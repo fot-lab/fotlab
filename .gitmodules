@@ -1,9 +1,10 @@
 [submodule "external/dnglab"]
 	path = external/dnglab
 	url = ../dnglab.git
-	tag = v0.8.0
+	branch = main
+
 
 [submodule "external/exiftool"]
 	path = external/exiftool
 	url = ../exiftool.git
-	tag = 13.59
+	branch = master
