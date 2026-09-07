@@ -1,0 +1,5 @@
+# 文档构建依赖（Read the Docs 与本地构建共用）
+# 只声明下限，避免锁定过旧版本；如需可复现构建，请在 CI 中固定版本。
+sphinx>=7.4
+sphinx-rtd-theme>=2.0
+myst-parser>=2.0
