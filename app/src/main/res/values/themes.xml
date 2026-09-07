@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- No action bar: every module draws its own top app bar (FOTLAB-UIXDES-000002 R1). -->
+    <style name="Theme.FotLab" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>

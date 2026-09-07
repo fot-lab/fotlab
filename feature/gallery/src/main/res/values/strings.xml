@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="gallery_title">Gallery</string>
+    <string name="gallery_cd_open_drawer">Open navigation drawer</string>
+    <string name="gallery_cd_more_options">More options</string>
+    <string name="gallery_drawer_empty">No drawer entries yet</string>
+</resources>

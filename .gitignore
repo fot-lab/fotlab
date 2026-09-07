@@ -1,0 +1,38 @@
+# Gradle / build output
+.gradle/
+build/
+.kotlin/
+captures/
+.externalNativeBuild/
+.cxx/
+local.properties
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Android artifacts
+*.apk
+*.aab
+*.dex
+*.class
+bin/
+gen/
+out/
+
+# Native build artifacts
+*.o
+*.so
+*.dylib
+target/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python / docs build (docs/ is part of the repository)
+__pycache__/
+*.pyc
+docs/_build/

@@ -1,16 +1,16 @@
 # Agent Rules
 
-ALL project rules for AI agents reside in the **[RULES/](RULES/)** directory.
+ALL project rules for AI agents reside in the **[rules/](rules/)** directory.
 
 ## Entry Points
 
 | Entry | Purpose |
 |-------|---------|
-| [RULES/VERSION.md](RULES/ACTION.md) | Version management — bumping, tagging, release notes |
-| [RULES/ACTION.md](RULES/ACTION.md) | Build & CI/CD behavior — no local toolchain; cloud CI only |
-| [RULES/REVIEW.md](RULES/REVIEW.md) | Architecture review issues — discovery, tracking, resolution |
-| [RULES/DESIGN.md](RULES/DESIGN.md) | Product requirement documents — feature specs & constraints |
-| [RULES/SKILLS.md](RULES/SKILLS.md) |  |
+| [rules/VERSION.md](rules/VERSION.md) | Version management — bumping, tagging, release notes (`VERSION_NAME` / `VERSION_CODE`) |
+| [rules/ACTION.md](rules/ACTION.md) | Build & CI/CD behavior — no local toolchain; cloud CI only |
+| [rules/REVIEW.md](rules/REVIEW.md) | Architecture review issues — discovery, tracking, resolution |
+| [rules/DESIGN.md](rules/DESIGN.md) | Product requirement documents — feature specs & constraints |
+| [rules/SKILLS.md](rules/SKILLS.md) |  |
 
 ## Top-Level Config Files
 
@@ -21,18 +21,19 @@ ALL project rules for AI agents reside in the **[RULES/](RULES/)** directory.
 
 ## Rules
 
-- **Read**: Before any task, scan `RULES/` for applicable rules.
-- **Write**: When asked to persist a rule, create/update the appropriate file under `RULES/`.
+- **Read**: Before any task, scan `rules/` for applicable rules.
+- **Write**: When asked to persist a rule, create/update the appropriate file under `rules/`.
+- **Paths**: Every path written inside a rule document — links and inline code alike — starts at the **repository root**. Write `docs/architecture.md` or `rules/VERSION.md`, never `../docs/...`. This keeps a reference valid no matter how deep the file sits.
 
-This file itself contains no rules — it is only a redirect to `RULES/`.
+This file itself contains no rules — it is only a redirect to `rules/`.
 
 
 ## Design Hierarchy
 
-The `RULES/` directory uses a three-layer structure for rule documentation:
+The `rules/` directory uses a three-layer structure for rule documentation:
 
 ```
-RULES/
+rules/
 ├── {ENTRY}.md             ← Layer 1: Entry file (REVIEW.md, DESIGN.md, ACTION.md)
 │   Redirect + write spec + quick reference tables + encoding rules
 │

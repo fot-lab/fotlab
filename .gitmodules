@@ -8,3 +8,11 @@
 	path = external/exiftool
 	url = ../exiftool.git
 	branch = master
+[submodule "external/RawTherapee"]
+	path = external/RawTherapee
+	url = ../RawTherapee.git
+	branch = dev
+[submodule "external/colour"]
+	path = external/colour
+	url = ../colour.git
+	branch = master

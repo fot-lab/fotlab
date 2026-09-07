@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Single strings file for the whole app (`FOTLAB-STRUCT-000001`).
+  Block order — common, then app (shell), then one block per feature package —
+  and key naming follow `FOTLAB-UIXDES-000003` R2/R4.
+-->
+<resources>
+
+    <!-- ===== common ===== -->
+
+    <!-- ===== app (shell) ===== -->
+    <string name="app_name">FotLab</string>
+    <string name="app_nav_gallery_label">Gallery</string>
+
+    <!-- ===== feature: gallery ===== -->
+    <string name="gallery_title">Gallery</string>
+    <string name="gallery_cd_open_drawer">Open navigation drawer</string>
+    <string name="gallery_cd_more_options">More options</string>
+    <string name="gallery_drawer_empty">No drawer entries yet</string>
+
+</resources>

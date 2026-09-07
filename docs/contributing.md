@@ -31,5 +31,5 @@ Read the Docs 会在每次推送后自动构建，配置见仓库根目录的 `.
 ## 代码
 
 - 提交前确认 `external/` 的 submodule 指针是有意变更的。
-- 修改 harness 时同步更新 `docs/architecture.md` 中的分层约定。
+- 新增或修改 third-party 模块的集成方式时，同步登记到 `FOTLAB-NATIVE-000001` 与 `docs/external/index.md`。
 - 新增上游补丁时，同步登记到外部依赖与许可页面所述的 patch 清单。

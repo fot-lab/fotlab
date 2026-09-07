@@ -26,6 +26,8 @@ git submodule update --init --recursive
 | Rust toolchain | 构建 `external/dnglab`（`rawler` 等 crate） |
 | CMake | 原生构建编排 |
 | Perl | 运行 `external/exiftool` |
+| C++17 编译器（NDK clang） | 构建 `external/RawTherapee`（`rtengine`） |
+| Python 3.x | 仅用于离线运行 `external/colour` 生成/校验色彩数据，不进入 APK |
 
 > **注意**
 > 具体版本要求与构建命令尚未确定，本节将在首个可构建提交后补齐。
@@ -37,6 +39,8 @@ git submodule update --init --recursive
 | --- | --- |
 | `external/dnglab` | Rust 实现的 DNG 处理工具链（workspace：`bin`、`rawler`、`embedftp`） |
 | `external/exiftool` | Perl 实现的元数据处理工具（`lib/` + `exiftool` 入口脚本） |
+| `external/RawTherapee` | C++ 实现的 RAW 处理引擎（`rtengine/` + `rtdata/` 配置数据） |
+| `external/colour` | Python 色彩科学库（`colour/` 包 + 内置色彩数据），构建期参考用 |
 | `docs/` | 本文档站点源 |
 
 ## 下一步

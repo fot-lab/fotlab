@@ -1,0 +1,105 @@
+# Per-Module Top App Bar and Drawer Behaviour
+
+- ID: FOTLAB-UIXDES-000002
+- Status: Draft
+- Priority: P1
+- Created: 2026-09-07
+- Owner: —
+- Related: `FOTLAB-UIXDES-000001` (overall UI shell — the top bar belongs to the module, not to the shell)
+
+## Background & Goal
+
+`FOTLAB-UIXDES-000001` establishes that the top region of the shell is owned by the active module,
+and that nothing except the bottom navigation bar is persistent at application level. That makes the
+top app bar a module-level element — and therefore a place where modules can easily drift apart.
+
+This item defines the mandatory structure and behaviour of every module's top app bar, so that all
+modules stay consistent while remaining autonomous:
+
+- G1 — Every module draws its own top app bar at the top of its content region.
+- G2 — The leftmost element is a three-line ("hamburger") icon that opens a drawer; the drawer occupies 80% of the available width when expanded.
+- G3 — The rightmost element is a vertical three-dot overflow menu.
+- G4 — The behaviour of these two affordances is identical across modules, even though their content is module-owned.
+
+## Requirement
+
+### R1 — Every module owns and renders its top app bar
+
+- Each top-level module renders its own Material3 top app bar as the first element of its content region.
+- The top app bar is **not** part of the shell and **not** persistent: it is created and destroyed with the module, and it disappears when the user switches destination.
+- Each module writes and owns its own top app bar implementation; no shared top app bar component exists (see C1). Consistency comes from the behaviour contract R2–R5, not from shared code.
+- The title is the module name, single line, truncated on overflow.
+
+### R2 — Leftmost element: drawer icon
+
+- The leftmost element of the top app bar is an icon button with the three-line menu icon (`Icons.Default.Menu`, Material "menu").
+- It carries a non-null `contentDescription` for accessibility.
+- Activating it opens the navigation drawer of the current module.
+- No other element may be placed to its left, and the icon is always present — it is never conditionally hidden.
+
+### R3 — Drawer width and placement
+
+- When expanded, the drawer content occupies **80% of the width of its parent container**, expressed as `Modifier.fillMaxWidth(0.8f)`.
+- The drawer lives **inside the module's content region**, not around the whole screen. Its scrim therefore covers only the module content region.
+- Consequence: the bottom navigation region is **not** covered by the drawer and remains visible while the drawer is open, preserving the rule that it is the only persistent element in the app.
+- Implementation note: Material3's `ModalDrawerSheet` applies its own width constraints (default maximum 360dp). If those constraints conflict with the 80% requirement, the sheet is replaced by a custom `Surface` carrying the 80% modifier. The resolution chosen in code is recorded in the Change History of this item.
+
+### R4 — Rightmost element: overflow menu
+
+- The rightmost element of the top app bar is an icon button with the vertical three-dot icon (`Icons.Default.MoreVert`, Material "more_vert"), opening a Material3 `DropdownMenu`.
+- It carries a non-null `contentDescription` for accessibility.
+- The menu holds secondary and destructive actions only. Primary actions belong in the content region, and navigation actions belong in the drawer or the bottom bar.
+- Destructive entries are visually distinguished and require confirmation before execution.
+- Nothing may be placed to its right.
+
+### R5 — Drawer behaviour
+
+- The drawer is owned by the module: its content, its state and its lifetime follow the module.
+- **The drawer content is module-private.** No application-level entries (settings, about, licence or attribution) are placed in a module drawer; each module decides what its own drawer holds.
+- Because it is module-owned, switching destination destroys it. A destination never inherits an expanded drawer from another module.
+- While the drawer is expanded, the system back action closes it first; only a subsequent back action performs navigation. Whether Material3 already handles this internally must be verified during implementation, and a `BackHandler` is registered if it does not.
+- **The bottom navigation region stays interactive while the drawer is expanded.** Tapping a bottom navigation item switches to that destination and discards the drawer: no confirmation dialog, no preserved drawer state, and the outgoing module's drawer is destroyed together with the module.
+- Gesture opening (edge swipe) is enabled when the platform gesture system allows it.
+
+## Constraints
+
+- C1 — Each module implements its own top app bar. Neither the shell nor `:core:ui` ships a shared top app bar (or drawer) component, and a module must not depend on one to achieve consistency: uniformity is guaranteed by the behaviour contract R2–R5 and verified by AC1–AC9, not by shared code. Modules may still share primitives (icons, dimensions, content descriptions).
+- C2 — The top app bar is never lifted into the shell. Making it persistent would violate `FOTLAB-UIXDES-000001` R2.
+- C3 — The drawer is never a second bottom bar, and never overlaps the bottom navigation region.
+- C4 — Both end icons are always present; conditional hiding is not allowed (see Q2 for the empty-menu case).
+- C5 — First-party APIs only, per `FOTLAB-UIXDES-000001` R1.
+- C6 — A module drawer carries module content only; shared application entries are not distributed across module drawers.
+- C7 — With the drawer expanded, the bottom navigation region remains visible **and** interactive. Tapping it always wins over the drawer: the destination switches and the drawer is discarded without confirmation.
+
+## Acceptance Criteria
+
+- AC1 — On every top-level destination, the content region starts with a top app bar whose leftmost element is the three-line icon and whose rightmost element is the vertical three-dot icon.
+- AC2 — Activating the three-line icon expands a drawer whose measured width equals 80% of the parent container width, within 1dp of rounding.
+- AC3 — With the drawer expanded, the bottom navigation region is still fully visible on screen and not covered by the drawer or its scrim.
+- AC4 — Switching destination while the drawer is expanded results in the new destination showing a collapsed drawer.
+- AC5 — With the drawer expanded, one system back press closes the drawer and does not change the destination; a second back press performs the normal back behaviour.
+- AC6 — Activating the three-dot icon opens a dropdown menu; every entry is reachable and destructive entries ask for confirmation.
+- AC7 — Both end icons expose a non-null content description when queried by accessibility services.
+- AC8 — Rotating the device re-measures the drawer to 80% of the new parent width.
+- AC9 — With the drawer expanded, tapping a different bottom navigation item switches the destination immediately, and the newly shown module starts with a collapsed drawer. No drawer state of the outgoing module survives the switch.
+
+## Impacted Modules
+
+- `:core:ui` — theme and shared primitives only; ships no top app bar and no drawer component
+- Every top-level feature module — owns its top app bar and drawer outright: the implementation, the title, the drawer content and the menu entries
+- `FOTLAB-UIXDES-000001` — the shell contract these rules build on
+
+## Open Questions
+
+- Q2 — If a module has no overflow actions, is the three-dot icon hidden or shown with an empty/disabled state? **TBD.** C4 currently requires it to be always present.
+- Q3 — On tablets, foldables and landscape screens, is 80% still the right value, or should an absolute maximum (for example 400dp) apply? **TBD.**
+- Q5 — Is the top app bar scroll behaviour unified (pinned vs. `enterAlways`), or chosen per module? **TBD.**
+- Q6 — Is RTL supported at launch? In RTL the drawer expands from the opposite edge and the icon order mirrors.
+
+Resolved and retired on 2026-09-07: Q1 (drawer content is module-private — now R5 and C6) and Q4 (bottom navigation stays interactive while the drawer is expanded — now R5, C7 and AC9). The retired numbers are intentionally not reused.
+
+## Change History
+
+- 2026-09-07 — Initial draft. Defined the mandatory top app bar structure per module (three-line drawer icon at the left end, vertical three-dot overflow menu at the right end), the 80%-of-parent drawer width, module ownership of the top bar and drawer, and the requirement that the drawer never covers the bottom navigation region. Left drawer content scope, empty-menu handling and large-screen behaviour open as Q1–Q6.
+- 2026-09-07 — C1 amended: modules implement their **own** top app bar; the previously mandated shared top app bar component is withdrawn, because it contradicted module autonomy (a shared component turns the top bar into an app-level element in practice). R1 updated to state that no shared component exists. Consequence for the codebase: `:core:ui` is limited to theme and shared primitives and ships no top app bar or drawer component; each feature module owns its implementation, its state and its lifetime. R2–R5 remain the binding behaviour contract and AC1–AC9 remain the verification, so no acceptance criterion had to change.
+- 2026-09-07 — Decisions recorded: the drawer content is **module-private** (no app-level entries such as settings, about or licence — added to R5 as a bold clause, plus new constraint C6), and the bottom navigation region stays **interactive** while the drawer is expanded, with a tap switching destination and discarding the drawer (new clause in R5, new constraint C7, new acceptance criterion AC9). Q1 and Q4 retired from Open Questions.
