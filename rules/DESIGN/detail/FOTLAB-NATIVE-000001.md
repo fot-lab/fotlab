@@ -12,7 +12,7 @@
 FotLab depends on upstream projects that are not consumed as Maven artifacts — `dnglab` (Rust,
 RAW/DNG processing) and `exiftool` (Perl, metadata read & write). Their source lives inside this
 repository, so without a rule they tend to spread: a copied crate here, a patched Perl library
-there, a vendored copy inside a feature module. Once scattered, a module can no longer be upgraded,
+there, a vendored copy inside a feature package. Once scattered, a module can no longer be upgraded,
 licensed or stripped for release with confidence, and reviewers cannot tell project code from
 imported code.
 
@@ -28,8 +28,8 @@ path.
   `external/<module-name>/`, one top-level directory per module.
 - The directory name is the lower-case, hyphen-separated upstream project name (`dnglab`,
   `exiftool`); no version suffix, no vendor prefix such as `third_party` or `vendor`.
-- No third-party source is placed inside `app/`, `core/`, `feature/` or any other first-party
-  module — not even a partial copy of a header, a crate or a script.
+- No third-party source is placed inside `app/` — the only first-party module
+  (`FOTLAB-STRUCT-000001`) — not even a partial copy of a header, a crate or a script.
 - Conversely, `external/` holds **only** third-party code. Project code, patches to the build
   scripts that drive `external/`, and our own wrapper code stay outside it (wrapper and bridge
   code belongs to a dedicated first-party native-integration module, designed in a separate
@@ -135,3 +135,4 @@ path.
 - 2026-09-07 — Added `external/colour` as the fourth submodule (`../colour.git`, branch `master`, pinned at `a3bfe349`, describe `v0.4.7`); registered it in `docs/external/index.md` and `docs/getting-started.md`, and recorded its consumption question as Q8.
 - 2026-09-07 — Added `external/RawTherapee` as the third submodule (`../RawTherapee.git`, branch `dev`, pinned at `498f6237`, describe `5.13-9-g498f62378`); registered it in `docs/external/index.md` and `docs/getting-started.md`, and recorded the open integration question as Q7.
 - 2026-09-07 — Initial draft. Established `external/<module-name>/` as the only location for third-party source, the two permitted introduction methods (pinned git submodule, vendored snapshot with provenance record), the rule that `external/` stays out of the Gradle build and is reached only through a dedicated native-integration layer (designed per module), read-only upstream with recorded patches, per-module licence plus inventory entry in `docs/external/index.md`, runtime-only release packaging, and the clone/CI requirements. Left submodule-vs-vendor default, patch tooling, licence scanning, the exiftool/dnglab packaging shape and the upgrade-review process open as Q1–Q6.
+- 2026-09-07 — `core/` and `feature/` no longer exist: `app/` is the only first-party module (`FOTLAB-STRUCT-000001`). R1 updated accordingly. The rule itself — third-party source only under `external/<module-name>/`, never inside first-party code — is unchanged.

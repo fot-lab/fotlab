@@ -28,7 +28,7 @@ its result would prove nothing.
 | --- | --- |
 | Language | Kotlin (Compose); native code not yet present |
 | Build system | Gradle Kotlin DSL + version catalog (`gradle/libs.versions.toml`), Gradle wrapper `8.9`, AGP `8.7.3` |
-| Modules | `:app` (shell), `:core:ui`, `:core:data`, `:feature:*` |
+| Modules | `:app` — the only module; layers are the packages `ui`, `navigation`, `data` (`../rules/DESIGN/detail/FOTLAB-STRUCT-000001.md`) |
 | Native | **None yet.** The first-party native-integration module is designed by the `NATIVE` items (`rules/DESIGN/detail/FOTLAB-NATIVE-000001.md` R1) and does not exist; until it is created there is nothing for a native job to build. |
 | Upstream | git submodules under `external/` — inventory in `docs/external/index.md` |
 | Default branch | `main` |
@@ -196,3 +196,4 @@ Split across the two rule files, on purpose:
 | 2026-09-07 | Submodule bumps now trigger CI and run the `native` job (`external/**` is explicitly excluded from the path ignore list); a bump alone never creates a release. Also declared the scope boundary against `VERSION.md` — version content is owned there, pipeline behaviour here. |
 | 2026-09-07 | `compileSdk` / `targetSdk` set to `36` in every Gradle module, matching the CI SDK baseline; AGP compatibility left to CI verification (Q1). Native job re-scoped: no native source exists yet, so it stays wired but inactive until the native-integration module designed by the `NATIVE` items is created. Cross-references adjusted — superseded the same day by the repository-root convention. |
 | 2026-09-07 | Initial creation. Declares the no-local-toolchain rule, the `build.yml` trigger matrix for `main`, the SDK/NDK baseline, artifact set and retention, version handling delegated to `VERSION.md`, JVM-only unit testing, and the agent prohibited/allowed list. |
+| 2026-09-07 | Multi-module build collapsed into the single module `:app` (`../rules/DESIGN/detail/FOTLAB-STRUCT-000001.md`): `:core:ui`, `:core:data` and `:feature:gallery` merged into `app/`, with layers expressed as the packages `ui`, `navigation` and `data`. Gradle task set, SDK baseline and triggers are unchanged. |

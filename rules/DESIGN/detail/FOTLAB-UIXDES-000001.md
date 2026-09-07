@@ -73,7 +73,7 @@ The top-level screen consists of exactly two regions:
 
 - Each top-level module contributes exactly one navigation graph through a single assembly entry point, e.g. `fun NavGraphBuilder.featureXGraph(...)`.
 - The shell assembles graphs; it does not know what is inside them.
-- Feature modules must not depend on each other. Cross-module navigation, when needed, goes through routes owned by the shell or a dedicated navigation contract.
+- Feature packages must not depend on each other. Cross-feature navigation, when needed, goes through routes owned by the shell or a dedicated navigation contract. This is a review convention, not a build-enforced rule — see `FOTLAB-STRUCT-000001` C3.
 - A module may only render inside its own content region. Rendering a second bottom bar (or any app-level persistent element) is forbidden.
 
 ### R5 — System UI integration
@@ -103,7 +103,7 @@ The top-level screen consists of exactly two regions:
 ## Impacted Modules
 
 - `app` (shell) — activity, root `Scaffold`, bottom navigation composable, root `NavHost`
-- Feature modules (TBD, one per destination) — each owns its graph and its content region
+- Feature packages (TBD, one per destination) — each owns its graph and its content region
 - `FOTLAB-NATIVE-000001` — defines how first-party code may reach into third-party modules
 
 ## Open Questions
@@ -118,3 +118,4 @@ The top-level screen consists of exactly two regions:
 ## Change History
 
 - 2026-09-07 — Initial draft. Defined the two-region shell (persistent bottom navigation region + module-owned content region), the native-first Material3 stack constraint, module autonomy rules and the edge-to-edge requirement. Destination set, start destination and immersive-mode exception left open as Q1–Q3.
+- 2026-09-07 — With the move to a single Gradle module (`FOTLAB-STRUCT-000001`), "module" in this item now means a destination's feature package (`ui/<feature>/` plus `navigation/<feature>/`). R4 reworded accordingly, and the isolation note added: feature packages must not depend on each other, but that is a review convention rather than a build-enforced guarantee. The two-region structure, the navigation behaviour and the edge-to-edge requirement are unchanged.

@@ -52,7 +52,7 @@ concrete design for that route, so `000002` can move from options to a decision.
 - Pure-Python code (the `colour` subset we actually need, plus the stdlib) is packaged as an
   asset and extracted at first run into the app's private data directory; that directory is then
   placed on `sys.path`.
-- No third-party `.py` source is committed under `app/`, `core/`, or `feature/`.
+- No third-party `.py` source is committed under `app/`.
 
 ### R5 — Interpreter lifecycle and the GIL
 
@@ -81,7 +81,7 @@ concrete design for that route, so `000002` can move from options to a decision.
    pyjnius approach adapted in-house — pyjnius itself is MIT).
 4. **Ship and mount** — `.so` files in `jniLibs`; pure-Python assets extracted to private storage
    and prepended to `sys.path` so `import colour` / `import numpy` resolve.
-5. **Expose narrowly** — the integration module presents a typed Kotlin API; feature modules and UI
+5. **Expose narrowly** — the integration module presents a typed Kotlin API; feature packages and UI
    consume that API and never see FFI.
 
 ## Constraints
@@ -132,3 +132,6 @@ concrete design for that route, so `000002` can move from options to a decision.
   the artifact source, integration boundary, layered packaging/runtime layout, interpreter
   lifecycle/ABI constraints, and acceptance criteria. Created alongside the removal of the
   non-existent `core:harness` module.
+- 2026-09-07 — Updated for the single-module layout (`FOTLAB-STRUCT-000001`): `app/` is the only
+  first-party source tree, and the consumers of the integration API are feature packages, not
+  feature modules.

@@ -16,4 +16,5 @@ This file contains **only** the item table. No statistics, no changelog — git 
 | `FOTLAB-NATIVE-000001` | Third-party modules — single location under `external/` | `NATIVE` | Draft | P1 | [detail](rules/DESIGN/detail/FOTLAB-NATIVE-000001.md) |
 | `FOTLAB-NATIVE-000002` | Running Python on Android — open-source, royalty-free | `NATIVE` | Draft | P2 | [detail](rules/DESIGN/detail/FOTLAB-NATIVE-000002.md) |
 | `FOTLAB-NATIVE-000003` | Embedding Python in the host app via p4a-built CPython & packages | `NATIVE` | Draft | P2 | [detail](rules/DESIGN/detail/FOTLAB-NATIVE-000003.md) |
-<!-- Next sequence per category: UIXDES 000004, DATABS 000002, NATIVE 000004. Append one row per new item; never reuse or renumber IDs. -->
+| `FOTLAB-STRUCT-000001` | Single-module source layout | `STRUCT` | Draft | P0 | [detail](rules/DESIGN/detail/FOTLAB-STRUCT-000001.md) |
+<!-- Next sequence per category: UIXDES 000004, DATABS 000002, NATIVE 000004, STRUCT 000002. Append one row per new item; never reuse or renumber IDs. -->

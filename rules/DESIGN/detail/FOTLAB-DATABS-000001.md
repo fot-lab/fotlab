@@ -40,9 +40,9 @@ UI (Compose) → ViewModel → Repository → DAO → Room Database
 
 ### R3 — Data ownership follows module boundaries
 
-- Each module owns its entities, DAOs and database; naming is `<Module>Entity`, `<Module>Dao`, `<Module>Database`.
-- Default: **one Room database per module**, so a module can add, change or drop its schema without a shared `@Database` class that every module has to edit.
-- Shared infrastructure (common type converters, migration helpers, in-memory test rule) lives in a common database module; it holds no entity of any feature module.
+- Each feature owns its entities, DAOs and database; naming is `<Feature>Entity`, `<Feature>Dao`, `<Feature>Database`.
+- Default: **one Room database per feature**, so a feature can add, change or drop its schema without a shared `@Database` class that every feature has to edit.
+- Shared infrastructure (common type converters, migration helpers, in-memory test rule) lives in the `data` package; it holds no entity of any feature.
 
 ### R4 — Threading and asynchronous access
 
@@ -78,7 +78,7 @@ UI (Compose) → ViewModel → Repository → DAO → Room Database
 
 - C1 — First-party Room only, per R1; any exception is recorded in this item's Change History before it is implemented.
 - C2 — UI and feature code must not import DAO, entity or database types; the dependency direction is UI → ViewModel → Repository → DAO.
-- C3 — A module must not reference another module's DAO or entity directly; only exported repositories cross module boundaries.
+- C3 — A feature must not reference another feature's DAO or entity directly; only exported repositories cross feature boundaries (`FOTLAB-STRUCT-000001` C3).
 - C4 — No main-thread access; no `allowMainThreadQueries()`.
 - C5 — No destructive migration fallback in release builds; every schema version change is accompanied by a committed schema JSON.
 - C6 — No large binaries in the database.
@@ -87,7 +87,7 @@ UI (Compose) → ViewModel → Repository → DAO → Room Database
 ## Acceptance Criteria
 
 - AC1 — A dependency report of the data layer lists only `androidx.room` artifacts (plus KSP as a build plugin); no third-party database library appears.
-- AC2 — An architecture check (module dependency graph or lint rule) shows no UI/feature module importing a DAO, entity or database class.
+- AC2 — An architecture check (package review or lint rule) shows no UI/feature package importing a DAO, entity or database class.
 - AC3 — Calling a DAO query on the main thread throws Room's main-thread exception in a test; the same holds for every DAO.
 - AC4 — For each database, the schema directory contains one JSON per released version, and any version bump adds exactly one new JSON plus a migration entry.
 - AC5 — A release build fails (or a review checklist rejects it) if `fallbackToDestructiveMigration` is configured.
@@ -96,8 +96,8 @@ UI (Compose) → ViewModel → Repository → DAO → Room Database
 
 ## Impacted Modules
 
-- Common database module — shared converters, migration helpers, in-memory test rule
-- Every feature module that persists structured data — owns its entities, DAOs and database
+- `data` package — shared converters, migration helpers, in-memory test rule
+- Every feature package that persists structured data — owns its entities, DAOs and database
 - `FOTLAB-NATIVE-000001` — governs how native code reaches third-party modules, keeping it out of the database
 
 ## Open Questions
@@ -112,3 +112,4 @@ UI (Compose) → ViewModel → Repository → DAO → Room Database
 ## Change History
 
 - 2026-09-07 — Initial draft. Established Room as the only structured persistence layer, the UI → ViewModel → Repository → DAO → Database layering with module-owned data, the no-main-thread rule, the migration and schema-export discipline, the rule that large binaries stay on the file system, KSP-only build configuration, and in-memory/migration testing. Left single-vs-multi database, DI, encryption, paging/FTS, backup and metadata-cache consistency open as Q1–Q6.
+- 2026-09-07 — Updated for the single-module layout (`FOTLAB-STRUCT-000001`): ownership is per feature package instead of per Gradle module, `<Module>*` naming became `<Feature>*`, shared infrastructure lives in the `data` package, and the architectural check of AC2 is a package review rather than a module dependency graph. Room as the only persistence layer, the layering, the threading and migration discipline are unchanged.

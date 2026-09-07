@@ -5,7 +5,7 @@
 - Priority: P1
 - Created: 2026-09-07
 - Owner: —
-- Related: `FOTLAB-UIXDES-000001` (module autonomy — modules own their content region and their copy), `FOTLAB-UIXDES-000002` (module-owned top bar, drawer and overflow menu — all of it is copy that needs resources)
+- Related: `FOTLAB-STRUCT-000001` (single module — one `res/` set, features are packages), `FOTLAB-UIXDES-000001` (destinations own their content region and their copy), `FOTLAB-UIXDES-000002` (top bar, drawer and overflow menu — all of it is copy that needs resources)
 
 ## Background & Goal
 
@@ -13,18 +13,17 @@ FotLab must be usable in more than one language. That is only cheap if copy is t
 from the first line of code: no literal text in composables, one place to look for a string, and a
 structure that a translator, a reviewer and an agent can all navigate without guessing.
 
-The UI is module-owned (`FOTLAB-UIXDES-000001` R4): each module renders inside its own content
-region and owns what it shows. Copy therefore has to follow the same boundary — otherwise every
-shared module starts leaking text into its neighbours, or every module duplicates the same "OK" and
-"Cancel" in its own dialect.
+The project is a single Gradle module (`FOTLAB-STRUCT-000001`), so there is exactly **one**
+`strings.xml`. That removes the old per-module question but makes order the only navigational aid
+left: without a fixed order, a single file of a few hundred keys becomes unreadable.
 
 Goals:
 
 - G1 — One i18n mechanism for the whole app: the Android resource system. No parallel solution.
-- G2 — One canonical order for every strings document / source set: **`common` first, then modules
-  in a fixed, published order.** The same order everywhere, so a string is found by position, not by
-  search.
-- G3 — Module ownership of copy, with an explicit promotion path when two modules need the same text.
+- G2 — One canonical order for the single strings file: **`common` first, then `app`, then one block
+  per feature in a fixed order.** A string is found by position, not by search.
+- G3 — Feature ownership of copy, with an explicit promotion path when two features need the same
+  text.
 - G4 — Stable, semantic, language-independent keys, so translations can be added or corrected without
   touching code.
 
@@ -32,7 +31,7 @@ Goals:
 
 ### R1 — Android string resources are the only i18n mechanism
 
-- All user-visible text lives in `res/values*/strings.xml` resource files, read through
+- All user-visible text lives in `app/src/main/res/values*/strings.xml`, read through
   `stringResource(R.string.x)` in Compose (or `resources.getString(...)` where a `Context` is required).
 - Default (unqualified) `values/strings.xml` holds the **base language** — see Q1; every other locale
   is a qualifier directory such as `values-zh-rCN`, `values-ja`, `values-de`.
@@ -47,77 +46,81 @@ Goals:
 - HTML/styling inside strings is limited to what `stringResource` can render; rich text is built in
   code from separate spans only when formatting genuinely differs per locale.
 
-### R2 — Document architecture: `common` first, then modules in a fixed order
+### R2 — Document architecture: `common` first, then features in a fixed order
 
-Every strings document (a `strings.xml`, and any aggregated strings listing kept in the repo) is laid
-out in the following order. No exceptions, no alphabetical wandering, no "append at the end":
+The strings file is laid out in the following order. No exceptions, no alphabetical wandering, no
+"append at the end":
 
 ```
 ┌──────────────────────────────────────────────┐
-│ 1. common                                    │  ← app-wide copy, shared by every module
+│ 1. common                                    │  ← app-wide copy, shared by every feature
 │      generic actions, generic states/errors, │
 │      shared accessibility descriptions       │
 ├──────────────────────────────────────────────┤
 │ 2. app (shell)                               │  ← bottom navigation labels, shell-level dialogs
 ├──────────────────────────────────────────────┤
-│ 3. <module> …                                │  ← one block per feature module,
-│ 4. <module> …                                │     in canonical module order
-│ 5. <module> …                                │
+│ 3. <feature> …                               │  ← one block per feature package,
+│ 4. <feature> …                               │     in canonical feature order
+│ 5. <feature> …                               │
 ├──────────────────────────────────────────────┤
-│ n. other / non-destination modules           │  ← alphabetically, only if they own copy
+│ n. other / non-destination features          │  ← alphabetically, only if they own copy
 └──────────────────────────────────────────────┘
 ```
 
-- **Block 1 — `common`.** Copy that is, or may become, used by more than one module: generic
+- **Block 1 — `common`.** Copy that is, or may become, used by more than one feature: generic
   affirmative/dismissive actions (OK, Cancel, Save, Delete, Retry, Close, Back, Done, More), generic
   states (Loading, Empty, No results), generic errors (Something went wrong, Network unavailable),
   confirm-dialog scaffolding, and accessibility descriptions for shared components.
 - **Block 2 — `app`.** The shell: bottom navigation item labels and their content descriptions,
   shell-level dialogs, app name.
-- **Blocks 3..n — modules.** One contiguous block per module. The order of these blocks is the
-  **canonical module order**: the left-to-right order of the bottom navigation destinations defined
-  by `FOTLAB-UIXDES-000001` (see Q2). Modules that are not top-level destinations are appended after
-  them, sorted alphabetically by module id.
+- **Blocks 3..n — features.** One contiguous block per feature package. The order of these blocks is
+  the **canonical feature order**: the left-to-right order of the bottom navigation destinations
+  defined by `FOTLAB-UIXDES-000001` (see Q2). Features that are not top-level destinations are
+  appended after them, sorted alphabetically by feature id.
 - Each block is introduced by a visible separator comment so the order is machine-checkable:
 
   ```xml
   <!-- ===== common ===== -->
   <string name="common_action_ok">OK</string>
 
-  <!-- ===== module: render ===== -->
-  <string name="render_preview_title">Preview</string>
+  <!-- ===== app ===== -->
+  <string name="app_name">FotLab</string>
+
+  <!-- ===== feature: gallery ===== -->
+  <string name="gallery_title">Gallery</string>
   ```
 
-- Inside a block, strings are grouped by screen/feature and, within a screen, ordered by role in the
-  order: `title` → `label` → `action` → `hint` → `message` → `error` → `empty` → `cd`
+- Inside a block, strings are grouped by screen and, within a screen, ordered by role in the order:
+  `title` → `label` → `action` → `hint` → `message` → `error` → `empty` → `cd`
   (content description). Keys of the same screen stay together; a new key is inserted in its group,
   never appended to the end of the file.
 - The same order applies to locale files: a translated `strings.xml` mirrors the base file block for
   block and key for key, so a diff between locales is readable.
 
-### R3 — Ownership: strings follow module boundaries
+### R3 — Ownership: strings follow feature boundaries
 
-- Each module keeps its own `src/main/res/values*/strings.xml`; the shared module keeps the `common`
-  block. A module's block exists in exactly one place.
-- A module must not reference another module's string resource. If two modules need the same text,
-  the string is **promoted into `common`** (with a `common_` key) and the module copies are removed.
-  This promotion is recorded in this item's Change History when it affects an existing key.
-- The shell must not reference module strings; a module must not reference `app` strings. Shared text
-  belongs in `common`, which everyone may reference.
+There is one strings file per locale; ownership is expressed by the block and by the key prefix, not
+by a file per feature (`FOTLAB-STRUCT-000001` R5).
+
+- Each feature owns exactly one contiguous block; a block exists in exactly one place.
+- A feature must not use another feature's keys. If two features need the same text, the string is
+  **promoted into `common`** (with a `common_` key) and the feature copies are removed. This
+  promotion is recorded in this item's Change History when it affects an existing key.
+- The shell must not use feature keys; a feature must not use `app` keys. Shared text belongs in
+  `common`, which everyone may use.
 - Non-translatable content — brand names, file paths, format samples, debug identifiers — stays in
   `common` and is marked `translatable="false"`; it is not duplicated into locale files.
 
 ### R4 — Naming: semantic, prefixed, stable
 
 - Key format (snake_case): `<block>_<screen or feature>_<what>_<role>`
-  - `<block>` — `common`, `app`, or the module id (e.g. `render`, `imgmgr`, `metada`).
+  - `<block>` — `common`, `app`, or the feature id (e.g. `gallery`, `render`, `import`).
   - `<screen or feature>` — the screen or component the text belongs to (`preview`, `style_picker`).
   - `<what>` — what it names (`title`, `apply`, `empty`, `failed`).
   - `<role>` — suffix describing the kind of text: `_title`, `_label`, `_action`, `_hint`, `_message`,
-    `_error`, `_empty`, `_cd` (content description), `_plural` is not used (`<plurals>` carries it).
-- Examples: `common_action_ok`, `common_error_generic`, `app_nav_render_label`,
-  `render_preview_style_title`, `render_preview_style_apply_action`, `render_preview_empty_message`,
-  `render_preview_thumbnail_cd`.
+    `_error`, `_empty`, `_cd` (content description); plurals use `<plurals>`, not a `_plural` suffix.
+- Examples: `common_action_ok`, `common_error_generic`, `app_nav_gallery_label`,
+  `gallery_title`, `gallery_cd_open_drawer`, `gallery_drawer_empty`.
 - Keys are **semantic, never derived from the English text**, and never renamed just because the
   wording changed. Changing the meaning of a key requires a new key; the old one is removed only when
   no locale and no code references it.
@@ -143,7 +146,7 @@ out in the following order. No exceptions, no alphabetical wandering, no "append
 - Accessibility descriptions (`contentDescription`) come from resources as well; a hardcoded English
   description is a translation defect, not a shortcut.
 - Developer-facing output (log tags, log messages, exceptions, debug overlays) may stay literal
-  English and is **not** part of the strings documents.
+  English and is **not** part of the strings file.
 
 ### R7 — Locale-aware formatting
 
@@ -167,10 +170,9 @@ out in the following order. No exceptions, no alphabetical wandering, no "append
 ## Constraints
 
 - C1 — Android resource files only; no third-party i18n library, no runtime string loading (R1).
-- C2 — Every strings document starts with `common`, then `app`, then modules in canonical order (R2).
-  Appending a new module anywhere else is a violation.
-- C3 — A module references only `common` and its own block; cross-module string references are
-  forbidden (R3).
+- C2 — The strings file starts with `common`, then `app`, then features in canonical order (R2).
+  Appending a new feature anywhere else is a violation.
+- C3 — A feature uses only `common` and its own block; cross-feature key use is forbidden (R3).
 - C4 — Keys are semantic, ASCII snake_case, prefixed by their block, and stable across wording
   changes (R4).
 - C5 — Locale parity is mandatory; missing keys fail the build rather than falling back silently (R5).
@@ -182,10 +184,11 @@ out in the following order. No exceptions, no alphabetical wandering, no "append
 
 - AC1 — Searching the UI source for a string literal passed to `Text`, `contentDescription`, a menu
   entry, a snackbar or a dialog returns no production hits (preview and test code excluded).
-- AC2 — Opening any `strings.xml` shows `common` as the first block, `app` as the second, and one
-  contiguous block per module in canonical order, each preceded by its separator comment.
-- AC3 — A module dependency check shows no module importing another module's `R.string` (only
-  `common`/own `R` are referenced).
+- AC2 — Opening `app/src/main/res/values/strings.xml` shows `common` as the first block, `app` as the
+  second, and one contiguous block per feature in canonical order, each preceded by its separator
+  comment.
+- AC3 — A grep of the `ui/<feature>/` and `navigation/<feature>/` sources shows no feature using
+  another feature's `R.string` — only `common_*` and its own prefixed keys (R3).
 - AC4 — Changing a locale qualifier (e.g. forcing `zh-rCN`) renders the whole UI in that locale with
   no untranslated base-language text visible in a normal walkthrough of every destination.
 - AC5 — A build with one key deliberately missing from a locale fails (or is rejected by the lint
@@ -197,34 +200,41 @@ out in the following order. No exceptions, no alphabetical wandering, no "append
 
 ## Impacted Modules
 
-- Shared/common UI module — owns the `common` block and, if needed, shared formatting helpers
-- `app` (shell) — bottom navigation labels, shell-level dialogs
-- Every feature module — owns its own block inside its own `res/values*/`
-- `FOTLAB-UIXDES-000001` — supplies the destination order that fixes the canonical module order
-- `FOTLAB-UIXDES-000002` — top bar, drawer and overflow menu copy that must come from resources
+- `app/src/main/res/values*/strings.xml` — the single copy source per locale
+- `ui/theme` and shared helpers — own the `common` block and, if needed, shared formatting helpers
+- `navigation/TopLevelDestination.kt` — bottom navigation labels (`app_*`)
+- Every feature package (`ui/<feature>/`) — owns one block in the strings file
+- `FOTLAB-UIXDES-000001` — supplies the destination order that fixes the canonical feature order
+- `FOTLAB-STRUCT-000001` — decides that there is exactly one resource set
 
 ## Open Questions
 
 - Q1 — What is the base language of the unqualified `values/` directory: English (current default in
   this item) or Chinese? **TBD.** Everything else — key semantics, translation workflow — is unaffected,
   but the choice must be written down before the first locale is added.
-- Q2 — Canonical module order depends on the definitive destination set and its order, which is Q1 of
-  `FOTLAB-UIXDES-000001`. **TBD.** Until it is fixed, module blocks follow the order in which
+- Q2 — Canonical feature order depends on the definitive destination set and its order, which is Q1 of
+  `FOTLAB-UIXDES-000001`. **TBD.** Until it is fixed, feature blocks follow the order in which
   destinations appear in the shell's route table.
 - Q3 — Which locales ship in the first release? **TBD.**
 - Q4 — Is translation done in-repo (translators edit `values-xx/strings.xml` directly) or through an
   export/import step with an external tool? The export format must preserve the block order of R2.
 - Q5 — Is RTL in scope at launch? The resource and layout rules of R8 hold either way, but testing
   effort differs.
-- Q6 — Does any module need locale-dependent plural rules beyond the standard CLDR quantities, and is
+- Q6 — Does any feature need locale-dependent plural rules beyond the standard CLDR quantities, and is
   `<plurals>` sufficient for Chinese (which has a single quantity)? **TBD.**
 
 ## Change History
 
 - 2026-09-07 — Initial draft. Established Android string resources as the only i18n mechanism; the
-  `common` → `app` → modules (canonical order) document architecture with per-block separator comments
-  and a fixed intra-block role order; module ownership of copy with promotion of shared text into
+  `common` → `app` → features (canonical order) document architecture with per-block separator comments
+  and a fixed intra-block role order; feature ownership of copy with promotion of shared text into
   `common`; semantic prefixed snake_case keys; mandatory locale parity; the ban on hardcoded
   user-visible text (including content descriptions); platform-based date/number formatting; and
-  locale/RTL layout rules. Base language, canonical module order, shipped locales, translation
+  locale/RTL layout rules. Base language, canonical feature order, shipped locales, translation
   workflow, RTL scope and plural handling left open as Q1–Q6.
+- 2026-09-07 — Updated for the single-module layout (`FOTLAB-STRUCT-000001`): "module" became
+  "feature" throughout, because there is now **one** strings file instead of one per module. Ownership
+  (R3) is expressed by block and key prefix rather than by file; AC3 became a grep over
+  `ui/<feature>/` and `navigation/<feature>/` instead of a module dependency check; the Impacted
+  Modules section now names `app/src/main/res/values*/strings.xml` and the feature packages. The block
+  order itself — `common` first, then `app`, then features — is unchanged.

@@ -63,7 +63,7 @@ modules stay consistent while remaining autonomous:
 
 ## Constraints
 
-- C1 — Each module implements its own top app bar. Neither the shell nor `:core:ui` ships a shared top app bar (or drawer) component, and a module must not depend on one to achieve consistency: uniformity is guaranteed by the behaviour contract R2–R5 and verified by AC1–AC9, not by shared code. Modules may still share primitives (icons, dimensions, content descriptions).
+- C1 — Each feature implements its own top app bar. Neither the shell nor the `ui/theme` package ships a shared top app bar (or drawer) component, and a feature must not depend on one to achieve consistency: uniformity is guaranteed by the behaviour contract R2–R5 and verified by AC1–AC9, not by shared code. Features may still share primitives (icons, dimensions, content descriptions).
 - C2 — The top app bar is never lifted into the shell. Making it persistent would violate `FOTLAB-UIXDES-000001` R2.
 - C3 — The drawer is never a second bottom bar, and never overlaps the bottom navigation region.
 - C4 — Both end icons are always present; conditional hiding is not allowed (see Q2 for the empty-menu case).
@@ -85,8 +85,8 @@ modules stay consistent while remaining autonomous:
 
 ## Impacted Modules
 
-- `:core:ui` — theme and shared primitives only; ships no top app bar and no drawer component
-- Every top-level feature module — owns its top app bar and drawer outright: the implementation, the title, the drawer content and the menu entries
+- `ui/theme` — theme and shared primitives only; ships no top app bar and no drawer component
+- Every top-level feature package (`ui/<feature>/`) — owns its top app bar and drawer outright: the implementation, the title, the drawer content and the menu entries
 - `FOTLAB-UIXDES-000001` — the shell contract these rules build on
 
 ## Open Questions
@@ -103,3 +103,4 @@ Resolved and retired on 2026-09-07: Q1 (drawer content is module-private — now
 - 2026-09-07 — Initial draft. Defined the mandatory top app bar structure per module (three-line drawer icon at the left end, vertical three-dot overflow menu at the right end), the 80%-of-parent drawer width, module ownership of the top bar and drawer, and the requirement that the drawer never covers the bottom navigation region. Left drawer content scope, empty-menu handling and large-screen behaviour open as Q1–Q6.
 - 2026-09-07 — C1 amended: modules implement their **own** top app bar; the previously mandated shared top app bar component is withdrawn, because it contradicted module autonomy (a shared component turns the top bar into an app-level element in practice). R1 updated to state that no shared component exists. Consequence for the codebase: `:core:ui` is limited to theme and shared primitives and ships no top app bar or drawer component; each feature module owns its implementation, its state and its lifetime. R2–R5 remain the binding behaviour contract and AC1–AC9 remain the verification, so no acceptance criterion had to change.
 - 2026-09-07 — Decisions recorded: the drawer content is **module-private** (no app-level entries such as settings, about or licence — added to R5 as a bold clause, plus new constraint C6), and the bottom navigation region stays **interactive** while the drawer is expanded, with a tap switching destination and discarding the drawer (new clause in R5, new constraint C7, new acceptance criterion AC9). Q1 and Q4 retired from Open Questions.
+- 2026-09-07 — `:core:ui` no longer exists after the single-module move (`FOTLAB-STRUCT-000001`): C1 and the Impacted Modules list now name the `ui/theme` package, which ships theme and shared primitives only — no top app bar, no drawer component. Behaviour contract R2–R5 and verification AC1–AC9 are unchanged.
