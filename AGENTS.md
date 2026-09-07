@@ -6,6 +6,7 @@ ALL project rules for AI agents reside in the **[RULES/](RULES/)** directory.
 
 | Entry | Purpose |
 |-------|---------|
+| [RULES/VERSION.md](RULES/ACTION.md) | Version management — bumping, tagging, release notes |
 | [RULES/ACTION.md](RULES/ACTION.md) | Build & CI/CD behavior — no local toolchain; cloud CI only |
 | [RULES/REVIEW.md](RULES/REVIEW.md) | Architecture review issues — discovery, tracking, resolution |
 | [RULES/DESIGN.md](RULES/DESIGN.md) | Product requirement documents — feature specs & constraints |
@@ -44,7 +45,7 @@ RULES/
         Full analysis/spec + must include a human-readable changelog section
 ```
 
-### Layer 1 — Entry File (`REVIEW.md`, `PrdReqDoc.md`, `ACTION.md`)
+### Layer 1 — Entry File (`REVIEW.md`, `DESIGN.md`, `ACTION.md`)
 
 - `REVIEW.md` / `DESIGN.md`: Lightweight redirect to the index folder; contains directory structure diagram, design principles, agent usage guide, write specifications, encoding rules, category quick-reference table, and general rules. Does NOT contain the master index of items.
 
@@ -55,9 +56,9 @@ RULES/
 - Does NOT maintain changelogs (git manages version history)
 - Only the item table is maintained here
 
-### Layer 3 — Detail Files (`detail/XXXX-XXXX-XXXX-NNNN.md`)
+### Layer 3 — Detail Files (`detail/XXXXXX-XXXXXX-NNNNNN.md`)
 
 - One file per encoded item
-- Must include a "变更历史" (Change History) section at the end — each change must be directly human-readable
+- Must include a Change History section at the end — each change must be directly human-readable
 - Encoded using `XXXXXX-XXXXXX-NNNNNN` 18-character fixed-length IDs for grep-ability
 
