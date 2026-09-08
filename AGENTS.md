@@ -10,6 +10,7 @@ ALL project rules for AI agents reside in the **[rules/](rules/)** directory.
 | [rules/ACTION.md](rules/ACTION.md) | Build & CI/CD behavior — no local toolchain; cloud CI only |
 | [rules/REVIEW.md](rules/REVIEW.md) | Architecture review issues — discovery, tracking, resolution |
 | [rules/DESIGN.md](rules/DESIGN.md) | Product requirement documents — feature specs & constraints |
+| [rules/STRUCT.md](rules/STRUCT.md) | Project structure rules — source layout, packages, where each screen lives |
 | [rules/SKILLS.md](rules/SKILLS.md) |  |
 
 ## Top-Level Config Files
@@ -34,7 +35,7 @@ The `rules/` directory uses a three-layer structure for rule documentation:
 
 ```
 rules/
-├── {ENTRY}.md             ← Layer 1: Entry file (REVIEW.md, DESIGN.md, ACTION.md)
+├── {ENTRY}.md             ← Layer 1: Entry file (REVIEW.md, DESIGN.md, ACTION.md, STRUCT.md)
 │   Redirect + write spec + quick reference tables + encoding rules
 │
 ├── {Folder}/

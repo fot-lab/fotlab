@@ -28,7 +28,7 @@ its result would prove nothing.
 | --- | --- |
 | Language | Kotlin (Compose); native code not yet present |
 | Build system | Gradle Kotlin DSL + version catalog (`gradle/libs.versions.toml`), Gradle wrapper `8.9`, AGP `8.7.3` |
-| Modules | `:app` — the only module; layers are the packages `ui`, `navigation`, `data` (`../rules/DESIGN/detail/FOTLAB-STRUCT-000001.md`) |
+| Modules | `:app` — the only module; layers are the packages `ui`, `navigation`, `data` (`rules/STRUCT/detail/FOTLAB-STRUCT-000001.md`) |
 | Native | **None yet.** The first-party native-integration module is designed by the `NATIVE` items (`rules/DESIGN/detail/FOTLAB-NATIVE-000001.md` R1) and does not exist; until it is created there is nothing for a native job to build. |
 | Upstream | git submodules under `external/` — inventory in `docs/external/index.md` |
 | Default branch | `main` |
@@ -209,6 +209,6 @@ Split across the two rule files, on purpose:
 | 2026-09-07 | Submodule bumps now trigger CI and run the `native` job (`external/**` is explicitly excluded from the path ignore list); a bump alone never creates a release. Also declared the scope boundary against `VERSION.md` — version content is owned there, pipeline behaviour here. |
 | 2026-09-07 | `compileSdk` / `targetSdk` set to `36` in every Gradle module, matching the CI SDK baseline; AGP compatibility left to CI verification (Q1). Native job re-scoped: no native source exists yet, so it stays wired but inactive until the native-integration module designed by the `NATIVE` items is created. Cross-references adjusted — superseded the same day by the repository-root convention. |
 | 2026-09-07 | Initial creation. Declares the no-local-toolchain rule, the `build.yml` trigger matrix for `main`, the SDK/NDK baseline, artifact set and retention, version handling delegated to `VERSION.md`, JVM-only unit testing, and the agent prohibited/allowed list. |
-| 2026-09-07 | Multi-module build collapsed into the single module `:app` (`../rules/DESIGN/detail/FOTLAB-STRUCT-000001.md`): `:core:ui`, `:core:data` and `:feature:gallery` merged into `app/`, with layers expressed as the packages `ui`, `navigation` and `data`. Gradle task set, SDK baseline and triggers are unchanged. |
+| 2026-09-07 | Multi-module build collapsed into the single module `:app` (`rules/STRUCT/detail/FOTLAB-STRUCT-000001.md`): `:core:ui`, `:core:data` and `:feature:gallery` merged into `app/`, with layers expressed as the packages `ui`, `navigation` and `data`. Gradle task set, SDK baseline and triggers are unchanged. |
 | 2026-09-08 | CI split into the orchestrator `.github/workflows/build.yaml` and the reusable `.github/workflows/gradle.yaml` (`on: workflow_call`). Triggers, path filters, the `external/**` submodule-bump condition and release publishing stay in the orchestrator; toolchain setup, the Gradle invocation and artifact upload move into the reusable workflow. Trigger matrix, artifact set with retention, SDK/NDK baseline and task set are unchanged; the release is published with `gh` instead of a third-party action. |
 | 2026-09-08 | GitHub Release now honours the `-rc` suffix: a `VERSION_NAME` ending in `-rc` is published with `--prerelease` (and an existing release is edited to match), a formal version is published as a normal release. |

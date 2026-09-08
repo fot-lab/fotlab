@@ -99,7 +99,7 @@ The detail file name **must** equal its ID plus `.md`.
 | `METADA` | Metadata | EXIF/XMP read & write, exiftool-backed behaviour |
 | `NATIVE` | Native Integration | JNI/FFI native integration, dnglab integration |
 | `UIXDES` | UI & UX | Layout, navigation, accessibility, copy |
-| `STRUCT` | Project Structure | Source layout, Gradle modules vs. packages, layer and package naming |
+| `STRUCT` | Project Structure | **Moved out to its own peer rule** [`rules/STRUCT.md`](rules/STRUCT.md) — items live under `rules/STRUCT/detail/` |
 | `PERFOR` | Performance | Memory, latency, large-image and batch processing |
 | `COMPAT` | Compatibility | Android versions, vendor devices, ABI coverage |
 | `PRIVCY` | Privacy & Security | Permissions, data retention, third-party dependencies |
