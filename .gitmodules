@@ -16,3 +16,7 @@
 	path = external/colour
 	url = ../colour.git
 	branch = master
+[submodule "external/rawloader"]
+	path = external/rawloader
+	url = ../rawloader.git
+	branch = master

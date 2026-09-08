@@ -63,6 +63,21 @@
 - 许可证：BSD-3-Clause，见 `external/colour/LICENSE`（与本项目 GPL-3.0 兼容，随附义务为保留版权声明）
 - 注意：Python 运行环境不存在于 Android 上，本模块不作为运行时依赖，仅作为构建期/离线参考（详见设计项 `FOTLAB-NATIVE-000001` Q8）
 
+## rawloader
+
+- 语言：Rust（crate `rawloader`，edition 2018，v0.37.2）
+- 用途：从相机 RAW 格式提取数据的解码库；是 `external/dnglab` 中 `rawler` 的上游原库（同一作者），在 fotlab 中作为参考/对比基线，不直接作为运行时依赖
+- 结构：
+
+  | 路径 | 说明 |
+  | --- | --- |
+  | `src/` | 库源码（38 个 `.rs`） |
+  | `data/` | 相机数据库（`*.toml` 定义 + `join.rs` 构建脚本，编译期合并），build = `data/cameras/join.rs` |
+  | `examples/`、`fuzz/`、`regressions/` | 示例、模糊测试与回归样本（`regressions/` 含 1100+ 样本），发布产物中可剥离 |
+  | `benchmark`、`identify` | 两个二进制示例，应用侧不需要 |
+
+- 许可证：LGPL-2.1，见 `external/rawloader/LICENSE`
+
 ## 使用约束
 
 - **pin 到具体 commit**：submodule 必须锁定版本，禁止直接跟踪上游分支的最新提交。
