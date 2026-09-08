@@ -1,4 +1,4 @@
-package io.github.fotlab.fotlab.ui.gallery
+package io.github.fotlab.fotlab.feature.gallery
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
@@ -36,12 +36,14 @@ import io.github.fotlab.fotlab.R
 private const val DrawerWidthFraction = 0.8f
 
 /**
- * Placeholder gallery screen.
+ * Gallery screen (UI) — the first independent screen, owned by the `feature/gallery`
+ * package alongside its lower layer [GalleryCore] (`FOTLAB-STRUCT-000001`).
  *
- * The top app bar and the drawer are implemented **by this feature package**:
- * its own code, its own state and its own lifetime, per `FOTLAB-UIXDES-000002`
- * R1/R5 and the amended C1. Only the behaviour contract (drawer icon left,
- * overflow right, 80% width, never covering the bottom bar) is shared.
+ * This screen draws its own top app bar and drawer: its own code, its own state and
+ * its own lifetime, per `FOTLAB-UIXDES-000002` R1/R5 and the amended C1. Only the
+ * behaviour contract (drawer icon left, overflow right, 80% width, never covering the
+ * bottom bar) is shared. Its display name is owned by the feature core
+ * ([GalleryCore.titleRes]).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -57,7 +59,7 @@ fun GalleryScreen() {
                 TopAppBar(
                     title = {
                         Text(
-                            text = stringResource(id = R.string.gallery_title),
+                            text = stringResource(id = GalleryCore.titleRes),
                             maxLines = 1,
                         )
                     },

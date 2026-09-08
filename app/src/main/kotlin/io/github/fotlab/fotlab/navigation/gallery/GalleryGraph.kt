@@ -2,7 +2,7 @@ package io.github.fotlab.fotlab.navigation.gallery
 
 import androidx.navigation.NavGraphBuilder
 import androidx.navigation.compose.composable
-import io.github.fotlab.fotlab.ui.gallery.GalleryScreen
+import io.github.fotlab.fotlab.feature.gallery.GalleryScreen
 
 /**
  * Route owned by the gallery feature; the shell only assembles the graph
