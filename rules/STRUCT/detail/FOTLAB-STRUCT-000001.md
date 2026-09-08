@@ -5,7 +5,7 @@
 - Priority: P0
 - Created: 2026-09-07
 - Owner: —
-- Related: `FOTLAB-UIXDES-000001` (shell/destination contract), `FOTLAB-UIXDES-000002` (per-destination top bar and drawer — the screen owns both), `FOTLAB-UIXDES-000003` (strings blocks), `FOTLAB-DATABS-000001` (persistence ownership), `FOTLAB-NATIVE-000001` (third-party source location), `FOTLAB-IMGMGR-000001` (the gallery module this layout hosts), `FOTLAB-DATABS-000002` (the gallery's fs_node schema, owned by the gallery's lower layer)
+- Related: `FOTLAB-UIXDES-000001` (shell/destination contract), `FOTLAB-UIXDES-000002` (per-destination top bar and drawer — the screen owns both), `FOTLAB-UIXDES-000003` (strings blocks), `FOTLAB-DATABS-000001` (persistence ownership), `FOTLAB-NATIVE-000001` (third-party source location), `FOTLAB-IMGMGR-000001` (the gallery module this layout hosts), `FOTLAB-DATABS-000002` (the gallery's fs_node schema, owned by the gallery's lower layer), `FOTLAB-STRUCT-000003` (naming — avoid product-specific tokens in code identifiers; no duplicate components)
 
 ## Background & Goal
 
@@ -54,7 +54,7 @@ Goals:
 app/src/main/
 ├── AndroidManifest.xml
 ├── kotlin/io/github/fotlab/fotlab/
-│   ├── FotLabApplication.kt
+│   ├── MainApplication.kt
 │   ├── MainActivity.kt
 │   ├── ui/                       ← shell composables and theme only
 │   │   ├── theme/                ← Material3 theme and shared primitives
@@ -126,7 +126,7 @@ No Gradle file and no manifest is touched.
 - C1 — `settings.gradle.kts` lists `:app` and nothing else.
 - C2 — All first-party Kotlin lives under `io.github.fotlab.fotlab`, inside `ui`, `navigation`,
   `data` or `feature` (or a later layer package recorded here). No code at the root package level
-  other than `FotLabApplication` and `MainActivity`.
+  other than `MainApplication` and `MainActivity`.
 - C3 — Dependency direction follows R3. Since Gradle no longer enforces it, violation is caught in
   review; no third-party architecture-test library is introduced to re-create the guarantee
   (`FOTLAB-UIXDES-000001` R1 — first-party APIs only).
@@ -140,7 +140,7 @@ No Gradle file and no manifest is touched.
 - AC2 — Listing the repository root shows no first-party source directory other than `app/`.
 - AC3 — Every Kotlin file under `app/src/main/kotlin` declares a package starting with
   `io.github.fotlab.fotlab`, and its second segment is `ui`, `navigation`, `data` or `feature` (or a
-  recorded later layer); the only exceptions are `FotLabApplication.kt` and `MainActivity.kt`.
+  recorded later layer); the only exceptions are `MainApplication.kt` and `MainActivity.kt`.
 - AC4 — No file under `data/` imports anything from `ui`, `navigation` or `feature`.
 - AC5 — No file under `feature/<name>/` imports anything from `navigation`; and `GalleryCore` (or any
   `<Name>Core`) does not import from `ui`.

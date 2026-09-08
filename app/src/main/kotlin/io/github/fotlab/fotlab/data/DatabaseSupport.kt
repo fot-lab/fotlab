@@ -10,7 +10,7 @@ import androidx.room.RoomDatabase
  * Rules enforced by the code that uses it (`FOTLAB-DATABS-000001`):
  * - no `allowMainThreadQueries()`, ever (R4/C4)
  * - one database per feature, named after it (R3)
- * - `exportSchema = true`, schema JSON committed (R5)
+ * - `exportSchema = false`; the schema JSON is a build artifact and is not committed (R5)
  * - no destructive migration fallback in release builds (R5/C5)
  */
 object RoomDatabases {

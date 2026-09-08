@@ -13,7 +13,7 @@ import io.github.fotlab.fotlab.navigation.gallery.GalleryDestination
  *
  * Open question Q1 of that item: the definitive destination set, its order and
  * its start destination are still TBD. Adding a destination means adding one
- * entry here plus one graph contribution in [FotLabNavHost] — nothing else.
+ * entry here plus one graph contribution in [RootNavHost] — nothing else.
  */
 enum class TopLevelDestination(
     val route: String,

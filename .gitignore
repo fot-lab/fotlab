@@ -22,6 +22,9 @@ bin/
 gen/
 out/
 
+# Room schema export — a build artifact; never committed (FOTLAB-STRUCT-000002 R1)
+app/schemas/
+
 # Native build artifacts
 *.o
 *.so

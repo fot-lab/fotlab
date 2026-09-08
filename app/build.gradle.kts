@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.ksp)
 }
 
 // Version identity is owned by the repository root files, not by this script.
@@ -53,11 +54,11 @@ android {
 }
 
 dependencies {
-    // Shared Room infrastructure (data package). KSP + room-compiler are added
-    // when the first @Entity/@Database lands (`FOTLAB-DATABS-000001` R7); there
-    // is nothing for the annotation processor to run on yet.
+    // Shared Room infrastructure (data package). KSP + room-compiler run on the
+    // gallery's @Entity/@Database (`FOTLAB-DATABS-000001` R7).
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
+    ksp(libs.androidx.room.compiler)
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)

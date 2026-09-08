@@ -5,7 +5,7 @@
 - Priority: P1
 - Created: 2026-09-08
 - Owner: —
-- Related: `FOTLAB-IMGMGR-000001` (the two-table logical model this schema realises), `FOTLAB-DATABS-000001` (Room persistence discipline, schema export, migrations, no large objects)
+- Related: `FOTLAB-IMGMGR-000001` (the two-table logical model this schema realises), `FOTLAB-DATABS-000001` (Room persistence discipline, runtime schema validation, migrations, no large objects)
 
 ## Background & Goal
 
@@ -19,7 +19,7 @@ It resolves from `FOTLAB-IMGMGR-000001`: Q1 (concrete names), Q2 (root semantics
 deduplication) and the cascade-deletion part of the lifecycle rules (R7). Remaining decisions are
 listed in Open Questions.
 
-Goal: one agreed, committed schema for the virtual file tree, realisable in Room under
+Goal: one agreed schema for the virtual file tree, realisable in Room under
 `FOTLAB-DATABS-000001`.
 
 ## Requirement
@@ -109,7 +109,8 @@ Indexes:
 ## Constraints
 
 - C1 — Realised with Room only, under the persistence discipline of `FOTLAB-DATABS-000001`
-  (KSP, `exportSchema = true`, committed schema JSON, explicit migration per version, no destructive
+  (KSP, `exportSchema = false` — the generated schema JSON is not committed; migration safety
+  comes from Room's runtime validation, explicit migration per version, no destructive
   fallback in release).
 - C2 — No large binaries: `fs_node_object` stores references and small metadata only.
 - C3 — The UNIQUE index on `uri_storage` and the composite primary key of `fs_node_relation` are
@@ -131,8 +132,9 @@ Indexes:
 - AC5 — After a row is deleted, a later insert may reuse its freed ID (no `AUTOINCREMENT`).
 - AC6 — The same physical file can appear under two collections as two relation rows against one
   file node; no file bytes are moved or copied.
-- AC7 — The exported schema JSON is committed and every version bump adds one JSON plus a passing
-  migration test from the previous version (`FOTLAB-DATABS-000001` R5/R8).
+- AC7 — Every migration is exercised by opening the database; Room's runtime validation confirms the
+  post-migration schema matches the current entities, and a mismatch fails at open time rather than
+  corrupting data (`FOTLAB-DATABS-000001` R5/R8).
 
 ## Impacted Modules
 

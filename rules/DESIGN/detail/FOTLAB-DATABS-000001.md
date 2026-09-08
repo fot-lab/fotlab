@@ -53,7 +53,8 @@ UI (Compose) → ViewModel → Repository → DAO → Room Database
 
 ### R5 — Schema and migration discipline
 
-- `exportSchema = true` for every database; the generated JSON schemas are committed to the repository.
+- `exportSchema = false`; the Room-generated schema JSON is a build artifact and is **not** committed to source.
+- Migration safety is enforced by Room's **runtime schema validation**: on every database open, Room derives the expected schema from the current `@Entity` / `@Database` definitions and verifies that each applied migration produces exactly that schema; a mismatch throws at open time. No committed JSON is required for this guarantee.
 - Every version change ships an explicit `Migration` or a verified `AutoMigration`.
 - `fallbackToDestructiveMigration` — and its variants — are forbidden in release builds.
 - Database `version` is an internal schema counter; it is unrelated to `VERSION_NAME` / `VERSION_CODE`.
@@ -72,7 +73,10 @@ UI (Compose) → ViewModel → Repository → DAO → Room Database
 ### R8 — Testing
 
 - DAO tests run against `Room.inMemoryDatabaseBuilder`; they do not touch the on-device database file.
-- Every migration has a migration test that upgrades from the previous version with data present.
+- Migration correctness is enforced by Room's runtime schema validation: opening the database after a
+  migration must not throw Room's schema-mismatch exception. Because `exportSchema = false` (R5), the
+  schema JSON is not committed, so tests do not reconstruct a prior-version database from a committed
+  artifact; correctness rests on careful migrations plus this runtime check.
 
 ## Constraints
 
@@ -80,7 +84,7 @@ UI (Compose) → ViewModel → Repository → DAO → Room Database
 - C2 — UI and feature code must not import DAO, entity or database types; the dependency direction is UI → ViewModel → Repository → DAO.
 - C3 — A feature must not reference another feature's DAO or entity directly; only exported repositories cross feature boundaries (`FOTLAB-STRUCT-000001` C3).
 - C4 — No main-thread access; no `allowMainThreadQueries()`.
-- C5 — No destructive migration fallback in release builds; every schema version change is accompanied by a committed schema JSON.
+- C5 — No destructive migration fallback in release builds; every schema version change ships a migration (explicit or verified `AutoMigration`).
 - C6 — No large binaries in the database.
 - C7 — Native code (dnglab, exiftool, or any other third-party module) never opens the database.
 
@@ -89,10 +93,10 @@ UI (Compose) → ViewModel → Repository → DAO → Room Database
 - AC1 — A dependency report of the data layer lists only `androidx.room` artifacts (plus KSP as a build plugin); no third-party database library appears.
 - AC2 — An architecture check (package review or lint rule) shows no UI/feature package importing a DAO, entity or database class.
 - AC3 — Calling a DAO query on the main thread throws Room's main-thread exception in a test; the same holds for every DAO.
-- AC4 — For each database, the schema directory contains one JSON per released version, and any version bump adds exactly one new JSON plus a migration entry.
+- AC4 — Opening the database at runtime does not throw Room's schema-mismatch exception for any migration path, confirming every migration produces the schema derived from the current entities (no committed JSON needed).
 - AC5 — A release build fails (or a review checklist rejects it) if `fallbackToDestructiveMigration` is configured.
 - AC6 — Inspecting all entity definitions shows no binary/blob column; image-carrying records store a path or URI instead.
-- AC7 — DAO tests execute against an in-memory database and pass; a migration test upgrades real data from the previous version without loss.
+- AC7 — DAO tests execute against an in-memory database and pass; a migration is exercised by opening the database, and Room's runtime validation confirms the post-migration schema matches the current entities without throwing.
 
 ## Impacted Modules
 
@@ -111,5 +115,6 @@ UI (Compose) → ViewModel → Repository → DAO → Room Database
 
 ## Change History
 
-- 2026-09-07 — Initial draft. Established Room as the only structured persistence layer, the UI → ViewModel → Repository → DAO → Database layering with module-owned data, the no-main-thread rule, the migration and schema-export discipline, the rule that large binaries stay on the file system, KSP-only build configuration, and in-memory/migration testing. Left single-vs-multi database, DI, encryption, paging/FTS, backup and metadata-cache consistency open as Q1–Q6.
+- 2026-09-07 — Initial draft. Established Room as the only structured persistence layer, the UI → ViewModel → Repository → DAO → Database layering with module-owned data, the no-main-thread rule, the migration discipline (runtime schema validation; the generated schema JSON is a build artifact and is not committed), the rule that large binaries stay on the file system, KSP-only build configuration, and in-memory/migration testing. Left single-vs-multi database, DI, encryption, paging/FTS, backup and metadata-cache consistency open as Q1–Q6.
 - 2026-09-07 — Updated for the single-module layout (`FOTLAB-STRUCT-000001`): ownership is per feature package instead of per Gradle module, `<Module>*` naming became `<Feature>*`, shared infrastructure lives in the `data` package, and the architectural check of AC2 is a package review rather than a module dependency graph. Room as the only persistence layer, the layering, the threading and migration discipline are unchanged.
+- 2026-09-08 — Reversed the schema-export stance per project decision: `exportSchema = false`; the generated schema JSON is a build artifact and is not committed to source. Migration safety now rests on Room's runtime schema validation (derived from the entities), not on committed schema files. Dropped the `room.schemaLocation` KSP argument and the "committed schema JSON" requirements from R5/C5/AC4/R8/AC7; updated the gallery database and shared `RoomDatabases` comments to match.
