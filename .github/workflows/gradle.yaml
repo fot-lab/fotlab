@@ -1,0 +1,164 @@
+# Reusable workflow: prepares the Android/Gradle toolchain and runs Gradle.
+#
+# It has no triggers of its own — it is only called by build.yaml, the
+# orchestrator. Everything a caller may vary (tasks, artifacts, NDK, submodules)
+# is an input; the pinned toolchain versions are not, they are fixed here.
+# See rules/ACTION.md for the values CI is expected to pass.
+
+name: Gradle
+
+on:
+  workflow_call:
+    inputs:
+      gradle-tasks:
+        description: >
+          Gradle tasks to run, e.g. "testDebugUnitTest assembleDebug".
+          Empty means: set the toolchain up and run nothing.
+        required: false
+        type: string
+        default: ''
+      install-ndk:
+        description: Install the pinned NDK in addition to the SDK packages.
+        required: false
+        type: boolean
+        default: false
+      submodules:
+        description: Check out git submodules under external/ recursively.
+        required: false
+        type: boolean
+        default: false
+      release-build:
+        description: >
+          Rename the produced APK to FotLab-<VERSION_NAME>-arm64-v8a-release.apk
+          and upload that instead of the raw output directory.
+        required: false
+        type: boolean
+        default: false
+      validate-version:
+        description: Fail fast when VERSION_NAME does not match the required format.
+        required: false
+        type: boolean
+        default: true
+      apk-path:
+        description: Glob of the APKs to upload. Empty means no APK artifact.
+        required: false
+        type: string
+        default: ''
+      apk-artifact-name:
+        description: Name of the uploaded APK artifact. Empty means no APK artifact.
+        required: false
+        type: string
+        default: ''
+      apk-retention-days:
+        description: Retention of the APK artifact, in days.
+        required: false
+        type: number
+        default: 1
+      log-artifact-name:
+        description: Name of the uploaded build log artifact. Empty means no log artifact.
+        required: false
+        type: string
+        default: ''
+      log-retention-days:
+        description: Retention of the build log artifact, in days.
+        required: false
+        type: number
+        default: 7
+    outputs:
+      version-name:
+        description: VERSION_NAME as read from the repository root.
+        value: ${{ jobs.gradle.outputs.version-name }}
+
+permissions:
+  contents: read
+
+jobs:
+  gradle:
+    name: Gradle
+    runs-on: ubuntu-24.04
+    outputs:
+      version-name: ${{ steps.version.outputs.version-name }}
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: ${{ inputs.submodules && 'recursive' || 'false' }}
+
+      - name: Read VERSION_NAME
+        id: version
+        run: |
+          version="$(tr -d '[:space:]' < VERSION_NAME)"
+          echo "version-name=$version" >> "$GITHUB_OUTPUT"
+          echo "VERSION_NAME = $version"
+
+      - name: Validate VERSION_NAME
+        if: inputs.validate-version
+        run: |
+          version="${{ steps.version.outputs.version-name }}"
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]{4}\.[0-9]{2}\.[0-9]{2}\.[0-9]{2}\.[0-9]{2}(-rc)?$'; then
+            echo "::error::VERSION_NAME '$version' does not match YYYY.MM.DD.HH.mm(-rc)"
+            exit 1
+          fi
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install SDK packages
+        run: |
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager --install "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Install NDK
+        if: inputs.install-ndk
+        run: sdkmanager --install "ndk;28.2.13676358"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Run Gradle
+        if: inputs.gradle-tasks != ''
+        run: |
+          chmod +x ./gradlew
+          set -o pipefail
+          ./gradlew --no-daemon --stacktrace ${{ inputs.gradle-tasks }} 2>&1 | tee build-log.txt
+        shell: bash
+
+      - name: No Gradle task requested
+        if: inputs.gradle-tasks == ''
+        run: |
+          echo "No gradle-tasks requested — toolchain set up, nothing to build." | tee build-log.txt
+        shell: bash
+
+      - name: Rename release APK
+        if: inputs.release-build
+        run: |
+          version="${{ steps.version.outputs.version-name }}"
+          mkdir -p release-apk
+          cp app/build/outputs/apk/release/*.apk "release-apk/FotLab-$version-arm64-v8a-release.apk"
+        shell: bash
+
+      - name: Upload APK artifact
+        if: inputs.apk-artifact-name != '' && inputs.apk-path != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.apk-artifact-name }}
+          path: ${{ inputs.release-build && 'release-apk/*.apk' || inputs.apk-path }}
+          retention-days: ${{ inputs.apk-retention-days }}
+          if-no-files-found: error
+
+      - name: Upload build log
+        if: inputs.log-artifact-name != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.log-artifact-name }}
+          path: build-log.txt
+          retention-days: ${{ inputs.log-retention-days }}
+          if-no-files-found: warn

@@ -33,7 +33,17 @@ its result would prove nothing.
 | Upstream | git submodules under `external/` — inventory in `docs/external/index.md` |
 | Default branch | `main` |
 
-## CI/CD Workflow — `.github/workflows/build.yml`
+## CI/CD Workflow — `.github/workflows/build.yaml`
+
+| File | Role |
+| --- | --- |
+| `.github/workflows/build.yaml` | **Orchestrator** — triggers, `paths-ignore`, job order, release publishing. It contains no build steps. |
+| `.github/workflows/gradle.yaml` | **Reusable workflow** (`on: workflow_call`) — toolchain setup (JDK 17, Android SDK, NDK when asked), the Gradle invocation, artifact upload. It has no triggers of its own. |
+
+The split keeps every pinned toolchain version and every build step in one
+place, so a second caller (for example a future emulator job) reuses it instead
+of copying steps. Everything a caller may vary — tasks, NDK, submodules,
+artifact names and retention — is a `workflow_call` input.
 
 ### Trigger Rules
 
@@ -137,7 +147,7 @@ Everything else triggers, `external/**` included.
 ### Allowed
 
 1. **Read CI logs** — `build-gradle.log`, `build-native.log` artifacts.
-2. **Read `.github/workflows/*.yml`** — to understand what CI does.
+2. **Read `.github/workflows/*.yaml`** — to understand what CI does.
 3. **Read `VERSION_NAME` / `VERSION_CODE`** — to learn the current version.
 4. **Edit `VERSION_NAME` / `VERSION_CODE`** — only when the user explicitly asks,
    and always under [`rules/VERSION.md`](rules/VERSION.md) (a bump without a `v*` tag is
@@ -197,3 +207,4 @@ Split across the two rule files, on purpose:
 | 2026-09-07 | `compileSdk` / `targetSdk` set to `36` in every Gradle module, matching the CI SDK baseline; AGP compatibility left to CI verification (Q1). Native job re-scoped: no native source exists yet, so it stays wired but inactive until the native-integration module designed by the `NATIVE` items is created. Cross-references adjusted — superseded the same day by the repository-root convention. |
 | 2026-09-07 | Initial creation. Declares the no-local-toolchain rule, the `build.yml` trigger matrix for `main`, the SDK/NDK baseline, artifact set and retention, version handling delegated to `VERSION.md`, JVM-only unit testing, and the agent prohibited/allowed list. |
 | 2026-09-07 | Multi-module build collapsed into the single module `:app` (`../rules/DESIGN/detail/FOTLAB-STRUCT-000001.md`): `:core:ui`, `:core:data` and `:feature:gallery` merged into `app/`, with layers expressed as the packages `ui`, `navigation` and `data`. Gradle task set, SDK baseline and triggers are unchanged. |
+| 2026-09-08 | CI split into the orchestrator `.github/workflows/build.yaml` and the reusable `.github/workflows/gradle.yaml` (`on: workflow_call`). Triggers, path filters, the `external/**` submodule-bump condition and release publishing stay in the orchestrator; toolchain setup, the Gradle invocation and artifact upload move into the reusable workflow. Trigger matrix, artifact set with retention, SDK/NDK baseline and task set are unchanged; the release is published with `gh` instead of a third-party action. |

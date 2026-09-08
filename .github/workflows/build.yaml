@@ -1,0 +1,149 @@
+# Orchestrator: decides what runs, and delegates every build to gradle.yaml.
+#
+# This file owns triggers, conditions and job order. It contains no build steps
+# of its own — the toolchain and the Gradle invocation live in the reusable
+# workflow gradle.yaml. See rules/ACTION.md.
+
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'rules/**'
+      - 'LICENSE*'
+      - '.gitignore'
+      - '.readthedocs.yaml'
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'rules/**'
+      - 'LICENSE*'
+      - '.gitignore'
+      - '.readthedocs.yaml'
+  workflow_dispatch:
+    inputs:
+      build_native:
+        description: Build and verify the native side as well.
+        required: false
+        type: boolean
+        default: false
+      release:
+        description: Produce a release APK and publish a GitHub Release.
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    name: Preflight
+    runs-on: ubuntu-24.04
+    outputs:
+      release: ${{ steps.flags.outputs.release }}
+      external-changed: ${{ steps.changes.outputs.external-changed }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute release flag
+        id: flags
+        run: |
+          release=false
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            release=true
+          fi
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.release }}" = "true" ]; then
+            release=true
+          fi
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+        shell: bash
+
+      - name: Detect external/ changes
+        id: changes
+        run: |
+          external=false
+          if [ "${{ github.event_name }}" = "push" ]; then
+            if git diff --name-only '${{ github.event.before }}' '${{ github.event.after }}' | grep -q '^external/'; then
+              external=true
+            fi
+          fi
+          echo "external-changed=$external" >> "$GITHUB_OUTPUT"
+        shell: bash
+
+  native:
+    name: Native
+    needs: preflight
+    if: >-
+      needs.preflight.outputs.external-changed == 'true' ||
+      startsWith(github.ref, 'refs/tags/v') ||
+      (github.event_name == 'workflow_dispatch' && (inputs.build_native || inputs.release))
+    uses: ./.github/workflows/gradle.yaml
+    with:
+      # No native source exists yet, so no Gradle task is run — the job stays
+      # wired in (NDK, submodules, log slot) until the native-integration module
+      # lands, at which point its tasks are added here. rules/ACTION.md.
+      gradle-tasks: ''
+      install-ndk: true
+      submodules: true
+      validate-version: false
+      log-artifact-name: build-native.log
+      log-retention-days: 7
+
+  apk:
+    name: APK
+    needs: [preflight, native]
+    if: ${{ always() && needs.preflight.result == 'success' && needs.native.result != 'failure' }}
+    uses: ./.github/workflows/gradle.yaml
+    with:
+      gradle-tasks: ${{ needs.preflight.outputs.release == 'true' && 'assembleRelease' || 'testDebugUnitTest assembleDebug' }}
+      release-build: ${{ needs.preflight.outputs.release == 'true' }}
+      apk-path: ${{ needs.preflight.outputs.release == 'true' && 'app/build/outputs/apk/release/*.apk' || 'app/build/outputs/apk/debug/*.apk' }}
+      apk-artifact-name: ${{ needs.preflight.outputs.release == 'true' && 'fotlab-release-apk' || 'debug-apks' }}
+      apk-retention-days: ${{ needs.preflight.outputs.release == 'true' && 30 || 1 }}
+      log-artifact-name: build-gradle.log
+      log-retention-days: 7
+
+  github-release:
+    name: GitHub Release
+    needs: [preflight, apk]
+    if: ${{ always() && needs.preflight.outputs.release == 'true' && needs.apk.result == 'success' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download release APK
+        uses: actions/download-artifact@v4
+        with:
+          name: fotlab-release-apk
+          path: apk
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          VERSION_NAME: ${{ needs.apk.outputs.version-name }}
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" apk/*.apk --clobber
+          else
+            gh release create "$TAG" \
+              --target "$GITHUB_SHA" \
+              --title "FotLab $VERSION_NAME" \
+              --generate-notes \
+              apk/*.apk
+          fi
+        shell: bash
