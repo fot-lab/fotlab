@@ -116,12 +116,62 @@ external/exiftool/
 ## 与本项目（FotLab）的关系
 
 - `external/` 是第三方库存放区；`exiftool` 作为独立 Perl 工具链引入。
-- **当前未集成**：仓库内无调用方，Android 应用（`app/`，Kotlin）无法直接 `use Image::ExifTool`。若需使用，典型路径有：
-  1. 在 Android 端通过 `Runtime.exec`/Process 调用打包后的 `exiftool`（需 Perl 运行时或 Windows/Linux 独立 EXE）；
-  2. 改用原生/JVM 元数据库（如 Apache Commons Imaging、Sanselan、camera2 ExifInterface）替代；
-  3. 在桌面/服务端辅助流程中调用。
+- **当前未集成**：仓库内无调用方，Android 应用（`app/`，Kotlin）无法直接 `use Image::ExifTool`。若需使用，典型路径见
+  下文「在 Android 上运行 Perl / ExifTool 的可行方案（调研补充）」一节：
+  1. （推荐）交叉编译 Perl（perl-cross + NDK）随 APK 以 `.so` 分发，并以 `ProcessBuilder` 调用 `exiftool`（方案 A）；
+  2. 简化版：交叉编译 perl + exiftool 解压到 `files` 目录并赋权执行（方案 B，仅 32 位 PIE，API 21+）；
+  3. 改用原生/JVM 元数据库（如 Apache Commons Imaging、Sanselan、camera2 ExifInterface）替代；
+  4. 在桌面/服务端辅助流程中调用。
 - 决策要点：许可证兼容（Artistic/GPL 与本项目 `LICENSE.md` 是否冲突需确认）；Perl 运行时在移动端不可行，需权衡
   引入体积与跨平台成本。
+
+## 在 Android 上运行 Perl / ExifTool 的可行方案（调研补充）
+
+ExifTool 是纯 Perl 程序，Android（ART/Dalvik，Kotlin/Java）无内置 Perl 运行时。要在 FotLab 中复用 ExifTool，
+需自行提供 Perl 运行时。经调研（2026-09-08）现实中已有完整可落地的方案，归纳为四类：
+
+### 方案 A — 交叉编译 Perl（perl-cross + NDK），随 APK 分发并以进程调用（推荐 / 主流）
+基于 `bestvibes/exiftoolwrapper-android`（MIT，2026，GitHub Actions 可复现构建）的成熟实践：
+- **交叉编译**：用 `perl-cross`（github.com/arsv/perl-cross，2025 仍活跃）在启用 `DynaLoader` 的配置下交叉编译 Perl，
+  `make install` 到暂存树；`native/PINS` 精确锁定 perl / ExifTool / perl-cross / NDK 版本与 SHA256。
+- **打包**：将 perl 解释器重命名为 `libperl.so`、各 XS 模块（POSIX、Compress::Raw::Zlib 等）重命名为
+  `libperl_xs_<flat_name>.so`，经 `jniLibs` 按 ABI 随应用安装分发（落入 `nativeLibraryDir`，无需 `chmod`）；
+  ExifTool 脚本 + `Image::ExifTool/` 库树 + 纯 Perl `@INC` 打包为 `assets/perl5.tar`，首次启动经 `AssetExtractor`
+  解压到 `filesDir/perl5/`。
+- **调用**：`ProcessBuilder(libperl.so, "-I", arch, "-I", lib, exiftool, …)` —— **argv 列表、无 shell、无字符串插值**；
+  SAF 返回的 URI 先拷到缓存子目录，exiftool 读写副本后写回源 URI。
+- **链接**：运行时在 `filesDir/perl5/arch/auto/<dist>/<dist>.so` 建符号链接指向 `nativeLibraryDir/libperl_xs_*.so`
+  （因安装时 `nativeLibraryDir` 随机化，每次启动重建），使 `DynaLoader` 能在规范 archlib 路径找到 XS 模块。
+- **ABI**：`arm64-v8a` / `armeabi-v7a` / `x86_64` / `x86`，提供 `universal` APK。
+- **安全**：过滤危险 flag（`-config`、`-@`、`-stay_open`、`-execute*`）防止加载任意 Perl；命令写入 `command_history`。
+
+### 方案 B — 简化打包（交叉编译 perl + exiftool 解压到 files 目录）
+基于 `vdzhos-dh/ExifToolForAndroid`（ExifDateFixer，方案 A 的派生）：
+- 将 exiftool 与**交叉编译的 Perl**（arm + x86，仅 PIE）打包进 APK，运行时解压到
+  `/data/data/<pkg>/files` 并设置可执行权限，再运行 exiftool。
+- ABI 仅 32 位（arm/x86）+ PIE，隐含要求 **Android 5.0（API 21）及以上**；不支持 64 位 ABI（除非系统兼容 32 位）。
+
+### 方案 C — Termux / 原生构建（仅适合调试或依赖外部环境）
+- **Termux**（Play Store）预装交叉编译好的 perl，可在 Android 上原生编译 Perl 5.30+；但作为 App 内嵌依赖体积大、
+  且需用户安装 Termux，不适合产品化。
+- **CCTools** 等非官方工具链已停更、路径随应用而异，不推荐。
+- **SL4A** 已废弃，不再适用。
+
+### 方案 D — JNI 内嵌 Perl 解释器
+- 通过 JNI 将 perl 解释器嵌入 native 库，在 JVM 内直接调用。复杂度高，仅在需要进程内深度集成时考虑；
+  方案 A 的「perl 作为独立 `.so` + `ProcessBuilder` 调用」已能满足绝大多数元数据读写场景。
+
+### 官方文档与约束（perlandroid）
+- `perldoc.perl.org/perlandroid` 给出：① 用 NDK 独立工具链（`make-standalone-toolchain.sh`）交叉编译，需**类 Unix
+  主机**（Windows 原生不支持该流程），早期目标 ABI 为 `arm-linux-androideabi` / `mips` / `x86`；② 或 Termux/CCTools
+  原生构建。
+- 限制：交叉编译仅正式支持类 Unix 主机；旧设备/低权限受限；要求 Android 2.0+。
+
+### 体积与许可影响
+- **体积**：perl 解释器 + ExifTool `lib/` 约数十 MB（按 ABI 拆分后 `universal` 包更大），需在「功能完整性」与「包体」
+  间权衡；可裁剪 `lib/` 中无关厂商模块。
+- **许可**：ExifTool 与 perl 均为 Artistic/GPL；作为独立进程调用（方案 A/B）属「聚合分发」，通常不触发 GPL 传染；
+  但需确认与本项目 `LICENSE.md` 的兼容，并保留上游版权声明（见 Q2）。
 
 ## Constraints
 
@@ -146,3 +196,7 @@ external/exiftool/
 - 2026-09-08 — 初始调研稿。梳理 `external/exiftool`（ExifTool 13.59）的目录结构、核心架构（引擎 + 标签表 +
   写入例程）、功能范围（360+ 文件类型、EXIF/IPTC/XMP/GPS/厂商 MakerNotes 等）、辅助文件（arg/config/fmt）、
   文档与测试布局，并指出当前仓库未与之集成及潜在集成路径与许可约束。
+- 2026-09-08 — 补充「在 Android 上运行 Perl / ExifTool 的可行方案」：基于 `bestvibes/exiftoolwrapper-android`
+  （perl-cross + NDK 交叉编译 perl 为 `.so`、`ProcessBuilder` 调用，覆盖 4 种 ABI）、`vdzhos-dh/ExifToolForAndroid`
+  （简化解压到 files 目录，32 位 PIE/API 21+）、Termux/CCTools/SL4A、JNI 内嵌四类方案，并引用 perlandroid 官方
+  交叉编译约束（需类 Unix 主机、早期 ABI）；补充体积与 GPL 许可影响。同步将「与本项目关系」集成路径指向该节。
