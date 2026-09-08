@@ -38,18 +38,23 @@ The Gallery top bar is laid out as follows, and this order never changes:
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│ ☰   middle region (custom)                  [A]  [B]   ⋮         │
+│ ☰  ▦   middle region (custom)                [A]  [B]   ⋮         │
 └──────────────────────────────────────────────────────────────────┘
-  │         │                                   │    │     │
-  │         │                                   │    │     └─ three-dot overflow (always last)
-  │         │                                   │    └─────── slot B: create / delete
-  │         │                                   └──────────── slot A: import / export
-  │         └───────────────────────────────────────────────── screen-defined
+  │   │    │                                  │    │     │
+  │   │    │                                  │    │     └─ three-dot overflow (always last)
+  │   │    │                                  │    └─────── slot B: create / delete
+  │   │    │                                  └──────────── slot A: import / export
+  │   │    └──────────────────────────────────────────────── screen-defined
+  │   └───────────────────────────────────────────────────── layout toggle (▦ grid)
   └─────────────────────────────────────────────────────────── three-line drawer icon
 ```
 
 - The three-line icon (`Icons.Default.Menu`) is the leftmost element and opens the drawer at 80%
   of the content region (`FOTLAB-UIXDES-000002` R2/R3).
+- Immediately to its right sits the **layout-toggle icon** (`▦`, the grid / 田字 glyph) of R9. It
+  is always present, never moves, and leads the screen-defined middle region. It is part of the
+  inherited skeleton's leading cluster, not an action slot: slots A and B and the overflow menu are
+  still the three rightmost elements in that order.
 - The three-dot icon (`Icons.Default.MoreVert`) is the rightmost element and opens the dropdown of
   R5 (`FOTLAB-UIXDES-000002` R4). Nothing is placed to its right and it is never hidden.
 - Slots A and B sit between the middle region and the three-dot icon, in that order: **A, then B,
@@ -135,10 +140,12 @@ entry is **icon + text** (no brackets, no decorative punctuation in the copy):
 | --- | --- | --- |
 | Select all | `Icons.Default.SelectAll` | Every node of the currently shown virtual directory becomes selected |
 | Invert selection | `Icons.Default.SwapHoriz` | Selected nodes become unselected and vice versa, within the currently shown directory |
-| Clear selection | `Icons.Default.Deselect` | The list becomes empty, returning the bar to its empty state |
+| Clear selection | `Icons.Default.Clear` | The list becomes empty, returning the bar to its empty state |
 
 - The three entries are always present, in this order, whatever the current selection is; entries
   are not hidden, reordered or disabled based on state.
+- Material ships no dedicated "deselect" glyph, so clearing uses `Clear`; inverting has no glyph of
+  its own either and uses `SwapHoriz` as the expression of "swap the two sets" (see Q3).
 - They operate on the **currently shown virtual directory** — the directory whose children the
   content region is displaying. Nodes outside it are untouched (see Q5 for recursion).
 - "Clear selection" is the only way, other than deselecting every node, to return to the empty
@@ -164,9 +171,16 @@ entry is **icon + text** (no brackets, no decorative punctuation in the copy):
   **never moved or copied** (`FOTLAB-IMGMGR-000001` R1/R3).
 - **Export** — writes the selected nodes out to a location chosen through the platform. A selected
   collection means its contents (see Q6).
-- **Delete** — removes the selected nodes from the virtual tree. Relations are removed with the
-  node, and deleting a node never deletes the physical file implicitly — that remains an explicit,
-  confirmed action (`FOTLAB-IMGMGR-000001` R7, `FOTLAB-UIXDES-000002` R4).
+- **Delete** — archives the selected nodes instead of dropping them, and never touches a physical
+  file. Node rows move to `fs_node_object_recycle`, removed relations to
+  `fs_node_relation_recycle`, all stamped with one batch id per operation. Deleting a collection
+  removes every relation where it is the parent; a child that still has another parent keeps that
+  membership and its own subtree, while a child left with no parent is archived as an orphan and
+  the rule is applied to it recursively. The recycle schema and the algorithm are specified in
+  `FOTLAB-DATABS-000002` R9–R13. Confirmation is still required before the operation runs
+  (`FOTLAB-UIXDES-000002` R4).
+- **Collections are selectable** — a collection can be selected (long press) and deleted like any
+  other node; its contents are walked by the rule above.
 - All four go through the gallery's lower layer (`GalleryCore`); the screen does not touch the
   database.
 
@@ -174,10 +188,48 @@ entry is **icon + text** (no brackets, no decorative punctuation in the copy):
 
 Every label, content description and the default collection name comes from the `feature: gallery`
 block of the single strings file (`FOTLAB-UIXDES-000003` R2/R4). Keys used by this screen:
-`gallery_title`, `gallery_cd_open_drawer`, `gallery_cd_more_options`, `gallery_action_import`,
-`gallery_action_export`, `gallery_action_new_collection`, `gallery_action_delete`,
-`gallery_menu_select_all`, `gallery_menu_invert`, `gallery_menu_clear`,
-`gallery_new_collection_name`, `gallery_selection_count` (plural).
+`gallery_title`, `gallery_new_collection_name`, `gallery_menu_select_all`, `gallery_menu_invert`,
+`gallery_menu_clear`, `gallery_delete_title`, `gallery_delete_message`,
+`gallery_empty_directory`, `gallery_drawer_empty`, `gallery_selection_count` (plural) and the
+content descriptions `gallery_cd_open_drawer`, `gallery_cd_more_options`, `gallery_cd_import`,
+`gallery_cd_export`, `gallery_cd_new_collection`, `gallery_cd_delete`. The two generic dialog
+actions are promoted to `common`: `common_action_delete`, `common_action_cancel`.
+
+### R9 — Layout toggle (grid / 田字) leads the middle region
+
+A layout-toggle icon sits immediately to the **right of the three-line drawer icon**, before the
+middle region (R1). It is always present and never moves.
+
+- **Glyph reflects the current mode.** The bar is icon-only (C4), so the button shows the mode it
+  is in: the list glyph (`Icons.Filled.ViewList`) in detail-list mode, and the grid / 田字 glyph
+  (`Icons.Filled.GridView`) in any grid mode. Its meaning is also carried by a `contentDescription`
+  from resources (`gallery_cd_layout_mode`), never by a text label in the bar.
+- **Tapping cycles through seven modes**, in this fixed order, wrapping around to the first:
+  1. Detail list — a single-column list showing the node name (and, where known, its type/mime);
+  2. Grid 1 column;
+  3. Grid 2 columns;
+  4. Grid 3 columns;
+  5. Grid 4 columns;
+  6. Grid 5 columns;
+  7. Grid 6 columns;
+  then back to Detail list. The cycle is the only interaction; there is no long-press or menu.
+- **Default = Grid 3 columns.** On first run, or whenever no mode has been stored, the content
+  shows as a 3-column grid. This default is deliberately independent of `ListSelectionOfGallery`:
+  "empty selection" in R3/R4 is about node selection, not about how the content is displayed, and
+  the two never influence each other.
+- **The chosen mode is persisted.** The app remembers the user's last display mode across process
+  restarts. The mode is a user preference, stored separately from the `fs_node` data: an
+  `androidx.datastore:datastore-preferences` `DataStore` keyed by the mode and owned by
+  `GalleryCore` (`FOTLAB-STRUCT-000001` R2/R3). This is distinct from R3's rule that
+  `ListSelectionOfGallery` is never persisted — selection is transient process state, the display
+  mode is a durable preference.
+- **Scope of effect.** The toggle changes only the **content region** — how the nodes of the
+  currently shown directory are laid out. It does not change the selection, the current directory,
+  or any top-bar action (slots A/B, overflow, drawer).
+- The seven modes are modelled by a single sealed set `GalleryLayoutMode` (one `DetailList` value
+  plus `Grid1`…`Grid6` carrying their column count), with a `cycle()` that maps the order above and
+  a `fromColumns()` that resolves the stored integer back to a mode (unknown values fall back to
+  Grid 3).
 
 ## Constraints
 
@@ -198,6 +250,11 @@ block of the single strings file (`FOTLAB-UIXDES-000003` R2/R4). Keys used by th
 - C8 — No action moves, copies or implicitly deletes a physical file; import and export work
   through platform pickers and the virtual tree (`FOTLAB-IMGMGR-000001` R1/R3/R7).
 - C9 — First-party APIs only, per `FOTLAB-UIXDES-000001` R1.
+- C10 — The layout toggle is a fixed icon immediately right of the drawer icon and left of the
+  middle region (R1/R9); it shows the current mode's glyph, cycles the seven modes in the fixed
+  order of R9 with Grid 3 as the default, and persists the choice to a `DataStore` preference owned
+  by `GalleryCore`. The display mode is independent of `ListSelectionOfGallery` (R3): changing the
+  selection never changes the mode, and changing the mode never changes the selection.
 
 ## Acceptance Criteria
 
@@ -224,8 +281,20 @@ block of the single strings file (`FOTLAB-UIXDES-000003` R2/R4). Keys used by th
   equals the localised default name, and no physical file or directory is created.
 - AC9 — Importing a picked file creates one file-entry node related to the currently shown
   directory while the file itself stays at its original location.
-- AC10 — Deleting a selection asks for confirmation before it runs, removes the nodes and their
-  relations, and leaves the referenced physical files in place.
+- AC10 — Deleting a selection asks for confirmation before it runs, then archives the nodes and
+  the removed relations under one batch id, and leaves the referenced physical files in place.
+- AC15 — Deleting a collection that contains a file which also lives in another collection keeps
+  that file in the other collection: only the relation to the deleted parent is archived.
+- AC16 — Deleting a collection archives a child that has no other parent, and the same rule is
+  applied to that child's own children in the same batch.
+- AC17 — On a first run with no stored preference, the Gallery content shows as a 3-column grid and
+  the layout-toggle icon reads as the grid / 田字 glyph.
+- AC18 — Tapping the layout-toggle icon cycles the seven modes in the order of R9 (detail list →
+  1 → 2 → 3 → 4 → 5 → 6 → detail list); the icon glyph updates to reflect the current mode (list
+  glyph in detail-list mode, 田字 in any grid mode) and the content region relayouts accordingly.
+- AC19 — After the user changes the mode, fully exiting the app and starting it again restores the
+  last chosen mode (not the Grid 3 default); the preference is stored in a `DataStore` owned by
+  `GalleryCore` and is independent of the selection state.
 - AC11 — Every icon in the top bar and every dropdown entry exposes a non-null content description
   or text resolved from resources.
 - AC12 — With the drawer expanded, the bottom navigation region stays visible and interactive, and
@@ -233,14 +302,21 @@ block of the single strings file (`FOTLAB-UIXDES-000003` R2/R4). Keys used by th
 
 ## Impacted Modules
 
-- `feature/gallery/GalleryScreen.kt` — renders the top bar, the two slots, the dropdown and the
-  drawer; holds no data logic
+- `feature/gallery/GalleryScreen.kt` — renders the top bar (including the layout-toggle icon of
+  R9), the two slots, the dropdown and the drawer; lays the content out per the current
+  `GalleryLayoutMode`; holds no data logic
 - `feature/gallery/GalleryCore.kt` — the lower layer implementing new-collection, import, export
   and delete over the virtual tree
 - `feature/gallery/GalleryCore` — owns the single process-scoped `ListSelectionOfGallery` instance
-  and exposes it as observable state; also implements the four node operations
+  and exposes it as observable state (R3); also owns the current `GalleryLayoutMode` as an
+  observable state and persists it through `GalleryLayoutPreference` (R9); also implements the four
+  node operations
+- `feature/gallery/GalleryLayoutMode.kt` — sealed set of the seven display modes (one `DetailList`
+  plus `Grid1`…`Grid6`), with `cycle()` and `fromColumns()`
+- `feature/gallery/GalleryLayoutPreference.kt` — the `androidx.datastore:datastore-preferences`
+  `DataStore` holding the persisted mode, owned by `GalleryCore`
 - `navigation/gallery/` — unchanged; the graph still only composes the screen
-- `res/values/strings.xml` — new keys in the `feature: gallery` block
+- `res/values/strings.xml` — new keys in the `feature: gallery` block: `gallery_cd_layout_mode`
 - `FOTLAB-UIXDES-000002` — the skeleton this screen implements
 - `FOTLAB-IMGMGR-000001` / `FOTLAB-DATABS-000002` — what a node is and how structure is stored
 
@@ -249,8 +325,6 @@ block of the single strings file (`FOTLAB-UIXDES-000003` R2/R4). Keys used by th
 - Q3 — "Invert selection" has no dedicated Material icon. `SwapHoriz` is proposed as the closest
   first-party expression of "swap the two sets"; is that acceptable, or should invert get no icon
   in the dropdown? **TBD.**
-- Q4 — Selectable scope: can a collection node be selected and deleted together with file entries,
-  or is selection restricted to file entries at first? **TBD.**
 - Q5 — Do "Select all" and "Invert selection" apply only to the children of the currently shown
   directory, or recursively to the whole subtree beneath it? R5 currently says direct children
   only. **TBD.**
@@ -264,9 +338,10 @@ block of the single strings file (`FOTLAB-UIXDES-000003` R2/R4). Keys used by th
   directory name? R6 currently says the current directory name. **TBD.**
 
 Resolved and retired on 2026-09-08: Q1 (the state holder — a process-scoped object owned by
-`GalleryCore`, read by the screen with plain `remember`; now R3 and C6) and Q2 (the type keeps its
-full `ListSelectionOfGallery` name — now a clause in R2). The retired numbers are intentionally not
-reused.
+`GalleryCore`, read by the screen with plain `remember`; now R3 and C6), Q2 (the type keeps its
+full `ListSelectionOfGallery` name — now a clause in R2) and Q4 (collections are selectable and
+deletable; their deletion semantics are owned by `FOTLAB-DATABS-000002` R9–R13 — now a clause in
+R7). The retired numbers are intentionally not reused.
 
 ## Change History
 
@@ -285,6 +360,13 @@ reused.
   identifier to prevent collisions; `FOTLAB-STRUCT-000003` forbids brand tokens, not destination
   names, and a future second list (for example `ListSelectionOfRender`) follows the same pattern
   instead of shortening the name. Recorded as a clause in R2.
+- 2026-09-08 — Deletion became **recycling**: nothing is dropped and no physical file is ever
+  removed. R7 now states that delete archives node rows into `fs_node_object_recycle` and removed
+  relations into `fs_node_relation_recycle` under one batch id, that a child with a surviving
+  parent keeps its membership while a parentless child is archived as an orphan and recursed into,
+  and that collections are selectable — answering Q4, which is retired. Added AC15 (multi-parent
+  child survives deleting one of its parents) and AC16 (orphaned subtree archived in one batch).
+  The schema and the algorithm live in `FOTLAB-DATABS-000002` R9–R13.
 - 2026-09-08 — Q1 retired: the selection is held by a **process-scoped object owned by
   `GalleryCore`** — not by the composition. `GalleryScreen` obtains that holder with plain
   `remember` and subscribes to the state it exposes (`StateFlow` read as Compose `State`); the
@@ -294,3 +376,11 @@ reused.
   `SavedStateHandle` and any persistence. Added as clauses in R3 and constraint C6 (later
   constraints renumbered to C7–C9), plus acceptance criteria AC13 (rotation keeps the selection)
   and AC14 (no restoration across process death).
+- 2026-09-08 — Added R9, C10 and AC17–AC19: a layout-toggle icon (grid / 田字 glyph) sits
+  immediately right of the drawer icon and cycles seven display modes — detail list, and 1–6 column
+  grids — wrapping around, defaulting to a 3-column grid. The chosen mode is a durable user
+  preference persisted to a `androidx.datastore:datastore-preferences` `DataStore` owned by
+  `GalleryCore`, independent of `ListSelectionOfGallery`. The seven modes are modelled by a new
+  sealed `GalleryLayoutMode` with `cycle()`/`fromColumns()`; rendering of the content region follows
+  the current mode. Impacted modules and the strings block gained `GalleryLayoutMode`,
+  `GalleryLayoutPreference` and `gallery_cd_layout_mode`.

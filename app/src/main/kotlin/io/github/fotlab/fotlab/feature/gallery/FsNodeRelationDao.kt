@@ -3,13 +3,20 @@ package io.github.fotlab.fotlab.feature.gallery
 import androidx.room.Dao
 import androidx.room.Delete
 import androidx.room.Insert
+import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface FsNodeRelationDao {
 
-    @Insert
+    /**
+     * IGNORE keeps the "same edge cannot be inserted twice" guarantee of the composite
+     * primary key usable from code: re-linking an existing child/parent pair is a no-op
+     * instead of an abort (`FOTLAB-DATABS-000002` R3). It also covers the root case,
+     * where a `NULL` parent cannot be matched with `=` in a query.
+     */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(relation: FsNodeRelation)
 
     @Delete
@@ -53,4 +60,16 @@ interface FsNodeRelationDao {
             "WHERE fs_node_id_child = :childId AND fs_node_id_parent = :parentId",
     )
     suspend fun removeRelation(childId: Long, parentId: Long?)
+
+    /** Relations where the node is the child — its own links to its parents. */
+    @Query("SELECT * FROM fs_node_relation WHERE fs_node_id_child = :childId")
+    suspend fun relationsWithChild(childId: Long): List<FsNodeRelation>
+
+    /** Relations where the node is the parent — what sits directly under it. */
+    @Query("SELECT * FROM fs_node_relation WHERE fs_node_id_parent = :parentId")
+    suspend fun relationsWithParent(parentId: Long): List<FsNodeRelation>
+
+    /** How many parents a node still has; 0 means it became an orphan (R12). */
+    @Query("SELECT COUNT(*) FROM fs_node_relation WHERE fs_node_id_child = :childId")
+    suspend fun parentCount(childId: Long): Int
 }

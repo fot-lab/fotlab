@@ -7,6 +7,8 @@
 <resources>
 
     <!-- ===== common ===== -->
+    <string name="common_action_delete">Delete</string>
+    <string name="common_action_cancel">Cancel</string>
 
     <!-- ===== app (shell) ===== -->
     <string name="app_name">FotLab</string>
@@ -14,8 +16,30 @@
 
     <!-- ===== feature: gallery ===== -->
     <string name="gallery_title">Gallery</string>
+    <string name="gallery_new_collection_name">New Folder</string>
+
+    <string name="gallery_menu_select_all">Select all</string>
+    <string name="gallery_menu_invert">Invert selection</string>
+    <string name="gallery_menu_clear">Clear selection</string>
+
+    <string name="gallery_delete_title">Delete selection?</string>
+    <string name="gallery_delete_message">The selected items are removed from the library. The
+        original files stay where they are.</string>
+
+    <string name="gallery_empty_directory">This folder is empty</string>
+
+    <plurals name="gallery_selection_count">
+        <item quantity="one">%1$d selected</item>
+        <item quantity="other">%1$d selected</item>
+    </plurals>
+
+    <string name="gallery_drawer_empty">No drawer entries yet</string>
     <string name="gallery_cd_open_drawer">Open navigation drawer</string>
     <string name="gallery_cd_more_options">More options</string>
-    <string name="gallery_drawer_empty">No drawer entries yet</string>
+    <string name="gallery_cd_import">Import files</string>
+    <string name="gallery_cd_export">Export selection</string>
+    <string name="gallery_cd_new_collection">New folder</string>
+    <string name="gallery_cd_delete">Delete selection</string>
+    <string name="gallery_cd_layout_mode">Switch display mode</string>
 
 </resources>

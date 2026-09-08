@@ -64,4 +64,85 @@ class GalleryRepository(private val database: GalleryDatabase) {
 
     suspend fun getByUri(uri: String): FsNodeObject? =
         database.nodeObjectDao().getByUri(uri)
+
+    suspend fun getById(id: Long): FsNodeObject? =
+        database.nodeObjectDao().getById(id)
+
+    // --- Deletion (`FOTLAB-DATABS-000002` R9–R13) ---
+
+    /**
+     * Remove nodes by **archiving** them — nothing is dropped silently and no physical
+     * file is ever touched.
+     *
+     * Every row this writes, in both recycle tables, carries [batchId], so the whole
+     * operation can be recognised afterwards as one batch. The entire delete runs in a
+     * single transaction: an interrupted delete leaves either the complete batch or
+     * nothing (R13).
+     */
+    suspend fun deleteNodes(nodeIds: Collection<Long>, batchId: Long) {
+        database.withTransaction {
+            val pending = ArrayDeque<Long>()
+            pending.addAll(nodeIds)
+            while (pending.isNotEmpty()) {
+                archiveAndRemove(pending.removeLast(), batchId, pending)
+            }
+        }
+    }
+
+    /**
+     * Archive one node and the relations that leave with it.
+     *
+     * 1. archive + remove the relations where the node is the child (its link up);
+     * 2. for a collection, archive + remove every relation where it is the parent, and
+     *    for each child: keep it when another parent survives, otherwise queue it as an
+     *    orphan so the rule is applied to it in turn (recursion through [pending]);
+     * 3. archive + remove the node row itself.
+     */
+    private suspend fun archiveAndRemove(
+        nodeId: Long,
+        batchId: Long,
+        pending: ArrayDeque<Long>,
+    ) {
+        val relationDao = database.nodeRelationDao()
+
+        for (relation in relationDao.relationsWithChild(nodeId)) {
+            archiveRelation(relation, batchId)
+            relationDao.delete(relation)
+        }
+
+        for (relation in relationDao.relationsWithParent(nodeId)) {
+            archiveRelation(relation, batchId)
+            relationDao.delete(relation)
+            val childId = relation.fsNodeIdChild
+            // Still has a parent: it stays exactly where it is (R12 step 2c).
+            if (relationDao.parentCount(childId) == 0) {
+                pending.addLast(childId)
+            }
+        }
+
+        val node = database.nodeObjectDao().getById(nodeId) ?: return
+        val nodeIdValue = node.fsNodeId ?: return
+        database.nodeObjectRecycleDao().insert(
+            FsNodeObjectRecycle(
+                idRecycle = batchId,
+                fsNodeId = nodeIdValue,
+                nameDisplay = node.nameDisplay,
+                typeMime = node.typeMime,
+                uriStorage = node.uriStorage,
+                timeModified = node.timeModified,
+                timeCreated = node.timeCreated,
+            ),
+        )
+        database.nodeObjectDao().delete(node)
+    }
+
+    private suspend fun archiveRelation(relation: FsNodeRelation, batchId: Long) {
+        database.nodeRelationRecycleDao().insert(
+            FsNodeRelationRecycle(
+                idRecycle = batchId,
+                fsNodeIdChild = relation.fsNodeIdChild,
+                fsNodeIdParent = relation.fsNodeIdParent,
+            ),
+        )
+    }
 }

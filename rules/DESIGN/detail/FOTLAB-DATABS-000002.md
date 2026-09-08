@@ -106,6 +106,93 @@ Indexes:
 - Structural writes (creating/removing an edge, reparenting) are applied atomically
   (`FOTLAB-DATABS-000001` R4).
 
+### R9 — Deleting never touches external storage
+
+- No delete path removes, truncates, unlinks or otherwise modifies a physical file. The
+  app organises **references**; deleting removes the reference, never the bytes
+  (`FOTLAB-IMGMGR-000001` R1/R3, R7/AC6).
+- This holds for every node kind: deleting a file entry and deleting a collection both
+  leave the referenced storage untouched.
+
+### R10 — Removal is a move into two recycle tables
+
+Nothing of the virtual tree is ever dropped silently. Removing a node or a relation
+**archives** it:
+
+- `fs_node_object_recycle` — archived copy of a removed `fs_node_object` row.
+- `fs_node_relation_recycle` — archived copy of a removed relation row.
+- Both tables carry `id_recycle`, the **batch id**: every row written by one delete
+  operation shares the same value, so a single operation can be identified, inspected
+  and — if a restore is ever built — undone as one unit.
+- The recycle tables carry **no foreign keys** and take part in no cascade. They are
+  append-only archives and must stay readable after the live rows they mirror are gone.
+- The live `fs_node_object` / `fs_node_relation` tables keep the cascading foreign keys
+  of R3/R8; recycling is an explicit move performed by the delete routine, not a
+  side effect of a cascade.
+
+### R11 — Recycle table columns and keys
+
+`fs_node_object_recycle`:
+
+| Column | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `id_recycle` | INTEGER | yes | Batch id of the delete operation |
+| `fs_node_id` | INTEGER | yes | The archived node's id |
+| `name_display` | TEXT | yes | Archived display name |
+| `type_mime` | TEXT | yes | Archived MIME kind |
+| `uri_storage` | TEXT | no | Archived file reference |
+| `time_modified` | INTEGER | no | Archived modification timestamp |
+| `time_created` | INTEGER | yes | Archived creation timestamp |
+
+- Primary key: the composite `(id_recycle, fs_node_id)` — one operation archives a node once.
+- Index: `id_recycle` (reading one batch).
+
+`fs_node_relation_recycle`:
+
+| Column | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `id_recycle` | INTEGER | yes | Batch id of the delete operation |
+| `fs_node_id_child` | INTEGER | yes | Archived child node id |
+| `fs_node_id_parent` | INTEGER | no | Archived parent node id; `NULL` = root-level |
+
+- Primary key: the composite `(id_recycle, fs_node_id_child, fs_node_id_parent)`.
+- Indexes: `id_recycle`, and `fs_node_id_parent` (reconstructing what sat under an
+  archived collection).
+
+### R12 — The delete algorithm
+
+One delete operation takes a set of node ids and one batch id, and runs as follows.
+
+1. **Archive the node itself.** Archive every relation row where the node is the
+   **child** (its link to its own parent), then archive the node row into
+   `fs_node_object_recycle`.
+2. **If it is a collection, walk its children.** For every relation row where the node
+   is the **parent**:
+   1. archive that relation row into `fs_node_relation_recycle`;
+   2. count how many parent relations the child still has;
+   3. **if the child still has a parent** — stop here for that child. It stays exactly
+      where it is: its other memberships are untouched, its own subtree is untouched,
+      and it is neither archived nor recursed into (many-to-many membership, R4/R7);
+   4. **if the child has no parent left** — it is an orphan. Archive its node row into
+      `fs_node_object_recycle`, then apply step 2 to it (recursion), so a whole
+      orphaned subtree is collected.
+3. **Never archive a node that still has a parent.** A node reachable from a surviving
+   collection is not removable as a side effect of deleting one of its parents.
+
+Consequences: deleting a collection removes that collection and, transitively, only
+those descendants that became unreachable; a file that also lives in another collection
+simply loses one membership and remains in the other.
+
+### R13 — Atomicity, and what is not part of the transaction
+
+- The whole delete — all archived rows and all removals from the live tables — runs in
+  **one transaction** (`FOTLAB-DATABS-000001` R4). An interrupted delete leaves the live
+  tree and the recycle batch consistent: the batch is complete, or nothing moved.
+- No file-system operation belongs to that transaction; the delete never opens, writes
+  or deletes a physical file (R9).
+- The batch id is assigned once per operation, before the transaction opens, so every
+  row of the batch can be recognised afterwards.
+
 ## Constraints
 
 - C1 — Realised with Room only, under the persistence discipline of `FOTLAB-DATABS-000001`
@@ -118,6 +205,13 @@ Indexes:
 - C4 — The schema is the persistence contract of `FOTLAB-IMGMGR-000001`; entities, DAOs and
   migrations for it are owned in the place that item C4/Q8 settles (feature vs. shared `data`
   package), reached by consumers only through the exported repository.
+- C5 — No delete path touches a physical file: removing a node removes only the app's
+  reference to it (R9).
+- C6 — Removal archives instead of dropping. Every archived row carries the `id_recycle` of
+  the operation that produced it, and the recycle tables carry no foreign keys and no
+  cascade (R10).
+- C7 — A child that still has a surviving parent is never archived and never recursed into;
+  only a node left without any parent is archived as an orphan (R12).
 
 ## Acceptance Criteria
 
@@ -127,14 +221,26 @@ Indexes:
   the file is recorded as one `fs_node_object` row regardless of how many relations reference it.
 - AC3 — A node with a `NULL`-parent relation row appears as a top-level node, and no separate root
   row exists in `fs_node_object`.
-- AC4 — Deleting a node row removes all `fs_node_relation` rows that reference it as child or
-  parent, and leaves other nodes' relations untouched.
+- AC4 — Removing a node archives it and every live relation row that references it as child
+  (R9–R12); nothing is dropped silently and no other node's relations are altered.
 - AC5 — After a row is deleted, a later insert may reuse its freed ID (no `AUTOINCREMENT`).
 - AC6 — The same physical file can appear under two collections as two relation rows against one
   file node; no file bytes are moved or copied.
 - AC7 — Every migration is exercised by opening the database; Room's runtime validation confirms the
   post-migration schema matches the current entities, and a mismatch fails at open time rather than
   corrupting data (`FOTLAB-DATABS-000001` R5/R8).
+- AC8 — Deleting a file entry archives its node row and its child-side relations under one
+  `id_recycle`, removes them from the live tables, and leaves the file at its original
+  location — the bytes are unchanged.
+- AC9 — Deleting a collection archives every relation row where it is the parent. A child
+  that still has another parent keeps that relation, is not archived, and its own subtree is
+  untouched.
+- AC10 — A child left with no parent at all is archived as an object and the rule is applied
+  to it recursively, so an orphaned subtree is collected in the same batch.
+- AC11 — All rows written by one delete share one `id_recycle`; two separate deletes carry
+  different values, so a batch can be listed on its own.
+- AC12 — An interrupted delete leaves no half-applied batch: either every row of the batch is
+  archived and removed from the live tables, or none is.
 
 ## Impacted Modules
 
@@ -161,6 +267,13 @@ Indexes:
   and is `time_modified` maintained for nodes or left to the physical file? **TBD.**
 - Q6 — Entity, DAO and database names and their owning package are not fixed here (C4 /
   `FOTLAB-IMGMGR-000001` Q8). **TBD.**
+- Q7 — Is there a restore path out of the recycle tables — user-visible undo or a
+  recycle-bin screen — or are they an audit trail only? **TBD.**
+- Q8 — Retention: are recycle rows ever purged (by age, size cap or app upgrade), or kept
+  indefinitely? **TBD.**
+- Q9 — How is `id_recycle` produced — clock, in-memory counter or a persisted sequence — and
+  must it stay unique across process restarts? **TBD.** The current implementation uses a
+  clock value, which makes a collision possible if two deletes land in the same millisecond.
 
 ## Change History
 
@@ -172,3 +285,13 @@ Indexes:
   storage-URI index, and `INTEGER PRIMARY KEY` reuse freed IDs by design. Linked to and resolving
   parts of `FOTLAB-IMGMGR-000001`; left MIME kinds, tree-vs-DAG invariants, cycle prevention,
   ordering, timestamp semantics and ownership naming open as Q1–Q6.
+- 2026-09-08 — Added the deletion design: nothing is ever dropped silently and no physical
+  file is ever removed — deleting moves the node row into `fs_node_object_recycle` and the
+  relation rows into `fs_node_relation_recycle`, both stamped with a batch id `id_recycle`
+  that identifies one delete operation. Recycle tables mirror the live columns, carry no
+  foreign keys and no cascade, and are keyed by `(id_recycle, …)`. Specified the delete
+  algorithm (R12): archive the node's own child-side relations and the node itself; for a
+  collection, archive every relation where it is the parent, then for each child keep it
+  when another parent survives and archive it as an orphan — recursing into it — when none
+  does. Added constraints C5–C7, reworded AC4, added AC8–AC12, and recorded restore,
+  retention and batch-id generation as Q7–Q9.
