@@ -28,4 +28,8 @@ interface FsNodeObjectDao {
 
     @Query("SELECT * FROM fs_node_object WHERE type_mime = 'application/folder' ORDER BY name_display")
     fun observeCollections(): Flow<List<FsNodeObject>>
+
+    /** All file-entry nodes (everything that is not a virtual folder); used by refresh (R10). */
+    @Query("SELECT * FROM fs_node_object WHERE type_mime <> :folderMime")
+    suspend fun fileEntryNodes(folderMime: String): List<FsNodeObject>
 }

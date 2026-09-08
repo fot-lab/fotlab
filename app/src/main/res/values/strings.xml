@@ -41,5 +41,6 @@
     <string name="gallery_cd_new_collection">New folder</string>
     <string name="gallery_cd_delete">Delete selection</string>
     <string name="gallery_cd_layout_mode">Switch display mode</string>
+    <string name="gallery_cd_refresh">Refresh library</string>
 
 </resources>

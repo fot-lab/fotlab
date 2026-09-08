@@ -38,15 +38,16 @@ The Gallery top bar is laid out as follows, and this order never changes:
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│ ☰  ▦   middle region (custom)                [A]  [B]   ⋮         │
+│ ☰  ▦  ⟳   middle region (custom)               [A]  [B]   ⋮       │
 └──────────────────────────────────────────────────────────────────┘
-  │   │    │                                  │    │     │
-  │   │    │                                  │    │     └─ three-dot overflow (always last)
-  │   │    │                                  │    └─────── slot B: create / delete
-  │   │    │                                  └──────────── slot A: import / export
-  │   │    └──────────────────────────────────────────────── screen-defined
-  │   └───────────────────────────────────────────────────── layout toggle (▦ grid)
-  └─────────────────────────────────────────────────────────── three-line drawer icon
+  │   │   │    │                                 │    │     │
+  │   │   │    │                                 │    │     └─ three-dot overflow (always last)
+  │   │   │    │                                 │    └─────── slot B: create / delete
+  │   │   │    │                                 └──────────── slot A: import / export
+  │   │   │    └─────────────────────────────────────────────── screen-defined
+  │   │   └──────────────────────────────────────────────────── refresh (⟳)
+  │   └───────────────────────────────────────────────────────── layout toggle (▦ grid)
+  └────────────────────────────────────────────────────────────── three-line drawer icon
 ```
 
 - The three-line icon (`Icons.Default.Menu`) is the leftmost element and opens the drawer at 80%
@@ -55,6 +56,11 @@ The Gallery top bar is laid out as follows, and this order never changes:
   is always present, never moves, and leads the screen-defined middle region. It is part of the
   inherited skeleton's leading cluster, not an action slot: slots A and B and the overflow menu are
   still the three rightmost elements in that order.
+- Immediately to the **right of the layout-toggle icon** sits the **refresh icon** (`⟳`,
+  `Icons.Filled.Refresh`) of R10. It is always present and never moves, and is the last element of
+  the leading cluster, still left of the middle region. It is not an action slot: slots A and B and
+  the overflow menu remain the three rightmost elements. It is icon-only like the rest of the bar
+  and carries a `contentDescription` from resources (`gallery_cd_refresh`).
 - The three-dot icon (`Icons.Default.MoreVert`) is the rightmost element and opens the dropdown of
   R5 (`FOTLAB-UIXDES-000002` R4). Nothing is placed to its right and it is never hidden.
 - Slots A and B sit between the middle region and the three-dot icon, in that order: **A, then B,
@@ -231,6 +237,33 @@ middle region (R1). It is always present and never moves.
   a `fromColumns()` that resolves the stored integer back to a mode (unknown values fall back to
   Grid 3).
 
+### R10 — Refresh: reconcile virtual nodes with real objects
+
+A refresh icon (`⟳`, `Icons.Filled.Refresh`) sits immediately right of the layout toggle (R1). Tapping
+it reconciles the virtual tree with the real world, without confirmation and without touching the
+selection or the current directory.
+
+- **Missing real objects are recycled.** Every node that is **not a virtual folder** (its
+  `type_mime` is not `application/folder`) and that references a physical object via `uri_storage`
+  is checked: if the referenced object no longer exists (the `content://` URI is unresolvable — the
+  file was deleted, moved, or its permission was revoked), the node is archived into the recycle
+  tables exactly like a deletion (`FOTLAB-DATABS-000002` R9–R13). Virtual folders are never checked
+  and never removed by refresh: a folder is a pure virtual construct with no real object to lose.
+- **Orphans are recycled.** Any node that has no parent relation at all — it appears in
+  `fs_node_object` but in no `fs_node_relation` row as a child, and is therefore neither a root
+  member nor nested under any collection — is an orphan and is archived into the recycle tables too.
+  A collection orphan drags its own subtree with it, by the same recursion as a deletion.
+- **One batch id per refresh.** All nodes archived by a single refresh share **one** `recycle_id`
+  (a single `batchId`), exactly as all nodes archived by one user delete action share one
+  `recycle_id` (`FOTLAB-DATABS-000002` R10/R13). The meaning is identical: a batch id groups the rows
+  that left the tree in the same operation, whether that operation was a delete or a refresh.
+- **Vacuum.** After archiving, an explicit `VACUUM` is run on the Room database so the space freed
+  by the archived rows is reclaimed (`FOTLAB-DATABS-000002` R14). Vacuum runs once per refresh, after
+  the archive transaction has committed.
+- Refresh is implemented by `GalleryCore.refresh()` over `GalleryRepository`; it reuses the existing
+  `deleteNodes` archive path (so missing files and orphans land in the recycle tables under one
+  batch id) and then calls `vacuum()`. The screen only fires it; it performs no logic of its own.
+
 ## Constraints
 
 - C1 — The skeleton of `FOTLAB-UIXDES-000002` is binding: three-line icon leftmost, three-dot icon
@@ -255,6 +288,11 @@ middle region (R1). It is always present and never moves.
   order of R9 with Grid 3 as the default, and persists the choice to a `DataStore` preference owned
   by `GalleryCore`. The display mode is independent of `ListSelectionOfGallery` (R3): changing the
   selection never changes the mode, and changing the mode never changes the selection.
+- C11 — The refresh icon is a fixed icon immediately right of the layout toggle and left of the
+  middle region (R1/R10); tapping it archives missing real objects and orphans into the recycle
+  tables under one batch id reused by `deleteNodes`, then vacuums the database (R10). It is
+  icon-only and carries a `contentDescription` from resources (`gallery_cd_refresh`). Refresh never
+  changes the selection or the current directory.
 
 ## Acceptance Criteria
 
@@ -295,6 +333,14 @@ middle region (R1). It is always present and never moves.
 - AC19 — After the user changes the mode, fully exiting the app and starting it again restores the
   last chosen mode (not the Grid 3 default); the preference is stored in a `DataStore` owned by
   `GalleryCore` and is independent of the selection state.
+- AC20 — Tapping refresh archives every non-folder node whose `uri_storage` object no longer exists
+  into the recycle tables, leaves virtual folders untouched, and does not change the selection or
+  the current directory.
+- AC21 — Tapping refresh archives every orphan node (no parent relation at all) into the recycle
+  tables, dragging its subtree with it for collection orphans.
+- AC22 — All nodes archived by one refresh share a single `recycle_id`, identical in meaning to the
+  `recycle_id` of one delete action (`FOTLAB-DATABS-000002` R10/R13); after archiving, the database
+  is vacuumed.
 - AC11 — Every icon in the top bar and every dropdown entry exposes a non-null content description
   or text resolved from resources.
 - AC12 — With the drawer expanded, the bottom navigation region stays visible and interactive, and
@@ -305,8 +351,9 @@ middle region (R1). It is always present and never moves.
 - `feature/gallery/GalleryScreen.kt` — renders the top bar (including the layout-toggle icon of
   R9), the two slots, the dropdown and the drawer; lays the content out per the current
   `GalleryLayoutMode`; holds no data logic
-- `feature/gallery/GalleryCore.kt` — the lower layer implementing new-collection, import, export
-  and delete over the virtual tree
+- `feature/gallery/GalleryCore.kt` — the lower layer implementing new-collection, import, export,
+  delete and **refresh** over the virtual tree; refresh archives missing real objects and orphans
+  through the existing `deleteNodes` path under one batch id and then vacuums the database (R10)
 - `feature/gallery/GalleryCore` — owns the single process-scoped `ListSelectionOfGallery` instance
   and exposes it as observable state (R3); also owns the current `GalleryLayoutMode` as an
   observable state and persists it through `GalleryLayoutPreference` (R9); also implements the four
@@ -316,7 +363,10 @@ middle region (R1). It is always present and never moves.
 - `feature/gallery/GalleryLayoutPreference.kt` — the `androidx.datastore:datastore-preferences`
   `DataStore` holding the persisted mode, owned by `GalleryCore`
 - `navigation/gallery/` — unchanged; the graph still only composes the screen
-- `res/values/strings.xml` — new keys in the `feature: gallery` block: `gallery_cd_layout_mode`
+- `res/values/strings.xml` — new keys in the `feature: gallery` block: `gallery_cd_layout_mode`,
+  `gallery_cd_refresh`
+- `feature/gallery/GalleryRepository.kt` — new queries for the refresh (`fileEntryNodes` excluding
+  folders, `orphanNodeIds`) and `vacuum()`
 - `FOTLAB-UIXDES-000002` — the skeleton this screen implements
 - `FOTLAB-IMGMGR-000001` / `FOTLAB-DATABS-000002` — what a node is and how structure is stored
 
@@ -384,3 +434,11 @@ R7). The retired numbers are intentionally not reused.
   sealed `GalleryLayoutMode` with `cycle()`/`fromColumns()`; rendering of the content region follows
   the current mode. Impacted modules and the strings block gained `GalleryLayoutMode`,
   `GalleryLayoutPreference` and `gallery_cd_layout_mode`.
+- 2026-09-08 — Added R10, C11 and AC20–AC22: a refresh icon (`⟳`) sits immediately right of the
+  layout toggle. Tapping it archives every non-folder node whose `uri_storage` object no longer
+  exists and every orphan node (no parent relation), both through the existing `deleteNodes` archive
+  path so they share one `recycle_id` — identical in meaning to a delete action's `recycle_id`
+  (`FOTLAB-DATABS-000002` R10/R13) — and then runs an explicit `VACUUM` to reclaim space (R14). The
+  gallery's `GalleryRepository` gained `fileEntryNodes` (excluding folders), `orphanNodeIds` and
+  `vacuum()`; `GalleryCore.refresh()` orchestrates them. `gallery_cd_refresh` joined the strings
+  block.

@@ -1,7 +1,9 @@
 package io.github.fotlab.fotlab.feature.gallery
 
 import androidx.room.withTransaction
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.withContext
 
 /**
  * Lower-layer access for the gallery's virtual file tree, owned by the feature
@@ -57,7 +59,6 @@ class GalleryRepository(private val database: GalleryDatabase) {
         database.nodeRelationDao().removeRelation(childId, parentId)
     }
 
-    /** Deleting a node cascades to its relations (FK CASCADE); the file is untouched. */
     suspend fun removeNode(node: FsNodeObject) {
         database.nodeObjectDao().delete(node)
     }
@@ -65,19 +66,25 @@ class GalleryRepository(private val database: GalleryDatabase) {
     suspend fun getByUri(uri: String): FsNodeObject? =
         database.nodeObjectDao().getByUri(uri)
 
-    suspend fun getById(id: Long): FsNodeObject? =
-        database.nodeObjectDao().getById(id)
+    /** All file-entry nodes (non-folder); the refresh check filters out the missing ones (R10). */
+    suspend fun fileEntryNodes(): List<FsNodeObject> =
+        database.nodeObjectDao().fileEntryNodes(MimeCollection)
 
-    // --- Deletion (`FOTLAB-DATABS-000002` R9–R13) ---
+    /** All orphan nodes (no parent relation); archived by refresh (R10). */
+    suspend fun orphanNodeIds(): List<Long?> =
+        database.nodeRelationDao().orphanNodeIds()
+
+    // --- Deletion and refresh archiving (`FOTLAB-DATABS-000002` R9–R13, `FOTLAB-UIXDES-000004` R10) ---
 
     /**
      * Remove nodes by **archiving** them — nothing is dropped silently and no physical
      * file is ever touched.
      *
-     * Every row this writes, in both recycle tables, carries [batchId], so the whole
-     * operation can be recognised afterwards as one batch. The entire delete runs in a
-     * single transaction: an interrupted delete leaves either the complete batch or
-     * nothing (R13).
+     * Used by both the delete action and the refresh reconciliation (`FOTLAB-UIXDES-000004`
+     * R10): every row this writes, in both recycle tables, carries [batchId], so the whole
+     * operation can be recognised afterwards as one batch — identical in meaning whether the
+     * trigger was a user delete or a refresh. The entire delete runs in a single transaction:
+     * an interrupted delete leaves either the complete batch or nothing (R13).
      */
     suspend fun deleteNodes(nodeIds: Collection<Long>, batchId: Long) {
         database.withTransaction {
@@ -144,5 +151,12 @@ class GalleryRepository(private val database: GalleryDatabase) {
                 fsNodeIdParent = relation.fsNodeIdParent,
             ),
         )
+    }
+
+    /** Reclaim space freed by archived rows (R10/R14); runs outside the archive transaction. */
+    suspend fun vacuum() {
+        withContext(Dispatchers.IO) {
+            database.openHelper.writableDatabase.execSQL("VACUUM")
+        }
     }
 }

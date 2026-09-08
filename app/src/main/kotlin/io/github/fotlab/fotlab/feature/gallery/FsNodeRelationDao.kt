@@ -72,4 +72,11 @@ interface FsNodeRelationDao {
     /** How many parents a node still has; 0 means it became an orphan (R12). */
     @Query("SELECT COUNT(*) FROM fs_node_relation WHERE fs_node_id_child = :childId")
     suspend fun parentCount(childId: Long): Int
+
+    /** Nodes with no parent relation at all — neither root nor nested; recycled by refresh (R10). */
+    @Query(
+        "SELECT fs_node_id FROM fs_node_object " +
+            "WHERE fs_node_id NOT IN (SELECT DISTINCT fs_node_id_child FROM fs_node_relation)",
+    )
+    suspend fun orphanNodeIds(): List<Long?>
 }

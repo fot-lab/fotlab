@@ -114,6 +114,34 @@ object GalleryCore {
         ioScope.launch { layoutPreference.setMode(next) }
     }
 
+    /**
+     * Reconcile the virtual tree with the real world (`FOTLAB-UIXDES-000004` R10): archive every
+     * non-folder node whose real object is gone and every orphan node, reusing the delete archive
+     * path so they share one `recycle_id`, then vacuum the database.
+     */
+    suspend fun refresh() {
+        val batchId = System.currentTimeMillis()
+        val missing = repo().fileEntryNodes().filter { node ->
+            node.uriStorage != null && !uriExists(node.uriStorage)
+        }.mapNotNull { it.fsNodeId }
+        val orphans = repo().orphanNodeIds().mapNotNull { it }
+        val toRecycle = (missing + orphans).toSet()
+        if (toRecycle.isNotEmpty()) {
+            repo().deleteNodes(toRecycle, batchId)
+        }
+        repo().vacuum()
+    }
+
+    /** True when the real object behind [uriString] is still resolvable; false on any failure. */
+    private fun uriExists(uriString: String): Boolean {
+        val uri = Uri.parse(uriString)
+        return runCatching {
+            applicationContext.contentResolver
+                .query(uri, null, null, null, null)
+                ?.use { it.count >= 0 }
+        }.getOrDefault(false)
+    }
+
     // --- Top bar actions (`FOTLAB-UIXDES-000004` R7) ---
 
     /**

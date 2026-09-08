@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Upload
@@ -66,15 +67,16 @@ private const val DrawerWidthFraction = 0.8f
  * package alongside its lower layer [GalleryCore] (`FOTLAB-STRUCT-000001`).
  *
  * The top bar follows `FOTLAB-UIXDES-000002` (drawer icon left, overflow right, 80%
- * drawer) and fills its middle region and two action slots as `FOTLAB-UIXDES-000004`
- * prescribes: import + new collection when nothing is selected, export + delete when
- * something is. A layout-toggle icon (grid / 田字) sits right of the drawer icon and cycles
- * the content display mode (`FOTLAB-UIXDES-000004` R9).
+ * drawer) and fills its leading cluster and two action slots as `FOTLAB-UIXDES-000004`
+ * prescribes: a layout-toggle icon (grid / 田字) and a refresh icon sit right of the
+ * drawer icon and cycle / reconcile the content; import + new collection show when
+ * nothing is selected, export + delete when something is.
  *
  * The selection itself lives in [GalleryCore.selection] — a process-scoped object. This
  * screen only reads it with plain `remember`; it is never saved with `rememberSaveable`
  * and never restored (`FOTLAB-UIXDES-000004` R3/C6). The display mode is likewise owned by
- * the core and read here (`FOTLAB-UIXDES-000004` R9).
+ * the core and read here (`FOTLAB-UIXDES-000004` R9); the refresh fires a core reconcile
+ * (`FOTLAB-UIXDES-000004` R10).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -116,6 +118,7 @@ fun GalleryScreen() {
                     candidateIds = children.mapNotNull { it.fsNodeId },
                     layoutMode = layoutMode,
                     onCycleLayout = { scope.launch { GalleryCore.cycleLayoutMode() } },
+                    onRefresh = { scope.launch { GalleryCore.refresh() } },
                     onOpenDrawer = { drawerOpen = true },
                     onImport = { importLauncher.launch(arrayOf("*/*")) },
                     onCreateCollection = {
@@ -227,6 +230,7 @@ private fun GalleryTopBar(
     candidateIds: List<Long>,
     layoutMode: GalleryLayoutMode,
     onCycleLayout: () -> Unit,
+    onRefresh: () -> Unit,
     onOpenDrawer: () -> Unit,
     onImport: () -> Unit,
     onCreateCollection: () -> Unit,
@@ -254,7 +258,7 @@ private fun GalleryTopBar(
             )
         },
         navigationIcon = {
-            // Drawer icon, then the layout toggle (grid / 田字) immediately to its right (R9).
+            // Drawer icon, then the layout toggle (grid / 田字) and the refresh icon (R9/R10).
             Row {
                 IconButton(onClick = onOpenDrawer) {
                     Icon(
@@ -266,6 +270,12 @@ private fun GalleryTopBar(
                     Icon(
                         imageVector = if (layoutMode.isGrid) Icons.Filled.GridView else Icons.Filled.ViewList,
                         contentDescription = stringResource(id = R.string.gallery_cd_layout_mode),
+                    )
+                }
+                IconButton(onClick = onRefresh) {
+                    Icon(
+                        imageVector = Icons.Filled.Refresh,
+                        contentDescription = stringResource(id = R.string.gallery_cd_refresh),
                     )
                 }
             }

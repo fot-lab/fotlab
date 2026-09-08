@@ -193,6 +193,15 @@ simply loses one membership and remains in the other.
 - The batch id is assigned once per operation, before the transaction opens, so every
   row of the batch can be recognised afterwards.
 
+### R14 — Vacuum after archiving
+
+- After a delete or a refresh archives rows into the recycle tables, an explicit `VACUUM` is run on
+  the Room database so the page space freed by the removed live rows is reclaimed. Auto-vacuum is
+  not enabled on this database, so space is only returned by an explicit `VACUUM`.
+- Vacuum runs **after** the archive transaction has committed (it cannot run inside a write
+  transaction), once per operation — after a delete, and after a refresh (`FOTLAB-UIXDES-000004`
+  R10). It is a maintenance step, not part of the archive logic, and touches no node or relation row.
+
 ## Constraints
 
 - C1 — Realised with Room only, under the persistence discipline of `FOTLAB-DATABS-000001`
@@ -212,6 +221,9 @@ simply loses one membership and remains in the other.
   cascade (R10).
 - C7 — A child that still has a surviving parent is never archived and never recursed into;
   only a node left without any parent is archived as an orphan (R12).
+- C8 — Space freed by archiving is reclaimed by an explicit `VACUUM` after the archive transaction
+  commits, on both delete and refresh (R14). Vacuum is a maintenance step and must not touch live
+  rows.
 
 ## Acceptance Criteria
 
@@ -241,6 +253,8 @@ simply loses one membership and remains in the other.
   different values, so a batch can be listed on its own.
 - AC12 — An interrupted delete leaves no half-applied batch: either every row of the batch is
   archived and removed from the live tables, or none is.
+- AC13 — After a delete or a refresh archives rows, an explicit `VACUUM` reclaims the freed space;
+  the operation leaves the database internally consistent (R14).
 
 ## Impacted Modules
 
@@ -295,3 +309,7 @@ simply loses one membership and remains in the other.
   when another parent survives and archive it as an orphan — recursing into it — when none
   does. Added constraints C5–C7, reworded AC4, added AC8–AC12, and recorded restore,
   retention and batch-id generation as Q7–Q9.
+- 2026-09-08 — Added R14, C8 and AC13: after a delete or a refresh archives rows into the recycle
+  tables, an explicit `VACUUM` reclaims the freed page space (auto-vacuum is off), running once per
+  operation after the archive transaction commits and touching no live row. Driven by the gallery
+  refresh (`FOTLAB-UIXDES-000004` R10).
