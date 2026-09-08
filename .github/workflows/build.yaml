@@ -137,13 +137,24 @@ jobs:
           TAG: ${{ github.ref_name }}
           VERSION_NAME: ${{ needs.apk.outputs.version-name }}
         run: |
+          # -rc means pre-release, a bare version is a formal release.
+          # The semantics of the suffix are owned by rules/VERSION.md.
+          case "$VERSION_NAME" in
+            *-rc) prerelease="--prerelease" ;;
+            *)    prerelease="" ;;
+          esac
+
           if gh release view "$TAG" > /dev/null 2>&1; then
             gh release upload "$TAG" apk/*.apk --clobber
+            if [ -n "$prerelease" ]; then
+              gh release edit "$TAG" --prerelease
+            fi
           else
             gh release create "$TAG" \
               --target "$GITHUB_SHA" \
               --title "FotLab $VERSION_NAME" \
               --generate-notes \
+              $prerelease \
               apk/*.apk
           fi
         shell: bash

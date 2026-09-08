@@ -111,6 +111,9 @@ Everything else triggers, `external/**` included.
   `^\d{4}\.\d{2}\.\d{2}\.\d{2}\.\d{2}(-rc)?$` and fails fast otherwise.
 - Current: `VERSION_NAME` = `2026.09.07.05.48-rc`, `VERSION_CODE` = `1`.
 - Release APK is renamed to `FotLab-{VERSION_NAME}-arm64-v8a-release.apk`.
+- A `VERSION_NAME` ending in `-rc` publishes the GitHub Release as a
+  **pre-release** (`gh release create --prerelease`); without the suffix it is a
+  formal release. The meaning of `-rc` is owned by [`rules/VERSION.md`](rules/VERSION.md).
 
 ### Native Job Scope
 
@@ -208,3 +211,4 @@ Split across the two rule files, on purpose:
 | 2026-09-07 | Initial creation. Declares the no-local-toolchain rule, the `build.yml` trigger matrix for `main`, the SDK/NDK baseline, artifact set and retention, version handling delegated to `VERSION.md`, JVM-only unit testing, and the agent prohibited/allowed list. |
 | 2026-09-07 | Multi-module build collapsed into the single module `:app` (`../rules/DESIGN/detail/FOTLAB-STRUCT-000001.md`): `:core:ui`, `:core:data` and `:feature:gallery` merged into `app/`, with layers expressed as the packages `ui`, `navigation` and `data`. Gradle task set, SDK baseline and triggers are unchanged. |
 | 2026-09-08 | CI split into the orchestrator `.github/workflows/build.yaml` and the reusable `.github/workflows/gradle.yaml` (`on: workflow_call`). Triggers, path filters, the `external/**` submodule-bump condition and release publishing stay in the orchestrator; toolchain setup, the Gradle invocation and artifact upload move into the reusable workflow. Trigger matrix, artifact set with retention, SDK/NDK baseline and task set are unchanged; the release is published with `gh` instead of a third-party action. |
+| 2026-09-08 | GitHub Release now honours the `-rc` suffix: a `VERSION_NAME` ending in `-rc` is published with `--prerelease` (and an existing release is edited to match), a formal version is published as a normal release. |
