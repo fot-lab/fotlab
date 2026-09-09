@@ -3,10 +3,12 @@
 > Version: 1.2
 > Updated: 2026-09-09
 
-> **Redirect**: this file is the entry point of the build and CI rules. It has no
-> index folder yet — build rules are few and stable enough to live in one file.
-> If encoded entries ever become necessary, they follow the same three-layer
-> layout as `DESIGN/` (`ACTION/index.md` + `ACTION/detail/FOTLAB-XXXXXX-NNNNNN.md`).
+> **Redirect**: this file is the Layer 1 entry of the build and CI rules. The
+> master item table lives in [`rules/ACTION/index.md`](rules/ACTION/index.md); encoded
+> detail specs live in [`rules/ACTION/detail/`](rules/ACTION/detail/). Build rules
+> that are few and stable enough to state inline stay here; anything that warrants
+> an encoded ID is extracted to a detail file. ACTION-area IDs use the form
+> `GITHUB-ACTION-NNNNNN` (see [`rules/ACTION/index.md`](rules/ACTION/index.md)).
 >
 > **Scope boundary**: this file governs *how the software is built, verified and
 > released*. It does **not** govern version numbering — that belongs to
@@ -176,31 +178,11 @@ Everything else triggers, `external/**` included.
    - `workflow_runs[0].name` — workflow name
 3. Never record GitHub usernames or personal account information in these rules.
 
-### Viewing Remote CI Results (gh CLI)
+### Viewing Remote CI Results
 
-When the user **explicitly asks to view remote CI results**, prefer the `gh`
-CLI over the raw REST API — it resolves the repository, authentication and
-pagination for you.
-
-- **Locating `gh`** — the path is environment-dependent; never assume a single
-  fixed location:
-  - On Windows the CLI commonly installs to `C:\Program Files\GitHub CLI\gh.exe`.
-    If it is missing from `PATH` in the agent's shell, invoke it by that full
-    path.
-  - Otherwise let the agent search for it: `where gh` (cmd) or
-    `Get-Command gh` (PowerShell), or probe common install dirs
-    (`C:\Program Files\GitHub CLI`, the WinGet `Packages` tree, scoop shims,
-    `${env:LOCALAPPDATA}`). Do not hard-code a single path in rules.
-  - In CI the runner image already ships `gh` on `PATH`, so no lookup is needed.
-- **Useful commands** (run from the repo root so the repo is resolved automatically):
-  - `gh run list --limit 5` — recent runs with status / conclusion.
-  - `gh run view <run-id> --log` — full log of a run.
-  - `gh run watch <run-id>` — follow a run until it finishes.
-  - `gh run list --branch main --status failure` — filter to failures.
-- **Auth** — `gh` uses the GitHub credential already available to the
-  agent/user; never paste a token into a command. If `gh auth status` reports
-  unauthenticated, tell the user to run `gh auth login` rather than
-  authenticating on their behalf.
+Specified as an encoded rule: [`rules/ACTION/detail/GITHUB-ACTION-000001.md`](rules/ACTION/detail/GITHUB-ACTION-000001.md).
+When the user explicitly asks to view remote CI results, the agent calls the `gh` CLI; its
+location (environment-dependent) and the useful `gh run` commands are documented there.
 
 ### Release Procedure
 
@@ -241,3 +223,4 @@ Split across the two rule files, on purpose:
 | 2026-09-08 | CI split into the orchestrator `.github/workflows/build.yaml` and the reusable `.github/workflows/gradle.yaml` (`on: workflow_call`). Triggers, path filters, the `external/**` submodule-bump condition and release publishing stay in the orchestrator; toolchain setup, the Gradle invocation and artifact upload move into the reusable workflow. Trigger matrix, artifact set with retention, SDK/NDK baseline and task set are unchanged; the release is published with `gh` instead of a third-party action. |
 | 2026-09-08 | GitHub Release now honours the `-rc` suffix: a `VERSION_NAME` ending in `-rc` is published with `--prerelease` (and an existing release is edited to match), a formal version is published as a normal release. |
 | 2026-09-09 | Added "Viewing Remote CI Results (gh CLI)": when the user explicitly asks to view remote CI results, the agent calls the `gh` CLI; documents its environment-dependent location (e.g. `C:\Program Files\GitHub CLI\gh.exe` on Windows, or locate via `where gh` / `Get-Command` / common install dirs) plus useful `gh run` commands. |
+| 2026-09-09 | Per AGENTS.md three-layer layout: extracted the GH CLI rule into the encoded detail file `rules/ACTION/detail/GITHUB-ACTION-000001.md`, created `rules/ACTION/index.md` as the Layer 2 master table, and replaced the inline section in `rules/ACTION.md` with a brief reference. `rules/ACTION.md` is now Layer 1 only. |
