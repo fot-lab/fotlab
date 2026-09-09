@@ -1,0 +1,55 @@
+# Reusable workflow: publishes the built APK as a GitHub Release.
+#
+# Downloads the APK artifact produced by build_gradle.yaml and creates a release.
+# A version ending in -rc is published as a pre-release (prerelease: true); a
+# formal version is a normal release. The -rc semantics are owned by rules/VERSION.md.
+# This workflow has no triggers of its own; build.yaml calls it on a v* tag or a
+# release dispatch. See rules/ACTION.md.
+#
+# Publishing uses softprops/action-gh-release (the dedicated GitHub Release
+# action) instead of the gh CLI: it calls the GitHub API directly via
+# GITHUB_TOKEN, so it needs no actions/checkout and no .git on the runner. The
+# previous gh-based step failed with "fatal: not a git repository" because the
+# job had no git checkout for gh to resolve the remote from.
+
+name: GitHub Release
+
+on:
+  workflow_call:
+    inputs:
+      apk-artifact-name:
+        description: Name of the APK artifact to download and publish.
+        required: true
+        type: string
+      version-name:
+        description: VERSION_NAME of the build being released (drives pre-release).
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: GitHub Release
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Download release APK
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.apk-artifact-name }}
+          path: apk
+
+      # softprops/action-gh-release talks to the GitHub API directly via
+      # GITHUB_TOKEN, so it needs NO actions/checkout and NO .git on the runner.
+      # This is what the previous gh CLI step lacked: gh resolves the repo from a
+      # local git checkout, and this job had none ("fatal: not a git repository").
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          files: apk/*.apk
+          tag_name: ${{ github.ref_name }}
+          name: FotLab ${{ inputs.version-name }}
+          generate_release_notes: true
+          prerelease: ${{ endsWith(github.ref, '-rc') }}

@@ -11,4 +11,5 @@ This file contains **only** the item table. No statistics, no changelog — git 
 | --- | --- | --- | --- | --- | --- |
 | `GITHUB-ACTION-000001` | Viewing remote CI results via the gh CLI | `ACTION` | Approved | P3 | [detail](rules/ACTION/detail/GITHUB-ACTION-000001.md) |
 | `GITHUB-COMMIT-000001` | Commit scope — conversation-local commits | `ACTION` | Approved | P3 | [detail](rules/ACTION/detail/GITHUB-COMMIT-000001.md) |
-<!-- Next sequence: GITHUB-ACTION-000002. Append one row per new item; never reuse or renumber IDs. -->
+| `GITHUB-ACTION-000002` | GitHub Actions workflow architecture principles | `ACTION` | Approved | P3 | [detail](rules/ACTION/detail/GITHUB-ACTION-000002.md) |
+<!-- Next sequence: GITHUB-ACTION-000003. Append one row per new item; never reuse or renumber IDs. -->

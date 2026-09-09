@@ -1,0 +1,25 @@
+# Composite action: install the pinned JDK (Temurin) on the caller's runner.
+# Runs in-job, so the rest of the build shares this JDK. Version is an input so
+# the caller is the single source of truth (rules/ACTION.md).
+
+name: Install JDK
+description: Install the pinned JDK via actions/setup-java.
+
+inputs:
+  java-version:
+    description: JDK version to install.
+    required: false
+    default: '17'
+  distribution:
+    description: JDK distribution.
+    required: false
+    default: temurin
+
+runs:
+  using: composite
+  steps:
+    - name: Set up JDK
+      uses: actions/setup-java@v4
+      with:
+        distribution: ${{ inputs.distribution }}
+        java-version: ${{ inputs.java-version }}

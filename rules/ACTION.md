@@ -41,13 +41,17 @@ its result would prove nothing.
 
 | File | Role |
 | --- | --- |
-| `.github/workflows/build.yaml` | **Orchestrator** — triggers, `paths-ignore`, job order, release publishing. It contains no build steps. |
-| `.github/workflows/gradle.yaml` | **Reusable workflow** (`on: workflow_call`) — toolchain setup (JDK 17, Android SDK, NDK when asked), the Gradle invocation, artifact upload. It has no triggers of its own. |
+| `.github/workflows/build.yaml` | **Orchestrator** — triggers, `paths-ignore`, job order, release decisions. Contains no build steps. |
+| `.github/workflows/build_gradle.yaml` | **Reusable workflow** (`on: workflow_call`) — Android dev env (via the composite action) + Gradle build + APK/log artifact upload. |
+| `.github/workflows/release_github.yaml` | **Reusable workflow** (`on: workflow_call`) — download the APK artifact and publish a GitHub Release (pre-release on `-rc`). |
+| `.github/actions/install_jdk/action.yml`, `.github/actions/install_sdk/action.yml`, `.github/actions/install_ndk/action.yml` | **Composite actions** — the toolchain is split per component: `install_jdk` (JDK), `install_sdk` (SDK + caches), `install_ndk` (NDK + caches). Each runs in-job and is reused by `build_gradle.yaml` (JDK+SDK) and by future per-language native workflows (JDK+SDK+NDK), so no step is duplicated and NDK is pulled in only when needed. |
 
-The split keeps every pinned toolchain version and every build step in one
-place, so a second caller (for example a future emulator job) reuses it instead
-of copying steps. Everything a caller may vary — tasks, NDK, submodules,
-artifact names and retention — is a `workflow_call` input.
+The orchestrator composes the build and release workflows; the shared toolchain
+steps live in the composite action, so every pinned toolchain version and every
+build step is in one place and a second caller (e.g. a future emulator job, or a
+`build_cmake` / `build_rust` native workflow) reuses it instead of copying.
+Everything a caller may vary — tasks, submodules, artifact names and retention —
+is a `workflow_call` input.
 
 ### Trigger Rules
 
@@ -55,22 +59,23 @@ artifact names and retention — is a `workflow_call` input.
 | --- | --- | --- |
 | push to `main` (no `v*` tag) | `apk` | Kotlin/Compose compile + debug APK + unit tests |
 | Pull Request to `main` | `apk` | same as above, no release |
-| push to `main` touching `external/**` (submodule pointer bump) | `apk` **and** `native` | An upstream bump changes third-party source, so it must not be validated by a Kotlin-only build. See [Submodule Bumps](#submodule-bumps). |
-| push `v*` tag | `native` → `apk` → `github-release` | native build (when native source exists) + release APK + GitHub Release |
-| `workflow_dispatch` (`build_native=true`) | `native` → `apk` | manual native verification |
-| `workflow_dispatch` (`release=true`) | `native` → `apk` → `github-release` | manual release |
+| push to `main` touching `external/**` (submodule pointer bump) | `apk` | An upstream bump triggers a rebuild; the native job (when added) would compile the changed third-party source. See [Submodule Bumps](#submodule-bumps). |
+| push `v*` tag | `apk` → `github-release` | release APK + GitHub Release |
+| `workflow_dispatch` (`release=true`) | `apk` → `github-release` | manual release |
 
-Native compilation is expensive: it runs on tags, manual dispatch and submodule
-bumps only. A normal push stays on the fast Kotlin path.
+A normal push stays on the fast Kotlin path; only a `v*` tag or `release=true`
+produces a Release.
 
 ### Submodule Bumps
 
-A bump of a gitlink under `external/` upgrades third-party source. It is treated
-as a **native-relevant change**:
+A bump of a gitlink under `external/` upgrades third-party source. While there is
+no native job yet, the bump still triggers a rebuild so the change is not
+silently ignored:
 
-- `external/**` is **not** in the ignore list — such a push triggers CI.
-- The `native` job runs so the upstream change is compiled/verified, not just
-  linked against a Kotlin-only build.
+- `external/**` is **not** in the ignore list — such a push triggers CI (`apk`).
+- When a native-integration module lands, a dedicated native workflow (split by
+  language, e.g. `build_cmake`) would compile/verify the upstream change instead
+  of a Kotlin-only build (see [Native Job Scope](#native-job-scope)).
 - A submodule bump alone must never produce a GitHub Release: release still
   requires a `v*` tag or `release=true`.
 
@@ -89,8 +94,7 @@ Everything else triggers, `external/**` included.
 | `fotlab-release-apk` | tag push / `release=true` dispatch | 30 days |
 | `debug-apks` | `apk` job success | 1 day |
 | `build-gradle.log` | `apk` job | 7 days |
-| `build-native.log` | `native` job | 7 days |
-| `build_log_gradle.log` | `gradle.yaml` gradle step runs (apk job) — gradle-only log, separate from the full log | 7 days |
+| `build_log_gradle.log` | `build_gradle.yaml` gradle step runs (apk job) — gradle-only log, separate from the full log | 7 days |
 
 ### Key Configuration
 
@@ -100,7 +104,7 @@ Everything else triggers, `external/**` included.
 | JDK | 17 (Temurin) |
 | Android SDK | `platforms;android-36`, `build-tools;36.0.0` |
 | `compileSdk` / `targetSdk` | `36` / `36` (set in every module's `build.gradle.kts`) |
-| NDK | `28.2.13676358` (native job only) |
+| NDK | `28.2.13676358` (pinned for future native builds; installed by the `install_ndk` composite action when a native workflow runs) |
 | Gradle tasks — push/PR | `testDebugUnitTest` `assembleDebug` |
 | Gradle tasks — release | `assembleRelease` |
 | Release APK output | `app/build/outputs/apk/release/*.apk` |
@@ -122,9 +126,13 @@ Everything else triggers, `external/**` included.
 
 ### Native Job Scope
 
-- No native source exists yet, so the job has no build steps to run. It stays
-  wired into the pipeline (triggers, artifact slot, NDK setup) and becomes
-  effective when the native-integration module lands.
+- No native source exists yet, so there is **no native job** in `build.yaml`
+  (the prior `native` placeholder was removed as redundant). When the
+  native-integration module lands, add per-language build workflows — e.g.
+  `build_cmake`, `build_python`, `build_perl`, `build_rust` — each a reusable
+  `on: workflow_call` workflow that calls the `install_jdk`, `install_sdk` and
+  `install_ndk` composite actions (in that order) and compiles its slice. Do not
+  add them until the native code exists.
 - Toolchains to be added with that module: CMake for the JNI bridge, Rust
   cross-compilation for `dnglab`, and whatever the `NATIVE` items decide for
   `exiftool` (`docs/architecture.md` records the layering; the integration
@@ -154,7 +162,7 @@ Everything else triggers, `external/**` included.
 
 ### Allowed
 
-1. **Read CI logs** — `build-gradle.log`, `build-native.log` artifacts.
+1. **Read CI logs** — `build-gradle.log` and `build_log_gradle.log` artifacts.
 2. **Read `.github/workflows/*.yaml`** — to understand what CI does.
 3. **Read `VERSION_NAME` / `VERSION_CODE`** — to learn the current version.
 4. **Edit `VERSION_NAME` / `VERSION_CODE`** — only when the user explicitly asks,
@@ -165,7 +173,7 @@ Everything else triggers, `external/**` included.
 
 1. Commit and push the change — push/PR triggers the `apk` job.
 2. Wait for CI.
-3. If CI failed, download `build-gradle.log` (and `build-native.log` when relevant) into the gitignored `log/` directory (see `.gitignore`) and read the compile errors — never commit the logs. A `success` run needs no log download.
+3. If CI failed, download `build-gradle.log` (and `build_log_gradle.log` for the gradle portion) into the gitignored `log/` directory (see `.gitignore`) and read the compile errors — never commit the logs. A `success` run needs no log download.
 4. Fix, push again.
 
 ### Querying CI Status
@@ -193,7 +201,7 @@ Split across the two rule files, on purpose:
    `VERSION_CODE` — only when the user asks.
 2. Commit and push.
 3. Create the `v{VERSION_NAME}` tag and push it (mandatory, per VERSION.md).
-4. **Pipeline** (this file): CI runs native → APK → GitHub Release automatically.
+4. **Pipeline** (this file): CI runs APK → GitHub Release automatically.
 
 ## Open Questions
 
@@ -228,3 +236,6 @@ Split across the two rule files, on purpose:
 | 2026-09-09 | CI logs must be downloaded into the gitignored `log/` directory (`.gitignore`) and never committed; documented in the Verification Loop and in `rules/ACTION/detail/GITHUB-ACTION-000001.md`. |
 | 2026-09-09 | Added a separate `build_log_gradle.log` artifact from the gradle step (in addition to the full `build-log.txt` log), so tooling can fetch the gradle portion independently; 7-day retention. Documented in the Artifacts table. |
 | 2026-09-09 | Verification Loop now states a `success` run needs no log download; only `failure` runs warrant fetching logs into the gitignored `log/`. |
+| 2026-09-09 | CI restructured into the orchestrator `build.yaml` plus three reusable workflows — `devenv_android.yaml` (env only), `build_gradle.yaml` (Gradle build + artifacts), `release_github.yaml` (GitHub Release). The shared toolchain steps moved into the composite action `.github/actions/devenv-android/action.yml` so env setup is defined once and reused. Naming clarified: env setup / Gradle build / release are now separate, reusable and composed in `build.yaml`. |
+| 2026-09-09 | Removed the redundant `devenv_android.yaml` reusable workflow and the `native` placeholder job in `build.yaml`; the shared toolchain steps now live in per-component composite actions (`install_jdk` / `install_sdk` / `install_ndk`), reused in-job by `build_gradle.yaml`. Native builds, when needed, will be added as per-language workflows (`build_cmake`/`build_python`/`build_perl`/`build_rust`) — not yet present. Architecture principles extracted to `rules/ACTION/detail/GITHUB-ACTION-000002.md`. |
+| 2026-09-09 | Split the monolithic `devenv-android` composite action into three per-component composite actions — `install_jdk` (JDK), `install_sdk` (SDK + per-component cache), `install_ndk` (NDK + per-component cache) — so NDK install is no longer a parameter switch. `build_gradle.yaml` now calls `install_jdk` + `install_sdk`; future native workflows add `install_ndk`. The old `devenv-android/action.yml` is deleted. |

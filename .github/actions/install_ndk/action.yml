@@ -1,0 +1,36 @@
+# Composite action: install the pinned NDK (and cache it) on the caller's
+# runner, with per-component caching. Kept separate from install_sdk so a Kotlin
+# build does not pay for an NDK it never uses — native builds add this action on
+# top of install_jdk + install_sdk. The install path and NDK version are inputs,
+# so the caller is the single source of truth (rules/ACTION.md).
+
+name: Install Android NDK
+description: Install the pinned NDK (and cache it) with per-component caching.
+
+inputs:
+  android-home:
+    description: ANDROID_HOME path the NDK is installed into.
+    required: true
+  ndk-version:
+    description: NDK version, used as ndk;<version>, e.g. 28.2.13676358.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Cache Android NDK
+      uses: actions/cache@v4
+      with:
+        path: ${{ inputs.android-home }}/ndk/${{ inputs.ndk-version }}
+        key: ${{ runner.os }}-ndk-${{ inputs.ndk-version }}
+        restore-keys: |
+          ${{ runner.os }}-ndk-
+
+    - name: Install NDK
+      shell: bash
+      env:
+        ANDROID_HOME: ${{ inputs.android-home }}
+        ANDROID_SDK_ROOT: ${{ inputs.android-home }}
+      run: |
+        export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
+        sdkmanager --install "ndk;${{ inputs.ndk-version }}"

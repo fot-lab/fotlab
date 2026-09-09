@@ -1,0 +1,58 @@
+# Composite action: install the Android SDK (cmdline-tools, platforms,
+# build-tools) on the caller's runner, with per-component caching. Runs in-job,
+# so the Gradle build that follows shares this SDK. The install path and the
+# pinned API/build-tools versions are inputs, so the caller is the single source
+# of truth (rules/ACTION.md). The NDK is a separate action (install_ndk) — it is
+# not toggled here.
+
+name: Install Android SDK
+description: Install the Android SDK (cmdline-tools, platforms, build-tools) with caching.
+
+inputs:
+  android-home:
+    description: ANDROID_HOME path the SDK is installed into.
+    required: true
+  api-level:
+    description: Android API level, used as platforms;android-<level>.
+    required: true
+  build-tools:
+    description: Android build-tools version, used as build-tools;<version>.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # Each component is cached by its own actions/cache step and restored into
+    # its own directory, so the SDK is versioned and reused independently of the
+    # NDK. Restored BEFORE setup-android: on a hit cmdline-tools are already
+    # present so setup-android skips its own download, and the sdkmanager step
+    # below becomes a no-op. On a miss, setup-android installs cmdline-tools and
+    # the sdkmanager step fills in the packages, then the result is saved.
+    - name: Cache Android SDK (cmdline-tools, platforms, build-tools)
+      uses: actions/cache@v4
+      with:
+        path: |
+          ${{ inputs.android-home }}/cmdline-tools
+          ${{ inputs.android-home }}/platforms
+          ${{ inputs.android-home }}/build-tools
+        key: ${{ runner.os }}-android-sdk-${{ inputs.api-level }}-${{ inputs.build-tools }}
+        restore-keys: |
+          ${{ runner.os }}-android-sdk-${{ inputs.api-level }}-
+          ${{ runner.os }}-android-sdk-
+
+    - name: Set up Android SDK
+      uses: android-actions/setup-android@v3
+      env:
+        ANDROID_HOME: ${{ inputs.android-home }}
+        ANDROID_SDK_ROOT: ${{ inputs.android-home }}
+
+    - name: Install SDK packages
+      shell: bash
+      env:
+        ANDROID_HOME: ${{ inputs.android-home }}
+        ANDROID_API: ${{ inputs.api-level }}
+        ANDROID_BUILD_TOOLS: ${{ inputs.build-tools }}
+      run: |
+        export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
+        yes | sdkmanager --licenses > /dev/null 2>&1 || true
+        sdkmanager --install "platforms;android-$ANDROID_API" "build-tools;$ANDROID_BUILD_TOOLS"
