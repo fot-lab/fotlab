@@ -22,6 +22,10 @@ Call the `gh` CLI only when the user explicitly asks to view remote CI results
 (runs, logs, conclusions). Routine build/verify work still goes through the
 push-and-wait loop in `rules/ACTION.md`.
 
+A run whose conclusion is `success` needs no further action — do **not** download
+its logs. Only fetch logs when the conclusion is `failure` or `cancelled` and the
+user wants to investigate (see the Verification Loop in `rules/ACTION.md`).
+
 ### Locating `gh` — environment-dependent, never a single hard-coded path
 
 - On Windows the CLI commonly installs to `C:\Program Files\GitHub CLI\gh.exe`.
@@ -58,3 +62,4 @@ to run `gh auth login` rather than authenticating on their behalf.
 - 2026-09-09 — Initial encoded rule. Extracted from `rules/ACTION.md`'s "Viewing Remote CI Results (gh CLI)" section into this detail file as the first ACTION-area item (`GITHUB-ACTION-000001`), per the AGENTS.md three-layer layout; `rules/ACTION/index.md` created as the Layer 2 master table and `rules/ACTION.md` now keeps only a brief reference.
 - 2026-09-09 — Added the "Downloading logs" rule: CI logs are downloaded into the gitignored `log/` directory (see `.gitignore`) and never committed.
 - 2026-09-09 — Noted the additional gradle-only `build_log_gradle.log` artifact (separate from the full `build-log.txt` log) among the uploaded CI artifacts.
+- 2026-09-09 — Added the "skip on success" rule: a `success` run needs no log download; only `failure`/`cancelled` runs warrant fetching logs.
