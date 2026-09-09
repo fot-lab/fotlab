@@ -1,7 +1,7 @@
 # ACTION — Build & CI/CD Behaviour
 
-> Version: 1.1
-> Updated: 2026-09-07
+> Version: 1.2
+> Updated: 2026-09-09
 
 > **Redirect**: this file is the entry point of the build and CI rules. It has no
 > index folder yet — build rules are few and stable enough to live in one file.
@@ -176,6 +176,32 @@ Everything else triggers, `external/**` included.
    - `workflow_runs[0].name` — workflow name
 3. Never record GitHub usernames or personal account information in these rules.
 
+### Viewing Remote CI Results (gh CLI)
+
+When the user **explicitly asks to view remote CI results**, prefer the `gh`
+CLI over the raw REST API — it resolves the repository, authentication and
+pagination for you.
+
+- **Locating `gh`** — the path is environment-dependent; never assume a single
+  fixed location:
+  - On Windows the CLI commonly installs to `C:\Program Files\GitHub CLI\gh.exe`.
+    If it is missing from `PATH` in the agent's shell, invoke it by that full
+    path.
+  - Otherwise let the agent search for it: `where gh` (cmd) or
+    `Get-Command gh` (PowerShell), or probe common install dirs
+    (`C:\Program Files\GitHub CLI`, the WinGet `Packages` tree, scoop shims,
+    `${env:LOCALAPPDATA}`). Do not hard-code a single path in rules.
+  - In CI the runner image already ships `gh` on `PATH`, so no lookup is needed.
+- **Useful commands** (run from the repo root so the repo is resolved automatically):
+  - `gh run list --limit 5` — recent runs with status / conclusion.
+  - `gh run view <run-id> --log` — full log of a run.
+  - `gh run watch <run-id>` — follow a run until it finishes.
+  - `gh run list --branch main --status failure` — filter to failures.
+- **Auth** — `gh` uses the GitHub credential already available to the
+  agent/user; never paste a token into a command. If `gh auth status` reports
+  unauthenticated, tell the user to run `gh auth login` rather than
+  authenticating on their behalf.
+
 ### Release Procedure
 
 Split across the two rule files, on purpose:
@@ -214,3 +240,4 @@ Split across the two rule files, on purpose:
 | 2026-09-07 | Multi-module build collapsed into the single module `:app` (`rules/STRUCT/detail/FOTLAB-STRUCT-000001.md`): `:core:ui`, `:core:data` and `:feature:gallery` merged into `app/`, with layers expressed as the packages `ui`, `navigation` and `data`. Gradle task set, SDK baseline and triggers are unchanged. |
 | 2026-09-08 | CI split into the orchestrator `.github/workflows/build.yaml` and the reusable `.github/workflows/gradle.yaml` (`on: workflow_call`). Triggers, path filters, the `external/**` submodule-bump condition and release publishing stay in the orchestrator; toolchain setup, the Gradle invocation and artifact upload move into the reusable workflow. Trigger matrix, artifact set with retention, SDK/NDK baseline and task set are unchanged; the release is published with `gh` instead of a third-party action. |
 | 2026-09-08 | GitHub Release now honours the `-rc` suffix: a `VERSION_NAME` ending in `-rc` is published with `--prerelease` (and an existing release is edited to match), a formal version is published as a normal release. |
+| 2026-09-09 | Added "Viewing Remote CI Results (gh CLI)": when the user explicitly asks to view remote CI results, the agent calls the `gh` CLI; documents its environment-dependent location (e.g. `C:\Program Files\GitHub CLI\gh.exe` on Windows, or locate via `where gh` / `Get-Command` / common install dirs) plus useful `gh run` commands. |
