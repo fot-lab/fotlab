@@ -82,8 +82,12 @@ jobs:
     outputs:
       version-name: ${{ steps.version.outputs.version-name }}
     env:
-      ANDROID_HOME: ${{ env.HOME }}/Android/Sdk
-      ANDROID_SDK_ROOT: ${{ env.HOME }}/Android/Sdk
+      # NOTE: ANDROID_HOME / ANDROID_SDK_ROOT are deliberately NOT set here. The
+      # `env` context is not available inside a job's own `env:` block — GitHub
+      # rejects it with "Unrecognized named-value: 'env'", which invalidates the
+      # whole workflow file (and every reusable workflow that calls it). $HOME is
+      # also a runner variable, not a workflow one. Both are exported from a step
+      # via $GITHUB_ENV instead. See rules/ACTION.md.
       ANDROID_API: '36'
       ANDROID_BUILD_TOOLS: '36.0.0'
       NDK_VERSION: '28.2.13676358'
@@ -115,6 +119,14 @@ jobs:
         with:
           java-version: '17'
           distribution: temurin
+
+      # Exports ANDROID_HOME / ANDROID_SDK_ROOT for every later step — the
+      # install_sdk input below reads env.ANDROID_HOME, and Gradle needs both.
+      - name: Export Android SDK path
+        run: |
+          echo "ANDROID_HOME=$HOME/Android/Sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$HOME/Android/Sdk" >> "$GITHUB_ENV"
+        shell: bash
 
       - name: Install Android SDK
         uses: ./.github/actions/install_sdk
