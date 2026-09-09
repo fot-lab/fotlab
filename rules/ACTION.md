@@ -164,7 +164,7 @@ Everything else triggers, `external/**` included.
 
 1. Commit and push the change — push/PR triggers the `apk` job.
 2. Wait for CI.
-3. Download `build-gradle.log` and read the compile errors.
+3. Download `build-gradle.log` (and `build-native.log` when relevant) into the gitignored `log/` directory (see `.gitignore`) and read the compile errors — never commit the logs.
 4. Fix, push again.
 
 ### Querying CI Status
@@ -224,3 +224,4 @@ Split across the two rule files, on purpose:
 | 2026-09-08 | GitHub Release now honours the `-rc` suffix: a `VERSION_NAME` ending in `-rc` is published with `--prerelease` (and an existing release is edited to match), a formal version is published as a normal release. |
 | 2026-09-09 | Added "Viewing Remote CI Results (gh CLI)": when the user explicitly asks to view remote CI results, the agent calls the `gh` CLI; documents its environment-dependent location (e.g. `C:\Program Files\GitHub CLI\gh.exe` on Windows, or locate via `where gh` / `Get-Command` / common install dirs) plus useful `gh run` commands. |
 | 2026-09-09 | Per AGENTS.md three-layer layout: extracted the GH CLI rule into the encoded detail file `rules/ACTION/detail/GITHUB-ACTION-000001.md`, created `rules/ACTION/index.md` as the Layer 2 master table, and replaced the inline section in `rules/ACTION.md` with a brief reference. `rules/ACTION.md` is now Layer 1 only. |
+| 2026-09-09 | CI logs must be downloaded into the gitignored `log/` directory (`.gitignore`) and never committed; documented in the Verification Loop and in `rules/ACTION/detail/GITHUB-ACTION-000001.md`. |

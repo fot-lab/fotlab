@@ -39,3 +39,6 @@ Thumbs.db
 __pycache__/
 *.pyc
 docs/_build/
+
+# CI logs — downloaded locally for inspection, never committed
+log/
