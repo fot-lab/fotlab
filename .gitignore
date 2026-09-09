@@ -42,3 +42,6 @@ docs/_build/
 
 # CI logs — downloaded locally for inspection, never committed
 log/
+
+# CodeBuddy local config (memory/skills/user data) — never committed
+.codebuddy/
