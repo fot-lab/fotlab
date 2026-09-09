@@ -49,7 +49,7 @@ permissions:
 jobs:
   preflight:
     name: Preflight
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     outputs:
       release: ${{ steps.flags.outputs.release }}
       external-changed: ${{ steps.changes.outputs.external-changed }}
@@ -121,7 +121,7 @@ jobs:
     name: GitHub Release
     needs: [preflight, apk]
     if: ${{ always() && needs.preflight.outputs.release == 'true' && needs.apk.result == 'success' }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: write
     steps:

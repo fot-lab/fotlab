@@ -27,11 +27,13 @@ its result would prove nothing.
 | Aspect | Value |
 | --- | --- |
 | Language | Kotlin (Compose); native code not yet present |
-| Build system | Gradle Kotlin DSL + version catalog (`gradle/libs.versions.toml`), Gradle wrapper `8.9`, AGP `8.7.3` |
+| Build system | Gradle Kotlin DSL + version catalog (`gradle/libs.versions.toml`), Gradle `8.14.5` installed & cached by CI (not committed as a wrapper), AGP `8.7.3` |
 | Modules | `:app` — the only module; layers are the packages `ui`, `navigation`, `data` (`rules/STRUCT/detail/FOTLAB-STRUCT-000001.md`) |
 | Native | **None yet.** The first-party native-integration module is designed by the `NATIVE` items (`rules/DESIGN/detail/FOTLAB-NATIVE-000001.md` R1) and does not exist; until it is created there is nothing for a native job to build. |
 | Upstream | git submodules under `external/` — inventory in `docs/external/index.md` |
 | Default branch | `main` |
+
+**Wrapper policy:** The Gradle Wrapper is intentionally *not* committed — there is no `gradlew`, `gradlew.bat` or `gradle-wrapper.jar` in the repository (the binary wrapper jar is rejected by repo policy). CI installs the exact Gradle version via `gradle/actions/setup-gradle`'s `gradle-version` input (pinned to `8.14.5`) and caches it; builds invoke `gradle` directly. Reproducibility is pinned by that input rather than by a wrapper.
 
 ## CI/CD Workflow — `.github/workflows/build.yaml`
 
@@ -91,7 +93,7 @@ Everything else triggers, `external/**` included.
 
 | Item | Value |
 | --- | --- |
-| Runner | `ubuntu-24.04` |
+| Runner | `ubuntu-26.04` |
 | JDK | 17 (Temurin) |
 | Android SDK | `platforms;android-36`, `build-tools;36.0.0` |
 | `compileSdk` / `targetSdk` | `36` / `36` (set in every module's `build.gradle.kts`) |
@@ -187,7 +189,7 @@ Split across the two rule files, on purpose:
 ## Open Questions
 
 - Q1 — CI must confirm that AGP `8.7.3` accepts `compileSdk = 36`. If AGP rejects
-  it, AGP and the Gradle wrapper are upgraded **together** (their versions are
+  it, AGP and Gradle are upgraded **together** (their versions are
   coupled); neither is bumped alone. **TBD.**
 - Q2 — Is R8 minification enabled for release? Currently `isMinifyEnabled = false`
   in `app/build.gradle.kts`. **TBD.**

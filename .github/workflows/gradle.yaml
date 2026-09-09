@@ -75,7 +75,7 @@ permissions:
 jobs:
   gradle:
     name: Gradle
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     outputs:
       version-name: ${{ steps.version.outputs.version-name }}
 
@@ -111,6 +111,14 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Cache Android SDK (incl. NDK)
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.ANDROID_HOME }}
+          key: ${{ runner.os }}-android-sdk-${{ hashFiles('gradle/libs.versions.toml', '**/*.gradle.kts') }}
+          restore-keys: |
+            ${{ runner.os }}-android-sdk-
+
       - name: Install SDK packages
         run: |
           yes | sdkmanager --licenses > /dev/null 2>&1 || true
@@ -122,13 +130,19 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
+        with:
+          # Install Gradle 8.14.5 directly on the runner (no checked-in wrapper
+          # needed). setup-gradle caches the distribution + dependency caches by
+          # default, so the ubuntu runner does not re-download each run.
+          gradle-version: '8.14.5'
+          # We intentionally do not commit a Gradle Wrapper, so skip its validation.
+          validate-wrappers: false
 
       - name: Run Gradle
         if: inputs.gradle-tasks != ''
         run: |
-          chmod +x ./gradlew
           set -o pipefail
-          ./gradlew --no-daemon --stacktrace ${{ inputs.gradle-tasks }} 2>&1 | tee build-log.txt
+          gradle --no-daemon --stacktrace ${{ inputs.gradle-tasks }} 2>&1 | tee build-log.txt
         shell: bash
 
       - name: No Gradle task requested
