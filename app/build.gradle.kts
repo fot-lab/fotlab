@@ -16,12 +16,20 @@ val appVersionCode = rootProject.file("VERSION_CODE").readText().trim().toInt()
 // When the file is absent (e.g. a local build) the release build stays unsigned
 // instead of failing.
 val keystorePropsFile = rootProject.file("keystore.properties")
-val hasReleaseKeystore = keystorePropsFile.exists()
-val keystoreProps = java.util.Properties().apply {
-    if (hasReleaseKeystore) {
-        keystorePropsFile.inputStream().use { load(it) }
-    }
+// Parsed into a Map instead of java.util.Properties: inside this script `java`
+// is not the root package (the Java/Android plugin contributes a `java`
+// accessor), so `java.util.*` cannot be referenced by its qualified name.
+val keystoreProps: Map<String, String> = if (keystorePropsFile.exists()) {
+    keystorePropsFile.readLines()
+        .filter { it.contains('=') && !it.trim().startsWith("#") }
+        .associate { line ->
+            val (key, value) = line.split("=", limit = 2)
+            key.trim() to value.trim()
+        }
+} else {
+    emptyMap()
 }
+val hasReleaseKeystore = keystoreProps.containsKey("RELEASE_STORE_FILE")
 
 android {
     namespace = "io.github.fotlab.fotlab"
@@ -39,10 +47,10 @@ android {
     signingConfigs {
         if (hasReleaseKeystore) {
             create("release") {
-                storeFile = file(keystoreProps["RELEASE_STORE_FILE"] as String)
-                storePassword = keystoreProps["RELEASE_STORE_PASSWORD"] as String
-                keyAlias = keystoreProps["RELEASE_KEY_ALIAS"] as String
-                keyPassword = keystoreProps["RELEASE_KEY_PASSWORD"] as String
+                storeFile = file(keystoreProps.getValue("RELEASE_STORE_FILE"))
+                storePassword = keystoreProps.getValue("RELEASE_STORE_PASSWORD")
+                keyAlias = keystoreProps.getValue("RELEASE_KEY_ALIAS")
+                keyPassword = keystoreProps.getValue("RELEASE_KEY_PASSWORD")
             }
         }
     }
