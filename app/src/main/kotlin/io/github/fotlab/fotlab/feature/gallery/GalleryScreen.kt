@@ -146,19 +146,21 @@ fun GalleryScreen() {
                     selectedIds = selectedIds,
                     layoutMode = layoutMode,
                     onNodeClick = { node ->
-                        val id = node.fsNodeId ?: return@onNodeClick
-                        if (node.isCollection()) {
-                            currentDirectory = node
-                        } else {
-                            GalleryCore.selection.toggle(id)
+                        node.fsNodeId?.let { id ->
+                            if (node.isCollection()) {
+                                currentDirectory = node
+                            } else {
+                                GalleryCore.selection.toggle(id)
+                            }
                         }
                     },
                     // Long press selects a collection too: it can be deleted like any
                     // other node, and the delete walks its subtree (`FOTLAB-DATABS-000002`
                     // R12; `FOTLAB-UIXDES-000004` Q4).
                     onToggleSelect = { node ->
-                        val id = node.fsNodeId ?: return@onToggleSelect
-                        GalleryCore.selection.toggle(id)
+                        node.fsNodeId?.let { id ->
+                            GalleryCore.selection.toggle(id)
+                        }
                     },
                     modifier = Modifier.fillMaxSize(),
                 )
