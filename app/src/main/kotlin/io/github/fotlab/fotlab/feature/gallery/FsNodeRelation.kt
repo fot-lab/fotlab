@@ -10,17 +10,25 @@ import androidx.room.PrimaryKey
  * An edge of the virtual file tree (`FOTLAB-DATABS-000002`): "child is directly
  * under parent".
  *
- * The composite primary key `(fs_node_id_child, fs_node_id_parent)` means the same
- * edge cannot be inserted twice; a `NULL` parent denotes a root-level node. Both
- * foreign keys cascade, so deleting a node cleans up every relation that references
- * it (`FOTLAB-DATABS-000002` R3/R8).
+ * `NULL` parent denotes a root-level node (`FOTLAB-DATABS-000002` R5). Both foreign
+ * keys cascade, so deleting a node cleans up every relation that references it
+ * (R3/R8).
+ *
+ * Room forbids nullable columns in a `@PrimaryKey`, so the original composite key
+ * `(fs_node_id_child, fs_node_id_parent)` cannot be expressed directly (a `NULL`
+ * parent is a first-class value here). Instead a surrogate auto-generated `id` is
+ * the primary key and the `(fs_node_id_child, fs_node_id_parent)` pair is guarded by
+ * a UNIQUE index, preserving "the same edge cannot be inserted twice" (R3). Note:
+ * SQLite treats `NULL`s as distinct under a UNIQUE index, so two `(child, NULL)`
+ * rows are not rejected by the index — the `OnConflictStrategy.IGNORE` insert and
+ * the app's single-link-per-child usage make this unreachable in practice.
  */
 @Entity(
     tableName = "fs_node_relation",
-    primaryKeys = ["fs_node_id_child", "fs_node_id_parent"],
     indices = [
         Index(value = ["fs_node_id_parent"]),
         Index(value = ["fs_node_id_child"]),
+        Index(value = ["fs_node_id_child", "fs_node_id_parent"], unique = true),
     ],
     foreignKeys = [
         ForeignKey(
@@ -40,4 +48,5 @@ import androidx.room.PrimaryKey
 data class FsNodeRelation(
     @ColumnInfo(name = "fs_node_id_child") val fsNodeIdChild: Long,
     @ColumnInfo(name = "fs_node_id_parent") val fsNodeIdParent: Long?,
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
 )

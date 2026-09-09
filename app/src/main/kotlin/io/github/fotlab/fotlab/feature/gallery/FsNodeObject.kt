@@ -22,7 +22,7 @@ import androidx.room.PrimaryKey
     ],
 )
 data class FsNodeObject(
-    @PrimaryKey val fsNodeId: Long? = null,
+    @PrimaryKey @ColumnInfo(name = "fs_node_id") val fsNodeId: Long? = null,
     @ColumnInfo(name = "name_display") val nameDisplay: String,
     @ColumnInfo(name = "type_mime") val typeMime: String,
     @ColumnInfo(name = "uri_storage") val uriStorage: String? = null,
