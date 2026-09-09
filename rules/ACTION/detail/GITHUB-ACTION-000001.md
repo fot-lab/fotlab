@@ -40,8 +40,9 @@ push-and-wait loop in `rules/ACTION.md`.
 
 ### Downloading logs
 
-CI uploads `build-gradle.log` and `build-native.log` as artifacts. Download them
-into the gitignored `log/` directory (see `.gitignore`) so they are never committed:
+CI uploads `build-gradle.log`, `build-native.log` and the gradle-only
+`build_log_gradle.log` as artifacts. Download them into the gitignored `log/`
+directory (see `.gitignore`) so they are never committed:
 
 - `gh run download <run-id> -D log` — download all artifacts of a run into `log/`.
 - Then read `log/build-gradle.log` / `log/build-native.log` for the compile errors.
@@ -56,3 +57,4 @@ to run `gh auth login` rather than authenticating on their behalf.
 
 - 2026-09-09 — Initial encoded rule. Extracted from `rules/ACTION.md`'s "Viewing Remote CI Results (gh CLI)" section into this detail file as the first ACTION-area item (`GITHUB-ACTION-000001`), per the AGENTS.md three-layer layout; `rules/ACTION/index.md` created as the Layer 2 master table and `rules/ACTION.md` now keeps only a brief reference.
 - 2026-09-09 — Added the "Downloading logs" rule: CI logs are downloaded into the gitignored `log/` directory (see `.gitignore`) and never committed.
+- 2026-09-09 — Noted the additional gradle-only `build_log_gradle.log` artifact (separate from the full `build-log.txt` log) among the uploaded CI artifacts.

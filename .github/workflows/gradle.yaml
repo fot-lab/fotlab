@@ -142,7 +142,9 @@ jobs:
         if: inputs.gradle-tasks != ''
         run: |
           set -o pipefail
-          gradle --no-daemon --stacktrace ${{ inputs.gradle-tasks }} 2>&1 | tee build-log.txt
+          # Full log -> build-log.txt (the complete CI log artifact); gradle-only
+          # copy -> build_log_gradle.log (a separate, tool-friendly artifact).
+          gradle --no-daemon --stacktrace ${{ inputs.gradle-tasks }} 2>&1 | tee build-log.txt build_log_gradle.log
         shell: bash
 
       - name: No Gradle task requested
@@ -175,4 +177,13 @@ jobs:
           name: ${{ inputs.log-artifact-name }}
           path: build-log.txt
           retention-days: ${{ inputs.log-retention-days }}
+          if-no-files-found: warn
+
+      - name: Upload Gradle log
+        if: inputs.gradle-tasks != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: build_log_gradle.log
+          path: build_log_gradle.log
+          retention-days: 7
           if-no-files-found: warn

@@ -90,6 +90,7 @@ Everything else triggers, `external/**` included.
 | `debug-apks` | `apk` job success | 1 day |
 | `build-gradle.log` | `apk` job | 7 days |
 | `build-native.log` | `native` job | 7 days |
+| `build_log_gradle.log` | `gradle.yaml` gradle step runs (apk job) — gradle-only log, separate from the full log | 7 days |
 
 ### Key Configuration
 
@@ -225,3 +226,4 @@ Split across the two rule files, on purpose:
 | 2026-09-09 | Added "Viewing Remote CI Results (gh CLI)": when the user explicitly asks to view remote CI results, the agent calls the `gh` CLI; documents its environment-dependent location (e.g. `C:\Program Files\GitHub CLI\gh.exe` on Windows, or locate via `where gh` / `Get-Command` / common install dirs) plus useful `gh run` commands. |
 | 2026-09-09 | Per AGENTS.md three-layer layout: extracted the GH CLI rule into the encoded detail file `rules/ACTION/detail/GITHUB-ACTION-000001.md`, created `rules/ACTION/index.md` as the Layer 2 master table, and replaced the inline section in `rules/ACTION.md` with a brief reference. `rules/ACTION.md` is now Layer 1 only. |
 | 2026-09-09 | CI logs must be downloaded into the gitignored `log/` directory (`.gitignore`) and never committed; documented in the Verification Loop and in `rules/ACTION/detail/GITHUB-ACTION-000001.md`. |
+| 2026-09-09 | Added a separate `build_log_gradle.log` artifact from the gradle step (in addition to the full `build-log.txt` log), so tooling can fetch the gradle portion independently; 7-day retention. Documented in the Artifacts table. |
