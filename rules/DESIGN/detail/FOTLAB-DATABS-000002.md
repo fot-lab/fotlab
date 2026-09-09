@@ -314,15 +314,19 @@ simply loses one membership and remains in the other.
   operation after the archive transaction commits and touching no live row. Driven by the gallery
   refresh (`FOTLAB-UIXDES-000004` R10).
 - 2026-09-09 — Room adaptation (implementation, not a schema change in intent). Room forbids a
-  nullable column in a `@PrimaryKey`, so the composite key `(fs_node_id_child, fs_node_id_parent)`
-  of R3/R5 cannot be expressed directly — a `NULL` parent (root node) is a first-class value. Both
-  relation tables (`fs_node_relation`, `fs_node_relation_recycle`) therefore use a surrogate
-  auto-generated `id` as the primary key and guard the original key columns with a `UNIQUE` index
-  instead: `(fs_node_id_child, fs_node_id_parent)` for the live table and
-  `(id_recycle, fs_node_id_child, fs_node_id_parent)` for the recycle table, preserving "an edge is
-  recorded once" (R3/R11). The `NULL`-parent semantics, both cascading foreign keys (R3/R8) and all
-  DAO queries are unchanged. Caveat: SQLite treats `NULL`s as distinct under a `UNIQUE` index, so two
-  `(child, NULL)` rows are not rejected by the index; the `OnConflictStrategy.IGNORE` insert plus the
-  app's single-link-per-child usage make this unreachable in practice. Also: `FsNodeObject.fsNodeId`
-  must carry `@ColumnInfo(name = "fs_node_id")` so the column is `fs_node_id`, matching every FK and
-  query (it previously defaulted to the camelCase field name, which broke KSP).
+  nullable column in a `@PrimaryKey`, so a `NULL` parent (root node, R5) cannot sit in a composite
+  key. The two relation tables are handled differently:
+  - `fs_node_relation` (live): a surrogate auto-generated `id` is the primary key; the
+    `(fs_node_id_child, fs_node_id_parent)` pair is guarded by a `UNIQUE` index, so "an edge is
+    recorded once" (R3) holds and `NULL`-parent, both cascading foreign keys (R3/R8) and all DAO
+    queries stay unchanged. Caveat: SQLite treats `NULL`s as distinct under a `UNIQUE` index, so two
+    `(child, NULL)` rows are not rejected by the index; the `OnConflictStrategy.IGNORE` insert plus the
+    app's single-link-per-child usage make this unreachable in practice.
+  - `fs_node_relation_recycle` (archive): keeps the design's composite primary key
+    `(id_recycle, fs_node_id_child, fs_node_id_parent)` exactly as R11 specifies. Its `fs_node_id_parent`
+    is `NOT NULL` (a composite key cannot hold `NULL`), so an archived root-level edge stores the
+    sentinel `FsNodeParentRootId` (0, never a real node id) instead of `NULL`; the delete algorithm
+    writes that sentinel in `GalleryRepository.archiveRelation`. No FK, no cascade there (R10).
+  Also: `FsNodeObject.fsNodeId` must carry `@ColumnInfo(name = "fs_node_id")` so the column is
+  `fs_node_id`, matching every FK and query (it previously defaulted to the camelCase field name,
+  which broke KSP).

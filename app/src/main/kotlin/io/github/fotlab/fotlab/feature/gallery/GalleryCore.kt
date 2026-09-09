@@ -19,6 +19,15 @@ import kotlinx.coroutines.runBlocking
 /** MIME value that marks a collection (`FOTLAB-DATABS-000002` R4). */
 const val MimeCollection = "application/folder"
 
+/**
+ * Sentinel stored in `fs_node_relation_recycle.fs_node_id_parent` for an archived edge
+ * that was root-level on the live table (where `NULL` means root, R5). Room forbids a
+ * nullable column in the recycle table's composite primary key, so the root case is
+ * encoded as this never-real node id (live ids are >= 1). Also used by any future
+ * restore path to turn the sentinel back into a `NULL` parent.
+ */
+const val FsNodeParentRootId: Long = 0L
+
 /** Fallback MIME when the platform cannot tell us the type of a picked file. */
 private const val MimeUnknown = "application/octet-stream"
 

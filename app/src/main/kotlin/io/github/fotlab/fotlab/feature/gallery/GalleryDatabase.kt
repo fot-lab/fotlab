@@ -54,7 +54,7 @@ abstract class GalleryDatabase : RoomDatabase() {
                     "CREATE TABLE IF NOT EXISTS `fs_node_relation_recycle` (" +
                         "`id_recycle` INTEGER NOT NULL, " +
                         "`fs_node_id_child` INTEGER NOT NULL, " +
-                        "`fs_node_id_parent` INTEGER, " +
+                        "`fs_node_id_parent` INTEGER NOT NULL, " +
                         "PRIMARY KEY(`id_recycle`, `fs_node_id_child`, `fs_node_id_parent`))",
                 )
                 db.execSQL(

@@ -148,7 +148,7 @@ class GalleryRepository(private val database: GalleryDatabase) {
             FsNodeRelationRecycle(
                 idRecycle = batchId,
                 fsNodeIdChild = relation.fsNodeIdChild,
-                fsNodeIdParent = relation.fsNodeIdParent,
+                fsNodeIdParent = relation.fsNodeIdParent ?: FsNodeParentRootId,
             ),
         )
     }
