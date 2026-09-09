@@ -61,6 +61,12 @@ on:
         required: false
         type: number
         default: 7
+    secrets:
+      FOTLAB_KEYSTORE_SECRET:
+        description: >
+          SSH private deploy key with write access to the dedicated keystore
+          repo (branch `keystore`). Only used when release-build is true.
+        required: false
     outputs:
       version-name:
         description: VERSION_NAME as read from the repository root.
@@ -126,6 +132,58 @@ jobs:
           gradle-version: '8.14.5'
           # We intentionally do not commit a Gradle Wrapper, so skip its validation.
           validate-wrappers: false
+
+      # -------- keystore (release only) --------
+      # The release signing keystore lives in a dedicated `keystore` repo (branch
+      # `keystore`), fetched over SSH with a deploy key. On the first release run
+      # the keystore is generated and pushed back to that repo; afterwards it is
+      # reused. Writes keystore.properties for the Gradle release signing config.
+      - name: Get or create release keystore
+        if: inputs.release-build
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          KEYSTORE_PASS="android"
+          KEY_ALIAS="androiddebugkey"
+          KEY_PASS="android"
+
+          KEYSTORE_REPO="git@github.com:${{ github.repository_owner }}/keystore.git"
+
+          mkdir -p ~/.ssh
+          echo "$FOTLAB_KEYSTORE_SECRET" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+          if git clone --depth 1 --branch keystore "$KEYSTORE_REPO" /tmp/keystore_ks 2>/dev/null; then
+            cp /tmp/keystore_ks/release.keystore "$GITHUB_WORKSPACE/release.keystore"
+            echo "Using existing keystore from keystore@keystore"
+          else
+            echo "keystore branch not found, generating new keystore..."
+            keytool -genkey -v \
+              -keystore "$GITHUB_WORKSPACE/release.keystore" \
+              -alias "$KEY_ALIAS" -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass "$KEYSTORE_PASS" -keypass "$KEY_PASS" \
+              -dname "CN=Android Debug, OU=FotLab, O=FotLab, L=Unknown, ST=Unknown, C=US"
+
+            git clone --depth 1 "$KEYSTORE_REPO" /tmp/keystore_ks
+            cd /tmp/keystore_ks
+            git checkout --orphan keystore
+            git rm -rf --ignore-unmatched . 2>/dev/null || true
+            cp "$GITHUB_WORKSPACE/release.keystore" .
+            git add release.keystore
+            git -c user.name="CI" -c user.email="ci@fotlab.github.io" \
+              commit -m "Store release keystore"
+            git push origin keystore --force
+            cd "$GITHUB_WORKSPACE"
+            echo "Generated and stored keystore to keystore@keystore"
+          fi
+
+          echo "RELEASE_STORE_FILE=${GITHUB_WORKSPACE}/release.keystore" > keystore.properties
+          echo "RELEASE_STORE_PASSWORD=${KEYSTORE_PASS}" >> keystore.properties
+          echo "RELEASE_KEY_ALIAS=${KEY_ALIAS}" >> keystore.properties
+          echo "RELEASE_KEY_PASSWORD=${KEY_PASS}" >> keystore.properties
+        env:
+          FOTLAB_KEYSTORE_SECRET: ${{ secrets.FOTLAB_KEYSTORE_SECRET }}
 
       - name: Run Gradle
         if: inputs.gradle-tasks != ''

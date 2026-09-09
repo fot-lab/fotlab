@@ -7,6 +7,10 @@ captures/
 .cxx/
 local.properties
 
+# Release signing — written by CI into the repo root, never committed
+release.keystore
+keystore.properties
+
 # IDE
 .idea/
 *.iml

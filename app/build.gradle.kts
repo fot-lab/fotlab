@@ -10,6 +10,19 @@ plugins {
 val appVersionName = rootProject.file("VERSION_NAME").readText().trim()
 val appVersionCode = rootProject.file("VERSION_CODE").readText().trim().toInt()
 
+// Release signing. keystore.properties is written by CI — see the
+// "Get or create release keystore" step in .github/workflows/build_gradle.yaml;
+// the keystore itself lives in the dedicated `keystore` repo (branch `keystore`).
+// When the file is absent (e.g. a local build) the release build stays unsigned
+// instead of failing.
+val keystorePropsFile = rootProject.file("keystore.properties")
+val hasReleaseKeystore = keystorePropsFile.exists()
+val keystoreProps = java.util.Properties().apply {
+    if (hasReleaseKeystore) {
+        keystorePropsFile.inputStream().use { load(it) }
+    }
+}
+
 android {
     namespace = "io.github.fotlab.fotlab"
     compileSdk = 36
@@ -23,6 +36,17 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        if (hasReleaseKeystore) {
+            create("release") {
+                storeFile = file(keystoreProps["RELEASE_STORE_FILE"] as String)
+                storePassword = keystoreProps["RELEASE_STORE_PASSWORD"] as String
+                keyAlias = keystoreProps["RELEASE_KEY_ALIAS"] as String
+                keyPassword = keystoreProps["RELEASE_KEY_PASSWORD"] as String
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -30,6 +54,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            if (hasReleaseKeystore) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 

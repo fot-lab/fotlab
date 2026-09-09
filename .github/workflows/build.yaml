@@ -85,6 +85,8 @@ jobs:
       apk-retention-days: ${{ needs.preflight.outputs.release == 'true' && 30 || 1 }}
       log-artifact-name: build-gradle.log
       log-retention-days: 7
+    secrets:
+      FOTLAB_KEYSTORE_SECRET: ${{ secrets.FOTLAB_KEYSTORE_SECRET }}
 
   # Release stage. Only on a v* tag or a release dispatch, and only when the APK
   # build succeeded. The -rc vs formal release decision is made in release_github.
