@@ -66,3 +66,7 @@ tied to Gradle source files, any change to those files invalidates the cached SD
 re-download. Consider pinning the key to the already-fixed SDK/NDK versions (e.g.
 `platforms;android-36` / `ndk;28.2.13676358`) so the SDK/NDK cache is stable and not needlessly
 invalidated.
+
+## Change History
+
+- 2026-09-09 — Initial audit recorded. Confirmed SDK/NDK/Gradle are installed and cached in `gradle.yaml`; Rust NDK and python-for-android are absent (deferred per `rules/ACTION.md` Native Job Scope, "never invented earlier"). Filed as `ACTION-PREPIN-000001`; entry added to `rules/REVIEW/index.md`.
