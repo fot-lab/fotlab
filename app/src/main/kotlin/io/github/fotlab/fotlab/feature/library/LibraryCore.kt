@@ -5,7 +5,6 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.room.Room
-import io.github.fotlab.fotlab.R
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -37,9 +36,6 @@ fun FsNodeObject.isCollection(): Boolean = typeMime == MimeCollection
  * (`LibraryScreen`) depends on this class; this class never depends on `ui` or `navigation` (R3).
  */
 object LibraryCore {
-
-    /** Resource id of the library's display name, owned by the feature core. */
-    val titleRes: Int = R.string.library_title
 
     /**
      * The one selection instance of the process. Read by the screen, mutated only

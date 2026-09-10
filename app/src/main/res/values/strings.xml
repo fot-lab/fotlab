@@ -15,14 +15,10 @@
     <string name="common_action_new_folder">New folder</string>
     <string name="common_action_more_options">More options</string>
 
-    <!-- Selection: the trio every list shares, plus the count of what is selected. -->
+    <!-- Selection: the trio every list shares. -->
     <string name="common_selection_select_all">Select all</string>
     <string name="common_selection_invert">Invert selection</string>
     <string name="common_selection_deselect_all">Deselect all</string>
-    <plurals name="common_selection_count">
-        <item quantity="one">%1$d selected</item>
-        <item quantity="other">%1$d selected</item>
-    </plurals>
 
     <!-- Drawer: shared by every module drawer — open/close affordance and the empty state. -->
     <string name="common_drawer_empty">No drawer entries yet</string>
@@ -34,7 +30,6 @@
     <string name="app_nav_library_label">Library</string>
 
     <!-- ===== feature: library ===== -->
-    <string name="library_title">Library</string>
     <string name="library_new_collection_name">New Folder</string>
 
     <string name="library_delete_title">Delete selection?</string>
