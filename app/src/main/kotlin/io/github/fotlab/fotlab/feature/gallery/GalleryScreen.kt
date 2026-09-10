@@ -327,7 +327,7 @@ private fun GalleryTopBar(
                 IconButton(onClick = onCreateCollection) {
                     Icon(
                         imageVector = Icons.Filled.Add,
-                        contentDescription = stringResource(id = R.string.gallery_cd_new_collection),
+                        contentDescription = stringResource(id = R.string.common_action_new_folder),
                     )
                 }
             } else {
@@ -342,7 +342,7 @@ private fun GalleryTopBar(
                 IconButton(onClick = onDelete) {
                     Icon(
                         imageVector = Icons.Filled.Delete,
-                        contentDescription = stringResource(id = R.string.gallery_cd_delete),
+                        contentDescription = stringResource(id = R.string.common_action_delete_selection),
                     )
                 }
             }
@@ -351,7 +351,7 @@ private fun GalleryTopBar(
                 IconButton(onClick = { overflowOpen = true }) {
                     Icon(
                         imageVector = Icons.Filled.MoreVert,
-                        contentDescription = stringResource(id = R.string.gallery_cd_more_options),
+                        contentDescription = stringResource(id = R.string.common_action_more_options),
                     )
                 }
                 DropdownMenu(

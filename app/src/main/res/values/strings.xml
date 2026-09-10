@@ -11,6 +11,9 @@
     <string name="common_action_cancel">Cancel</string>
     <string name="common_action_import">Import files</string>
     <string name="common_action_export">Export selection</string>
+    <string name="common_action_delete_selection">Delete selection</string>
+    <string name="common_action_new_folder">New folder</string>
+    <string name="common_action_more_options">More options</string>
 
     <!-- Selection: the trio every list shares, plus the count of what is selected. -->
     <string name="common_selection_select_all">Select all</string>
@@ -40,9 +43,6 @@
 
     <string name="gallery_empty_directory">This folder is empty</string>
 
-    <string name="gallery_cd_more_options">More options</string>
-    <string name="gallery_cd_new_collection">New folder</string>
-    <string name="gallery_cd_delete">Delete selection</string>
     <string name="gallery_cd_layout_mode">Switch display mode</string>
     <string name="gallery_cd_refresh">Refresh library</string>
 
