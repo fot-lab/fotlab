@@ -141,7 +141,8 @@ The Gallery top bar is laid out as follows, and this order never changes:
 
 - The two slot-A icons were verified on a device and are recorded with their Chinese and English
   names in `FOTLAB-UIXDES-000005` R2: `Upload` / `Download` are **not** used here, they keep the
-  network upload / download meaning.
+  network upload / download meaning. This screen follows the standing rule of that item without
+  re-deciding it: **导入 / Import = `SaveAlt`, 导出 / Export = `IosShare`.**
 
 ### R5 — The three-dot dropdown: selection operations only
 

@@ -34,6 +34,8 @@ Goals:
 
 ### R2 — Import is the into-tray arrow, export is the out-of-box arrow
 
+**Standing rule — no re-deciding.** In this project, **导入 / Import is always `Icons.Filled.SaveAlt` (`save_alt`)**, and **导出 / Export is always `Icons.Filled.IosShare` (`ios_share`)**. Anywhere the words 导入 / import or 导出 / export appear — in this item, in another requirement, in a screen, in a menu, in a review comment — the icon is the one above, with no exception and no second judgement call. A screen that needs one of the two functions copies the constant of the table below; it never picks a glyph.
+
 | 功能 | 代码 (Kotlin) | 中文名称 | 英文名称 (Material) | 语义 |
 | --- | --- | --- | --- | --- |
 | 导出 Export | `Icons.Default.IosShare` / `Icons.Filled.IosShare` | 出盘（箭头自盒中向上离开） | IosShare (`ios_share`) | 数据从 App 出去 |
@@ -77,7 +79,7 @@ Goals:
 ## Constraints
 
 - C1 — `material-icons-core` + `material-icons-extended` only, filled style (`Icons.Filled.*` / `Icons.Default.*`); no third-party icon pack, no project vector drawable (R1).
-- C2 — Import is `SaveAlt` (入盘) and export is `IosShare` (出盘); the pair is never replaced by `Download`/`Upload`, `FileDownload`/`FileUpload`, `Input`/`Output`, `Share`, `Add` or `FolderOpen` (R2/R4).
+- C2 — 导入 / Import is `SaveAlt` and 导出 / Export is `IosShare`, always and without exception (R2 standing rule); the pair is never replaced by `Download`/`Upload`, `FileDownload`/`FileUpload`, `Input`/`Output`, `Share`, `Add` or `FolderOpen` (R2/R4).
 - C3 — A function already listed in R3 does not get a second icon; changing the meaning of a row requires a new row and a Change History entry.
 - C4 — Every icon carries a `contentDescription` resolved from `strings.xml` (`FOTLAB-UIXDES-000003` R6).
 
@@ -110,3 +112,4 @@ question. The retired number is intentionally not reused.
 - 2026-09-10 — Initial draft. Fixed the icon vocabulary as code + Chinese name + English name in one table per screen: the source is `material-icons-core` + `material-icons-extended` in the filled style only (R1); import and export are settled as the tray arrows — 导入 `Download` (arrow down into the tray), 导出 `Upload` (arrow up out of it) — with an explicit boundary clause forbidding `Share`, `Save`, `Add` and `FolderOpen` substitutes (R2/R4); the gallery top bar, drawer and overflow rows are recorded in R3. The selection trio is recorded as-is and left open as Q1; the outlined-style question is Q2.
 - 2026-09-10 — Q1 retired: the selection trio is fixed — 全选 `Icons.Filled.SelectAll`, 反选 `Icons.Filled.FlipToBack` (replacing `SwapHoriz`), 全不选 `Icons.Filled.Deselect` (replacing `Clear`) — in that order, and the copy key followed as `gallery_menu_deselect_all` (replacing `gallery_menu_clear`). R4 gained the `CheckCircle` / `CheckCircleOutline` boundary and the menu-ordering clause.
 - 2026-09-10 — R2 corrected after checking the glyphs **on a device**: import and export are **not** `Download` / `Upload`, which render as an arrow next to a plain line in the icon set this project uses. 导入 is `Icons.Filled.SaveAlt` (入盘 — the arrow comes from outside into the tray) and 导出 is `Icons.Filled.IosShare` (出盘 — the arrow rises out of the box). R3, C2, AC2 and AC6 follow; R4 now reserves `Upload` / `Download` for the network upload/download meanings.
+- 2026-09-10 — R2 opens with an explicit **standing rule**: 导入 / Import is always `SaveAlt` and 导出 / Export is always `IosShare`, wherever those words appear in the project — no exception, no second judgement per screen. C2 restates it as a constraint and `FOTLAB-UIXDES-000004` R4 references it instead of repeating the icons on its own.
