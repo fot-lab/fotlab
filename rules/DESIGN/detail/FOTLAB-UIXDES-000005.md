@@ -57,16 +57,19 @@ Goals:
 | 新建集合 | `Icons.Filled.Add` | 新建（加号） | Add (`add`) | 槽位 B，空选择态，`FOTLAB-UIXDES-000004` R4 |
 | 删除选中 | `Icons.Filled.Delete` | 删除 | Delete (`delete`) | 槽位 B，有选择态，`FOTLAB-UIXDES-000004` R4 |
 | 溢出菜单 | `Icons.Filled.MoreVert` | 更多（竖三点） | MoreVert (`more_vert`) | 顶栏最右，`FOTLAB-UIXDES-000002` R4 |
-| 全选 | `Icons.Filled.SelectAll` | 全选 | SelectAll (`select_all`) | 溢出菜单，`FOTLAB-UIXDES-000004` R5 — 见 Q1 |
-| 反选 | `Icons.Filled.SwapHoriz` | 反选（交换） | SwapHoriz (`swap_horiz`) | 溢出菜单，`FOTLAB-UIXDES-000004` R5 — 见 Q1 |
-| 不选 | `Icons.Filled.Clear` | 清除（叉号） | Clear (`clear`) | 溢出菜单，`FOTLAB-UIXDES-000004` R5 — 见 Q1 |
+| 全选 | `Icons.Filled.SelectAll` | 全选 | SelectAll (`select_all`) | 溢出菜单第一位，`FOTLAB-UIXDES-000004` R5 |
+| 反选 | `Icons.Filled.FlipToBack` | 反选（翻转） | FlipToBack (`flip_to_back`) | 溢出菜单第二位，`FOTLAB-UIXDES-000004` R5 |
+| 全不选 | `Icons.Filled.Deselect` | 全不选（取消选择） | Deselect (`deselect`) | 溢出菜单第三位，`FOTLAB-UIXDES-000004` R5 |
 
-- `Clear` is Material's name for the cross glyph; Material Symbols renamed the same glyph to `close`, and both `Icons.Filled.Clear` and `Icons.Filled.Close` exist in the set.
+- The three selection entries keep the order **全选 → 反选 → 全不选**; the order is part of the row, not a detail of one screen.
+- `Deselect` is the dashed-square glyph of the Material set, not the cross: the cross belongs to `close` (`Icons.Filled.Close`, the drawer's close button) and to Material's legacy `clear` name for the same glyph.
 - Every row is icon-only in the bar: the meaning is carried by the `contentDescription`, never by a text label next to the icon (`FOTLAB-UIXDES-000004` C4).
 
 ### R4 — Boundaries: what these icons are not
 
 - Export is not drawn as `Share` / `IosShare`, and import is not drawn as `Add` / `FolderOpen`. Each of those has its own meaning and this table is what keeps them apart.
+- 全选 / 反选 / 全不选 are not drawn as `CheckCircle` / `CheckCircleOutline`: those two mean a single item's checked state and "finished / downloaded", never a bulk selection operation.
+- When selection entries and import/export share one menu, the three selection entries come first, then the imports — the two groups are never interleaved.
 - `Download` read as "download a model" and `Download` read as "import" are the same glyph. The two cases are separated by copy and by placement, never by swapping the glyph.
 - The three-line icon and the three-dot icon never change glyph and are never hidden (`FOTLAB-UIXDES-000002` R2/R4/C4).
 
@@ -95,9 +98,13 @@ Goals:
 
 ## Open Questions
 
-- Q1 — The selection trio (全选 / 反选 / 不选) is recorded in R3 **as it is today**; Material ships no `invert_selection`, so the invert glyph is still under discussion and the three rows carry no final decision yet. **TBD.**
 - Q2 — Does a second screen ever need an outlined variant of a row (for example an unselected state), or does the filled style hold everywhere? **TBD.**
+
+Resolved and retired on 2026-09-10: Q1 — the selection trio is fixed: 全选 `SelectAll`, 反选
+`FlipToBack`, 全不选 `Deselect`, in that order; the rows carry the decision and no longer a
+question. The retired number is intentionally not reused.
 
 ## Change History
 
 - 2026-09-10 — Initial draft. Fixed the icon vocabulary as code + Chinese name + English name in one table per screen: the source is `material-icons-core` + `material-icons-extended` in the filled style only (R1); import and export are settled as the tray arrows — 导入 `Download` (arrow down into the tray), 导出 `Upload` (arrow up out of it) — with an explicit boundary clause forbidding `Share`, `Save`, `Add` and `FolderOpen` substitutes (R2/R4); the gallery top bar, drawer and overflow rows are recorded in R3. The selection trio is recorded as-is and left open as Q1; the outlined-style question is Q2.
+- 2026-09-10 — Q1 retired: the selection trio is fixed — 全选 `Icons.Filled.SelectAll`, 反选 `Icons.Filled.FlipToBack` (replacing `SwapHoriz`), 全不选 `Icons.Filled.Deselect` (replacing `Clear`) — in that order, and the copy key followed as `gallery_menu_deselect_all` (replacing `gallery_menu_clear`). R4 gained the `CheckCircle` / `CheckCircleOutline` boundary and the menu-ordering clause.

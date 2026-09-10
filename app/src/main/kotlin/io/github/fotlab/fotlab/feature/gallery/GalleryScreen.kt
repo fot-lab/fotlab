@@ -21,16 +21,16 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Deselect
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.FlipToBack
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SelectAll
-import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material3.AlertDialog
@@ -371,7 +371,7 @@ private fun GalleryTopBar(
                     DropdownMenuItem(
                         text = { Text(text = stringResource(id = R.string.gallery_menu_invert)) },
                         leadingIcon = {
-                            Icon(imageVector = Icons.Filled.SwapHoriz, contentDescription = null)
+                            Icon(imageVector = Icons.Filled.FlipToBack, contentDescription = null)
                         },
                         onClick = {
                             overflowOpen = false
@@ -379,9 +379,9 @@ private fun GalleryTopBar(
                         },
                     )
                     DropdownMenuItem(
-                        text = { Text(text = stringResource(id = R.string.gallery_menu_clear)) },
+                        text = { Text(text = stringResource(id = R.string.gallery_menu_deselect_all)) },
                         leadingIcon = {
-                            Icon(imageVector = Icons.Filled.Clear, contentDescription = null)
+                            Icon(imageVector = Icons.Filled.Deselect, contentDescription = null)
                         },
                         onClick = {
                             overflowOpen = false

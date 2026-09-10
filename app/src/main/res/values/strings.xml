@@ -20,7 +20,7 @@
 
     <string name="gallery_menu_select_all">Select all</string>
     <string name="gallery_menu_invert">Invert selection</string>
-    <string name="gallery_menu_clear">Clear selection</string>
+    <string name="gallery_menu_deselect_all">Deselect all</string>
 
     <string name="gallery_delete_title">Delete selection?</string>
     <string name="gallery_delete_message">The selected items are removed from the library. The

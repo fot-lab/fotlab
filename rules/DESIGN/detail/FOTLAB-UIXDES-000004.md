@@ -130,7 +130,7 @@ The Gallery top bar is laid out as follows, and this order never changes:
 - The two slots are **mutually exclusive per state**: import and export never appear together, and
   neither do new-collection and delete. One position, one meaning per state.
 - When the selection becomes empty again — the last node deselected, or the overflow menu's
-  "clear selection" used — the bar returns to import + new collection.
+  "Deselect all" used — the bar returns to import + new collection.
 - Every icon carries a non-null `contentDescription` from resources (`FOTLAB-UIXDES-000003`).
 - Icons (Material, first-party; `material-icons-core`, `material-icons-extended` when needed):
 
@@ -147,17 +147,17 @@ entry is **icon + text** (no brackets, no decorative punctuation in the copy):
 | Entry | Icon | Effect |
 | --- | --- | --- |
 | Select all | `Icons.Default.SelectAll` | Every node of the currently shown virtual directory becomes selected |
-| Invert selection | `Icons.Default.SwapHoriz` | Selected nodes become unselected and vice versa, within the currently shown directory |
-| Clear selection | `Icons.Default.Clear` | The list becomes empty, returning the bar to its empty state |
+| Invert selection | `Icons.Default.FlipToBack` | Selected nodes become unselected and vice versa, within the currently shown directory |
+| Deselect all | `Icons.Default.Deselect` | The list becomes empty, returning the bar to its empty state |
 
-- The three entries are always present, in this order, whatever the current selection is; entries
-  are not hidden, reordered or disabled based on state.
-- Material ships no dedicated "deselect" glyph, so clearing uses `Clear`; inverting has no glyph of
-  its own either and uses `SwapHoriz` as the expression of "swap the two sets" (see Q3).
+- The three entries are always present, in this order — **select all → invert → deselect all** —
+  whatever the current selection is; entries are not hidden, reordered or disabled based on state.
+- The three icons are fixed and are recorded with their Chinese and English names in
+  `FOTLAB-UIXDES-000005` R3; they are never replaced by `CheckCircle` / `CheckCircleOutline`, which
+  stand for a single item's checked state and for "finished / downloaded", not for a bulk operation.
 - They operate on the **currently shown virtual directory** — the directory whose children the
   content region is displaying. Nodes outside it are untouched (see Q5 for recursion).
-- "Clear selection" is the only way, other than deselecting every node, to return to the empty
-  state.
+- "Deselect all" is the only way, other than deselecting every node, to return to the empty state.
 - Because the dropdown holds selection operations and the destructive action lives in slot B, the
   dropdown itself contains no destructive entry (`FOTLAB-UIXDES-000002` R4).
 
@@ -197,7 +197,7 @@ entry is **icon + text** (no brackets, no decorative punctuation in the copy):
 Every label, content description and the default collection name comes from the `feature: gallery`
 block of the single strings file (`FOTLAB-UIXDES-000003` R2/R4). Keys used by this screen:
 `gallery_title`, `gallery_new_collection_name`, `gallery_menu_select_all`, `gallery_menu_invert`,
-`gallery_menu_clear`, `gallery_delete_title`, `gallery_delete_message`,
+`gallery_menu_deselect_all`, `gallery_delete_title`, `gallery_delete_message`,
 `gallery_empty_directory`, `gallery_drawer_empty`, `gallery_selection_count` (plural) and the
 content descriptions `gallery_cd_open_drawer`, `gallery_cd_close_drawer`, `gallery_cd_more_options`, `gallery_cd_import`,
 `gallery_cd_export`, `gallery_cd_new_collection`, `gallery_cd_delete`. The two generic dialog
@@ -304,8 +304,9 @@ selection or the current directory.
   icon, three-dot icon; neither import nor add is present.
 - AC3 — Deselecting back to zero nodes restores the bar of AC1.
 - AC4 — Activating the three-dot icon shows exactly three entries — Select all, Invert selection,
-  Clear selection — each with an icon and a text label and no other decoration.
-- AC5 — "Select all" selects every node of the currently shown directory; "Clear selection" empties
+  Deselect all — in that order, each with an icon and a text label and no other decoration, the
+  icons being `SelectAll`, `FlipToBack` and `Deselect`.
+- AC5 — "Select all" selects every node of the currently shown directory; "Deselect all" empties
   the list and restores the empty-state bar; "Invert selection" exchanges the selected and
   unselected nodes of that directory.
 - AC6 — Switching to another bottom-navigation destination and returning to Gallery shows the same
@@ -374,9 +375,6 @@ selection or the current directory.
 
 ## Open Questions
 
-- Q3 — "Invert selection" has no dedicated Material icon. `SwapHoriz` is proposed as the closest
-  first-party expression of "swap the two sets"; is that acceptable, or should invert get no icon
-  in the dropdown? **TBD.**
 - Q5 — Do "Select all" and "Invert selection" apply only to the children of the currently shown
   directory, or recursively to the whole subtree beneath it? R5 currently says direct children
   only. **TBD.**
@@ -394,6 +392,11 @@ Resolved and retired on 2026-09-08: Q1 (the state holder — a process-scoped ob
 full `ListSelectionOfGallery` name — now a clause in R2) and Q4 (collections are selectable and
 deletable; their deletion semantics are owned by `FOTLAB-DATABS-000002` R9–R13 — now a clause in
 R7). The retired numbers are intentionally not reused.
+
+Resolved and retired on 2026-09-10: Q3 (the invert icon — invert now uses `Icons.Default.FlipToBack`
+and "clear selection" became "Deselect all" with `Icons.Default.Deselect`; the three entries and
+their icons are fixed in R5 and recorded with their Chinese and English names in
+`FOTLAB-UIXDES-000005` R3). The retired number is intentionally not reused.
 
 ## Change History
 
@@ -444,5 +447,6 @@ R7). The retired numbers are intentionally not reused.
   gallery's `GalleryRepository` gained `fileEntryNodes` (excluding folders), `orphanNodeIds` and
   `vacuum()`; `GalleryCore.refresh()` orchestrates them. `gallery_cd_refresh` joined the strings
   block.
-- 2026-09-10 — The top bar icons are now recorded, code / 中文名称 / 英文名称, in `FOTLAB-UIXDES-000005`; R4 here keeps the meaning of the slots, that item owns which glyph fills them. Import and export are confirmed as `Download` (箭头向下入盘) and `Upload` (箭头向上出盘). The three selection entries of R5 keep their current glyphs for now — see `FOTLAB-UIXDES-000005` Q1.
+- 2026-09-10 — The top bar icons are now recorded, code / 中文名称 / 英文名称, in `FOTLAB-UIXDES-000005`; R4 here keeps the meaning of the slots, that item owns which glyph fills them. Import and export are confirmed as `Download` (箭头向下入盘) and `Upload` (箭头向上出盘).
 - 2026-09-10 — The gallery drawer became the **native Material3 `ModalNavigationDrawer`** around the module's whole region, replacing the hand-written scrim and sheet, and the screen no longer nests a `Scaffold` inside the shell's: the top bar and the content region are now two sibling regions laid out by the screen itself. The sheet keeps the 80% width (C1) and carries the close (X) button of `FOTLAB-UIXDES-000002` R6 in its own top-left corner, with the new key `gallery_cd_close_drawer` added to the copy list of R8. The drawer may now cover the top bar — native behaviour — while the bottom navigation region stays outside the module region and untouched.
+- 2026-09-10 — R5 fixed the three selection entries and their icons: **Select all → `Icons.Default.SelectAll`, Invert selection → `Icons.Default.FlipToBack`, Deselect all → `Icons.Default.Deselect`**, always in that order. "Clear selection" became **"Deselect all"** (`gallery_menu_deselect_all`, replacing `gallery_menu_clear`), and `SwapHoriz` / `Clear` are no longer used for these entries; `CheckCircle` / `CheckCircleOutline` stay reserved for a single item's checked state. Q3 (the invert icon) is retired; AC4/AC5 and the copy list of R8 follow the new wording.
