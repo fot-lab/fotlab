@@ -254,7 +254,7 @@ node reached by two paths in one operation is processed once.
 
 - The package owning the model's persistence/repository (location per `FOTLAB-IMGMGR-000001` Q8)
 - `data/` — shared Room infrastructure, migration helpers (`FOTLAB-DATABS-000001`)
-- `ui/gallery/` — consumes the exported repository; reads collection/file nodes through DAO queries
+- `ui/library/` — consumes the exported repository; reads collection/file nodes through DAO queries
   (`FOTLAB-IMGMGR-000001`)
 - Future input/output file-management features that reuse the same file tree
 - `FOTLAB-DATABS-000001` and `FOTLAB-IMGMGR-000001` — the rules and model this schema realises
@@ -306,7 +306,7 @@ node reached by two paths in one operation is processed once.
   retention and batch-id generation as Q7–Q9.
 - 2026-09-08 — Added R14, C8 and AC13: after a delete or a refresh archives rows into the recycle
   tables, an explicit `VACUUM` reclaims the freed page space (auto-vacuum is off), running once per
-  operation after the archive transaction commits and touching no live row. Driven by the gallery
+  operation after the archive transaction commits and touching no live row. Driven by the library
   refresh (`FOTLAB-UIXDES-000004` R10).
 - 2026-09-09 — Room adaptation (implementation, not a schema change in intent). Room forbids a
   nullable column in a `@PrimaryKey`, so a `NULL` parent (root node, R5) cannot sit in a composite
@@ -321,7 +321,7 @@ node reached by two paths in one operation is processed once.
     `(id_recycle, fs_node_id_child, fs_node_id_parent)` exactly as R11 specifies. Its `fs_node_id_parent`
     is `NOT NULL` (a composite key cannot hold `NULL`), so an archived root-level edge stores the
     sentinel `FsNodeParentRootId` (0, never a real node id) instead of `NULL`; the delete algorithm
-    writes that sentinel in `GalleryRepository.archiveRelation`. No FK, no cascade there (R10).
+    writes that sentinel in `LibraryRepository.archiveRelation`. No FK, no cascade there (R10).
   Also: `FsNodeObject.fsNodeId` must carry `@ColumnInfo(name = "fs_node_id")` so the column is
   `fs_node_id`, matching every FK and query (it previously defaulted to the camelCase field name,
   which broke KSP).

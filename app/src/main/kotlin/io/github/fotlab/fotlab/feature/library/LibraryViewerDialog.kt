@@ -1,4 +1,4 @@
-package io.github.fotlab.fotlab.feature.gallery
+package io.github.fotlab.fotlab.feature.library
 
 import android.content.Context
 import android.graphics.BitmapFactory
@@ -67,7 +67,7 @@ import kotlin.math.atan2
 import kotlin.math.roundToInt
 
 /**
- * Full-screen viewer for gallery media, opened on a single tap of an image or video tile.
+ * Full-screen viewer for library media, opened on a single tap of an image or video tile.
  *
  * Behaviour follows the request: a single tap opens the dialog on the tapped item; the dialog
  * shows the media large with a detail panel (EXIF for images, video metadata for clips) at the
@@ -80,7 +80,7 @@ import kotlin.math.roundToInt
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun GalleryViewerDialog(
+fun LibraryViewerDialog(
     items: List<FsNodeObject>,
     startIndex: Int,
     onDismiss: () -> Unit,
@@ -121,7 +121,7 @@ fun GalleryViewerDialog(
                         uri == null ->
                             Icon(
                                 imageVector = Icons.Filled.BrokenImage,
-                                contentDescription = stringResource(id = R.string.gallery_viewer_no_preview),
+                                contentDescription = stringResource(id = R.string.library_viewer_no_preview),
                                 tint = Color.White.copy(alpha = 0.6f),
                                 modifier = Modifier.fillMaxSize(0.3f),
                             )
@@ -136,7 +136,7 @@ fun GalleryViewerDialog(
                         else ->
                             Icon(
                                 imageVector = Icons.Filled.Image,
-                                contentDescription = stringResource(id = R.string.gallery_viewer_no_preview),
+                                contentDescription = stringResource(id = R.string.library_viewer_no_preview),
                                 tint = Color.White.copy(alpha = 0.6f),
                                 modifier = Modifier.fillMaxSize(0.3f),
                             )
@@ -156,7 +156,7 @@ fun GalleryViewerDialog(
                 IconButton(onClick = onDismiss) {
                     Icon(
                         imageVector = Icons.Filled.Close,
-                        contentDescription = stringResource(id = R.string.gallery_viewer_cd_close),
+                        contentDescription = stringResource(id = R.string.library_viewer_cd_close),
                         tint = Color.White,
                     )
                 }
@@ -169,7 +169,7 @@ fun GalleryViewerDialog(
                 IconButton(onClick = { showDetails = !showDetails }) {
                     Icon(
                         imageVector = Icons.Filled.Info,
-                        contentDescription = stringResource(id = R.string.gallery_viewer_cd_info),
+                        contentDescription = stringResource(id = R.string.library_viewer_cd_info),
                         tint = Color.White,
                     )
                 }
@@ -378,8 +378,8 @@ private suspend fun loadDetails(context: Context, node: FsNodeObject): List<Deta
         val uri = node.uriStorage?.let(Uri::parse)
         val rows = mutableListOf<DetailRow>()
 
-        rows += DetailRow(stringS(context, R.string.gallery_viewer_label_name), node.nameDisplay)
-        rows += DetailRow(stringS(context, R.string.gallery_viewer_label_type), node.typeMime)
+        rows += DetailRow(stringS(context, R.string.library_viewer_label_name), node.nameDisplay)
+        rows += DetailRow(stringS(context, R.string.library_viewer_label_type), node.typeMime)
 
         uri?.let { u ->
             runCatching {
@@ -388,7 +388,7 @@ private suspend fun loadDetails(context: Context, node: FsNodeObject): List<Deta
                         val sizeIdx = cursor.getColumnIndex(OpenableColumns.SIZE)
                         if (sizeIdx >= 0 && !cursor.isNull(sizeIdx)) {
                             rows += DetailRow(
-                                stringS(context, R.string.gallery_viewer_label_size),
+                                stringS(context, R.string.library_viewer_label_size),
                                 Formatter.formatShortFileSize(context, cursor.getLong(sizeIdx)),
                             )
                         }
@@ -398,12 +398,12 @@ private suspend fun loadDetails(context: Context, node: FsNodeObject): List<Deta
         }
 
         rows += DetailRow(
-            stringS(context, R.string.gallery_viewer_label_added),
+            stringS(context, R.string.library_viewer_label_added),
             DateUtils.formatDateTime(context, node.timeCreated, DATE_FLAGS),
         )
         node.timeModified?.let {
             rows += DetailRow(
-                stringS(context, R.string.gallery_viewer_label_modified),
+                stringS(context, R.string.library_viewer_label_modified),
                 DateUtils.formatDateTime(context, it, DATE_FLAGS),
             )
         }
@@ -425,7 +425,7 @@ private suspend fun loadImageExif(context: Context, uri: Uri, rows: MutableList<
             BitmapFactory.decodeStream(stream, null, opts)
             if (opts.outWidth > 0 && opts.outHeight > 0) {
                 rows += DetailRow(
-                    stringS(context, R.string.gallery_viewer_label_dimensions),
+                    stringS(context, R.string.library_viewer_label_dimensions),
                     "${opts.outWidth} × ${opts.outHeight}",
                 )
             }
@@ -437,7 +437,7 @@ private suspend fun loadImageExif(context: Context, uri: Uri, rows: MutableList<
             val exif = ExifInterface(stream)
             val orientation = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, 1)
             rows += DetailRow(
-                stringS(context, R.string.gallery_viewer_label_orientation),
+                stringS(context, R.string.library_viewer_label_orientation),
                 exifOrientationText(orientation),
             )
 
@@ -445,7 +445,7 @@ private suspend fun loadImageExif(context: Context, uri: Uri, rows: MutableList<
             val model = exif.getAttribute(ExifInterface.TAG_MODEL)?.trim().orEmpty()
             if (make.isNotBlank() || model.isNotBlank()) {
                 rows += DetailRow(
-                    stringS(context, R.string.gallery_viewer_label_camera),
+                    stringS(context, R.string.library_viewer_label_camera),
                     "$make $model".trim(),
                 )
             }
@@ -453,12 +453,12 @@ private suspend fun loadImageExif(context: Context, uri: Uri, rows: MutableList<
             exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL)
                 ?.let { exifDateTime(it) }
                 ?.let {
-                    rows += DetailRow(stringS(context, R.string.gallery_viewer_label_taken), it)
+                    rows += DetailRow(stringS(context, R.string.library_viewer_label_taken), it)
                 }
 
             exif.latLong?.let { ll ->
                 rows += DetailRow(
-                    stringS(context, R.string.gallery_viewer_label_location),
+                    stringS(context, R.string.library_viewer_label_location),
                     "%.5f, %.5f".format(ll[0], ll[1]),
                 )
             }
@@ -466,30 +466,30 @@ private suspend fun loadImageExif(context: Context, uri: Uri, rows: MutableList<
             val exposure = exif.getAttributeDouble(ExifInterface.TAG_EXPOSURE_TIME, 0.0)
             if (exposure > 0) {
                 val text = if (exposure >= 1) "${exposure}s" else "1/${(1 / exposure).roundToInt()} s"
-                rows += DetailRow(stringS(context, R.string.gallery_viewer_label_exposure), text)
+                rows += DetailRow(stringS(context, R.string.library_viewer_label_exposure), text)
             }
 
             val aperture = exif.getAttributeDouble(ExifInterface.TAG_F_NUMBER, 0.0)
             if (aperture > 0) {
-                rows += DetailRow(stringS(context, R.string.gallery_viewer_label_aperture), "f/$aperture")
+                rows += DetailRow(stringS(context, R.string.library_viewer_label_aperture), "f/$aperture")
             }
 
             val iso = exif.getAttribute(ExifInterface.TAG_ISO_SPEED)
                 ?: exif.getAttribute(ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY)
             if (!iso.isNullOrBlank()) {
-                rows += DetailRow(stringS(context, R.string.gallery_viewer_label_iso), iso)
+                rows += DetailRow(stringS(context, R.string.library_viewer_label_iso), iso)
             }
 
             val focal = exif.getAttributeDouble(ExifInterface.TAG_FOCAL_LENGTH, 0.0)
             if (focal > 0) {
-                rows += DetailRow(stringS(context, R.string.gallery_viewer_label_focal), "$focal mm")
+                rows += DetailRow(stringS(context, R.string.library_viewer_label_focal), "$focal mm")
             }
 
             val flash = exif.getAttributeInt(ExifInterface.TAG_FLASH, -1)
             if (flash >= 0) {
                 val fired = flash and 0x01 != 0
                 rows += DetailRow(
-                    stringS(context, R.string.gallery_viewer_label_flash),
+                    stringS(context, R.string.library_viewer_label_flash),
                     if (fired) "Fired" else "Did not fire",
                 )
             }
@@ -506,12 +506,12 @@ private suspend fun loadVideoMeta(context: Context, uri: Uri, rows: MutableList<
             ?.let { ms ->
                 val seconds = (ms / 1000).toInt()
                 val text = "%d:%02d".format(seconds / 60, seconds % 60)
-                rows += DetailRow(stringS(context, R.string.gallery_viewer_label_duration), text)
+                rows += DetailRow(stringS(context, R.string.library_viewer_label_duration), text)
             }
         val w = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
         val h = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
         if (!w.isNullOrBlank() && !h.isNullOrBlank()) {
-            rows += DetailRow(stringS(context, R.string.gallery_viewer_label_dimensions), "$w × $h")
+            rows += DetailRow(stringS(context, R.string.library_viewer_label_dimensions), "$w × $h")
         }
     }.also { runCatching { retriever.release() } }
 }

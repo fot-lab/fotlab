@@ -1,13 +1,13 @@
-package io.github.fotlab.fotlab.feature.gallery
+package io.github.fotlab.fotlab.feature.library
 
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
- * The selection that drives the gallery top bar (`FOTLAB-UIXDES-000004` R2/R3).
+ * The selection that drives the library top bar (`FOTLAB-UIXDES-000004` R2/R3).
  *
- * **Process-scoped**: the single instance is owned by [GalleryCore] and lives exactly
+ * **Process-scoped**: the single instance is owned by [LibraryCore] and lives exactly
  * as long as the process. It is never persisted and never written to saved instance
  * state, so every process starts with an empty selection and nothing is restored
  * behind the app's back (R3, C6).
@@ -18,7 +18,7 @@ import kotlinx.coroutines.flow.asStateFlow
  * The full name is deliberate: another feature may drive its own top bar from its own
  * selection list, and a short generic name would collide (R2).
  */
-class ListSelectionOfGallery internal constructor() {
+class ListSelectionOfLibrary internal constructor() {
 
     private val mutableIds = MutableStateFlow<Set<Long>>(emptySet())
 

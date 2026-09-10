@@ -1,4 +1,4 @@
-package io.github.fotlab.fotlab.feature.gallery
+package io.github.fotlab.fotlab.feature.library
 
 import androidx.room.ColumnInfo
 import androidx.room.Entity

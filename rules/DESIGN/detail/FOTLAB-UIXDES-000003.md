@@ -86,8 +86,8 @@ The strings file is laid out in the following order. No exceptions, no alphabeti
   <!-- ===== app ===== -->
   <string name="app_name">FotLab</string>
 
-  <!-- ===== feature: gallery ===== -->
-  <string name="gallery_title">Gallery</string>
+  <!-- ===== feature: library ===== -->
+  <string name="library_title">Library</string>
   ```
 
 - Inside a block, strings are grouped by screen and, within a screen, ordered by role in the order:
@@ -114,13 +114,13 @@ by a file per feature (`FOTLAB-STRUCT-000001` R5).
 ### R4 — Naming: semantic, prefixed, stable
 
 - Key format (snake_case): `<block>_<screen or feature>_<what>_<role>`
-  - `<block>` — `common`, `app`, or the feature id (e.g. `gallery`, `render`, `import`).
+  - `<block>` — `common`, `app`, or the feature id (e.g. `library`, `render`, `import`).
   - `<screen or feature>` — the screen or component the text belongs to (`preview`, `style_picker`).
   - `<what>` — what it names (`title`, `apply`, `empty`, `failed`).
   - `<role>` — suffix describing the kind of text: `_title`, `_label`, `_action`, `_hint`, `_message`,
     `_error`, `_empty`, `_cd` (content description); plurals use `<plurals>`, not a `_plural` suffix.
-- Examples: `common_action_ok`, `common_error_generic`, `app_nav_gallery_label`,
-  `gallery_title`, `gallery_cd_open_drawer`, `gallery_drawer_empty`.
+- Examples: `common_action_ok`, `common_error_generic`, `app_nav_library_label`,
+  `library_title`, `library_cd_open_drawer`, `library_drawer_empty`.
 - Keys are **semantic, never derived from the English text**, and never renamed just because the
   wording changed. Changing the meaning of a key requires a new key; the old one is removed only when
   no locale and no code references it.
@@ -237,15 +237,15 @@ by a file per feature (`FOTLAB-STRUCT-000001` R5).
   `ui/<feature>/` and `navigation/<feature>/` instead of a module dependency check; the Impacted
   Modules section now names `app/src/main/res/values*/strings.xml` and the feature packages. The block
   order itself — `common` first, then `app`, then features — is unchanged.
-- 2026-09-10 — Promoted shared copy from `feature: gallery` into `common` (R3 promotion path), per the
-  owner's decision that these are app-wide, not gallery-private: the selection trio and count
+- 2026-09-10 — Promoted shared copy from `feature: library` into `common` (R3 promotion path), per the
+  owner's decision that these are app-wide, not library-private: the selection trio and count
   (`common_selection_select_all`, `common_selection_invert`, `common_selection_deselect_all`,
-  `common_selection_count` — replacing `gallery_menu_select_all`, `gallery_menu_invert`,
-  `gallery_menu_deselect_all`, the `gallery_selection_count` plural), the two slot actions
-  (`common_action_import`, `common_action_export` — replacing `gallery_cd_import`,
-  `gallery_cd_export`) and the drawer copy (`common_drawer_empty`, `common_drawer_open`,
-  `common_drawer_close` — replacing `gallery_drawer_empty`, `gallery_cd_open_drawer`,
-  `gallery_cd_close_drawer`). The old keys are removed; no code references them.
+  `common_selection_count` — replacing `library_menu_select_all`, `library_menu_invert`,
+  `library_menu_deselect_all`, the `library_selection_count` plural), the two slot actions
+  (`common_action_import`, `common_action_export` — replacing `library_cd_import`,
+  `library_cd_export`) and the drawer copy (`common_drawer_empty`, `common_drawer_open`,
+  `common_drawer_close` — replacing `library_drawer_empty`, `library_cd_open_drawer`,
+  `library_cd_close_drawer`). The old keys are removed; no code references them.
 - 2026-09-10 — AC6 removed: the requirement that every `contentDescription` resolve through a key
   ending in `_cd` was never an owner decision and is withdrawn. Content descriptions still must come
   from resources (R6); the `_cd` suffix remains an available naming suffix in R4, nothing more. AC

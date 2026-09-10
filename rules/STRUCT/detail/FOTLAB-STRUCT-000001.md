@@ -5,12 +5,12 @@
 - Priority: P0
 - Created: 2026-09-07
 - Owner: —
-- Related: `FOTLAB-UIXDES-000001` (shell/destination contract), `FOTLAB-UIXDES-000002` (per-destination top bar and drawer — the screen owns both), `FOTLAB-UIXDES-000003` (strings blocks), `FOTLAB-DATABS-000001` (persistence ownership), `FOTLAB-NATIVE-000001` (third-party source location), `FOTLAB-IMGMGR-000001` (the gallery module this layout hosts), `FOTLAB-DATABS-000002` (the gallery's fs_node schema, owned by the gallery's lower layer), `FOTLAB-STRUCT-000003` (naming — avoid product-specific tokens in code identifiers; no duplicate components)
+- Related: `FOTLAB-UIXDES-000001` (shell/destination contract), `FOTLAB-UIXDES-000002` (per-destination top bar and drawer — the screen owns both), `FOTLAB-UIXDES-000003` (strings blocks), `FOTLAB-DATABS-000001` (persistence ownership), `FOTLAB-NATIVE-000001` (third-party source location), `FOTLAB-IMGMGR-000001` (the library module this layout hosts), `FOTLAB-DATABS-000002` (the library's fs_node schema, owned by the library's lower layer), `FOTLAB-STRUCT-000003` (naming — avoid product-specific tokens in code identifiers; no duplicate components)
 
 ## Background & Goal
 
 The codebase was first laid out as a multi-module Gradle build — `:app` (shell), `:core:ui`,
-`:core:data`, `:feature:gallery`. That layout is the one Google recommends for large apps
+`:core:data`, `:feature:library`. That layout is the one Google recommends for large apps
 (`developer.android.com/topic/modularization`, and the shape of `android/nowinandroid`), and it buys
 hard dependency isolation: modules that must not depend on each other *cannot*, because the build
 system rejects it.
@@ -67,9 +67,9 @@ app/src/main/
 │   ├── data/                     ← shared Room infrastructure only
 │   │   └── (converters, migration helpers, in-memory test rule)
 │   └── feature/                  ← one package per independent screen
-│       └── gallery/
-│           ├── GalleryScreen.kt  ← UI: owns its TopAppBar + drawer (UIXDES-000001/000002)
-│           └── GalleryCore.kt    ← lower layer: repository / data access for the gallery tree
+│       └── library/
+│           ├── LibraryScreen.kt  ← UI: owns its TopAppBar + drawer (UIXDES-000001/000002)
+│           └── LibraryCore.kt    ← lower layer: repository / data access for the library tree
 ```
 
 - The root package is `io.github.fotlab.fotlab`; the layer packages `ui`, `navigation`, `data` and
@@ -84,10 +84,10 @@ app/src/main/
   package, never here (`FOTLAB-DATABS-000001` R3).
 - `feature/` — one `feature/<name>/` package per independent screen. Each package contains the
   screen UI (`<Name>Screen.kt`) and its lower layer (`<Name>Core.kt`). Feature packages are named
-  after the destination, lower case, one word where possible (`gallery`, `render`, `import`).
-- `GalleryScreen` is the gallery screen (UI); it owns its top app bar and drawer per
-  `FOTLAB-UIXDES-000001` / `FOTLAB-UIXDES-000002`. `GalleryCore` is the gallery's lower layer and is
-  the natural owner of the gallery's persistence — the `fs_node` schema of `FOTLAB-DATABS-000002`.
+  after the destination, lower case, one word where possible (`library`, `render`, `import`).
+- `LibraryScreen` is the library screen (UI); it owns its top app bar and drawer per
+  `FOTLAB-UIXDES-000001` / `FOTLAB-UIXDES-000002`. `LibraryCore` is the library's lower layer and is
+  the natural owner of the library's persistence — the `fs_node` schema of `FOTLAB-DATABS-000002`.
 
 ### R3 — Dependency direction between packages
 
@@ -106,7 +106,7 @@ app/src/main/
 
 Adding a top-level destination touches exactly these places, in this order:
 
-1. `feature/<name>/` — `GalleryScreen.kt` (UI) and `GalleryCore.kt` (lower layer).
+1. `feature/<name>/` — `LibraryScreen.kt` (UI) and `LibraryCore.kt` (lower layer).
 2. `navigation/<feature>/` — the route constant and `fun NavGraphBuilder.<feature>Graph()`.
 3. `navigation/RootNavHost.kt` — one `<feature>Graph()` call.
 4. `navigation/TopLevelDestination.kt` — one enum entry (route, label, icon).
@@ -142,7 +142,7 @@ No Gradle file and no manifest is touched.
   `io.github.fotlab.fotlab`, and its second segment is `ui`, `navigation`, `data` or `feature` (or a
   recorded later layer); the only exceptions are `MainApplication.kt` and `MainActivity.kt`.
 - AC4 — No file under `data/` imports anything from `ui`, `navigation` or `feature`.
-- AC5 — No file under `feature/<name>/` imports anything from `navigation`; and `GalleryCore` (or any
+- AC5 — No file under `feature/<name>/` imports anything from `navigation`; and `LibraryCore` (or any
   `<Name>Core`) does not import from `ui`.
 - AC6 — Adding a destination following R4 requires no change to any `build.gradle.kts`, to
   `settings.gradle.kts`, or to `AndroidManifest.xml`.
@@ -159,8 +159,8 @@ No Gradle file and no manifest is touched.
 - `FOTLAB-UIXDES-000003` — strings blocks now live in one file
 - `FOTLAB-DATABS-000001` — database ownership now expressed by naming, not by module
 - `FOTLAB-NATIVE-000001` — `app/` is now the only first-party location
-- `FOTLAB-IMGMGR-000001` / `FOTLAB-DATABS-000002` — the gallery module and its fs_node schema are
-  hosted by `feature/gallery` (GalleryScreen + GalleryCore)
+- `FOTLAB-IMGMGR-000001` / `FOTLAB-DATABS-000002` — the library module and its fs_node schema are
+  hosted by `feature/library` (LibraryScreen + LibraryCore)
 
 ## Open Questions
 
@@ -173,15 +173,15 @@ No Gradle file and no manifest is touched.
 - Q4 — `data/` stays flat and shared (converters, migration, test rule) while each feature owns its
   core in `feature/<name>/` (current default). Is that split stable, or does shared infrastructure
   grow per-feature sub-packages later? **TBD.**
-- Q5 — May a `feature/<name>/` package ever hold more than the two files `GalleryScreen.kt` and
-  `GalleryCore.kt` (for example nested sub-screens)? **TBD.**
+- Q5 — May a `feature/<name>/` package ever hold more than the two files `LibraryScreen.kt` and
+  `LibraryCore.kt` (for example nested sub-screens)? **TBD.**
 
 ## Change History
 
 - 2026-09-07 — Initial draft. Decided that FotLab is a single Gradle module `:app`: `core/ui`,
-  `core/data` and `feature/gallery` were merged into it, their code re-homed under
-  `io.github.fotlab.fotlab.{ui,navigation,data}`, the gallery screen moved to `ui/gallery/` and its
-  graph to `navigation/gallery/`, and all string resources merged into the single
+  `core/data` and `feature/library` were merged into it, their code re-homed under
+  `io.github.fotlab.fotlab.{ui,navigation,data}`, the library screen moved to `ui/library/` and its
+  graph to `navigation/library/`, and all string resources merged into the single
   `app/src/main/res/values/strings.xml`. Defined the package layout, the dependency direction
   between `ui`, `navigation` and `data`, the five-step recipe for adding a destination, and recorded
   that dependency isolation is now a review convention rather than a build-enforced guarantee.
@@ -191,7 +191,7 @@ No Gradle file and no manifest is touched.
   as a sibling of `ui`, `navigation` and `data`: each independent screen is now a
   `feature/<name>/` package holding both its UI (`<Name>Screen`, owning its top app bar and drawer per
   `FOTLAB-UIXDES-000001`/`-000002`) and its lower layer (`<Name>Core`, repository/data access), with
-  the gallery example `GalleryScreen` + `GalleryCore`; `ui/` is now shell plus theme only. Updated
+  the library example `LibraryScreen` + `LibraryCore`; `ui/` is now shell plus theme only. Updated
   R2/R3/R4, constraints C2/C3, acceptance criteria (added AC8) and Impacted Modules, linked
   `FOTLAB-IMGMGR-000001` and `FOTLAB-DATABS-000002`, and replaced Q4 with the data-vs-feature-core
   split question plus a new Q5 on package size.

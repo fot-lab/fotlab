@@ -44,7 +44,7 @@ modules stay consistent while remaining autonomous:
 - The drawer is the **native Material3 modal drawer** (`ModalNavigationDrawer`) wrapped around the module's whole region — the top bar included — so it slides over the top bar with the platform's motion and scrim, exactly as the platform does. The module region is the region above the bottom navigation bar (`FOTLAB-UIXDES-000001` R2); the drawer never leaves it.
 - Consequence: the bottom navigation region is **not** covered by the drawer and remains visible while the drawer is open, preserving the rule that it is the only persistent element in the app.
 - Inside the module region the **top bar and the content region are siblings** — one above the other, neither overlapping the other. A module places them side by side itself (for example in a `Column`); it does not stack a second `Scaffold` on top of the shell's to do it.
-- Implementation note: Material3's `ModalDrawerSheet` applies its own width constraints (default maximum 360dp). If those constraints conflict with the 80% requirement, the sheet is replaced by a custom `Surface` carrying the 80% modifier. The gallery uses that resolution: a plain `Surface` with `fillMaxWidth(0.8f)` and `fillMaxHeight()`.
+- Implementation note: Material3's `ModalDrawerSheet` applies its own width constraints (default maximum 360dp). If those constraints conflict with the 80% requirement, the sheet is replaced by a custom `Surface` carrying the 80% modifier. The library uses that resolution: a plain `Surface` with `fillMaxWidth(0.8f)` and `fillMaxHeight()`.
 
 ### R4 — Rightmost element: overflow menu
 

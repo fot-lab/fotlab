@@ -1,4 +1,4 @@
-package io.github.fotlab.fotlab.feature.gallery
+package io.github.fotlab.fotlab.feature.library
 
 import android.content.Context
 import android.content.Intent
@@ -27,60 +27,60 @@ private const val MimeUnknown = "application/octet-stream"
 fun FsNodeObject.isCollection(): Boolean = typeMime == MimeCollection
 
 /**
- * Lower layer of the gallery feature (`FOTLAB-STRUCT-000001`).
+ * Lower layer of the library feature (`FOTLAB-STRUCT-000001`).
  *
- * Builds and owns the gallery's Room database (the two-table `fs_node` schema of
- * `FOTLAB-DATABS-000002`) and exposes it through [GalleryRepository]. This object also
- * owns the single [ListSelectionOfGallery] instance, which is therefore process-scoped
- * (`FOTLAB-UIXDES-000004` R3), and the current [GalleryLayoutMode], a process-scoped observable
+ * Builds and owns the library's Room database (the two-table `fs_node` schema of
+ * `FOTLAB-DATABS-000002`) and exposes it through [LibraryRepository]. This object also
+ * owns the single [ListSelectionOfLibrary] instance, which is therefore process-scoped
+ * (`FOTLAB-UIXDES-000004` R3), and the current [LibraryLayoutMode], a process-scoped observable
  * that is persisted to a `DataStore` preference (`FOTLAB-UIXDES-000004` R9). The UI
- * (`GalleryScreen`) depends on this class; this class never depends on `ui` or `navigation` (R3).
+ * (`LibraryScreen`) depends on this class; this class never depends on `ui` or `navigation` (R3).
  */
-object GalleryCore {
+object LibraryCore {
 
-    /** Resource id of the gallery's display name, owned by the feature core. */
-    val titleRes: Int = R.string.gallery_title
+    /** Resource id of the library's display name, owned by the feature core. */
+    val titleRes: Int = R.string.library_title
 
     /**
      * The one selection instance of the process. Read by the screen, mutated only
      * through here; never persisted and never restored from saved state
      * (`FOTLAB-UIXDES-000004` R3/C6).
      */
-    val selection: ListSelectionOfGallery = ListSelectionOfGallery()
+    val selection: ListSelectionOfLibrary = ListSelectionOfLibrary()
 
     /**
      * Observable display mode of the content region. Read by the screen, advanced through
      * [cycleLayoutMode]; the chosen mode is persisted to a `DataStore` and restored on start
      * (`FOTLAB-UIXDES-000004` R9).
      */
-    private val layoutModeState = MutableStateFlow(GalleryLayoutMode.DEFAULT)
-    val layoutMode: StateFlow<GalleryLayoutMode> = layoutModeState.asStateFlow()
+    private val layoutModeState = MutableStateFlow(LibraryLayoutMode.DEFAULT)
+    val layoutMode: StateFlow<LibraryLayoutMode> = layoutModeState.asStateFlow()
 
     private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private lateinit var layoutPreference: GalleryLayoutPreference
+    private lateinit var layoutPreference: LibraryLayoutPreference
 
-    private var repository: GalleryRepository? = null
+    private var repository: LibraryRepository? = null
     private lateinit var applicationContext: Context
 
-    /** Build the gallery database and the layout preference. Call once from the application context. */
+    /** Build the library database and the layout preference. Call once from the application context. */
     fun prepare(context: Context) {
         if (repository != null) return
         applicationContext = context.applicationContext
         val database = Room.databaseBuilder(
             applicationContext,
-            GalleryDatabase::class.java,
-            "gallery",
+            LibraryDatabase::class.java,
+            "library",
         )
-            .addMigrations(GalleryDatabase.MIGRATION_1_2, GalleryDatabase.MIGRATION_2_3)
+            .addMigrations(LibraryDatabase.MIGRATION_1_2, LibraryDatabase.MIGRATION_2_3)
             .build()
-        repository = GalleryRepository(database)
-        layoutPreference = GalleryLayoutPreference(applicationContext)
+        repository = LibraryRepository(database)
+        layoutPreference = LibraryLayoutPreference(applicationContext)
         // Restore the persisted mode once at start; default is Grid 3 (R9).
         layoutModeState.value = runBlocking(Dispatchers.IO) { layoutPreference.mode.first() }
     }
 
-    private fun repo(): GalleryRepository =
-        repository ?: error("GalleryCore.prepare(context) must be called before use")
+    private fun repo(): LibraryRepository =
+        repository ?: error("LibraryCore.prepare(context) must be called before use")
 
     // --- Tree queries, delegated to the repository ---
 
@@ -124,7 +124,7 @@ object GalleryCore {
 
     /** Cycle to the next display mode and persist it (`FOTLAB-UIXDES-000004` R9). */
     suspend fun cycleLayoutMode() {
-        val next = GalleryLayoutMode.cycle(layoutModeState.value)
+        val next = LibraryLayoutMode.cycle(layoutModeState.value)
         layoutModeState.value = next
         ioScope.launch { layoutPreference.setMode(next) }
     }

@@ -5,7 +5,7 @@
 - Priority: P2
 - Created: 2026-09-10
 - Owner: —
-- Related: `FOTLAB-UIXDES-000002` (top bar and drawer behaviour these icons belong to), `FOTLAB-UIXDES-000004` (the gallery top bar that uses them), `FOTLAB-UIXDES-000003` (every content description comes from resources), `FOTLAB-UIXDES-000001` (first-party APIs only)
+- Related: `FOTLAB-UIXDES-000002` (top bar and drawer behaviour these icons belong to), `FOTLAB-UIXDES-000004` (the library top bar that uses them), `FOTLAB-UIXDES-000003` (every content description comes from resources), `FOTLAB-UIXDES-000001` (first-party APIs only)
 
 ## Background & Goal
 
@@ -43,9 +43,9 @@ Goals:
 
 - The pair is decided by the **shape and the direction**, not by the English word: 导入 is the arrow coming from outside **into** the tray (入盘), 导出 is the arrow rising **out of** the box (出盘). A glyph that shows only an arrow above or below a plain horizontal line is **not** either of them — the tray or box has to read as a container the arrow goes into or comes out of.
 - These two were verified by eye on a device: `Upload` / `Download` (`upload` / `download`) render as an arrow next to a plain line in the icon set this project uses, which is why they are **not** the import/export icons here — see R4.
-- Content descriptions stay in `strings.xml` (`FOTLAB-UIXDES-000003` R6); the two actions are promoted copy, so the gallery uses `common_action_export` and `common_action_import`.
+- Content descriptions stay in `strings.xml` (`FOTLAB-UIXDES-000003` R6); the two actions are promoted copy, so the library uses `common_action_export` and `common_action_import`.
 
-### R3 — Gallery top bar, drawer and overflow vocabulary
+### R3 — Library top bar, drawer and overflow vocabulary
 
 | 功能 | 代码 (Kotlin) | 中文名称 | 英文名称 (Material) | 位置 |
 | --- | --- | --- | --- | --- |
@@ -85,7 +85,7 @@ Goals:
 
 ## Acceptance Criteria
 
-- AC1 — The gallery top bar reads left to right with the glyphs of R3, and each of them matches the code recorded for its row.
+- AC1 — The library top bar reads left to right with the glyphs of R3, and each of them matches the code recorded for its row.
 - AC2 — Import shows `SaveAlt` (arrow from outside into the tray) and export shows `IosShare` (arrow rising out of the box); no other glyph appears in slots A/B for these two functions.
 - AC3 — A grep of the app sources for `Icons.` resolves every occurrence to a row of R3 (or to a later row appended to this table), i.e. no icon is used that this item does not record.
 - AC4 — A dependency report shows no icon library beyond `material-icons-core` and `material-icons-extended`, and `res/drawable` holds no project-specific icon vector for a function of R3.
@@ -94,7 +94,7 @@ Goals:
 
 ## Impacted Modules
 
-- `app/src/main/kotlin/io/github/fotlab/fotlab/feature/gallery/GalleryScreen.kt` — the top bar, the drawer and the overflow menu of R3
+- `app/src/main/kotlin/io/github/fotlab/fotlab/feature/library/LibraryScreen.kt` — the top bar, the drawer and the overflow menu of R3
 - `app/src/main/res/values/strings.xml` — the copy behind every icon
 - `gradle/libs.versions.toml` — the two icon artifacts and their version
 - Every future feature screen — adds its own icons by appending rows to R3, never by inventing a parallel set
@@ -109,8 +109,8 @@ question. The retired number is intentionally not reused.
 
 ## Change History
 
-- 2026-09-10 — Initial draft. Fixed the icon vocabulary as code + Chinese name + English name in one table per screen: the source is `material-icons-core` + `material-icons-extended` in the filled style only (R1); import and export are settled as the tray arrows — 导入 `Download` (arrow down into the tray), 导出 `Upload` (arrow up out of it) — with an explicit boundary clause forbidding `Share`, `Save`, `Add` and `FolderOpen` substitutes (R2/R4); the gallery top bar, drawer and overflow rows are recorded in R3. The selection trio is recorded as-is and left open as Q1; the outlined-style question is Q2.
-- 2026-09-10 — Q1 retired: the selection trio is fixed — 全选 `Icons.Filled.SelectAll`, 反选 `Icons.Filled.FlipToBack` (replacing `SwapHoriz`), 全不选 `Icons.Filled.Deselect` (replacing `Clear`) — in that order, and the copy key followed as `gallery_menu_deselect_all` (replacing `gallery_menu_clear`). R4 gained the `CheckCircle` / `CheckCircleOutline` boundary and the menu-ordering clause.
+- 2026-09-10 — Initial draft. Fixed the icon vocabulary as code + Chinese name + English name in one table per screen: the source is `material-icons-core` + `material-icons-extended` in the filled style only (R1); import and export are settled as the tray arrows — 导入 `Download` (arrow down into the tray), 导出 `Upload` (arrow up out of it) — with an explicit boundary clause forbidding `Share`, `Save`, `Add` and `FolderOpen` substitutes (R2/R4); the library top bar, drawer and overflow rows are recorded in R3. The selection trio is recorded as-is and left open as Q1; the outlined-style question is Q2.
+- 2026-09-10 — Q1 retired: the selection trio is fixed — 全选 `Icons.Filled.SelectAll`, 反选 `Icons.Filled.FlipToBack` (replacing `SwapHoriz`), 全不选 `Icons.Filled.Deselect` (replacing `Clear`) — in that order, and the copy key followed as `library_menu_deselect_all` (replacing `library_menu_clear`). R4 gained the `CheckCircle` / `CheckCircleOutline` boundary and the menu-ordering clause.
 - 2026-09-10 — R2 corrected after checking the glyphs **on a device**: import and export are **not** `Download` / `Upload`, which render as an arrow next to a plain line in the icon set this project uses. 导入 is `Icons.Filled.SaveAlt` (入盘 — the arrow comes from outside into the tray) and 导出 is `Icons.Filled.IosShare` (出盘 — the arrow rises out of the box). R3, C2, AC2 and AC6 follow; R4 now reserves `Upload` / `Download` for the network upload/download meanings.
 - 2026-09-10 — R2 opens with an explicit **standing rule**: 导入 / Import is always `SaveAlt` and 导出 / Export is always `IosShare`, wherever those words appear in the project — no exception, no second judgement per screen. C2 restates it as a constraint and `FOTLAB-UIXDES-000004` R4 references it instead of repeating the icons on its own.
 - 2026-09-10 — AC5 wording follows the withdrawal of the `_cd`-suffix rule (`FOTLAB-UIXDES-000003`): a content description must resolve from a resource, with no required suffix.

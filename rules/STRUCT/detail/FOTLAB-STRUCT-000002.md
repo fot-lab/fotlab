@@ -5,7 +5,7 @@
 - Priority: P1
 - Created: 2026-09-08
 - Owner: —
-- Related: `FOTLAB-STRUCT-000001` (single-module layout; dependency isolation is now a review convention, not build-enforced), `FOTLAB-DATABS-000001` (Room persistence discipline; `exportSchema = false` — schema JSON is a build artifact and is not committed), `FOTLAB-DATABS-000002` (the gallery's `fs_node` schema, realised without committed schema files), `FOTLAB-STRUCT-000003` (naming — avoid product-specific tokens; no duplicate components)
+- Related: `FOTLAB-STRUCT-000001` (single-module layout; dependency isolation is now a review convention, not build-enforced), `FOTLAB-DATABS-000001` (Room persistence discipline; `exportSchema = false` — schema JSON is a build artifact and is not committed), `FOTLAB-DATABS-000002` (the library's `fs_node` schema, realised without committed schema files), `FOTLAB-STRUCT-000003` (naming — avoid product-specific tokens; no duplicate components)
 
 ## Background & Goal
 
@@ -50,9 +50,9 @@ The intended dependency direction is a directed acyclic graph (downward only):
 root (MainApplication, MainActivity)
   ├─▶ ui            (shell: MainWindowFrame, MainNavigationBar, theme)
   │     └─▶ navigation                 (RootNavHost, TopLevelDestination)
-  │           └─▶ navigation.<feature> (gallery: GalleryGraph, GalleryDestination)
-  │                 └─▶ feature.<name> (GalleryScreen → GalleryCore → GalleryRepository → GalleryDatabase → entities/DAOs)
-  └─▶ feature.<name>  (root may prepare/own a feature's lower layer, e.g. MainApplication → GalleryCore)
+  │           └─▶ navigation.<feature> (library: LibraryGraph, LibraryDestination)
+  │                 └─▶ feature.<name> (LibraryScreen → LibraryCore → LibraryRepository → LibraryDatabase → entities/DAOs)
+  └─▶ feature.<name>  (root may prepare/own a feature's lower layer, e.g. MainApplication → LibraryCore)
 
 data  (shared converters, in-memory test rule) — depended on by features, depends on nothing first-party.
 ```
@@ -99,7 +99,7 @@ data  (shared converters, in-memory test rule) — depended on by features, depe
   `navigation.<feature>`, `feature.<name>`, and `data`.
 - AC3 — No `feature.*` source file imports `io.github.fotlab.fotlab.ui` or
   `io.github.fotlab.fotlab.navigation` (the `R` class and generated classes are exempt). Currently
-  satisfied: `feature.gallery` imports only `R`.
+  satisfied: `feature.library` imports only `R`.
 - AC4 — `.gitignore` excludes build output and has not been relaxed.
 
 ## Impacted Modules

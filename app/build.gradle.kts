@@ -90,12 +90,12 @@ android {
 
 dependencies {
     // Shared Room infrastructure (data package). KSP + room-compiler run on the
-    // gallery's @Entity/@Database (`FOTLAB-DATABS-000001` R7).
+    // library's @Entity/@Database (`FOTLAB-DATABS-000001` R7).
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
 
-    // User preferences (gallery display mode) kept out of the fs_node Room database.
+    // User preferences (library display mode) kept out of the fs_node Room database.
     implementation(libs.androidx.datastore.preferences)
 
     implementation(libs.androidx.core.ktx)
@@ -112,7 +112,7 @@ dependencies {
     implementation(libs.androidx.compose.material.icons.core)
     implementation(libs.androidx.compose.material.icons.extended)
 
-    // Full-size image loading for the gallery viewer (content:// URIs, automatic downsampling).
+    // Full-size image loading for the library viewer (content:// URIs, automatic downsampling).
     implementation(libs.coil.compose)
     // EXIF metadata readout for the viewer's detail panel.
     implementation(libs.androidx.exifinterface)

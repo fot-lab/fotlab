@@ -1,4 +1,4 @@
-package io.github.fotlab.fotlab.feature.gallery
+package io.github.fotlab.fotlab.feature.library
 
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -77,14 +77,14 @@ private const val DrawerWidthFraction = 0.8f
 
 /**
  * The two top-level views the drawer switches between. `Library` is the Source Library — the
- * whole gallery feature built so far. `RecycleBin` shows removed nodes, whose content is not
+ * whole library feature built so far. `RecycleBin` shows removed nodes, whose content is not
  * implemented yet and is left empty for now.
  */
-private enum class GalleryViewMode { Library, RecycleBin }
+private enum class LibraryViewMode { Library, RecycleBin }
 
 /**
- * Gallery screen (UI) — the first independent screen, owned by the `feature/gallery`
- * package alongside its lower layer [GalleryCore] (`FOTLAB-STRUCT-000001`).
+ * Library screen (UI) — the first independent screen, owned by the `feature/library`
+ * package alongside its lower layer [LibraryCore] (`FOTLAB-STRUCT-000001`).
  *
  * The screen fills the whole region above the bottom navigation bar and splits it into two
  * sibling regions: the top bar, and the content region below it. Everything else the screen
@@ -105,7 +105,7 @@ private enum class GalleryViewMode { Library, RecycleBin }
  * / reconcile the content; import + new collection show when nothing is selected, export +
  * delete when something is.
  *
- * The selection itself lives in [GalleryCore.selection] — a process-scoped object. This
+ * The selection itself lives in [LibraryCore.selection] — a process-scoped object. This
  * screen only reads it with plain `remember`; it is never saved with `rememberSaveable`
  * and never restored (`FOTLAB-UIXDES-000004` R3/C6). The display mode is likewise owned by
  * the core and read here (`FOTLAB-UIXDES-000004` R9); the refresh fires a core reconcile
@@ -113,11 +113,11 @@ private enum class GalleryViewMode { Library, RecycleBin }
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun GalleryScreen() {
+fun LibraryScreen() {
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     var currentDirectory by remember { mutableStateOf<FsNodeObject?>(null) }
     // Which top-level view the drawer selected; defaults to the Source Library (built so far).
-    var viewMode by remember { mutableStateOf(GalleryViewMode.Library) }
+    var viewMode by remember { mutableStateOf(LibraryViewMode.Library) }
     var deleteConfirmation by remember { mutableStateOf(false) }
     // Node awaiting a rename from the single-selection edit action; null = dialog closed.
     var renameTarget by remember { mutableStateOf<FsNodeObject?>(null) }
@@ -126,22 +126,22 @@ fun GalleryScreen() {
     var viewerItems by remember { mutableStateOf<List<FsNodeObject>?>(null) }
     var viewerStart by remember { mutableStateOf(0) }
     val scope = rememberCoroutineScope()
-    val newCollectionName = stringResource(id = R.string.gallery_new_collection_name)
+    val newCollectionName = stringResource(id = R.string.library_new_collection_name)
 
     // Process-scoped state owned by the core: read here, never stored here.
-    val selectedIds by GalleryCore.selection.selected.collectAsState()
-    val layoutMode by GalleryCore.layoutMode.collectAsState()
+    val selectedIds by LibraryCore.selection.selected.collectAsState()
+    val layoutMode by LibraryCore.layoutMode.collectAsState()
 
     val children by remember(currentDirectory) {
         val parentId = currentDirectory?.fsNodeId
-        if (parentId == null) GalleryCore.rootChildren() else GalleryCore.childrenOf(parentId)
+        if (parentId == null) LibraryCore.rootChildren() else LibraryCore.childrenOf(parentId)
     }.collectAsState(initial = emptyList())
 
     val importLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments(),
     ) { uris ->
         if (uris.isNotEmpty()) {
-            scope.launch { GalleryCore.importUris(currentDirectory?.fsNodeId, uris) }
+            scope.launch { LibraryCore.importUris(currentDirectory?.fsNodeId, uris) }
         }
     }
 
@@ -152,7 +152,7 @@ fun GalleryScreen() {
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
-            GalleryDrawer(
+            LibraryDrawer(
                 viewMode = viewMode,
                 onSelectView = { viewMode = it },
                 onClose = { scope.launch { drawerState.close() } },
@@ -161,27 +161,27 @@ fun GalleryScreen() {
     ) {
         // Two sibling regions: the top bar, and the content region below it.
         Column(modifier = Modifier.fillMaxSize()) {
-            GalleryTopBar(
+            LibraryTopBar(
                 directoryName = when (viewMode) {
-                    GalleryViewMode.Library -> currentDirectory?.nameDisplay
-                        ?: stringResource(id = GalleryCore.titleRes)
-                    GalleryViewMode.RecycleBin -> stringResource(id = R.string.gallery_recycle_bin)
+                    LibraryViewMode.Library -> currentDirectory?.nameDisplay
+                        ?: stringResource(id = LibraryCore.titleRes)
+                    LibraryViewMode.RecycleBin -> stringResource(id = R.string.library_recycle_bin)
                 },
                 selectionSize = selectedIds.size,
                 candidateIds = children.mapNotNull { it.fsNodeId },
-                onCycleLayout = { scope.launch { GalleryCore.cycleLayoutMode() } },
-                onRefresh = { scope.launch { GalleryCore.refresh() } },
+                onCycleLayout = { scope.launch { LibraryCore.cycleLayoutMode() } },
+                onRefresh = { scope.launch { LibraryCore.refresh() } },
                 onOpenDrawer = { scope.launch { drawerState.open() } },
                 onImport = { importLauncher.launch(arrayOf("*/*")) },
                 onCreateCollection = {
                     scope.launch {
-                        GalleryCore.createCollection(
+                        LibraryCore.createCollection(
                             parentId = currentDirectory?.fsNodeId,
                             name = newCollectionName,
                         )
                     }
                 },
-                onCancelSelection = { GalleryCore.selection.clear() },
+                onCancelSelection = { LibraryCore.selection.clear() },
                 onRename = {
                     // Exactly one node is selected (the edit icon only shows then): open its
                     // rename dialog with the current name prefilled.
@@ -196,7 +196,7 @@ fun GalleryScreen() {
 
             Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
                 when (viewMode) {
-                    GalleryViewMode.Library -> {
+                    LibraryViewMode.Library -> {
                         NodeList(
                             nodes = children,
                             selectedIds = selectedIds,
@@ -212,7 +212,7 @@ fun GalleryScreen() {
                                             viewerStart = media.indexOfFirst { it.fsNodeId == id }.coerceAtLeast(0)
                                             viewerItems = media
                                         }
-                                        else -> GalleryCore.selection.toggle(id)
+                                        else -> LibraryCore.selection.toggle(id)
                                     }
                                 }
                             },
@@ -221,7 +221,7 @@ fun GalleryScreen() {
                             // R12; `FOTLAB-UIXDES-000004` Q4).
                             onToggleSelect = { node ->
                                 node.fsNodeId?.let { id ->
-                                    GalleryCore.selection.toggle(id)
+                                    LibraryCore.selection.toggle(id)
                                 }
                             },
                             modifier = Modifier.fillMaxSize(),
@@ -229,15 +229,15 @@ fun GalleryScreen() {
 
                         if (children.isEmpty()) {
                             Text(
-                                text = stringResource(id = R.string.gallery_empty_directory),
+                                text = stringResource(id = R.string.library_empty_directory),
                                 modifier = Modifier.padding(16.dp),
                             )
                         }
                     }
                     // Recycle Bin content is not built yet; the view switches here but stays empty.
-                    GalleryViewMode.RecycleBin -> {
+                    LibraryViewMode.RecycleBin -> {
                         Text(
-                            text = stringResource(id = R.string.gallery_recycle_bin_empty),
+                            text = stringResource(id = R.string.library_recycle_bin_empty),
                             modifier = Modifier.padding(16.dp),
                         )
                     }
@@ -246,7 +246,7 @@ fun GalleryScreen() {
 
             // Full-screen image / video viewer, opened by tapping a media tile.
             if (viewerItems != null) {
-                GalleryViewerDialog(
+                LibraryViewerDialog(
                     items = viewerItems!!,
                     startIndex = viewerStart,
                     onDismiss = { viewerItems = null },
@@ -258,13 +258,13 @@ fun GalleryScreen() {
     if (deleteConfirmation) {
         AlertDialog(
             onDismissRequest = { deleteConfirmation = false },
-            title = { Text(text = stringResource(id = R.string.gallery_delete_title)) },
-            text = { Text(text = stringResource(id = R.string.gallery_delete_message)) },
+            title = { Text(text = stringResource(id = R.string.library_delete_title)) },
+            text = { Text(text = stringResource(id = R.string.library_delete_message)) },
             confirmButton = {
                 TextButton(
                     onClick = {
                         deleteConfirmation = false
-                        scope.launch { GalleryCore.deleteSelected() }
+                        scope.launch { LibraryCore.deleteSelected() }
                     },
                 ) {
                     Text(text = stringResource(id = R.string.common_action_delete))
@@ -279,12 +279,12 @@ fun GalleryScreen() {
     }
 
     if (renameTarget != null) {
-        GalleryRenameDialog(
+        LibraryRenameDialog(
             initialName = renameTarget!!.nameDisplay,
             onDismiss = { renameTarget = null },
             onConfirm = { newName ->
                 scope.launch {
-                    renameTarget!!.fsNodeId?.let { GalleryCore.renameNode(it, newName) }
+                    renameTarget!!.fsNodeId?.let { LibraryCore.renameNode(it, newName) }
                     renameTarget = null
                 }
             },
@@ -293,7 +293,7 @@ fun GalleryScreen() {
 }
 
 /**
- * The gallery drawer sheet: the Material3 [DrawerSheet] at 80% of the module width
+ * The library drawer sheet: the Material3 [DrawerSheet] at 80% of the module width
  * (`FOTLAB-UIXDES-000002` R3), holding module-private content only (R5).
  *
  * [DrawerSheet] supplies the M3 container treatment — surface colour, the rounded trailing
@@ -308,9 +308,9 @@ fun GalleryScreen() {
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun GalleryDrawer(
-    viewMode: GalleryViewMode,
-    onSelectView: (GalleryViewMode) -> Unit,
+private fun LibraryDrawer(
+    viewMode: LibraryViewMode,
+    onSelectView: (LibraryViewMode) -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -333,22 +333,22 @@ private fun GalleryDrawer(
         // Row 2: Recycle Bin — shows removed nodes (content not built yet, left empty).
         DrawerNavItem(
             icon = Icons.Filled.Delete,
-            label = stringResource(id = R.string.gallery_recycle_bin),
-            contentDescription = stringResource(id = R.string.gallery_cd_recycle_bin),
-            selected = viewMode == GalleryViewMode.RecycleBin,
+            label = stringResource(id = R.string.library_recycle_bin),
+            contentDescription = stringResource(id = R.string.library_cd_recycle_bin),
+            selected = viewMode == LibraryViewMode.RecycleBin,
             onClick = {
-                onSelectView(GalleryViewMode.RecycleBin)
+                onSelectView(LibraryViewMode.RecycleBin)
                 onClose()
             },
         )
-        // Row 3: Library (Source Library) — the gallery feature built so far.
+        // Row 3: Library (Source Library) — the library feature built so far.
         DrawerNavItem(
             icon = Icons.Filled.Source,
-            label = stringResource(id = R.string.gallery_library),
-            contentDescription = stringResource(id = R.string.gallery_cd_library),
-            selected = viewMode == GalleryViewMode.Library,
+            label = stringResource(id = R.string.library_library),
+            contentDescription = stringResource(id = R.string.library_cd_library),
+            selected = viewMode == LibraryViewMode.Library,
             onClick = {
-                onSelectView(GalleryViewMode.Library)
+                onSelectView(LibraryViewMode.Library)
                 onClose()
             },
         )
@@ -394,7 +394,7 @@ private fun DrawerNavItem(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun GalleryTopBar(
+private fun LibraryTopBar(
     directoryName: String,
     selectionSize: Int,
     candidateIds: List<Long>,
@@ -410,7 +410,7 @@ private fun GalleryTopBar(
     modifier: Modifier = Modifier,
 ) {
     var overflowOpen by remember { mutableStateOf(false) }
-    val selection = GalleryCore.selection
+    val selection = LibraryCore.selection
 
     TopAppBar(
         modifier = modifier,
@@ -444,13 +444,13 @@ private fun GalleryTopBar(
                     IconButton(onClick = onCycleLayout) {
                         Icon(
                             imageVector = Icons.Filled.GridView,
-                            contentDescription = stringResource(id = R.string.gallery_cd_layout_mode),
+                            contentDescription = stringResource(id = R.string.library_cd_layout_mode),
                         )
                     }
                     IconButton(onClick = onRefresh) {
                         Icon(
                             imageVector = Icons.Filled.Sync,
-                            contentDescription = stringResource(id = R.string.gallery_cd_sync),
+                            contentDescription = stringResource(id = R.string.library_cd_sync),
                         )
                     }
                 }
@@ -459,14 +459,14 @@ private fun GalleryTopBar(
                     IconButton(onClick = onCancelSelection) {
                         Icon(
                             imageVector = Icons.Filled.Close,
-                            contentDescription = stringResource(id = R.string.gallery_cd_clear_selection),
+                            contentDescription = stringResource(id = R.string.library_cd_clear_selection),
                         )
                     }
                     if (selectionSize == 1) {
                         IconButton(onClick = onRename) {
                             Icon(
                                 imageVector = Icons.Filled.Edit,
-                                contentDescription = stringResource(id = R.string.gallery_cd_rename),
+                                contentDescription = stringResource(id = R.string.library_cd_rename),
                             )
                         }
                     } else {
@@ -565,7 +565,7 @@ private fun GalleryTopBar(
 private fun NodeList(
     nodes: List<FsNodeObject>,
     selectedIds: Set<Long>,
-    layoutMode: GalleryLayoutMode,
+    layoutMode: LibraryLayoutMode,
     onNodeClick: (FsNodeObject) -> Unit,
     onToggleSelect: (FsNodeObject) -> Unit,
     modifier: Modifier = Modifier,
@@ -580,7 +580,7 @@ private fun NodeList(
         )
     }
     when (layoutMode) {
-        GalleryLayoutMode.DetailList -> LazyColumn(modifier = modifier) {
+        LibraryLayoutMode.DetailList -> LazyColumn(modifier = modifier) {
             items(nodes, key = { it.fsNodeId ?: it.nameDisplay }) { cell(it) }
         }
         else -> LazyVerticalGrid(

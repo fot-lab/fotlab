@@ -5,7 +5,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.ui.graphics.vector.ImageVector
 import io.github.fotlab.fotlab.R
-import io.github.fotlab.fotlab.navigation.gallery.GalleryDestination
+import io.github.fotlab.fotlab.navigation.library.LibraryDestination
 
 /**
  * The set of destinations shown in the only persistent UI element of the app
@@ -20,15 +20,15 @@ enum class TopLevelDestination(
     @param:StringRes val label: Int,
     val icon: ImageVector,
 ) {
-    GALLERY(
-        route = GalleryDestination.ROUTE,
-        label = R.string.app_nav_gallery_label,
+    LIBRARY(
+        route = LibraryDestination.ROUTE,
+        label = R.string.app_nav_library_label,
         icon = Icons.Filled.PhotoLibrary,
     ),
     ;
 
     companion object {
-        val START: TopLevelDestination = GALLERY
+        val START: TopLevelDestination = LIBRARY
 
         fun fromRoute(route: String?): TopLevelDestination? =
             entries.firstOrNull { it.route == route }

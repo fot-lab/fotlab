@@ -1,4 +1,4 @@
-package io.github.fotlab.fotlab.feature.gallery
+package io.github.fotlab.fotlab.feature.library
 
 import androidx.room.Database
 import androidx.room.RoomDatabase
@@ -6,7 +6,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 /**
- * The gallery feature's own Room database (`FOTLAB-DATABS-000001` R3), realising the
+ * The library feature's own Room database (`FOTLAB-DATABS-000001` R3), realising the
  * `fs_node` schema of `FOTLAB-DATABS-000002` — the two live tables, now carrying a
  * `time_deleted` column so deletion is a soft stamp instead of an archive into separate
  * recycle tables (R10, revised).
@@ -23,7 +23,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
     version = 3,
     exportSchema = false,
 )
-abstract class GalleryDatabase : RoomDatabase() {
+abstract class LibraryDatabase : RoomDatabase() {
     abstract fun nodeObjectDao(): FsNodeObjectDao
     abstract fun nodeRelationDao(): FsNodeRelationDao
 

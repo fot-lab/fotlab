@@ -5,11 +5,11 @@
 - Priority: P1
 - Created: 2026-09-08
 - Owner: —
-- Related: `FOTLAB-STRUCT-000001` (feature package `gallery` owns the destination), `FOTLAB-DATABS-000001` (Room persistence, data ownership, large objects stay on disk), `FOTLAB-UIXDES-000001` / `FOTLAB-UIXDES-000002` (gallery owns its screen, top bar and drawer)
+- Related: `FOTLAB-STRUCT-000001` (feature package `library` owns the destination), `FOTLAB-DATABS-000001` (Room persistence, data ownership, large objects stay on disk), `FOTLAB-UIXDES-000001` / `FOTLAB-UIXDES-000002` (library owns its screen, top bar and drawer)
 
 ## Background & Goal
 
-The Library (图库 / gallery) destination is the app's first feature module and its current start
+The Library (图库 / library) destination is the app's first feature module and its current start
 destination. FotLab deals with file input and output — original media brought in for editing and
 files produced or exported from it. The naive approach would copy every file into an app-owned
 store so the app can organise it. That is expensive, duplicates storage and breaks the user's
@@ -129,7 +129,7 @@ Because structure lives only in relation rows, common operations stay local and 
 - C4 — Data ownership follows the feature boundary: entities, DAOs and the database for this model
   are owned by one place and reached by other features only through its exported repository
   interface (`FOTLAB-DATABS-000001` R2/R3, `FOTLAB-STRUCT-000001` C3). Where that owner lives — in
-  the `gallery` feature or in the shared `data` package, given the model is reused for input and
+  the `library` feature or in the shared `data` package, given the model is reused for input and
   output — is recorded in Open Questions and settled before implementation.
 - C5 — No code is written from this document: it records the design and leaves schema names,
   entities, DAOs and migrations to the subsequent implementation items.
@@ -155,7 +155,7 @@ Because structure lives only in relation rows, common operations stay local and 
 
 ## Impacted Modules
 
-- `ui/gallery/` — the Library screen renders the virtual tree (`FOTLAB-UIXDES-000001`/`000002`)
+- `ui/library/` — the Library screen renders the virtual tree (`FOTLAB-UIXDES-000001`/`000002`)
 - The feature (or shared) package that owns this model's persistence and repository — location TBD
   (C4, Open Questions)
 - `data/` — shared Room infrastructure, converters and migration helpers (`FOTLAB-DATABS-000001`)
@@ -183,7 +183,7 @@ Because structure lives only in relation rows, common operations stay local and 
   unique-constrained) so the same physical file maps to one row shared by many collections? **TBD.**
 - Q7 — Is a denormalised convenience (cached path or breadcrumb) added later for faster ancestry
   reads? Deferred by R8; must not be introduced at design time. **TBD.**
-- Q8 — Where does this model's persistence and repository owner live: inside the `gallery` feature
+- Q8 — Where does this model's persistence and repository owner live: inside the `library` feature
   package, or in the shared `data` package given input and output features will reuse it (C4)?
   **TBD.**
 - Q9 — Do collections map onto any platform media notion (for example a MediaStore album) at
@@ -194,7 +194,7 @@ Because structure lives only in relation rows, common operations stay local and 
 
 ## Change History
 
-- 2026-09-08 — Initial draft. Decided the Library (图库/gallery) module's foundation: files remain
+- 2026-09-08 — Initial draft. Decided the Library (图库/library) module's foundation: files remain
   in place and are referenced, never moved or copied, for organisation; a two-table logical model
   (a node table for what nodes are, a relation table for who sits under whom) delivers nested
   collections and many-to-many membership by adding relation rows; one root collection anchors the

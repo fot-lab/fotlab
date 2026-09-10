@@ -1,18 +1,18 @@
-package io.github.fotlab.fotlab.feature.gallery
+package io.github.fotlab.fotlab.feature.library
 
 import androidx.room.withTransaction
 import kotlinx.coroutines.flow.Flow
 
 /**
- * Lower-layer access for the gallery's virtual file tree, owned by the feature
+ * Lower-layer access for the library's virtual file tree, owned by the feature
  * (`FOTLAB-DATABS-000001` R3, `FOTLAB-STRUCT-000001`). UI reaches it through
- * [GalleryCore]; it never depends on `ui` or `navigation`.
+ * [LibraryCore]; it never depends on `ui` or `navigation`.
  *
  * Reads return [Flow] so the UI reacts to changes; writes are `suspend` and run
  * inside a transaction where they touch more than one table (`FOTLAB-DATABS-000001`
  * R4).
  */
-class GalleryRepository(private val database: GalleryDatabase) {
+class LibraryRepository(private val database: LibraryDatabase) {
 
     fun childrenOf(parentId: Long): Flow<List<FsNodeObject>> =
         database.nodeRelationDao().childrenOf(parentId)

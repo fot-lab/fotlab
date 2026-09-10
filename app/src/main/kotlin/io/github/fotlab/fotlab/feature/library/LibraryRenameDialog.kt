@@ -1,4 +1,4 @@
-package io.github.fotlab.fotlab.feature.gallery
+package io.github.fotlab.fotlab.feature.library
 
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -20,7 +20,7 @@ import io.github.fotlab.fotlab.R
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun GalleryRenameDialog(
+fun LibraryRenameDialog(
     initialName: String,
     onDismiss: () -> Unit,
     onConfirm: (String) -> Unit,
@@ -29,16 +29,16 @@ fun GalleryRenameDialog(
     val trimmed = name.trim()
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(text = stringResource(id = R.string.gallery_rename_title)) },
+        title = { Text(text = stringResource(id = R.string.library_rename_title)) },
         text = {
             OutlinedTextField(
                 value = name,
                 onValueChange = { name = it },
-                label = { Text(text = stringResource(id = R.string.gallery_rename_label)) },
+                label = { Text(text = stringResource(id = R.string.library_rename_label)) },
                 singleLine = true,
                 isError = trimmed.isEmpty(),
                 supportingText = if (trimmed.isEmpty()) {
-                    { Text(text = stringResource(id = R.string.gallery_rename_empty)) }
+                    { Text(text = stringResource(id = R.string.library_rename_empty)) }
                 } else null,
             )
         },
@@ -47,7 +47,7 @@ fun GalleryRenameDialog(
                 enabled = trimmed.isNotEmpty(),
                 onClick = { onConfirm(trimmed) },
             ) {
-                Text(text = stringResource(id = R.string.gallery_rename_confirm))
+                Text(text = stringResource(id = R.string.library_rename_confirm))
             }
         },
         dismissButton = {
