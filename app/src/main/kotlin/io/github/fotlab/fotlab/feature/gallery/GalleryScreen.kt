@@ -32,7 +32,6 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material.icons.filled.SelectAll
-import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DrawerSheet
@@ -137,7 +136,6 @@ fun GalleryScreen() {
                     ?: stringResource(id = GalleryCore.titleRes),
                 selectionSize = selectedIds.size,
                 candidateIds = children.mapNotNull { it.fsNodeId },
-                layoutMode = layoutMode,
                 onCycleLayout = { scope.launch { GalleryCore.cycleLayoutMode() } },
                 onRefresh = { scope.launch { GalleryCore.refresh() } },
                 onOpenDrawer = { scope.launch { drawerState.open() } },
@@ -264,7 +262,6 @@ private fun GalleryTopBar(
     directoryName: String,
     selectionSize: Int,
     candidateIds: List<Long>,
-    layoutMode: GalleryLayoutMode,
     onCycleLayout: () -> Unit,
     onRefresh: () -> Unit,
     onOpenDrawer: () -> Unit,
@@ -294,7 +291,8 @@ private fun GalleryTopBar(
             )
         },
         navigationIcon = {
-            // Drawer icon, then the layout toggle (grid / 田字) and the refresh icon (R9/R10).
+            // Drawer icon, then the layout-toggle (grid) icon and the refresh icon (R9/R10).
+            // The layout icon stays a fixed grid glyph and just cycles the content layout.
             Row {
                 IconButton(onClick = onOpenDrawer) {
                     Icon(
@@ -304,7 +302,7 @@ private fun GalleryTopBar(
                 }
                 IconButton(onClick = onCycleLayout) {
                     Icon(
-                        imageVector = if (layoutMode.isGrid) Icons.Filled.GridView else Icons.Filled.ViewList,
+                        imageVector = Icons.Filled.GridView,
                         contentDescription = stringResource(id = R.string.gallery_cd_layout_mode),
                     )
                 }
