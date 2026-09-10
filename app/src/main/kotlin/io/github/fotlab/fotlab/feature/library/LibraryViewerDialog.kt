@@ -62,7 +62,6 @@ import coil3.request.ImageRequest
 import io.github.fotlab.fotlab.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlin.math.atan2
 import kotlin.math.roundToInt
 
 /**
@@ -70,7 +69,7 @@ import kotlin.math.roundToInt
  *
  * Behaviour follows the request: a single tap opens the dialog on the tapped item; the dialog
  * shows the media large with a detail panel (EXIF for images, video metadata for clips) at the
- * bottom; a two-finger pinch zooms and rotates the image; a single-finger horizontal swipe moves
+ * bottom; a two-finger pinch zooms the image; a single-finger horizontal swipe moves
  * to the previous / next item, mixing images and videos together in the folder's current sort
  * order (`FsNodeRelationDao` orders children by `time_created`); and the top-left X closes it.
  *
@@ -94,7 +93,7 @@ fun LibraryViewerDialog(
         pageCount = { items.size },
     )
     var showDetails by remember { mutableStateOf(true) }
-    // While the image is zoomed / rotated, single-finger gestures pan it instead of paging.
+    // While the image is zoomed, single-finger gestures pan it instead of paging.
     var transformed by remember { mutableStateOf(false) }
 
     Dialog(
@@ -190,10 +189,10 @@ fun LibraryViewerDialog(
 
 /**
  * Image page: decoded at full size by Coil and scaled to fit, with two-finger pinch zoom and
- * rotate and one-finger pan. [onTransformChanged] lets the pager disable horizontal paging while
- * the image is zoomed / rotated, so a single-finger horizontal swipe still switches items when
- * the image sits at its default size ([zoomRotatePan] only consumes the gesture once a second
- * finger is down or the image is already transformed).
+ * one-finger pan. [onTransformChanged] lets the pager disable horizontal paging while the image
+ * is zoomed, so a single-finger horizontal swipe still switches items when the image sits at its
+ * default size ([zoomPan] only consumes the gesture once a second finger is down or the image is
+ * already transformed).
  */
 @Composable
 private fun ViewerImage(
@@ -203,11 +202,10 @@ private fun ViewerImage(
 ) {
     val context = LocalContext.current
     var scale by remember(uri) { mutableFloatStateOf(1f) }
-    var rotation by remember(uri) { mutableFloatStateOf(0f) }
     var offset by remember(uri) { mutableStateOf(Offset.Zero) }
 
-    LaunchedEffect(scale, rotation) {
-        onTransformChanged(scale != 1f || rotation != 0f)
+    LaunchedEffect(scale) {
+        onTransformChanged(scale != 1f)
     }
 
     AsyncImage(
@@ -217,16 +215,13 @@ private fun ViewerImage(
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
-                rotationZ = rotation
                 translationX = offset.x
                 translationY = offset.y
             }
-            .zoomRotatePan(
+            .zoomPan(
                 getScale = { scale },
-                getRotation = { rotation },
                 getOffset = { offset },
                 setScale = { scale = it },
-                setRotation = { rotation = it },
                 setOffset = { offset = it },
             ),
         contentScale = androidx.compose.ui.layout.ContentScale.Fit,
@@ -234,25 +229,21 @@ private fun ViewerImage(
 }
 
 /**
- * Custom pinch-zoom / rotate / pan detector that coexists with the pager's horizontal swipe:
- * a gesture is only consumed (and applied) once a second finger is down or the image is already
- * zoomed / rotated. A single-finger drag at the default size is left untouched so the pager can
- * page to the next item. Zoom is clamped to [1f, 5f]; returning to scale 1 also resets rotation
- * and pan so the image snaps back to its fit.
+ * Custom pinch-zoom / pan detector that coexists with the pager's horizontal swipe: a gesture is
+ * only consumed (and applied) once a second finger is down or the image is already zoomed. A
+ * single-finger drag at the default size is left untouched so the pager can page to the next item.
+ * Zoom is clamped to [1f, 5f]; returning to scale 1 also resets the pan so the image snaps back to
+ * its fit.
  */
-private fun Modifier.zoomRotatePan(
+private fun Modifier.zoomPan(
     getScale: () -> Float,
-    getRotation: () -> Float,
     getOffset: () -> Offset,
     setScale: (Float) -> Unit,
-    setRotation: (Float) -> Unit,
     setOffset: (Offset) -> Unit,
 ): Modifier = pointerInput(Unit) {
     awaitEachGesture {
         val startScale = getScale()
-        val startRot = getRotation()
         var prevSpacing = 0f
-        var prevAngleDeg = 0f
         var prevCentroid: Offset? = null
         do {
             val event = awaitPointerEvent()
@@ -265,42 +256,31 @@ private fun Modifier.zoomRotatePan(
                 changes.fold(Offset.Zero) { acc, c -> acc + c.position } / n.toFloat()
             }
             val spacing = if (n >= 2) (changes[0].position - changes[1].position).getDistance() else 0f
-            val angleDeg = if (n >= 2) angleDeg(changes[0].position, changes[1].position) else prevAngleDeg
 
             // Consume only when this is a real transform (pinch, or pan while already zoomed).
-            val consume = startScale != 1f || startRot != 0f || n >= 2
+            val consume = startScale != 1f || n >= 2
             if (consume && prevCentroid != null) {
                 val s = getScale()
-                val r = getRotation()
                 val o = getOffset()
                 val zoom = if (prevSpacing > 0f && n >= 2) spacing / prevSpacing else 1f
-                val rotDelta = angleDeg - prevAngleDeg
                 val pan = centroid - prevCentroid
 
                 var newScale = (s * zoom).coerceIn(1f, 5f)
-                var newRot = r + rotDelta
                 var newOffset = o + pan
                 if (newScale <= 1.0001f) {
                     newScale = 1f
-                    newRot = 0f
                     newOffset = Offset.Zero
                 }
                 setScale(newScale)
-                setRotation(newRot)
                 setOffset(newOffset)
                 changes.forEach { it.consume() }
             }
 
             prevSpacing = spacing
-            prevAngleDeg = angleDeg
             prevCentroid = centroid
         } while (event.changes.any { it.pressed })
     }
 }
-
-/** Angle, in degrees, of the vector from [a] to [b]. */
-private fun angleDeg(a: Offset, b: Offset): Float =
-    Math.toDegrees(atan2((b.y - a.y).toDouble(), (b.x - a.x).toDouble())).toFloat()
 
 /**
  * Video page: a framework [android.widget.VideoView] with a [android.widget.MediaController] for
