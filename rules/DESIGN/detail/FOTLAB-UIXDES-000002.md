@@ -36,6 +36,7 @@ modules stay consistent while remaining autonomous:
 - It carries a non-null `contentDescription` for accessibility.
 - Activating it opens the navigation drawer of the current module.
 - No other element may be placed to its left, and the icon is always present — it is never conditionally hidden.
+- **Exception — selection mode.** While the module is in selection mode, the leftmost element is the close (X) icon that leaves that mode, and the three-line icon is not shown (`FOTLAB-UIXDES-000006` R3). The slot itself is never empty: this is the only state in which the icon is replaced, and the three-line icon returns the moment selection mode ends.
 
 ### R3 — Drawer width and placement
 
@@ -75,7 +76,7 @@ modules stay consistent while remaining autonomous:
 - C1 — Each feature implements its own top app bar. Neither the shell nor the `ui/theme` package ships a shared top app bar (or drawer) component, and a feature must not depend on one to achieve consistency: uniformity is guaranteed by the behaviour contract R2–R5 and verified by AC1–AC9, not by shared code. Features may still share primitives (icons, dimensions, content descriptions).
 - C2 — The top app bar is never lifted into the shell. Making it persistent would violate `FOTLAB-UIXDES-000001` R2.
 - C3 — The drawer is never a second bottom bar, and never overlaps the bottom navigation region.
-- C4 — Both end icons are always present; conditional hiding is not allowed (see Q2 for the empty-menu case).
+- C4 — Both end icons are always present; conditional hiding is not allowed (see Q2 for the empty-menu case). The one exception is selection mode, where the left end carries the close (X) that leaves the mode instead of the three-line icon (`FOTLAB-UIXDES-000006` R3/C2).
 - C5 — First-party APIs only, per `FOTLAB-UIXDES-000001` R1.
 - C6 — A module drawer carries module content only; shared application entries are not distributed across module drawers.
 - C7 — With the drawer expanded, the bottom navigation region remains visible **and** interactive. Tapping it always wins over the drawer: the destination switches and the drawer is discarded without confirmation.
@@ -115,3 +116,4 @@ Resolved and retired on 2026-09-07: Q1 (drawer content is module-private — now
 - 2026-09-07 — Decisions recorded: the drawer content is **module-private** (no app-level entries such as settings, about or licence — added to R5 as a bold clause, plus new constraint C6), and the bottom navigation region stays **interactive** while the drawer is expanded, with a tap switching destination and discarding the drawer (new clause in R5, new constraint C7, new acceptance criterion AC9). Q1 and Q4 retired from Open Questions.
 - 2026-09-07 — `:core:ui` no longer exists after the single-module move (`FOTLAB-STRUCT-000001`): C1 and the Impacted Modules list now name the `ui/theme` package, which ships theme and shared primitives only — no top app bar, no drawer component. Behaviour contract R2–R5 and verification AC1–AC9 are unchanged.
 - 2026-09-10 — R3 rewritten: the drawer is the **native Material3 `ModalNavigationDrawer`** wrapped around the module's whole region, so it slides over the top bar the way the platform does; it still never leaves the module region, so the bottom navigation region stays uncovered and interactive. R3 now also states that the top bar and the content region are sibling regions and that a module does not stack its own `Scaffold` on the shell's. Added R6 and AC10: the expanded drawer owns the close affordance — an X button in its own top-left corner, aligned with the top bar's three-line icon, so the icon the user pressed is replaced in place. AC1–AC9 needed no change: the bottom bar's visibility and interactivity were never at stake, and the 80% width (AC2/AC8) is kept by the custom `Surface` already permitted by R3.
+- 2026-09-10 — R2 and C4 gained their single exception: while a module is in **selection mode** (`FOTLAB-UIXDES-000006` R3), the leftmost element is the close (X) that leaves the mode, not the three-line drawer icon. The slot is never empty and the three-line icon returns as soon as the mode ends, so the "always present, never conditionally hidden" rule is narrowed to one documented state instead of being silently broken.
