@@ -44,7 +44,6 @@ import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DrawerValue
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.DrawerSheet
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -278,50 +277,6 @@ fun GalleryScreen() {
             },
         )
     }
-}
-
-/**
- * Rename dialog for the single-selection edit action (`FOTLAB-UIXDES-000004`): prefilled with
- * the node's current name, and confirms only when the trimmed name is non-empty.
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun GalleryRenameDialog(
-    initialName: String,
-    onDismiss: () -> Unit,
-    onConfirm: (String) -> Unit,
-) {
-    var name by remember { mutableStateOf(initialName) }
-    val trimmed = name.trim()
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(text = stringResource(id = R.string.gallery_rename_title)) },
-        text = {
-            OutlinedTextField(
-                value = name,
-                onValueChange = { name = it },
-                label = { Text(text = stringResource(id = R.string.gallery_rename_label)) },
-                singleLine = true,
-                isError = trimmed.isEmpty(),
-                supportingText = if (trimmed.isEmpty()) {
-                    { Text(text = stringResource(id = R.string.gallery_rename_empty)) }
-                } else null,
-            )
-        },
-        confirmButton = {
-            TextButton(
-                enabled = trimmed.isNotEmpty(),
-                onClick = { onConfirm(trimmed) },
-            ) {
-                Text(text = stringResource(id = R.string.gallery_rename_confirm))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(text = stringResource(id = R.string.common_action_cancel))
-            }
-        },
-    )
 }
 
 /**
