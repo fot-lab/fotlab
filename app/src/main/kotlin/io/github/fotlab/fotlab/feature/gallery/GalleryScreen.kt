@@ -24,14 +24,14 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Deselect
-import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FlipToBack
 import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.IosShare
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material.icons.filled.SelectAll
-import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DrawerValue
@@ -318,9 +318,9 @@ private fun GalleryTopBar(
             if (selectionSize == 0) {
                 IconButton(onClick = onImport) {
                     Icon(
-                        // Import: the arrow pointing down into the tray — data enters the app
-                        // (`FOTLAB-UIXDES-000005` R2).
-                        imageVector = Icons.Filled.Download,
+                        // Import: the arrow coming from outside down into the tray — data enters
+                        // the app (`FOTLAB-UIXDES-000005` R2).
+                        imageVector = Icons.Filled.SaveAlt,
                         contentDescription = stringResource(id = R.string.gallery_cd_import),
                     )
                 }
@@ -333,9 +333,9 @@ private fun GalleryTopBar(
             } else {
                 IconButton(onClick = onExport) {
                     Icon(
-                        // Export: the arrow pointing up out of the tray — data leaves the app
+                        // Export: the arrow rising out of the box — data leaves the app
                         // (`FOTLAB-UIXDES-000005` R2).
-                        imageVector = Icons.Filled.Upload,
+                        imageVector = Icons.Filled.IosShare,
                         contentDescription = stringResource(id = R.string.gallery_cd_export),
                     )
                 }

@@ -136,8 +136,12 @@ The Gallery top bar is laid out as follows, and this order never changes:
 
   | Slot | Empty selection | Non-empty selection |
   | --- | --- | --- |
-  | A | `Icons.Default.Download` (import) | `Icons.Default.Upload` (export) |
+  | A | `Icons.Default.SaveAlt` (import, 入盘) | `Icons.Default.IosShare` (export, 出盘) |
   | B | `Icons.Default.Add` (new collection) | `Icons.Default.Delete` (delete) |
+
+- The two slot-A icons were verified on a device and are recorded with their Chinese and English
+  names in `FOTLAB-UIXDES-000005` R2: `Upload` / `Download` are **not** used here, they keep the
+  network upload / download meaning.
 
 ### R5 — The three-dot dropdown: selection operations only
 
@@ -449,5 +453,6 @@ their icons are fixed in R5 and recorded with their Chinese and English names in
   block.
 - 2026-09-10 — The top bar icons are now recorded, code / 中文名称 / 英文名称, in `FOTLAB-UIXDES-000005`; R4 here keeps the meaning of the slots, that item owns which glyph fills them. Import and export are confirmed as `Download` (箭头向下入盘) and `Upload` (箭头向上出盘).
 - 2026-09-10 — The gallery drawer became the **native Material3 `ModalNavigationDrawer`** around the module's whole region, replacing the hand-written scrim and sheet, and the screen no longer nests a `Scaffold` inside the shell's: the top bar and the content region are now two sibling regions laid out by the screen itself. The sheet keeps the 80% width (C1) and carries the close (X) button of `FOTLAB-UIXDES-000002` R6 in its own top-left corner, with the new key `gallery_cd_close_drawer` added to the copy list of R8. The drawer may now cover the top bar — native behaviour — while the bottom navigation region stays outside the module region and untouched.
+- 2026-09-10 — Slot A corrected after checking the glyphs on a device: import is `Icons.Default.SaveAlt` (入盘 — the arrow comes from outside into the tray) and export is `Icons.Default.IosShare` (出盘 — the arrow rises out of the box), replacing `Download` / `Upload`, which render as an arrow next to a plain line in this project's icon set and keep the network download / upload meaning (`FOTLAB-UIXDES-000005` R2/R4).
 - 2026-09-10 — R5 fixed the three selection entries and their icons: **Select all → `Icons.Default.SelectAll`, Invert selection → `Icons.Default.FlipToBack`, Deselect all → `Icons.Default.Deselect`**, always in that order. "Clear selection" became **"Deselect all"** (`gallery_menu_deselect_all`, replacing `gallery_menu_clear`), and `SwapHoriz` / `Clear` are no longer used for these entries; `CheckCircle` / `CheckCircleOutline` stay reserved for a single item's checked state. Q3 (the invert icon) is retired; AC4/AC5 and the copy list of R8 follow the new wording.
 - 2026-09-10 — The interaction around this selection is no longer defined here alone: `FOTLAB-UIXDES-000006` now owns how selection mode is entered (long press), what the top bar shows in it (close (X) at the left, count in the middle), how it is left (close or back) and where the batch actions live. This item keeps what the selection **is** (R2/R3), what the slots mean (R4) and what the overflow menu holds (R5); whether the gallery adopts an explicit mode flag or keeps deriving it from a non-empty selection is `FOTLAB-UIXDES-000006` Q1.
