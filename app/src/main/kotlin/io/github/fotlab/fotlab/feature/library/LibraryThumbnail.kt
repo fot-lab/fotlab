@@ -98,7 +98,7 @@ private fun MediaThumbnail(uri: Uri) {
     }
 }
 
-/** True for image/* and video/* entries, which get a real decoded thumbnail. */
+/** True for image and video MIME types, which get a real decoded thumbnail. */
 internal fun isMedia(mime: String): Boolean = mime.startsWith("image/") || mime.startsWith("video/")
 
 /** Pick the Material icon that represents a MIME type the way a file manager does. */
