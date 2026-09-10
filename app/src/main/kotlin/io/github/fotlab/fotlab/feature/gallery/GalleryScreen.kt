@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.DrawerSheet
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -42,7 +43,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalNavigationDrawer
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -64,9 +64,6 @@ import kotlinx.coroutines.launch
 /** Drawer width: 80% of the module region (`FOTLAB-UIXDES-000002` R3). */
 private const val DrawerWidthFraction = 0.8f
 
-/** Drawer elevation: the Material3 modal drawer sheet elevation, kept explicit here. */
-private val DrawerElevation = 3.dp
-
 /**
  * Gallery screen (UI) — the first independent screen, owned by the `feature/gallery`
  * package alongside its lower layer [GalleryCore] (`FOTLAB-STRUCT-000001`).
@@ -79,8 +76,10 @@ private val DrawerElevation = 3.dp
  * The drawer is the native Material3 [ModalNavigationDrawer] wrapped around both regions: it
  * slides over the top bar the way the platform does (`FOTLAB-UIXDES-000002` R3) and it can
  * never reach the bottom navigation region, which lies outside the module region. Its sheet
- * is a plain [Surface] at 80% of the module width and carries the close button in its own
- * top-left corner (`FOTLAB-UIXDES-000002` R6).
+ * is the Material3 [DrawerSheet] at 80% of the module width, and it carries the close button
+ * in its own top-left corner (`FOTLAB-UIXDES-000002` R6). The open/close is the M3 standard
+ * motion — the sheet slides from the start edge while the scrim fades, both on the standard
+ * easing — which [ModalNavigationDrawer] provides.
  *
  * The top bar follows `FOTLAB-UIXDES-000002` (drawer icon left, overflow right) and fills
  * its leading cluster and two action slots as `FOTLAB-UIXDES-000004` prescribes: a
@@ -216,42 +215,45 @@ fun GalleryScreen() {
 }
 
 /**
- * The gallery drawer sheet: 80% of the module width (`FOTLAB-UIXDES-000002` R3), holding
- * module-private content only (R5).
+ * The gallery drawer sheet: the Material3 [DrawerSheet] at 80% of the module width
+ * (`FOTLAB-UIXDES-000002` R3), holding module-private content only (R5).
+ *
+ * [DrawerSheet] supplies the M3 container treatment — surface colour, the rounded trailing
+ * edge and the tonal elevation — so the sheet reads as a proper M3 modal drawer while it
+ * slides. The slide and the scrim fade follow the M3 standard motion (standard easing,
+ * `FastOutSlowInEasing`), which [ModalNavigationDrawer] provides out of the box.
  *
  * The close button sits in the sheet's own top-left corner, at the position the top bar's
  * three-line icon occupies while the drawer is closed: the affordance the user pressed is
  * replaced in place by its counterpart (`FOTLAB-UIXDES-000002` R6). The padding matches the
  * top bar's leading slot so the two icons land on exactly the same spot.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun GalleryDrawer(
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Surface(
+    DrawerSheet(
         modifier = modifier
             .fillMaxHeight()
             .fillMaxWidth(DrawerWidthFraction),
-        tonalElevation = DrawerElevation,
     ) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            IconButton(
-                onClick = onClose,
-                modifier = Modifier.padding(start = 4.dp, top = 8.dp),
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Close,
-                    contentDescription = stringResource(id = R.string.common_drawer_close),
-                )
-            }
-
-            // Feature-private drawer content (R5): no app-level entries here.
-            Text(
-                text = stringResource(id = R.string.common_drawer_empty),
-                modifier = Modifier.padding(16.dp),
+        IconButton(
+            onClick = onClose,
+            modifier = Modifier.padding(start = 4.dp, top = 8.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Close,
+                contentDescription = stringResource(id = R.string.common_drawer_close),
             )
         }
+
+        // Feature-private drawer content (R5): no app-level entries here.
+        Text(
+            text = stringResource(id = R.string.common_drawer_empty),
+            modifier = Modifier.padding(16.dp),
+        )
     }
 }
 
