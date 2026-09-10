@@ -13,5 +13,7 @@ This file contains **only** the item table. No statistics, no changelog — git 
 | `FOTLAB-STRUCT-000002` | Source hygiene — no build artifacts in source, no circular dependencies | `STRUCT` | Draft | P1 | [detail](rules/STRUCT/detail/FOTLAB-STRUCT-000002.md) |
 | `FOTLAB-STRUCT-000003` | Naming — avoid product-specific tokens in code identifiers; no duplicate components | `STRUCT` | Draft | P1 | [detail](rules/STRUCT/detail/FOTLAB-STRUCT-000003.md) |
 | `DNGLAB-SURVEY-000001` | External module study — dnglab (RAW→DNG converter) structure & capabilities | `STRUCT` | Draft | P2 | [detail](rules/STRUCT/detail/DNGLAB-SURVEY-000001.md) |
+| `DNGLAB-SURVEY-000002` | External module study — dnglab rawler: RAW decode pipeline & unified intermediate data model | `STRUCT` | Draft | P2 | [detail](rules/STRUCT/detail/DNGLAB-SURVEY-000002.md) |
+| `DNGLAB-SURVEY-000003` | External module study — dnglab rawler: camera metadata (`data/cameras`) propagation through decode → encode | `STRUCT` | Draft | P2 | [detail](rules/STRUCT/detail/DNGLAB-SURVEY-000003.md) |
 | `EXIFTL-SURVEY-000001` | Research — external/exiftool module: structure, architecture and capabilities | `STRUCT` | Draft | P2 | [detail](rules/STRUCT/detail/EXIFTL-SURVEY-000001.md) |
 <!-- Next sequence per category: STRUCT 000004. Append one row per new item; never reuse or renumber IDs. -->
