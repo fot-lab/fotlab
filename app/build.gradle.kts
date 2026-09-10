@@ -112,8 +112,11 @@ dependencies {
     implementation(libs.androidx.compose.material.icons.core)
     implementation(libs.androidx.compose.material.icons.extended)
 
-    // Full-size image loading for the library viewer (content:// URIs, automatic downsampling).
+    // Image + video thumbnails and full-size loading for the library (content:// URIs,
+    // automatic downsampling). Coil owns the memory + disk cache, so we never hand-manage one.
+    // coil-video registers VideoFrameDecoder, letting AsyncImage pull a frame for video nodes.
     implementation(libs.coil.compose)
+    implementation(libs.coil.video)
     // EXIF metadata readout for the viewer's detail panel.
     implementation(libs.androidx.exifinterface)
 
