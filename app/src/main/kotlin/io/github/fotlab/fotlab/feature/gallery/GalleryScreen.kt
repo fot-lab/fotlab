@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Deselect
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FlipToBack
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.IosShare
@@ -43,6 +44,7 @@ import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.DrawerSheet
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -123,6 +125,8 @@ fun GalleryScreen() {
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     var currentDirectory by remember { mutableStateOf<FsNodeObject?>(null) }
     var deleteConfirmation by remember { mutableStateOf(false) }
+    // Node awaiting a rename from the single-selection edit action; null = dialog closed.
+    var renameTarget by remember { mutableStateOf<FsNodeObject?>(null) }
     // Media list + start index for the full-screen viewer, captured from the folder's current
     // sort order the moment a tile is tapped (FOTLAB-IMGMGR viewer).
     var viewerItems by remember { mutableStateOf<List<FsNodeObject>?>(null) }
@@ -175,6 +179,13 @@ fun GalleryScreen() {
                             name = newCollectionName,
                         )
                     }
+                },
+                onCancelSelection = { GalleryCore.selection.clear() },
+                onRename = {
+                    // Exactly one node is selected (the edit icon only shows then): open its
+                    // rename dialog with the current name prefilled.
+                    val id = selectedIds.singleOrNull()
+                    renameTarget = children.firstOrNull { it.fsNodeId == id }
                 },
                 // Export shape is undecided (`FOTLAB-UIXDES-000004` Q6): the slot is
                 // present as required by R4, the behaviour is added when Q6 is settled.
@@ -254,6 +265,63 @@ fun GalleryScreen() {
             },
         )
     }
+
+    if (renameTarget != null) {
+        GalleryRenameDialog(
+            initialName = renameTarget!!.nameDisplay,
+            onDismiss = { renameTarget = null },
+            onConfirm = { newName ->
+                scope.launch {
+                    renameTarget!!.fsNodeId?.let { GalleryCore.renameNode(it, newName) }
+                    renameTarget = null
+                }
+            },
+        )
+    }
+}
+
+/**
+ * Rename dialog for the single-selection edit action (`FOTLAB-UIXDES-000004`): prefilled with
+ * the node's current name, and confirms only when the trimmed name is non-empty.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun GalleryRenameDialog(
+    initialName: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    var name by remember { mutableStateOf(initialName) }
+    val trimmed = name.trim()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(text = stringResource(id = R.string.gallery_rename_title)) },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = { Text(text = stringResource(id = R.string.gallery_rename_label)) },
+                singleLine = true,
+                isError = trimmed.isEmpty(),
+                supportingText = if (trimmed.isEmpty()) {
+                    { Text(text = stringResource(id = R.string.gallery_rename_empty)) }
+                } else null,
+            )
+        },
+        confirmButton = {
+            TextButton(
+                enabled = trimmed.isNotEmpty(),
+                onClick = { onConfirm(trimmed) },
+            ) {
+                Text(text = stringResource(id = R.string.gallery_rename_confirm))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(text = stringResource(id = R.string.common_action_cancel))
+            }
+        },
+    )
 }
 
 /**
@@ -312,6 +380,8 @@ private fun GalleryTopBar(
     onCreateCollection: () -> Unit,
     onExport: () -> Unit,
     onDelete: () -> Unit,
+    onCancelSelection: () -> Unit,
+    onRename: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var overflowOpen by remember { mutableStateOf(false) }
@@ -334,26 +404,53 @@ private fun GalleryTopBar(
             )
         },
         navigationIcon = {
-            // Drawer icon, then the layout-toggle (grid) icon and the refresh icon (R9/R10).
-            // The layout icon stays a fixed grid glyph and just cycles the content layout.
-            Row {
-                IconButton(onClick = onOpenDrawer) {
-                    Icon(
-                        imageVector = Icons.Filled.Menu,
-                        contentDescription = stringResource(id = R.string.common_drawer_open),
-                    )
+            // Leading cluster swaps on selection (`FOTLAB-UIXDES-000004`): with nothing selected
+            // it is drawer + grid + sync; once anything is selected the drawer becomes a Close
+            // (clear selection) and the grid slot becomes a rename pencil (single) or the plain
+            // count (multiple) — sync is hidden while selecting.
+            if (selectionSize == 0) {
+                Row {
+                    IconButton(onClick = onOpenDrawer) {
+                        Icon(
+                            imageVector = Icons.Filled.Menu,
+                            contentDescription = stringResource(id = R.string.common_drawer_open),
+                        )
+                    }
+                    IconButton(onClick = onCycleLayout) {
+                        Icon(
+                            imageVector = Icons.Filled.GridView,
+                            contentDescription = stringResource(id = R.string.gallery_cd_layout_mode),
+                        )
+                    }
+                    IconButton(onClick = onRefresh) {
+                        Icon(
+                            imageVector = Icons.Filled.Sync,
+                            contentDescription = stringResource(id = R.string.gallery_cd_sync),
+                        )
+                    }
                 }
-                IconButton(onClick = onCycleLayout) {
-                    Icon(
-                        imageVector = Icons.Filled.GridView,
-                        contentDescription = stringResource(id = R.string.gallery_cd_layout_mode),
-                    )
-                }
-                IconButton(onClick = onRefresh) {
-                    Icon(
-                        imageVector = Icons.Filled.Sync,
-                        contentDescription = stringResource(id = R.string.gallery_cd_sync),
-                    )
+            } else {
+                Row {
+                    IconButton(onClick = onCancelSelection) {
+                        Icon(
+                            imageVector = Icons.Filled.Close,
+                            contentDescription = stringResource(id = R.string.gallery_cd_clear_selection),
+                        )
+                    }
+                    if (selectionSize == 1) {
+                        IconButton(onClick = onRename) {
+                            Icon(
+                                imageVector = Icons.Filled.Edit,
+                                contentDescription = stringResource(id = R.string.gallery_cd_rename),
+                            )
+                        }
+                    } else {
+                        Text(
+                            text = selectionSize.toString(),
+                            style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                        )
+                    }
                 }
             }
         },

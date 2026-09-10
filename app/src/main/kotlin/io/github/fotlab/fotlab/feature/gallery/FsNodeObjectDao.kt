@@ -26,6 +26,10 @@ interface FsNodeObjectDao {
     @Query("SELECT * FROM fs_node_object WHERE uri_storage = :uri")
     suspend fun getByUri(uri: String): FsNodeObject?
 
+    /** Rename a node in place (R-name only); selection rename path (`FOTLAB-UIXDES-000004`). */
+    @Query("UPDATE fs_node_object SET name_display = :name WHERE fs_node_id = :id")
+    suspend fun rename(id: Long, name: String)
+
     @Query("SELECT * FROM fs_node_object WHERE type_mime = 'application/folder' ORDER BY name_display")
     fun observeCollections(): Flow<List<FsNodeObject>>
 

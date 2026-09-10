@@ -117,6 +117,12 @@ object GalleryCore {
 
     suspend fun getByUri(uri: String): FsNodeObject? = repo().getByUri(uri)
 
+    /**
+     * Rename a node by id (display name only). Driven by the single-selection edit action in
+     * the top bar (`FOTLAB-UIXDES-000004`); the physical file is never touched.
+     */
+    suspend fun renameNode(id: Long, name: String) = repo().renameNode(id, name)
+
     /** Cycle to the next display mode and persist it (`FOTLAB-UIXDES-000004` R9). */
     suspend fun cycleLayoutMode() {
         val next = GalleryLayoutMode.cycle(layoutModeState.value)

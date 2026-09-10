@@ -45,6 +45,13 @@
 
     <string name="gallery_cd_layout_mode">Switch display mode</string>
     <string name="gallery_cd_sync">Sync library</string>
+    <string name="gallery_cd_clear_selection">Clear selection</string>
+    <string name="gallery_cd_rename">Rename</string>
+
+    <string name="gallery_rename_title">Rename</string>
+    <string name="gallery_rename_label">Name</string>
+    <string name="gallery_rename_confirm">Rename</string>
+    <string name="gallery_rename_empty">Name cannot be empty</string>
 
     <!-- Gallery viewer: the full-screen image/video dialog opened on a single tap. -->
     <string name="gallery_viewer_cd_close">Close viewer</string>

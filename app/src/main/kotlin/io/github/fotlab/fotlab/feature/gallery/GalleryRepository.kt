@@ -66,6 +66,10 @@ class GalleryRepository(private val database: GalleryDatabase) {
     suspend fun getByUri(uri: String): FsNodeObject? =
         database.nodeObjectDao().getByUri(uri)
 
+    /** Rename a node by id (display name only); reused by the single-selection rename action. */
+    suspend fun renameNode(id: Long, name: String) =
+        database.nodeObjectDao().rename(id, name)
+
     /** All file-entry nodes (non-folder); the refresh check filters out the missing ones (R10). */
     suspend fun fileEntryNodes(): List<FsNodeObject> =
         database.nodeObjectDao().fileEntryNodes(MimeCollection)
