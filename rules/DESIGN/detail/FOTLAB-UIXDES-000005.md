@@ -89,13 +89,13 @@ Goals:
 - AC2 — Import shows `SaveAlt` (arrow from outside into the tray) and export shows `IosShare` (arrow rising out of the box); no other glyph appears in slots A/B for these two functions.
 - AC3 — A grep of the app sources for `Icons.` resolves every occurrence to a row of R3 (or to a later row appended to this table), i.e. no icon is used that this item does not record.
 - AC4 — A dependency report shows no icon library beyond `material-icons-core` and `material-icons-extended`, and `res/drawable` holds no project-specific icon vector for a function of R3.
-- AC5 — Every icon in the top bar, the drawer and the overflow menu exposes a content description resolved from a `*_cd` resource.
+- AC5 — Every icon in the top bar, the drawer and the overflow menu exposes a content description resolved from a resource.
 - AC6 — On the device, the export glyph reads as an arrow rising **out of** a box and the import glyph as an arrow coming from outside **into** a tray. A glyph that reads as an arrow next to a plain horizontal line fails this item, even when the code constant is the one listed in R2.
 
 ## Impacted Modules
 
 - `app/src/main/kotlin/io/github/fotlab/fotlab/feature/gallery/GalleryScreen.kt` — the top bar, the drawer and the overflow menu of R3
-- `app/src/main/res/values/strings.xml` — the `*_cd` copy behind every icon
+- `app/src/main/res/values/strings.xml` — the copy behind every icon
 - `gradle/libs.versions.toml` — the two icon artifacts and their version
 - Every future feature screen — adds its own icons by appending rows to R3, never by inventing a parallel set
 
@@ -113,3 +113,4 @@ question. The retired number is intentionally not reused.
 - 2026-09-10 — Q1 retired: the selection trio is fixed — 全选 `Icons.Filled.SelectAll`, 反选 `Icons.Filled.FlipToBack` (replacing `SwapHoriz`), 全不选 `Icons.Filled.Deselect` (replacing `Clear`) — in that order, and the copy key followed as `gallery_menu_deselect_all` (replacing `gallery_menu_clear`). R4 gained the `CheckCircle` / `CheckCircleOutline` boundary and the menu-ordering clause.
 - 2026-09-10 — R2 corrected after checking the glyphs **on a device**: import and export are **not** `Download` / `Upload`, which render as an arrow next to a plain line in the icon set this project uses. 导入 is `Icons.Filled.SaveAlt` (入盘 — the arrow comes from outside into the tray) and 导出 is `Icons.Filled.IosShare` (出盘 — the arrow rises out of the box). R3, C2, AC2 and AC6 follow; R4 now reserves `Upload` / `Download` for the network upload/download meanings.
 - 2026-09-10 — R2 opens with an explicit **standing rule**: 导入 / Import is always `SaveAlt` and 导出 / Export is always `IosShare`, wherever those words appear in the project — no exception, no second judgement per screen. C2 restates it as a constraint and `FOTLAB-UIXDES-000004` R4 references it instead of repeating the icons on its own.
+- 2026-09-10 — AC5 wording follows the withdrawal of the `_cd`-suffix rule (`FOTLAB-UIXDES-000003`): a content description must resolve from a resource, with no required suffix.

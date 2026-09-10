@@ -193,7 +193,6 @@ by a file per feature (`FOTLAB-STRUCT-000001` R5).
   no untranslated base-language text visible in a normal walkthrough of every destination.
 - AC5 — A build with one key deliberately missing from a locale fails (or is rejected by the lint
   gate) instead of falling back at runtime.
-- AC6 — Every `contentDescription` in the app resolves through a resource entry ending in `_cd`.
 - AC7 — Enabling RTL pseudo-locale (or `ldrtl`) mirrors the layout without any string-specific code
   change, and no text is clipped in a locale whose strings are visibly longer than the base language.
 - AC8 — Diffing two locale files shows identical block order and identical key order.
@@ -247,3 +246,7 @@ by a file per feature (`FOTLAB-STRUCT-000001` R5).
   `gallery_cd_export`) and the drawer copy (`common_drawer_empty`, `common_drawer_open`,
   `common_drawer_close` — replacing `gallery_drawer_empty`, `gallery_cd_open_drawer`,
   `gallery_cd_close_drawer`). The old keys are removed; no code references them.
+- 2026-09-10 — AC6 removed: the requirement that every `contentDescription` resolve through a key
+  ending in `_cd` was never an owner decision and is withdrawn. Content descriptions still must come
+  from resources (R6); the `_cd` suffix remains an available naming suffix in R4, nothing more. AC
+  numbering keeps the gap so history stays greppable.

@@ -96,7 +96,7 @@ Goals:
 
 - `app/src/main/kotlin/io/github/fotlab/fotlab/feature/gallery/GalleryScreen.kt` — the top bar states of R3 and the back precedence of R4
 - `app/src/main/kotlin/io/github/fotlab/fotlab/feature/gallery/GalleryCore.kt` — owns the mode and the selection set (R1)
-- `app/src/main/res/values/strings.xml` — the count copy and a `*_cd` description for the close (X) that leaves selection mode
+- `app/src/main/res/values/strings.xml` — the count copy and a content description for the close (X) that leaves selection mode
 - Every future screen with a list or a grid — adopts R1–R7 instead of inventing its own selection handling
 - `FOTLAB-UIXDES-000002` — carries the one exception to R2 (the leftmost icon in selection mode)
 - `FOTLAB-UIXDES-000005` — owns the icons this mode uses
