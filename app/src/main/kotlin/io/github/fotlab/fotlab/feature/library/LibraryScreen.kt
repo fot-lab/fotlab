@@ -572,11 +572,15 @@ private fun NodeList(
     onToggleSelect: (FsNodeObject) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // While anything is selected the list is in selection mode: a plain tap then
+    // toggles that node instead of opening it (`FOTLAB-UIXDES-000004`).
+    val selectionActive = selectedIds.isNotEmpty()
     val cell: @Composable (FsNodeObject) -> Unit = { node ->
         NodeCell(
             node = node,
             selected = node.fsNodeId != null && node.fsNodeId in selectedIds,
             isGrid = layoutMode.isGrid,
+            selectionActive = selectionActive,
             onNodeClick = onNodeClick,
             onToggleSelect = onToggleSelect,
         )
@@ -600,13 +604,14 @@ private fun NodeCell(
     node: FsNodeObject,
     selected: Boolean,
     isGrid: Boolean,
+    selectionActive: Boolean,
     onNodeClick: (FsNodeObject) -> Unit,
     onToggleSelect: (FsNodeObject) -> Unit,
 ) {
     if (isGrid) {
         // M3 has no official grid cell, so it stays hand-written: a square thumbnail (like a
-        // file manager) above the name, with the selected container colour and a long-press
-        // to toggle selection.
+        // file manager) above the name, with the selected container colour. Long-press enters
+        // selection; while selecting a plain tap toggles, otherwise it opens.
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -620,7 +625,7 @@ private fun NodeCell(
                 .combinedClickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
-                    onClick = { onNodeClick(node) },
+                    onClick = { if (selectionActive) onToggleSelect(node) else onNodeClick(node) },
                     onLongClick = { onToggleSelect(node) },
                 ),
         ) {
@@ -638,10 +643,10 @@ private fun NodeCell(
     } else {
         // Detail list: the official M3 [ListItem] carries the selected container colour and
         // the proper list-row metrics; a square thumbnail sits in the leading slot, the way a
-        // file manager shows it. Long-press toggles selection like the grid tile does.
+        // file manager shows it. Tapping follows the grid tile's rules.
         ListItem(
             modifier = Modifier.combinedClickable(
-                onClick = { onNodeClick(node) },
+                onClick = { if (selectionActive) onToggleSelect(node) else onNodeClick(node) },
                 onLongClick = { onToggleSelect(node) },
             ),
             // M3's ListItem has no `selected` parameter — the selected tint is
