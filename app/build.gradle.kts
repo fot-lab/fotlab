@@ -112,6 +112,11 @@ dependencies {
     implementation(libs.androidx.compose.material.icons.core)
     implementation(libs.androidx.compose.material.icons.extended)
 
+    // Full-size image loading for the gallery viewer (content:// URIs, automatic downsampling).
+    implementation(libs.coil.compose)
+    // EXIF metadata readout for the viewer's detail panel.
+    implementation(libs.androidx.exifinterface)
+
     debugImplementation(libs.androidx.compose.ui.tooling)
     testImplementation(libs.junit)
 }

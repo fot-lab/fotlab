@@ -123,6 +123,10 @@ fun GalleryScreen() {
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     var currentDirectory by remember { mutableStateOf<FsNodeObject?>(null) }
     var deleteConfirmation by remember { mutableStateOf(false) }
+    // Media list + start index for the full-screen viewer, captured from the folder's current
+    // sort order the moment a tile is tapped (FOTLAB-IMGMGR viewer).
+    var viewerItems by remember { mutableStateOf<List<FsNodeObject>?>(null) }
+    var viewerStart by remember { mutableStateOf(0) }
     val scope = rememberCoroutineScope()
     val newCollectionName = stringResource(id = R.string.gallery_new_collection_name)
 
@@ -185,10 +189,16 @@ fun GalleryScreen() {
                     layoutMode = layoutMode,
                     onNodeClick = { node ->
                         node.fsNodeId?.let { id ->
-                            if (node.isCollection()) {
-                                currentDirectory = node
-                            } else {
-                                GalleryCore.selection.toggle(id)
+                            when {
+                                node.isCollection() -> currentDirectory = node
+                                isMedia(node.typeMime) -> {
+                                    // Open the full-screen viewer on the tapped media, paging
+                                    // through the folder's media in its current sort order.
+                                    val media = children.filter { isMedia(it.typeMime) }
+                                    viewerStart = media.indexOfFirst { it.fsNodeId == id }.coerceAtLeast(0)
+                                    viewerItems = media
+                                }
+                                else -> GalleryCore.selection.toggle(id)
                             }
                         }
                     },
@@ -209,6 +219,15 @@ fun GalleryScreen() {
                         modifier = Modifier.padding(16.dp),
                     )
                 }
+            }
+
+            // Full-screen image / video viewer, opened by tapping a media tile.
+            if (viewerItems != null) {
+                GalleryViewerDialog(
+                    items = viewerItems!!,
+                    startIndex = viewerStart,
+                    onDismiss = { viewerItems = null },
+                )
             }
         }
     }
