@@ -40,9 +40,10 @@ modules stay consistent while remaining autonomous:
 ### R3 — Drawer width and placement
 
 - When expanded, the drawer content occupies **80% of the width of its parent container**, expressed as `Modifier.fillMaxWidth(0.8f)`.
-- The drawer lives **inside the module's content region**, not around the whole screen. Its scrim therefore covers only the module content region.
+- The drawer is the **native Material3 modal drawer** (`ModalNavigationDrawer`) wrapped around the module's whole region — the top bar included — so it slides over the top bar with the platform's motion and scrim, exactly as the platform does. The module region is the region above the bottom navigation bar (`FOTLAB-UIXDES-000001` R2); the drawer never leaves it.
 - Consequence: the bottom navigation region is **not** covered by the drawer and remains visible while the drawer is open, preserving the rule that it is the only persistent element in the app.
-- Implementation note: Material3's `ModalDrawerSheet` applies its own width constraints (default maximum 360dp). If those constraints conflict with the 80% requirement, the sheet is replaced by a custom `Surface` carrying the 80% modifier. The resolution chosen in code is recorded in the Change History of this item.
+- Inside the module region the **top bar and the content region are siblings** — one above the other, neither overlapping the other. A module places them side by side itself (for example in a `Column`); it does not stack a second `Scaffold` on top of the shell's to do it.
+- Implementation note: Material3's `ModalDrawerSheet` applies its own width constraints (default maximum 360dp). If those constraints conflict with the 80% requirement, the sheet is replaced by a custom `Surface` carrying the 80% modifier. The gallery uses that resolution: a plain `Surface` with `fillMaxWidth(0.8f)` and `fillMaxHeight()`.
 
 ### R4 — Rightmost element: overflow menu
 
@@ -60,6 +61,14 @@ modules stay consistent while remaining autonomous:
 - While the drawer is expanded, the system back action closes it first; only a subsequent back action performs navigation. Whether Material3 already handles this internally must be verified during implementation, and a `BackHandler` is registered if it does not.
 - **The bottom navigation region stays interactive while the drawer is expanded.** Tapping a bottom navigation item switches to that destination and discards the drawer: no confirmation dialog, no preserved drawer state, and the outgoing module's drawer is destroyed together with the module.
 - Gesture opening (edge swipe) is enabled when the platform gesture system allows it.
+
+### R6 — Close affordance in the drawer
+
+- The expanded drawer carries a **close button in its own top-left corner**: an icon button with the Material "close" glyph (`Icons.Default.Close`), at the corner where the top bar's three-line icon sits while the drawer is closed.
+- Its padding matches the top bar's leading slot, so opening the drawer replaces the three-line icon **in place** with its counterpart instead of moving the affordance to a new position.
+- Activating it closes the drawer, and nothing else: the destination, the current directory and the selection are unchanged.
+- It carries a non-null `contentDescription` from resources.
+- The top bar's three-line icon keeps its glyph and is never swapped for a close icon: while the drawer is expanded the top bar is covered by the drawer, and the close affordance belongs to the drawer.
 
 ## Constraints
 
@@ -82,6 +91,7 @@ modules stay consistent while remaining autonomous:
 - AC7 — Both end icons expose a non-null content description when queried by accessibility services.
 - AC8 — Rotating the device re-measures the drawer to 80% of the new parent width.
 - AC9 — With the drawer expanded, tapping a different bottom navigation item switches the destination immediately, and the newly shown module starts with a collapsed drawer. No drawer state of the outgoing module survives the switch.
+- AC10 — With the drawer expanded, the drawer's top-left corner shows a close (X) button at the position the top bar's three-line icon occupies while the drawer is closed; activating it collapses the drawer and changes nothing else.
 
 ## Impacted Modules
 
@@ -104,3 +114,4 @@ Resolved and retired on 2026-09-07: Q1 (drawer content is module-private — now
 - 2026-09-07 — C1 amended: modules implement their **own** top app bar; the previously mandated shared top app bar component is withdrawn, because it contradicted module autonomy (a shared component turns the top bar into an app-level element in practice). R1 updated to state that no shared component exists. Consequence for the codebase: `:core:ui` is limited to theme and shared primitives and ships no top app bar or drawer component; each feature module owns its implementation, its state and its lifetime. R2–R5 remain the binding behaviour contract and AC1–AC9 remain the verification, so no acceptance criterion had to change.
 - 2026-09-07 — Decisions recorded: the drawer content is **module-private** (no app-level entries such as settings, about or licence — added to R5 as a bold clause, plus new constraint C6), and the bottom navigation region stays **interactive** while the drawer is expanded, with a tap switching destination and discarding the drawer (new clause in R5, new constraint C7, new acceptance criterion AC9). Q1 and Q4 retired from Open Questions.
 - 2026-09-07 — `:core:ui` no longer exists after the single-module move (`FOTLAB-STRUCT-000001`): C1 and the Impacted Modules list now name the `ui/theme` package, which ships theme and shared primitives only — no top app bar, no drawer component. Behaviour contract R2–R5 and verification AC1–AC9 are unchanged.
+- 2026-09-10 — R3 rewritten: the drawer is the **native Material3 `ModalNavigationDrawer`** wrapped around the module's whole region, so it slides over the top bar the way the platform does; it still never leaves the module region, so the bottom navigation region stays uncovered and interactive. R3 now also states that the top bar and the content region are sibling regions and that a module does not stack its own `Scaffold` on the shell's. Added R6 and AC10: the expanded drawer owns the close affordance — an X button in its own top-left corner, aligned with the top bar's three-line icon, so the icon the user pressed is replaced in place. AC1–AC9 needed no change: the bottom bar's visibility and interactivity were never at stake, and the 80% width (AC2/AC8) is kept by the custom `Surface` already permitted by R3.

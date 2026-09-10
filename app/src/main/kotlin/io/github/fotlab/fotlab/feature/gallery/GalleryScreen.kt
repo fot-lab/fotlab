@@ -5,7 +5,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
@@ -23,6 +22,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.GridView
@@ -34,17 +34,19 @@ import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
+import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -59,18 +61,32 @@ import androidx.compose.ui.unit.dp
 import io.github.fotlab.fotlab.R
 import kotlinx.coroutines.launch
 
-/** Drawer width: 80% of this content region (`FOTLAB-UIXDES-000002` R3). */
+/** Drawer width: 80% of the module region (`FOTLAB-UIXDES-000002` R3). */
 private const val DrawerWidthFraction = 0.8f
+
+/** Drawer elevation: the Material3 modal drawer sheet elevation, kept explicit here. */
+private val DrawerElevation = 3.dp
 
 /**
  * Gallery screen (UI) — the first independent screen, owned by the `feature/gallery`
  * package alongside its lower layer [GalleryCore] (`FOTLAB-STRUCT-000001`).
  *
- * The top bar follows `FOTLAB-UIXDES-000002` (drawer icon left, overflow right, 80%
- * drawer) and fills its leading cluster and two action slots as `FOTLAB-UIXDES-000004`
- * prescribes: a layout-toggle icon (grid / 田字) and a refresh icon sit right of the
- * drawer icon and cycle / reconcile the content; import + new collection show when
- * nothing is selected, export + delete when something is.
+ * The screen fills the whole region above the bottom navigation bar and splits it into two
+ * sibling regions: the top bar, and the content region below it. Everything else the screen
+ * adds belongs to one of them — the screen itself never stacks a second `Scaffold` on top of
+ * the shell's.
+ *
+ * The drawer is the native Material3 [ModalNavigationDrawer] wrapped around both regions: it
+ * slides over the top bar the way the platform does (`FOTLAB-UIXDES-000002` R3) and it can
+ * never reach the bottom navigation region, which lies outside the module region. Its sheet
+ * is a plain [Surface] at 80% of the module width and carries the close button in its own
+ * top-left corner (`FOTLAB-UIXDES-000002` R6).
+ *
+ * The top bar follows `FOTLAB-UIXDES-000002` (drawer icon left, overflow right) and fills
+ * its leading cluster and two action slots as `FOTLAB-UIXDES-000004` prescribes: a
+ * layout-toggle icon (grid / 田字) and a refresh icon sit right of the drawer icon and cycle
+ * / reconcile the content; import + new collection show when nothing is selected, export +
+ * delete when something is.
  *
  * The selection itself lives in [GalleryCore.selection] — a process-scoped object. This
  * screen only reads it with plain `remember`; it is never saved with `rememberSaveable`
@@ -81,7 +97,7 @@ private const val DrawerWidthFraction = 0.8f
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GalleryScreen() {
-    var drawerOpen by remember { mutableStateOf(false) }
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     var currentDirectory by remember { mutableStateOf<FsNodeObject?>(null) }
     var deleteConfirmation by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -105,42 +121,42 @@ fun GalleryScreen() {
     }
 
     // Drawer first, then the directory: back closes the drawer before leaving a folder.
-    BackHandler(enabled = drawerOpen) { drawerOpen = false }
-    BackHandler(enabled = !drawerOpen && currentDirectory != null) { currentDirectory = null }
+    BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
+    BackHandler(enabled = !drawerState.isOpen && currentDirectory != null) { currentDirectory = null }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        Scaffold(
-            topBar = {
-                GalleryTopBar(
-                    directoryName = currentDirectory?.nameDisplay
-                        ?: stringResource(id = GalleryCore.titleRes),
-                    selectionSize = selectedIds.size,
-                    candidateIds = children.mapNotNull { it.fsNodeId },
-                    layoutMode = layoutMode,
-                    onCycleLayout = { scope.launch { GalleryCore.cycleLayoutMode() } },
-                    onRefresh = { scope.launch { GalleryCore.refresh() } },
-                    onOpenDrawer = { drawerOpen = true },
-                    onImport = { importLauncher.launch(arrayOf("*/*")) },
-                    onCreateCollection = {
-                        scope.launch {
-                            GalleryCore.createCollection(
-                                parentId = currentDirectory?.fsNodeId,
-                                name = newCollectionName,
-                            )
-                        }
-                    },
-                    // Export shape is undecided (`FOTLAB-UIXDES-000004` Q6): the slot is
-                    // present as required by R4, the behaviour is added when Q6 is settled.
-                    onExport = { /* TODO: export, pending Q6 */ },
-                    onDelete = { deleteConfirmation = true },
-                )
-            },
-        ) { contentPadding ->
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(contentPadding),
-            ) {
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            GalleryDrawer(onClose = { scope.launch { drawerState.close() } })
+        },
+    ) {
+        // Two sibling regions: the top bar, and the content region below it.
+        Column(modifier = Modifier.fillMaxSize()) {
+            GalleryTopBar(
+                directoryName = currentDirectory?.nameDisplay
+                    ?: stringResource(id = GalleryCore.titleRes),
+                selectionSize = selectedIds.size,
+                candidateIds = children.mapNotNull { it.fsNodeId },
+                layoutMode = layoutMode,
+                onCycleLayout = { scope.launch { GalleryCore.cycleLayoutMode() } },
+                onRefresh = { scope.launch { GalleryCore.refresh() } },
+                onOpenDrawer = { scope.launch { drawerState.open() } },
+                onImport = { importLauncher.launch(arrayOf("*/*")) },
+                onCreateCollection = {
+                    scope.launch {
+                        GalleryCore.createCollection(
+                            parentId = currentDirectory?.fsNodeId,
+                            name = newCollectionName,
+                        )
+                    }
+                },
+                // Export shape is undecided (`FOTLAB-UIXDES-000004` Q6): the slot is
+                // present as required by R4, the behaviour is added when Q6 is settled.
+                onExport = { /* TODO: export, pending Q6 */ },
+                onDelete = { deleteConfirmation = true },
+            )
+
+            Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
                 NodeList(
                     nodes = children,
                     selectedIds = selectedIds,
@@ -173,31 +189,6 @@ fun GalleryScreen() {
                 }
             }
         }
-
-        if (drawerOpen) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.32f))
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = { drawerOpen = false },
-                    ),
-            )
-
-            Surface(
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .fillMaxWidth(DrawerWidthFraction),
-                tonalElevation = 3.dp,
-            ) {
-                Column {
-                    // Feature-private drawer content (R5): no app-level entries here.
-                    Text(text = stringResource(id = R.string.gallery_drawer_empty))
-                }
-            }
-        }
     }
 
     if (deleteConfirmation) {
@@ -221,6 +212,46 @@ fun GalleryScreen() {
                 }
             },
         )
+    }
+}
+
+/**
+ * The gallery drawer sheet: 80% of the module width (`FOTLAB-UIXDES-000002` R3), holding
+ * module-private content only (R5).
+ *
+ * The close button sits in the sheet's own top-left corner, at the position the top bar's
+ * three-line icon occupies while the drawer is closed: the affordance the user pressed is
+ * replaced in place by its counterpart (`FOTLAB-UIXDES-000002` R6). The padding matches the
+ * top bar's leading slot so the two icons land on exactly the same spot.
+ */
+@Composable
+private fun GalleryDrawer(
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier
+            .fillMaxHeight()
+            .fillMaxWidth(DrawerWidthFraction),
+        tonalElevation = DrawerElevation,
+    ) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            IconButton(
+                onClick = onClose,
+                modifier = Modifier.padding(start = 4.dp, top = 8.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Close,
+                    contentDescription = stringResource(id = R.string.gallery_cd_close_drawer),
+                )
+            }
+
+            // Feature-private drawer content (R5): no app-level entries here.
+            Text(
+                text = stringResource(id = R.string.gallery_drawer_empty),
+                modifier = Modifier.padding(16.dp),
+            )
+        }
     }
 }
 

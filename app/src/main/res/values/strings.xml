@@ -35,6 +35,7 @@
 
     <string name="gallery_drawer_empty">No drawer entries yet</string>
     <string name="gallery_cd_open_drawer">Open navigation drawer</string>
+    <string name="gallery_cd_close_drawer">Close navigation drawer</string>
     <string name="gallery_cd_more_options">More options</string>
     <string name="gallery_cd_import">Import files</string>
     <string name="gallery_cd_export">Export selection</string>

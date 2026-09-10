@@ -51,7 +51,7 @@ The Gallery top bar is laid out as follows, and this order never changes:
 ```
 
 - The three-line icon (`Icons.Default.Menu`) is the leftmost element and opens the drawer at 80%
-  of the content region (`FOTLAB-UIXDES-000002` R2/R3).
+  of the module region (`FOTLAB-UIXDES-000002` R2/R3).
 - Immediately to its right sits the **layout-toggle icon** (`▦`, the grid / 田字 glyph) of R9. It
   is always present, never moves, and leads the screen-defined middle region. It is part of the
   inherited skeleton's leading cluster, not an action slot: slots A and B and the overflow menu are
@@ -68,7 +68,9 @@ The Gallery top bar is laid out as follows, and this order never changes:
 - Everything in the top bar is **icon-only** — no text labels in the bar itself. Text appears only
   in the dropdown (`FOTLAB-UIXDES-000002` R4) and, as copy, in the middle region.
 - Drawer behaviour, back handling and the rule that the drawer never covers the bottom navigation
-  region are inherited unchanged from `FOTLAB-UIXDES-000002` R5.
+  region are inherited unchanged from `FOTLAB-UIXDES-000002` R5. The drawer may cover this top bar
+  (it is the native modal drawer around the whole module region) and owns the close affordance in
+  its own top-left corner (`FOTLAB-UIXDES-000002` R3/R6).
 
 ### R2 — `ListSelectionOfGallery` is the single driver
 
@@ -197,7 +199,7 @@ block of the single strings file (`FOTLAB-UIXDES-000003` R2/R4). Keys used by th
 `gallery_title`, `gallery_new_collection_name`, `gallery_menu_select_all`, `gallery_menu_invert`,
 `gallery_menu_clear`, `gallery_delete_title`, `gallery_delete_message`,
 `gallery_empty_directory`, `gallery_drawer_empty`, `gallery_selection_count` (plural) and the
-content descriptions `gallery_cd_open_drawer`, `gallery_cd_more_options`, `gallery_cd_import`,
+content descriptions `gallery_cd_open_drawer`, `gallery_cd_close_drawer`, `gallery_cd_more_options`, `gallery_cd_import`,
 `gallery_cd_export`, `gallery_cd_new_collection`, `gallery_cd_delete`. The two generic dialog
 actions are promoted to `common`: `common_action_delete`, `common_action_cancel`.
 
@@ -442,3 +444,4 @@ R7). The retired numbers are intentionally not reused.
   gallery's `GalleryRepository` gained `fileEntryNodes` (excluding folders), `orphanNodeIds` and
   `vacuum()`; `GalleryCore.refresh()` orchestrates them. `gallery_cd_refresh` joined the strings
   block.
+- 2026-09-10 — The gallery drawer became the **native Material3 `ModalNavigationDrawer`** around the module's whole region, replacing the hand-written scrim and sheet, and the screen no longer nests a `Scaffold` inside the shell's: the top bar and the content region are now two sibling regions laid out by the screen itself. The sheet keeps the 80% width (C1) and carries the close (X) button of `FOTLAB-UIXDES-000002` R6 in its own top-left corner, with the new key `gallery_cd_close_drawer` added to the copy list of R8. The drawer may now cover the top bar — native behaviour — while the bottom navigation region stays outside the module region and untouched.
