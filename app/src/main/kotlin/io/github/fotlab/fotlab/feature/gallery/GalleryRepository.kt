@@ -58,6 +58,35 @@ class GalleryRepository(private val database: GalleryDatabase) {
         database.nodeRelationDao().removeRelation(childId, parentId, System.currentTimeMillis())
     }
 
+    /**
+     * True if linking [childId] under [parentId] would introduce a cycle into the virtual tree.
+     *
+     * Edges are directed (`child → parent`, "child is under parent"). A cycle appears exactly
+     * when the current graph already contains a directed path from [parentId] to [childId] along
+     * those upward edges — i.e. [childId] is a (transitive) ancestor of [parentId]. Linking then
+     * closes the loop. A `NULL` [parentId] is the root and can never close a cycle; a node linked
+     * under itself is a trivial self-cycle.
+     *
+     * The loose design allows a node to have several parents, so the upward walk is a BFS over all
+     * live parent links rather than a single chain. The walk is purely read-only; it does not add
+     * any edge (`FOTLAB-DATABS-000002`, cycle invariant, to be enforced by callers).
+     */
+    suspend fun wouldCreateCycle(childId: Long, parentId: Long?): Boolean {
+        if (parentId == null) return false
+        val relationDao = database.nodeRelationDao()
+        val visited = mutableSetOf<Long>()
+        val queue = ArrayDeque<Long>().apply { add(parentId) }
+        while (queue.isNotEmpty()) {
+            val node = queue.removeFirst()
+            if (node == childId) return true
+            if (!visited.add(node)) continue
+            for (parent in relationDao.parentIdsOf(node)) {
+                if (parent !in visited) queue.addLast(parent)
+            }
+        }
+        return false
+    }
+
     /** Soft-delete a single node and the subtree it orphans (`FOTLAB-DATABS-000002` R10/R12, revised). */
     suspend fun removeNode(node: FsNodeObject) {
         node.fsNodeId?.let { deleteNodes(setOf(it)) }

@@ -75,6 +75,18 @@ interface FsNodeRelationDao {
     @Query("SELECT * FROM fs_node_relation WHERE fs_node_id_child = :childId AND time_deleted IS NULL")
     suspend fun relationsWithChild(childId: Long): List<FsNodeRelation>
 
+    /**
+     * Live, non-null parent ids of a node — the upward edges used by cycle detection.
+     * `NULL` parents (root edges) are excluded because they terminate an upward walk
+     * without forming a cycle.
+     */
+    @Query(
+        "SELECT fs_node_id_parent FROM fs_node_relation " +
+            "WHERE fs_node_id_child = :childId AND time_deleted IS NULL " +
+            "AND fs_node_id_parent IS NOT NULL",
+    )
+    suspend fun parentIdsOf(childId: Long): List<Long>
+
     /** Relations where the node is the parent — what sits directly under it (live only). */
     @Query("SELECT * FROM fs_node_relation WHERE fs_node_id_parent = :parentId AND time_deleted IS NULL")
     suspend fun relationsWithParent(parentId: Long): List<FsNodeRelation>

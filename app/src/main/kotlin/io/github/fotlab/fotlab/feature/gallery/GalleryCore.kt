@@ -104,6 +104,14 @@ object GalleryCore {
 
     suspend fun unlink(childId: Long, parentId: Long?) = repo().unlink(childId, parentId)
 
+    /**
+     * True if linking [childId] under [parentId] would create a cycle in the virtual tree
+     * (`FOTLAB-DATABS-000002`, cycle invariant). Read-only; callers decide what to do with the
+     * result. A `null` [parentId] (root) never cycles; linking a node under itself does.
+     */
+    suspend fun wouldCreateCycle(childId: Long, parentId: Long?): Boolean =
+        repo().wouldCreateCycle(childId, parentId)
+
     suspend fun removeNode(node: FsNodeObject) = repo().removeNode(node)
 
     suspend fun getByUri(uri: String): FsNodeObject? = repo().getByUri(uri)
