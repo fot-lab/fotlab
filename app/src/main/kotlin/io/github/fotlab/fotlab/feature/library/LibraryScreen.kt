@@ -67,7 +67,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import io.github.fotlab.fotlab.R
@@ -418,14 +417,12 @@ private fun LibraryTopBar(
         modifier = modifier,
         title = {
             Text(
+                // While anything is selected the title is intentionally blank: the count
+                // lives in the leading cluster, so it must not be shown twice.
                 text = if (selectionSize == 0) {
                     directoryName
                 } else {
-                    pluralStringResource(
-                        id = R.plurals.common_selection_count,
-                        count = selectionSize,
-                        selectionSize,
-                    )
+                    ""
                 },
                 maxLines = 1,
             )
@@ -433,8 +430,9 @@ private fun LibraryTopBar(
         navigationIcon = {
             // Leading cluster swaps on selection (`FOTLAB-UIXDES-000004`): with nothing selected
             // it is drawer + grid + sync; once anything is selected the drawer becomes a Close
-            // (clear selection) and the grid slot becomes a rename pencil (single) or the plain
-            // count (multiple) — sync is hidden while selecting.
+            // (clear selection) and the grid slot becomes a rename pencil (single) or the bare
+            // count (multiple) — sync is hidden while selecting. The title stays blank while
+            // selecting, so the count is never shown twice.
             if (selectionSize == 0) {
                 Row {
                     IconButton(onClick = onOpenDrawer) {
@@ -464,6 +462,8 @@ private fun LibraryTopBar(
                             contentDescription = stringResource(id = R.string.library_cd_clear_selection),
                         )
                     }
+                    // The grid slot: a rename pencil for a single selection, the bare
+                    // count for several — set in the title's own type scale.
                     if (selectionSize == 1) {
                         IconButton(onClick = onRename) {
                             Icon(
@@ -474,7 +474,7 @@ private fun LibraryTopBar(
                     } else {
                         Text(
                             text = selectionSize.toString(),
-                            style = MaterialTheme.typography.titleMedium,
+                            style = MaterialTheme.typography.titleLarge,
                             modifier = Modifier.padding(horizontal = 16.dp),
                         )
                     }
