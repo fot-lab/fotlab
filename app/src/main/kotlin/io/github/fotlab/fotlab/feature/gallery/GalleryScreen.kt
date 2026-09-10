@@ -41,6 +41,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Text
@@ -428,7 +429,7 @@ private fun NodeList(
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 private fun NodeCell(
     node: FsNodeObject,
@@ -437,25 +438,41 @@ private fun NodeCell(
     onNodeClick: (FsNodeObject) -> Unit,
     onToggleSelect: (FsNodeObject) -> Unit,
 ) {
-    val interaction = remember { MutableInteractionSource() }
-    Text(
-        text = node.nameDisplay,
-        maxLines = if (isGrid) 1 else Int.MAX_VALUE,
-        modifier = Modifier
-            .fillMaxWidth()
-            .then(
-                if (selected) {
-                    Modifier.background(MaterialTheme.colorScheme.secondaryContainer)
-                } else {
-                    Modifier
-                },
-            )
-            .combinedClickable(
-                interactionSource = interaction,
-                indication = null,
+    if (isGrid) {
+        // M3 has no official grid cell, so the compact tile stays hand-written: a name with
+        // the selected container colour and a long-press to toggle selection.
+        val interaction = remember { MutableInteractionSource() }
+        Text(
+            text = node.nameDisplay,
+            maxLines = 1,
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(
+                    if (selected) {
+                        Modifier.background(MaterialTheme.colorScheme.secondaryContainer)
+                    } else {
+                        Modifier
+                    },
+                )
+                .combinedClickable(
+                    interactionSource = interaction,
+                    indication = null,
+                    onClick = { onNodeClick(node) },
+                    onLongClick = { onToggleSelect(node) },
+                )
+                .padding(8.dp),
+        )
+    } else {
+        // Detail list: the official M3 [ListItem] carries the selected container colour and
+        // the proper list-row metrics out of the box. Long-press toggles selection the way
+        // the grid tile does.
+        ListItem(
+            selected = selected,
+            modifier = Modifier.combinedClickable(
                 onClick = { onNodeClick(node) },
                 onLongClick = { onToggleSelect(node) },
-            )
-            .padding(if (isGrid) 8.dp else 16.dp),
-    )
+            ),
+            headlineContent = { Text(text = node.nameDisplay) },
+        )
+    }
 }
