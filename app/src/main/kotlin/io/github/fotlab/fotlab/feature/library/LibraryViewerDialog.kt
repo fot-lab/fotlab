@@ -319,7 +319,7 @@ private fun ViewerVideo(uri: Uri, modifier: Modifier = Modifier) {
             }
         },
         modifier = modifier,
-        dispose = { it.stopPlayback() },
+        onRelease = { it.stopPlayback() },
     )
 }
 
