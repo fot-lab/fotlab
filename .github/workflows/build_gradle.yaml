@@ -159,6 +159,11 @@ jobs:
           KEY_ALIAS="androiddebugkey"
           KEY_PASS="android"
 
+          # Redact the signing secrets in any log output for the rest of the job,
+          # so a failed Gradle build can never leak them via stdout/stderr.
+          echo "::add-mask::$KEYSTORE_PASS"
+          echo "::add-mask::$KEY_PASS"
+
           KEYSTORE_REPO="git@github.com:${{ github.repository_owner }}/keystore.git"
 
           mkdir -p ~/.ssh
@@ -201,8 +206,8 @@ jobs:
         if: inputs.gradle-tasks != ''
         run: |
           set -o pipefail
-          # Full log -> build-log.txt (the complete CI log artifact); gradle-only
-          # copy -> build_log_gradle.log (a separate, tool-friendly artifact).
+          # Both copies are uploaded ONLY on failure (see the upload steps below);
+          # a passing run leaves no build log behind.
           gradle --no-daemon --stacktrace ${{ inputs.gradle-tasks }} 2>&1 | tee build-log.txt build_log_gradle.log
         shell: bash
 
@@ -229,8 +234,11 @@ jobs:
           retention-days: ${{ inputs.apk-retention-days }}
           if-no-files-found: error
 
+      # Logs are only kept when the build fails — a green build needs no verbose
+      # trace, and keeping logs off the success path shrinks the public artifact
+      # surface (build logs can carry dependency/SDK/environment detail).
       - name: Upload build log
-        if: inputs.log-artifact-name != ''
+        if: failure() && inputs.log-artifact-name != ''
         uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.log-artifact-name }}
@@ -239,7 +247,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload Gradle log
-        if: inputs.gradle-tasks != ''
+        if: failure() && inputs.gradle-tasks != ''
         uses: actions/upload-artifact@v4
         with:
           name: build_log_gradle.log
