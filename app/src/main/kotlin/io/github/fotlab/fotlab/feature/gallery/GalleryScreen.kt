@@ -318,6 +318,8 @@ private fun GalleryTopBar(
             if (selectionSize == 0) {
                 IconButton(onClick = onImport) {
                     Icon(
+                        // Import: the arrow pointing down into the tray — data enters the app
+                        // (`FOTLAB-UIXDES-000005` R2).
                         imageVector = Icons.Filled.Download,
                         contentDescription = stringResource(id = R.string.gallery_cd_import),
                     )
@@ -331,6 +333,8 @@ private fun GalleryTopBar(
             } else {
                 IconButton(onClick = onExport) {
                     Icon(
+                        // Export: the arrow pointing up out of the tray — data leaves the app
+                        // (`FOTLAB-UIXDES-000005` R2).
                         imageVector = Icons.Filled.Upload,
                         contentDescription = stringResource(id = R.string.gallery_cd_export),
                     )
