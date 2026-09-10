@@ -89,6 +89,7 @@ The detail file name **must** equal its ID plus `.md`.
 | Code | Category | Scope |
 | --- | --- | --- |
 | `PREPIN` | Preflight / Toolchain Cache | Runner toolchain bootstrap and caching of SDK, NDK, Gradle, Rust NDK, python-for-android, and other build tools |
+| `LIBRND` | Library Rendering | Library / Recycle view one-level rendering, query scoping, and view-isolation audit for the virtual fs feature |
 
 ## Status & Priority
 
