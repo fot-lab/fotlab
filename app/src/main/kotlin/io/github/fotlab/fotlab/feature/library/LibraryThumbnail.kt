@@ -19,7 +19,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.layout.ContentScale
 import android.net.Uri
-import coil.compose.AsyncImage
+import coil3.compose.AsyncImage
 
 /** Fraction of the square the folder glyph fills; the remainder is the inset. */
 private const val FolderGlyphFraction = 0.64f
