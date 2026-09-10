@@ -511,12 +511,14 @@ private fun NodeCell(
 /**
  * Square thumbnail for a gallery node, in the spirit of Material Files: a real thumbnail for
  * image/video media (decoded from the node's `content://` URI), a folder glyph for
- * collections, and a MIME-type icon otherwise. The frame is always a square and every
- * thumbnail uses [ContentScale.Fit] so the whole content stays visible inside it.
+ * collections, and a MIME-type icon otherwise. The frame is always a square with a default
+ * [MaterialTheme.colorScheme.surfaceVariant] background, and every thumbnail uses
+ * [ContentScale.Fit] so the whole content stays visible inside it — for non-square images the
+ * letterboxed bands show that background rather than the gallery behind it.
  */
 @Composable
 private fun NodeThumbnail(node: FsNodeObject, modifier: Modifier = Modifier) {
-    Box(modifier = modifier) {
+    Box(modifier = modifier.background(MaterialTheme.colorScheme.surfaceVariant)) {
         when {
             node.isCollection() -> {
                 Icon(
