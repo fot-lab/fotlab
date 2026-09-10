@@ -43,6 +43,13 @@
 
     <string name="gallery_empty_directory">This folder is empty</string>
 
+    <!-- Drawer navigation: the two top-level views the drawer switches between. -->
+    <string name="gallery_library">Library</string>
+    <string name="gallery_recycle_bin">Recycle Bin</string>
+    <string name="gallery_recycle_bin_empty">The recycle bin is empty</string>
+    <string name="gallery_cd_library">Open Library</string>
+    <string name="gallery_cd_recycle_bin">Open Recycle Bin</string>
+
     <string name="gallery_cd_layout_mode">Switch display mode</string>
     <string name="gallery_cd_sync">Sync library</string>
     <string name="gallery_cd_clear_selection">Clear selection</string>

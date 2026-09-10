@@ -17,6 +17,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -26,6 +29,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Source
 import androidx.compose.material.icons.filled.Deselect
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FlipToBack
@@ -66,6 +70,7 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.ImageVector
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -88,6 +93,13 @@ import kotlinx.coroutines.withContext
 
 /** Drawer width: 80% of the module region (`FOTLAB-UIXDES-000002` R3). */
 private const val DrawerWidthFraction = 0.8f
+
+/**
+ * The two top-level views the drawer switches between. `Library` is the Source Library — the
+ * whole gallery feature built so far. `RecycleBin` shows removed nodes, whose content is not
+ * implemented yet and is left empty for now.
+ */
+private enum class GalleryViewMode { Library, RecycleBin }
 
 /**
  * Gallery screen (UI) — the first independent screen, owned by the `feature/gallery`
@@ -123,6 +135,8 @@ private const val DrawerWidthFraction = 0.8f
 fun GalleryScreen() {
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     var currentDirectory by remember { mutableStateOf<FsNodeObject?>(null) }
+    // Which top-level view the drawer selected; defaults to the Source Library (built so far).
+    var viewMode by remember { mutableStateOf(GalleryViewMode.Library) }
     var deleteConfirmation by remember { mutableStateOf(false) }
     // Node awaiting a rename from the single-selection edit action; null = dialog closed.
     var renameTarget by remember { mutableStateOf<FsNodeObject?>(null) }
@@ -157,14 +171,21 @@ fun GalleryScreen() {
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
-            GalleryDrawer(onClose = { scope.launch { drawerState.close() } })
+            GalleryDrawer(
+                viewMode = viewMode,
+                onSelectView = { viewMode = it },
+                onClose = { scope.launch { drawerState.close() } },
+            )
         },
     ) {
         // Two sibling regions: the top bar, and the content region below it.
         Column(modifier = Modifier.fillMaxSize()) {
             GalleryTopBar(
-                directoryName = currentDirectory?.nameDisplay
-                    ?: stringResource(id = GalleryCore.titleRes),
+                directoryName = when (viewMode) {
+                    GalleryViewMode.Library -> currentDirectory?.nameDisplay
+                        ?: stringResource(id = GalleryCore.titleRes)
+                    GalleryViewMode.RecycleBin -> stringResource(id = R.string.gallery_recycle_bin)
+                },
                 selectionSize = selectedIds.size,
                 candidateIds = children.mapNotNull { it.fsNodeId },
                 onCycleLayout = { scope.launch { GalleryCore.cycleLayoutMode() } },
@@ -193,41 +214,52 @@ fun GalleryScreen() {
             )
 
             Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
-                NodeList(
-                    nodes = children,
-                    selectedIds = selectedIds,
-                    layoutMode = layoutMode,
-                    onNodeClick = { node ->
-                        node.fsNodeId?.let { id ->
-                            when {
-                                node.isCollection() -> currentDirectory = node
-                                isMedia(node.typeMime) -> {
-                                    // Open the full-screen viewer on the tapped media, paging
-                                    // through the folder's media in its current sort order.
-                                    val media = children.filter { isMedia(it.typeMime) }
-                                    viewerStart = media.indexOfFirst { it.fsNodeId == id }.coerceAtLeast(0)
-                                    viewerItems = media
+                when (viewMode) {
+                    GalleryViewMode.Library -> {
+                        NodeList(
+                            nodes = children,
+                            selectedIds = selectedIds,
+                            layoutMode = layoutMode,
+                            onNodeClick = { node ->
+                                node.fsNodeId?.let { id ->
+                                    when {
+                                        node.isCollection() -> currentDirectory = node
+                                        isMedia(node.typeMime) -> {
+                                            // Open the full-screen viewer on the tapped media, paging
+                                            // through the folder's media in its current sort order.
+                                            val media = children.filter { isMedia(it.typeMime) }
+                                            viewerStart = media.indexOfFirst { it.fsNodeId == id }.coerceAtLeast(0)
+                                            viewerItems = media
+                                        }
+                                        else -> GalleryCore.selection.toggle(id)
+                                    }
                                 }
-                                else -> GalleryCore.selection.toggle(id)
-                            }
-                        }
-                    },
-                    // Long press selects a collection too: it can be deleted like any
-                    // other node, and the delete walks its subtree (`FOTLAB-DATABS-000002`
-                    // R12; `FOTLAB-UIXDES-000004` Q4).
-                    onToggleSelect = { node ->
-                        node.fsNodeId?.let { id ->
-                            GalleryCore.selection.toggle(id)
-                        }
-                    },
-                    modifier = Modifier.fillMaxSize(),
-                )
+                            },
+                            // Long press selects a collection too: it can be deleted like any
+                            // other node, and the delete walks its subtree (`FOTLAB-DATABS-000002`
+                            // R12; `FOTLAB-UIXDES-000004` Q4).
+                            onToggleSelect = { node ->
+                                node.fsNodeId?.let { id ->
+                                    GalleryCore.selection.toggle(id)
+                                }
+                            },
+                            modifier = Modifier.fillMaxSize(),
+                        )
 
-                if (children.isEmpty()) {
-                    Text(
-                        text = stringResource(id = R.string.gallery_empty_directory),
-                        modifier = Modifier.padding(16.dp),
-                    )
+                        if (children.isEmpty()) {
+                            Text(
+                                text = stringResource(id = R.string.gallery_empty_directory),
+                                modifier = Modifier.padding(16.dp),
+                            )
+                        }
+                    }
+                    // Recycle Bin content is not built yet; the view switches here but stays empty.
+                    GalleryViewMode.RecycleBin -> {
+                        Text(
+                            text = stringResource(id = R.string.gallery_recycle_bin_empty),
+                            modifier = Modifier.padding(16.dp),
+                        )
+                    }
                 }
             }
 
@@ -296,6 +328,8 @@ fun GalleryScreen() {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun GalleryDrawer(
+    viewMode: GalleryViewMode,
+    onSelectView: (GalleryViewMode) -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -304,6 +338,7 @@ private fun GalleryDrawer(
             .fillMaxHeight()
             .fillMaxWidth(DrawerWidthFraction),
     ) {
+        // Row 1: the close affordance that replaces the drawer icon while closed (R6).
         IconButton(
             onClick = onClose,
             modifier = Modifier.padding(start = 4.dp, top = 8.dp),
@@ -314,11 +349,65 @@ private fun GalleryDrawer(
             )
         }
 
-        // Feature-private drawer content (R5): no app-level entries here.
-        Text(
-            text = stringResource(id = R.string.common_drawer_empty),
-            modifier = Modifier.padding(16.dp),
+        // Row 2: Recycle Bin — shows removed nodes (content not built yet, left empty).
+        DrawerNavItem(
+            icon = Icons.Filled.Delete,
+            label = stringResource(id = R.string.gallery_recycle_bin),
+            contentDescription = stringResource(id = R.string.gallery_cd_recycle_bin),
+            selected = viewMode == GalleryViewMode.RecycleBin,
+            onClick = {
+                onSelectView(GalleryViewMode.RecycleBin)
+                onClose()
+            },
         )
+        // Row 3: Library (Source Library) — the gallery feature built so far.
+        DrawerNavItem(
+            icon = Icons.Filled.Source,
+            label = stringResource(id = R.string.gallery_library),
+            contentDescription = stringResource(id = R.string.gallery_cd_library),
+            selected = viewMode == GalleryViewMode.Library,
+            onClick = {
+                onSelectView(GalleryViewMode.Library)
+                onClose()
+            },
+        )
+    }
+}
+
+/**
+ * A single drawer navigation row: a leading icon plus its label, with the selected row
+ * tinted by the M3 secondary container. Tapping switches the top-level view and closes the drawer.
+ */
+@Composable
+private fun DrawerNavItem(
+    icon: ImageVector,
+    label: String,
+    contentDescription: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .then(
+                if (selected) {
+                    Modifier.background(MaterialTheme.colorScheme.secondaryContainer)
+                } else {
+                    Modifier
+                },
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            modifier = Modifier.size(24.dp),
+        )
+        Spacer(modifier = Modifier.width(16.dp))
+        Text(text = label, style = MaterialTheme.typography.bodyLarge)
     }
 }
 
