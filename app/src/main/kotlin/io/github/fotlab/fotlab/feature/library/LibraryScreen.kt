@@ -41,13 +41,14 @@ import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DrawerValue
-import androidx.compose.material3.DrawerSheet
+import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Text
@@ -63,7 +64,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.graphics.ImageVector
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -314,7 +316,7 @@ private fun LibraryDrawer(
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    DrawerSheet(
+    ModalDrawerSheet(
         modifier = modifier
             .fillMaxHeight()
             .fillMaxWidth(DrawerWidthFraction),
@@ -638,10 +640,18 @@ private fun NodeCell(
         // the proper list-row metrics; a square thumbnail sits in the leading slot, the way a
         // file manager shows it. Long-press toggles selection like the grid tile does.
         ListItem(
-            selected = selected,
             modifier = Modifier.combinedClickable(
                 onClick = { onNodeClick(node) },
                 onLongClick = { onToggleSelect(node) },
+            ),
+            // M3's ListItem has no `selected` parameter — the selected tint is
+            // expressed through its colours instead.
+            colors = ListItemDefaults.colors(
+                containerColor = if (selected) {
+                    MaterialTheme.colorScheme.secondaryContainer
+                } else {
+                    Color.Transparent
+                },
             ),
             leadingContent = { NodeThumbnail(node = node, modifier = Modifier.size(40.dp)) },
             headlineContent = { Text(text = node.nameDisplay) },

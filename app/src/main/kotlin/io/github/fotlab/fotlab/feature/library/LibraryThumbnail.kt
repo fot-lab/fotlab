@@ -1,8 +1,8 @@
 package io.github.fotlab.fotlab.feature.library
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Audiotrack
 import androidx.compose.material.icons.filled.Folder
@@ -13,12 +13,19 @@ import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.ImageVector
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.layout.ContentScale
 import android.net.Uri
 import coil.compose.AsyncImage
+
+/** Fraction of the square the folder glyph fills; the remainder is the inset. */
+private const val FolderGlyphFraction = 0.64f
+
+/** Fraction of the square a MIME-type glyph fills; the remainder is the inset. */
+private const val MimeGlyphFraction = 0.56f
 
 /**
  * Square thumbnail for a library node, in the spirit of Material Files: a real thumbnail for
@@ -33,14 +40,17 @@ import coil.compose.AsyncImage
  */
 @Composable
 internal fun NodeThumbnail(node: FsNodeObject, modifier: Modifier = Modifier) {
-    Box(modifier = modifier.background(MaterialTheme.colorScheme.surfaceVariant)) {
+    Box(
+        modifier = modifier.background(MaterialTheme.colorScheme.surfaceVariant),
+        contentAlignment = Alignment.Center,
+    ) {
         when {
             node.isCollection() -> {
                 Icon(
                     imageVector = Icons.Filled.Folder,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.fillMaxSize().padding(percent = 18),
+                    modifier = Modifier.fillMaxSize(FolderGlyphFraction),
                 )
             }
             isMedia(node.typeMime) -> {
@@ -68,15 +78,17 @@ internal fun NodeThumbnail(node: FsNodeObject, modifier: Modifier = Modifier) {
 /** MIME-type glyph shown when there is no real thumbnail to decode. */
 @Composable
 private fun MimeIcon(mimeType: String) {
-    Icon(
-        imageVector = mimeIcon(mimeType),
-        contentDescription = null,
-        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.fillMaxSize().padding(percent = 22),
-    )
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Icon(
+            imageVector = mimeIcon(mimeType),
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.fillMaxSize(MimeGlyphFraction),
+        )
+    }
 }
 
-/** True for image/* and video/* entries, which get a real decoded thumbnail. */
+/** True for image and video MIME types, which get a real decoded thumbnail. */
 internal fun isMedia(mime: String): Boolean = mime.startsWith("image/") || mime.startsWith("video/")
 
 /** Pick the Material icon that represents a MIME type the way a file manager does. */
