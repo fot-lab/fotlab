@@ -28,4 +28,11 @@ data class FsNodeObject(
     @ColumnInfo(name = "uri_storage") val uriStorage: String? = null,
     @ColumnInfo(name = "time_modified") val timeModified: Long? = null,
     @ColumnInfo(name = "time_created") val timeCreated: Long,
+    /**
+     * Soft-delete timestamp (`FOTLAB-DATABS-000002` R10, revised): `NULL` means the node
+     * is live; any non-null value marks it removed. Deletion never drops or archives a row
+     * — it only stamps this column, so the node id stays unique and the live and removed
+     * id spaces never collide.
+     */
+    @ColumnInfo(name = "time_deleted") val timeDeleted: Long? = null,
 )

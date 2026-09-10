@@ -1,10 +1,10 @@
 package io.github.fotlab.fotlab.feature.gallery
 
 import androidx.room.Dao
-import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -19,14 +19,15 @@ interface FsNodeRelationDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(relation: FsNodeRelation)
 
-    @Delete
-    suspend fun delete(relation: FsNodeRelation)
+    @Update
+    suspend fun update(relation: FsNodeRelation)
 
     /** Children of a non-root parent (high-frequency: loading a directory). */
     @Query(
         "SELECT child.* FROM fs_node_object AS child " +
             "JOIN fs_node_relation AS r ON child.fs_node_id = r.fs_node_id_child " +
-            "WHERE r.fs_node_id_parent = :parentId " +
+            "WHERE r.fs_node_id_parent = :parentId AND r.time_deleted IS NULL " +
+            "AND child.time_deleted IS NULL " +
             "ORDER BY child.time_created",
     )
     fun childrenOf(parentId: Long): Flow<List<FsNodeObject>>
@@ -35,7 +36,8 @@ interface FsNodeRelationDao {
     @Query(
         "SELECT child.* FROM fs_node_object AS child " +
             "JOIN fs_node_relation AS r ON child.fs_node_id = r.fs_node_id_child " +
-            "WHERE r.fs_node_id_parent IS NULL " +
+            "WHERE r.fs_node_id_parent IS NULL AND r.time_deleted IS NULL " +
+            "AND child.time_deleted IS NULL " +
             "ORDER BY child.time_created",
     )
     fun rootChildren(): Flow<List<FsNodeObject>>
@@ -44,39 +46,48 @@ interface FsNodeRelationDao {
     @Query(
         "SELECT parent.* FROM fs_node_object AS parent " +
             "JOIN fs_node_relation AS r ON parent.fs_node_id = r.fs_node_id_parent " +
-            "WHERE r.fs_node_id_child = :childId " +
+            "WHERE r.fs_node_id_child = :childId AND r.time_deleted IS NULL " +
+            "AND parent.time_deleted IS NULL " +
             "ORDER BY parent.name_display",
     )
     fun parentsOf(childId: Long): Flow<List<FsNodeObject>>
 
     @Query(
         "SELECT * FROM fs_node_relation " +
-            "WHERE fs_node_id_child = :childId AND fs_node_id_parent = :parentId",
+            "WHERE fs_node_id_child = :childId AND fs_node_id_parent = :parentId " +
+            "AND time_deleted IS NULL",
     )
     suspend fun getRelation(childId: Long, parentId: Long?): FsNodeRelation?
 
+    /**
+     * Unlink a child from a parent by soft-deleting the edge (`FOTLAB-DATABS-000002` R10,
+     * revised): the row stays but its `time_deleted` is stamped, so the node id space is
+     * never touched. `NULL` parent needs the `IS NULL` branch because `= NULL` never matches.
+     */
     @Query(
-        "DELETE FROM fs_node_relation " +
-            "WHERE fs_node_id_child = :childId AND fs_node_id_parent = :parentId",
+        "UPDATE fs_node_relation SET time_deleted = :timeDeleted " +
+            "WHERE fs_node_id_child = :childId AND " +
+            "(fs_node_id_parent = :parentId OR (fs_node_id_parent IS NULL AND :parentId IS NULL))",
     )
-    suspend fun removeRelation(childId: Long, parentId: Long?)
+    suspend fun removeRelation(childId: Long, parentId: Long?, timeDeleted: Long)
 
-    /** Relations where the node is the child — its own links to its parents. */
-    @Query("SELECT * FROM fs_node_relation WHERE fs_node_id_child = :childId")
+    /** Relations where the node is the child — its own links to its parents (live only). */
+    @Query("SELECT * FROM fs_node_relation WHERE fs_node_id_child = :childId AND time_deleted IS NULL")
     suspend fun relationsWithChild(childId: Long): List<FsNodeRelation>
 
-    /** Relations where the node is the parent — what sits directly under it. */
-    @Query("SELECT * FROM fs_node_relation WHERE fs_node_id_parent = :parentId")
+    /** Relations where the node is the parent — what sits directly under it (live only). */
+    @Query("SELECT * FROM fs_node_relation WHERE fs_node_id_parent = :parentId AND time_deleted IS NULL")
     suspend fun relationsWithParent(parentId: Long): List<FsNodeRelation>
 
-    /** How many parents a node still has; 0 means it became an orphan (R12). */
-    @Query("SELECT COUNT(*) FROM fs_node_relation WHERE fs_node_id_child = :childId")
-    suspend fun parentCount(childId: Long): Int
+    /** How many live parents a node still has; 0 means it became an orphan (R12). */
+    @Query("SELECT COUNT(*) FROM fs_node_relation WHERE fs_node_id_child = :childId AND time_deleted IS NULL")
+    suspend fun activeParentCount(childId: Long): Int
 
-    /** Nodes with no parent relation at all — neither root nor nested; recycled by refresh (R10). */
+    /** Live nodes with no live parent relation at all — neither root nor nested; recycled by refresh. */
     @Query(
         "SELECT fs_node_id FROM fs_node_object " +
-            "WHERE fs_node_id NOT IN (SELECT DISTINCT fs_node_id_child FROM fs_node_relation)",
+            "WHERE time_deleted IS NULL " +
+            "AND fs_node_id NOT IN (SELECT DISTINCT fs_node_id_child FROM fs_node_relation WHERE time_deleted IS NULL)",
     )
     suspend fun orphanNodeIds(): List<Long?>
 }

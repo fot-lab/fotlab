@@ -48,5 +48,12 @@ import androidx.room.PrimaryKey
 data class FsNodeRelation(
     @ColumnInfo(name = "fs_node_id_child") val fsNodeIdChild: Long,
     @ColumnInfo(name = "fs_node_id_parent") val fsNodeIdParent: Long?,
+    /**
+     * Soft-delete timestamp (`FOTLAB-DATABS-000002` R10, revised): `NULL` means the edge is
+     * live; a non-null value marks it removed. Deleting a node stamps every relation that
+     * leaves with it instead of removing the row, so the node id and edge id spaces stay
+     * unique across live and removed rows (no recycle tables, R6).
+     */
+    @ColumnInfo(name = "time_deleted") val timeDeleted: Long? = null,
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
 )

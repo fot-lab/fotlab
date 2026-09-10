@@ -7,8 +7,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 /**
  * The gallery feature's own Room database (`FOTLAB-DATABS-000001` R3), realising the
- * `fs_node` schema of `FOTLAB-DATABS-000002` — the two live tables plus the two recycle
- * tables deletion moves rows into (R10/R11).
+ * `fs_node` schema of `FOTLAB-DATABS-000002` — the two live tables, now carrying a
+ * `time_deleted` column so deletion is a soft stamp instead of an archive into separate
+ * recycle tables (R10, revised).
  *
  * `exportSchema = false`: the schema JSON is a build artifact and is not committed
  * (`FOTLAB-DATABS-000001` R5). Migration safety comes from Room's runtime validation
@@ -18,21 +19,17 @@ import androidx.sqlite.db.SupportSQLiteDatabase
     entities = [
         FsNodeObject::class,
         FsNodeRelation::class,
-        FsNodeObjectRecycle::class,
-        FsNodeRelationRecycle::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = false,
 )
 abstract class GalleryDatabase : RoomDatabase() {
     abstract fun nodeObjectDao(): FsNodeObjectDao
     abstract fun nodeRelationDao(): FsNodeRelationDao
-    abstract fun nodeObjectRecycleDao(): FsNodeObjectRecycleDao
-    abstract fun nodeRelationRecycleDao(): FsNodeRelationRecycleDao
 
     companion object {
 
-        /** Adds the two recycle tables that deletion archives into (R10). */
+        /** Adds the two recycle tables that deletion archived into (R10, removed in v3). */
         val MIGRATION_1_2: Migration = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
@@ -65,6 +62,21 @@ abstract class GalleryDatabase : RoomDatabase() {
                     "CREATE INDEX IF NOT EXISTS `index_fs_node_relation_recycle_fs_node_id_parent` " +
                         "ON `fs_node_relation_recycle` (`fs_node_id_parent`)",
                 )
+            }
+        }
+
+        /**
+         * Soft-delete migration (R10, revised): drops the two recycle tables (no longer used)
+         * and adds the nullable `time_deleted` column to both live tables. `ALTER TABLE ... ADD
+         * COLUMN` leaves existing rows with `time_deleted = NULL`, i.e. still live
+         * (`FOTLAB-DATABS-000002` R6/C6, revised).
+         */
+        val MIGRATION_2_3: Migration = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `fs_node_object` ADD COLUMN `time_deleted` INTEGER")
+                db.execSQL("ALTER TABLE `fs_node_relation` ADD COLUMN `time_deleted` INTEGER")
+                db.execSQL("DROP TABLE IF EXISTS `fs_node_object_recycle`")
+                db.execSQL("DROP TABLE IF EXISTS `fs_node_relation_recycle`")
             }
         }
     }

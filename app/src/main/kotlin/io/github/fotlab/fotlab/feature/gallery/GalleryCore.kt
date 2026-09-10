@@ -20,15 +20,6 @@ import kotlinx.coroutines.runBlocking
 /** MIME value that marks a collection (`FOTLAB-DATABS-000002` R4). */
 const val MimeCollection = "application/folder"
 
-/**
- * Sentinel stored in `fs_node_relation_recycle.fs_node_id_parent` for an archived edge
- * that was root-level on the live table (where `NULL` means root, R5). Room forbids a
- * nullable column in the recycle table's composite primary key, so the root case is
- * encoded as this never-real node id (live ids are >= 1). Also used by any future
- * restore path to turn the sentinel back into a `NULL` parent.
- */
-const val FsNodeParentRootId: Long = 0L
-
 /** Fallback MIME when the platform cannot tell us the type of a picked file. */
 private const val MimeUnknown = "application/octet-stream"
 
@@ -80,7 +71,7 @@ object GalleryCore {
             GalleryDatabase::class.java,
             "gallery",
         )
-            .addMigrations(GalleryDatabase.MIGRATION_1_2)
+            .addMigrations(GalleryDatabase.MIGRATION_1_2, GalleryDatabase.MIGRATION_2_3)
             .build()
         repository = GalleryRepository(database)
         layoutPreference = GalleryLayoutPreference(applicationContext)
@@ -131,21 +122,22 @@ object GalleryCore {
     }
 
     /**
-     * Reconcile the virtual tree with the real world (`FOTLAB-UIXDES-000004` R10): archive every
-     * non-folder node whose real object is gone and every orphan node, reusing the delete archive
-     * path so they share one `recycle_id`, then vacuum the database.
+     * Reconcile the virtual tree with the real world (`FOTLAB-UIXDES-000004` R10): soft-delete
+     * every live non-folder node whose real object is gone and every live orphan node, reusing
+     * the delete path so they share one `time_deleted` timestamp. No physical row is removed and
+     * no `VACUUM` is needed — soft deletion leaves the page in place (`FOTLAB-DATABS-000002` R10/R14,
+     * revised).
      */
     suspend fun refresh() {
-        val batchId = System.currentTimeMillis()
+        val now = System.currentTimeMillis()
         val missing = repo().fileEntryNodes().filter { node ->
             node.uriStorage != null && !uriExists(node.uriStorage)
         }.mapNotNull { it.fsNodeId }
         val orphans = repo().orphanNodeIds().mapNotNull { it }
-        val toRecycle = (missing + orphans).toSet()
-        if (toRecycle.isNotEmpty()) {
-            repo().deleteNodes(toRecycle, batchId)
+        val toDelete = (missing + orphans).toSet()
+        if (toDelete.isNotEmpty()) {
+            repo().deleteNodes(toDelete)
         }
-        repo().vacuum()
     }
 
     /** True when the real object behind [uriString] is still resolvable; false on any failure. */
@@ -200,15 +192,15 @@ object GalleryCore {
 
     /**
      * Remove every selected node from the virtual tree. Relations go with the node
-     * (FK cascade) and the physical file is never touched — deletion of a file on disk
-     * remains an explicit, separately confirmed action (`FOTLAB-IMGMGR-000001` R7).
+     * (the delete routine stamps them) and the physical file is never touched — deletion of a
+     * file on disk remains an explicit, separately confirmed action (`FOTLAB-IMGMGR-000001` R7).
      */
     suspend fun deleteSelected() {
         val ids = selection.selected.value
         if (ids.isEmpty()) return
-        // One batch id for the whole operation, so every archived row belongs to it
-        // (`FOTLAB-DATABS-000002` R10/R13).
-        repo().deleteNodes(ids, batchId = System.currentTimeMillis())
+        // One timestamp for the whole operation, so every row it stamps belongs to it
+        // (`FOTLAB-DATABS-000002` R10/R13, revised).
+        repo().deleteNodes(ids)
         selection.clear()
     }
 
