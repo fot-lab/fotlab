@@ -9,6 +9,22 @@
     <!-- ===== common ===== -->
     <string name="common_action_delete">Delete</string>
     <string name="common_action_cancel">Cancel</string>
+    <string name="common_action_import">Import files</string>
+    <string name="common_action_export">Export selection</string>
+
+    <!-- Selection: the trio every list shares, plus the count of what is selected. -->
+    <string name="common_selection_select_all">Select all</string>
+    <string name="common_selection_invert">Invert selection</string>
+    <string name="common_selection_deselect_all">Deselect all</string>
+    <plurals name="common_selection_count">
+        <item quantity="one">%1$d selected</item>
+        <item quantity="other">%1$d selected</item>
+    </plurals>
+
+    <!-- Drawer: shared by every module drawer — open/close affordance and the empty state. -->
+    <string name="common_drawer_empty">No drawer entries yet</string>
+    <string name="common_drawer_open">Open navigation drawer</string>
+    <string name="common_drawer_close">Close navigation drawer</string>
 
     <!-- ===== app (shell) ===== -->
     <string name="app_name">FotLab</string>
@@ -18,27 +34,13 @@
     <string name="gallery_title">Gallery</string>
     <string name="gallery_new_collection_name">New Folder</string>
 
-    <string name="gallery_menu_select_all">Select all</string>
-    <string name="gallery_menu_invert">Invert selection</string>
-    <string name="gallery_menu_deselect_all">Deselect all</string>
-
     <string name="gallery_delete_title">Delete selection?</string>
     <string name="gallery_delete_message">The selected items are removed from the library. The
         original files stay where they are.</string>
 
     <string name="gallery_empty_directory">This folder is empty</string>
 
-    <plurals name="gallery_selection_count">
-        <item quantity="one">%1$d selected</item>
-        <item quantity="other">%1$d selected</item>
-    </plurals>
-
-    <string name="gallery_drawer_empty">No drawer entries yet</string>
-    <string name="gallery_cd_open_drawer">Open navigation drawer</string>
-    <string name="gallery_cd_close_drawer">Close navigation drawer</string>
     <string name="gallery_cd_more_options">More options</string>
-    <string name="gallery_cd_import">Import files</string>
-    <string name="gallery_cd_export">Export selection</string>
     <string name="gallery_cd_new_collection">New folder</string>
     <string name="gallery_cd_delete">Delete selection</string>
     <string name="gallery_cd_layout_mode">Switch display mode</string>

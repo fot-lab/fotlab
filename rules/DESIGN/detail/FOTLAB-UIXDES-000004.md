@@ -199,14 +199,18 @@ entry is **icon + text** (no brackets, no decorative punctuation in the copy):
 
 ### R8 — Copy lives in resources
 
-Every label, content description and the default collection name comes from the `feature: gallery`
-block of the single strings file (`FOTLAB-UIXDES-000003` R2/R4). Keys used by this screen:
-`gallery_title`, `gallery_new_collection_name`, `gallery_menu_select_all`, `gallery_menu_invert`,
-`gallery_menu_deselect_all`, `gallery_delete_title`, `gallery_delete_message`,
-`gallery_empty_directory`, `gallery_drawer_empty`, `gallery_selection_count` (plural) and the
-content descriptions `gallery_cd_open_drawer`, `gallery_cd_close_drawer`, `gallery_cd_more_options`, `gallery_cd_import`,
-`gallery_cd_export`, `gallery_cd_new_collection`, `gallery_cd_delete`. The two generic dialog
-actions are promoted to `common`: `common_action_delete`, `common_action_cancel`.
+Every label, content description and the default collection name comes from the single strings file
+(`FOTLAB-UIXDES-000003` R2/R4). Keys used by this screen:
+
+- `feature: gallery` block — `gallery_title`, `gallery_new_collection_name`, `gallery_delete_title`,
+  `gallery_delete_message`, `gallery_empty_directory` and the content descriptions
+  `gallery_cd_more_options`, `gallery_cd_new_collection`, `gallery_cd_delete`,
+  `gallery_cd_layout_mode`, `gallery_cd_refresh`.
+- `common` block — the selection trio and the count: `common_selection_select_all`,
+  `common_selection_invert`, `common_selection_deselect_all`, `common_selection_count` (plural);
+  the two slot actions: `common_action_import`, `common_action_export`; the drawer:
+  `common_drawer_empty`, `common_drawer_open`, `common_drawer_close`; and the dialog actions
+  `common_action_delete`, `common_action_cancel`.
 
 ### R9 — Layout toggle (grid / 田字) leads the middle region
 

@@ -242,13 +242,13 @@ private fun GalleryDrawer(
             ) {
                 Icon(
                     imageVector = Icons.Filled.Close,
-                    contentDescription = stringResource(id = R.string.gallery_cd_close_drawer),
+                    contentDescription = stringResource(id = R.string.common_drawer_close),
                 )
             }
 
             // Feature-private drawer content (R5): no app-level entries here.
             Text(
-                text = stringResource(id = R.string.gallery_drawer_empty),
+                text = stringResource(id = R.string.common_drawer_empty),
                 modifier = Modifier.padding(16.dp),
             )
         }
@@ -282,7 +282,7 @@ private fun GalleryTopBar(
                     directoryName
                 } else {
                     pluralStringResource(
-                        id = R.plurals.gallery_selection_count,
+                        id = R.plurals.common_selection_count,
                         count = selectionSize,
                         selectionSize,
                     )
@@ -296,7 +296,7 @@ private fun GalleryTopBar(
                 IconButton(onClick = onOpenDrawer) {
                     Icon(
                         imageVector = Icons.Filled.Menu,
-                        contentDescription = stringResource(id = R.string.gallery_cd_open_drawer),
+                        contentDescription = stringResource(id = R.string.common_drawer_open),
                     )
                 }
                 IconButton(onClick = onCycleLayout) {
@@ -321,7 +321,7 @@ private fun GalleryTopBar(
                         // Import: the arrow coming from outside down into the tray — data enters
                         // the app (`FOTLAB-UIXDES-000005` R2).
                         imageVector = Icons.Filled.SaveAlt,
-                        contentDescription = stringResource(id = R.string.gallery_cd_import),
+                        contentDescription = stringResource(id = R.string.common_action_import),
                     )
                 }
                 IconButton(onClick = onCreateCollection) {
@@ -336,7 +336,7 @@ private fun GalleryTopBar(
                         // Export: the arrow rising out of the box — data leaves the app
                         // (`FOTLAB-UIXDES-000005` R2).
                         imageVector = Icons.Filled.IosShare,
-                        contentDescription = stringResource(id = R.string.gallery_cd_export),
+                        contentDescription = stringResource(id = R.string.common_action_export),
                     )
                 }
                 IconButton(onClick = onDelete) {
@@ -359,7 +359,7 @@ private fun GalleryTopBar(
                     onDismissRequest = { overflowOpen = false },
                 ) {
                     DropdownMenuItem(
-                        text = { Text(text = stringResource(id = R.string.gallery_menu_select_all)) },
+                        text = { Text(text = stringResource(id = R.string.common_selection_select_all)) },
                         leadingIcon = {
                             Icon(imageVector = Icons.Filled.SelectAll, contentDescription = null)
                         },
@@ -369,7 +369,7 @@ private fun GalleryTopBar(
                         },
                     )
                     DropdownMenuItem(
-                        text = { Text(text = stringResource(id = R.string.gallery_menu_invert)) },
+                        text = { Text(text = stringResource(id = R.string.common_selection_invert)) },
                         leadingIcon = {
                             Icon(imageVector = Icons.Filled.FlipToBack, contentDescription = null)
                         },
@@ -379,7 +379,7 @@ private fun GalleryTopBar(
                         },
                     )
                     DropdownMenuItem(
-                        text = { Text(text = stringResource(id = R.string.gallery_menu_deselect_all)) },
+                        text = { Text(text = stringResource(id = R.string.common_selection_deselect_all)) },
                         leadingIcon = {
                             Icon(imageVector = Icons.Filled.Deselect, contentDescription = null)
                         },

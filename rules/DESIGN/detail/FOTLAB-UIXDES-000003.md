@@ -232,9 +232,18 @@ by a file per feature (`FOTLAB-STRUCT-000001` R5).
   user-visible text (including content descriptions); platform-based date/number formatting; and
   locale/RTL layout rules. Base language, canonical feature order, shipped locales, translation
   workflow, RTL scope and plural handling left open as Q1–Q6.
-- 2026-09-07 — Updated for the single-module layout (`FOTLAB-STRUCT-000001`): "module" became
+- 2026-09-07 — Updated for the single-module layout (`FOTLAB-STRUCT-000001`):   "module" became
   "feature" throughout, because there is now **one** strings file instead of one per module. Ownership
   (R3) is expressed by block and key prefix rather than by file; AC3 became a grep over
   `ui/<feature>/` and `navigation/<feature>/` instead of a module dependency check; the Impacted
   Modules section now names `app/src/main/res/values*/strings.xml` and the feature packages. The block
   order itself — `common` first, then `app`, then features — is unchanged.
+- 2026-09-10 — Promoted shared copy from `feature: gallery` into `common` (R3 promotion path), per the
+  owner's decision that these are app-wide, not gallery-private: the selection trio and count
+  (`common_selection_select_all`, `common_selection_invert`, `common_selection_deselect_all`,
+  `common_selection_count` — replacing `gallery_menu_select_all`, `gallery_menu_invert`,
+  `gallery_menu_deselect_all`, the `gallery_selection_count` plural), the two slot actions
+  (`common_action_import`, `common_action_export` — replacing `gallery_cd_import`,
+  `gallery_cd_export`) and the drawer copy (`common_drawer_empty`, `common_drawer_open`,
+  `common_drawer_close` — replacing `gallery_drawer_empty`, `gallery_cd_open_drawer`,
+  `gallery_cd_close_drawer`). The old keys are removed; no code references them.

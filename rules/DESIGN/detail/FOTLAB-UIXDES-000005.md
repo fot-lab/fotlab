@@ -43,7 +43,7 @@ Goals:
 
 - The pair is decided by the **shape and the direction**, not by the English word: 导入 is the arrow coming from outside **into** the tray (入盘), 导出 is the arrow rising **out of** the box (出盘). A glyph that shows only an arrow above or below a plain horizontal line is **not** either of them — the tray or box has to read as a container the arrow goes into or comes out of.
 - These two were verified by eye on a device: `Upload` / `Download` (`upload` / `download`) render as an arrow next to a plain line in the icon set this project uses, which is why they are **not** the import/export icons here — see R4.
-- Content descriptions stay in `strings.xml` (`FOTLAB-UIXDES-000003` R6); the gallery uses `gallery_cd_export` and `gallery_cd_import`.
+- Content descriptions stay in `strings.xml` (`FOTLAB-UIXDES-000003` R6); the two actions are promoted copy, so the gallery uses `common_action_export` and `common_action_import`.
 
 ### R3 — Gallery top bar, drawer and overflow vocabulary
 
