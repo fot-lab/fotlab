@@ -44,7 +44,7 @@
     <string name="gallery_empty_directory">This folder is empty</string>
 
     <string name="gallery_cd_layout_mode">Switch display mode</string>
-    <string name="gallery_cd_refresh">Refresh library</string>
+    <string name="gallery_cd_sync">Sync library</string>
 
     <!-- Gallery viewer: the full-screen image/video dialog opened on a single tap. -->
     <string name="gallery_viewer_cd_close">Close viewer</string>

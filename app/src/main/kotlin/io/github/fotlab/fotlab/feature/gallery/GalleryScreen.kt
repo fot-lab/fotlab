@@ -23,7 +23,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Deselect
@@ -32,7 +32,7 @@ import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.IosShare
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Audiotrack
@@ -351,8 +351,8 @@ private fun GalleryTopBar(
                 }
                 IconButton(onClick = onRefresh) {
                     Icon(
-                        imageVector = Icons.Filled.Refresh,
-                        contentDescription = stringResource(id = R.string.gallery_cd_refresh),
+                        imageVector = Icons.Filled.Sync,
+                        contentDescription = stringResource(id = R.string.gallery_cd_sync),
                     )
                 }
             }
@@ -370,7 +370,7 @@ private fun GalleryTopBar(
                 }
                 IconButton(onClick = onCreateCollection) {
                     Icon(
-                        imageVector = Icons.Filled.Add,
+                        imageVector = Icons.Filled.CreateNewFolder,
                         contentDescription = stringResource(id = R.string.common_action_new_folder),
                     )
                 }
