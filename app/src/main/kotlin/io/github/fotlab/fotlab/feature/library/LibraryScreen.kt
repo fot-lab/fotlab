@@ -163,11 +163,6 @@ fun LibraryScreen() {
         // Two sibling regions: the top bar, and the content region below it.
         Column(modifier = Modifier.fillMaxSize()) {
             LibraryTopBar(
-                directoryName = when (viewMode) {
-                    LibraryViewMode.Library -> currentDirectory?.nameDisplay
-                        ?: stringResource(id = LibraryCore.titleRes)
-                    LibraryViewMode.RecycleBin -> stringResource(id = R.string.library_recycle_bin)
-                },
                 selectionSize = selectedIds.size,
                 candidateIds = children.mapNotNull { it.fsNodeId },
                 onCycleLayout = { scope.launch { LibraryCore.cycleLayoutMode() } },
@@ -396,7 +391,6 @@ private fun DrawerNavItem(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun LibraryTopBar(
-    directoryName: String,
     selectionSize: Int,
     candidateIds: List<Long>,
     onCycleLayout: () -> Unit,
@@ -415,24 +409,15 @@ private fun LibraryTopBar(
 
     TopAppBar(
         modifier = modifier,
-        title = {
-            Text(
-                // While anything is selected the title is intentionally blank: the count
-                // lives in the leading cluster, so it must not be shown twice.
-                text = if (selectionSize == 0) {
-                    directoryName
-                } else {
-                    ""
-                },
-                maxLines = 1,
-            )
-        },
+        // The title slot is intentionally left empty: the top bar never renders text. The
+        // directory name is not surfaced here, and while selecting the count lives in the
+        // leading cluster.
         navigationIcon = {
             // Leading cluster swaps on selection (`FOTLAB-UIXDES-000004`): with nothing selected
             // it is drawer + grid + sync; once anything is selected the drawer becomes a Close
             // (clear selection) and the grid slot becomes a rename pencil (single) or the bare
-            // count (multiple) — sync is hidden while selecting. The title stays blank while
-            // selecting, so the count is never shown twice.
+            // count (multiple) — sync is hidden while selecting. The bar has no title, so the
+            // count is shown only here.
             if (selectionSize == 0) {
                 Row {
                     IconButton(onClick = onOpenDrawer) {
