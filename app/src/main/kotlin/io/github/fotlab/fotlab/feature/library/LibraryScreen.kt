@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -49,6 +51,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Text
@@ -69,9 +74,14 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import io.github.fotlab.fotlab.R
 import kotlinx.coroutines.launch
 import android.net.Uri
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /** Drawer width: 80% of the module region (`FOTLAB-UIXDES-000002` R3). */
 private const val DrawerWidthFraction = 0.8f
@@ -574,6 +584,14 @@ private fun LibraryTopBar(
     )
 }
 
+private val nodeDateformat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+
+/** Secondary line under a node name: last-modified (falling back to created) as a short date. */
+private fun nodeSubtitle(node: FsNodeObject): String {
+    val t = node.timeModified ?: node.timeCreated
+    return nodeDateformat.format(Date(t))
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun NodeList(
@@ -604,6 +622,9 @@ private fun NodeList(
         else -> LazyVerticalGrid(
             columns = GridCells.Fixed(layoutMode.columns),
             modifier = modifier,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(8.dp),
         ) {
             items(nodes, key = { it.fsNodeId ?: it.nameDisplay }) { cell(it) }
         }
@@ -621,41 +642,61 @@ private fun NodeCell(
     onToggleSelect: (FsNodeObject) -> Unit,
 ) {
     if (isGrid) {
-        // M3 has no official grid cell, so it stays hand-written: a square thumbnail (like a
-        // file manager) above the name, with the selected container colour. Long-press enters
-        // selection; while selecting a plain tap toggles, otherwise it opens.
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .then(
-                    if (selected) {
-                        Modifier.background(MaterialTheme.colorScheme.secondaryContainer)
-                    } else {
-                        Modifier
-                    },
-                )
-                .combinedClickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = { if (selectionActive) onToggleSelect(node) else onNodeClick(node) },
-                    onLongClick = { onToggleSelect(node) },
-                ),
+        // M3 has no official grid cell, so it stays hand-written but framed like a file manager:
+        // a square, rounded thumbnail tile inside a Card, the node name + a short date below, and
+        // a Checkbox shown during selection. Long-press enters selection; a plain tap toggles in
+        // selection mode, otherwise it opens (`FOTLAB-UIXDES-000004`).
+        Card(
+            modifier = Modifier.combinedClickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = { if (selectionActive) onToggleSelect(node) else onNodeClick(node) },
+                onLongClick = { onToggleSelect(node) },
+            ),
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = if (selected) {
+                    MaterialTheme.colorScheme.secondaryContainer
+                } else {
+                    MaterialTheme.colorScheme.surfaceVariant
+                },
+            ),
         ) {
-            NodeThumbnail(
-                node = node,
-                modifier = Modifier.fillMaxWidth().aspectRatio(1f),
-            )
+            Box(contentAlignment = Alignment.TopStart, modifier = Modifier.padding(8.dp)) {
+                NodeThumbnail(
+                    node = node,
+                    modifier = Modifier.fillMaxWidth().aspectRatio(1f)
+                        .clip(RoundedCornerShape(8.dp)),
+                )
+                if (selectionActive) {
+                    Checkbox(
+                        checked = selected,
+                        onCheckedChange = { onToggleSelect(node) },
+                        modifier = Modifier.padding(4.dp),
+                    )
+                }
+            }
             Text(
                 text = node.nameDisplay,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(8.dp),
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 2.dp),
+            )
+            Text(
+                text = nodeSubtitle(node),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 8.dp, end = 8.dp, bottom = 8.dp),
             )
         }
     } else {
-        // Detail list: the official M3 [ListItem] carries the selected container colour and
-        // the proper list-row metrics; a square thumbnail sits in the leading slot, the way a
-        // file manager shows it. Tapping follows the grid tile's rules.
+        // Detail list: the official M3 [ListItem] carries the selected container colour and the
+        // proper list-row metrics; a rounded thumbnail sits in the leading slot, the node name is
+        // the headline, a short date the supporting line, and a Checkbox appears during selection.
+        // Tapping follows the grid tile's rules (`FOTLAB-UIXDES-000004`).
         ListItem(
             modifier = Modifier.combinedClickable(
                 onClick = { if (selectionActive) onToggleSelect(node) else onNodeClick(node) },
@@ -670,8 +711,26 @@ private fun NodeCell(
                     Color.Transparent
                 },
             ),
-            leadingContent = { NodeThumbnail(node = node, modifier = Modifier.size(40.dp)) },
-            headlineContent = { Text(text = node.nameDisplay) },
+            leadingContent = {
+                NodeThumbnail(node = node, modifier = Modifier.size(40.dp).clip(RoundedCornerShape(8.dp)))
+            },
+            headlineContent = {
+                Text(text = node.nameDisplay, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            },
+            supportingContent = {
+                Text(
+                    text = nodeSubtitle(node),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            },
+            trailingContent = {
+                if (selectionActive) {
+                    Checkbox(checked = selected, onCheckedChange = { onToggleSelect(node) })
+                }
+            },
         )
     }
 }
