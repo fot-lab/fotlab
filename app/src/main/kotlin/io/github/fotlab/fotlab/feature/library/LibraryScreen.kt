@@ -408,10 +408,11 @@ private fun LibraryTopBar(
     val selection = LibraryCore.selection
 
     TopAppBar(
+        // The title slot stays an empty composable — Material3 makes `title` a required
+        // parameter, so it cannot simply be dropped. The bar never renders text: the directory
+        // name is not surfaced here, and while selecting the count lives in the leading cluster.
+        title = {},
         modifier = modifier,
-        // The title slot is intentionally left empty: the top bar never renders text. The
-        // directory name is not surfaced here, and while selecting the count lives in the
-        // leading cluster.
         navigationIcon = {
             // Leading cluster swaps on selection (`FOTLAB-UIXDES-000004`): with nothing selected
             // it is drawer + grid + sync; once anything is selected the drawer becomes a Close
