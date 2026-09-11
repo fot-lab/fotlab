@@ -9,6 +9,7 @@
     <!-- ===== common ===== -->
     <string name="common_action_delete">Delete</string>
     <string name="common_action_cancel">Cancel</string>
+    <string name="common_action_ok">OK</string>
     <string name="common_action_import">Import files</string>
     <string name="common_action_export">Export selection</string>
     <string name="common_action_delete_selection">Delete selection</string>
@@ -35,6 +36,9 @@
     <string name="library_delete_title">Delete selection?</string>
     <string name="library_delete_message">The selected items are removed from the library. The
         original files stay where they are.</string>
+
+    <string name="library_delete_invalid_title">无法删除</string>
+    <string name="library_delete_invalid_message">所有选中节点必须直接属于当前界面展示的目录才可删除</string>
 
     <string name="library_empty_directory">This folder is empty</string>
 

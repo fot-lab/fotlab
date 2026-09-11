@@ -132,6 +132,16 @@ class LibraryRepository(private val database: LibraryDatabase) {
     }
 
     /**
+     * True when every id is a direct, live child of [parentId] (null = the implicit root).
+     * Used to gate deletion on the delete press: only the selected level is checked, the
+     * subtree removed by recursion is not re-validated (`FOTLAB-UIXDES-000004` R10, guard).
+     */
+    suspend fun selectedDirectlyUnder(ids: Collection<Long>, parentId: Long?): Boolean {
+        val relationDao = database.nodeRelationDao()
+        return ids.all { id -> relationDao.getRelation(id, parentId) != null }
+    }
+
+    /**
      * Soft-delete one node and the relations that leave with it.
      *
      * 1. stamp the relations where the node is the child (its link up);

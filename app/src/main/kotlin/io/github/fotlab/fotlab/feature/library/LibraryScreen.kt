@@ -120,6 +120,9 @@ fun LibraryScreen() {
     // Which top-level view the drawer selected; defaults to the Source Library (built so far).
     var viewMode by remember { mutableStateOf(LibraryViewMode.Library) }
     var deleteConfirmation by remember { mutableStateOf(false) }
+    // Set when a delete press is blocked because a selected node is not a direct child of the
+    // directory on screen; drives the "cannot delete" dialog.
+    var deleteInvalid by remember { mutableStateOf(false) }
     // Node awaiting a rename from the single-selection edit action; null = dialog closed.
     var renameTarget by remember { mutableStateOf<FsNodeObject?>(null) }
     // Media list + start index for the full-screen viewer, captured from the folder's current
@@ -187,7 +190,17 @@ fun LibraryScreen() {
                 // Export shape is undecided (`FOTLAB-UIXDES-000004` Q6): the slot is
                 // present as required by R4, the behaviour is added when Q6 is settled.
                 onExport = { /* TODO: export, pending Q6 */ },
-                onDelete = { deleteConfirmation = true },
+                onDelete = {
+                    scope.launch {
+                        // Gate: only nodes directly under the directory on screen may be deleted
+                        // from here; recursion into subfolders is not re-checked (`FOTLAB-UIXDES-000004`).
+                        if (LibraryCore.selectionDirectlyUnder(currentDirectory?.fsNodeId)) {
+                            deleteConfirmation = true
+                        } else {
+                            deleteInvalid = true
+                        }
+                    }
+                },
             )
 
             Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
@@ -269,6 +282,19 @@ fun LibraryScreen() {
             dismissButton = {
                 TextButton(onClick = { deleteConfirmation = false }) {
                     Text(text = stringResource(id = R.string.common_action_cancel))
+                }
+            },
+        )
+    }
+
+    if (deleteInvalid) {
+        AlertDialog(
+            onDismissRequest = { deleteInvalid = false },
+            title = { Text(text = stringResource(id = R.string.library_delete_invalid_title)) },
+            text = { Text(text = stringResource(id = R.string.library_delete_invalid_message)) },
+            confirmButton = {
+                TextButton(onClick = { deleteInvalid = false }) {
+                    Text(text = stringResource(id = R.string.common_action_ok))
                 }
             },
         )

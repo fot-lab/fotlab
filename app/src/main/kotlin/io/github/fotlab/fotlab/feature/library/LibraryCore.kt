@@ -208,6 +208,17 @@ object LibraryCore {
         selection.clear()
     }
 
+    /**
+     * Gate for the delete press: every selected node must be a direct child of [parentId]
+     * (null = root) — i.e. belong to the directory currently on screen. Only the selected
+     * level is checked; recursively removed descendants are not re-validated.
+     */
+    suspend fun selectionDirectlyUnder(parentId: Long?): Boolean {
+        val ids = selection.selected.value
+        if (ids.isEmpty()) return false
+        return repo().selectedDirectlyUnder(ids, parentId)
+    }
+
     private fun takeReadPermission(uri: Uri) {
         // Persistence of the grant is best-effort: a provider that does not offer it
         // simply means the reference may stop resolving later (see Q7).
