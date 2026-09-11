@@ -28,7 +28,11 @@ modules stay consistent while remaining autonomous:
 - Each top-level module renders its own Material3 top app bar as the first element of its content region.
 - The top app bar is **not** part of the shell and **not** persistent: it is created and destroyed with the module, and it disappears when the user switches destination.
 - Each module writes and owns its own top app bar implementation; no shared top app bar component exists (see C1). Consistency comes from the behaviour contract R2–R5, not from shared code.
-- The title is the module name, single line, truncated on overflow.
+- The title slot is **module-owned and optional**. A module may render its name (single line,
+  truncated), or leave the slot empty — the Library renders an empty title composable and surfaces
+  nothing there (`FOTLAB-UIXDES-000004` R6). The skeleton requires the slot to exist (Material3 makes
+  `title` a required parameter), not that it show text. Whether every screen must show a title is
+  open as Q7.
 
 ### R2 — Leftmost element: drawer icon
 
@@ -44,7 +48,7 @@ modules stay consistent while remaining autonomous:
 - The drawer is the **native Material3 modal drawer** (`ModalNavigationDrawer`) wrapped around the module's whole region — the top bar included — so it slides over the top bar with the platform's motion and scrim, exactly as the platform does. The module region is the region above the bottom navigation bar (`FOTLAB-UIXDES-000001` R2); the drawer never leaves it.
 - Consequence: the bottom navigation region is **not** covered by the drawer and remains visible while the drawer is open, preserving the rule that it is the only persistent element in the app.
 - Inside the module region the **top bar and the content region are siblings** — one above the other, neither overlapping the other. A module places them side by side itself (for example in a `Column`); it does not stack a second `Scaffold` on top of the shell's to do it.
-- Implementation note: Material3's `ModalDrawerSheet` applies its own width constraints (default maximum 360dp). If those constraints conflict with the 80% requirement, the sheet is replaced by a custom `Surface` carrying the 80% modifier. The library uses that resolution: a plain `Surface` with `fillMaxWidth(0.8f)` and `fillMaxHeight()`.
+- Implementation note: Material3's `ModalDrawerSheet` applies its own width constraints (default maximum 360dp). If those constraints conflict with the 80% requirement, the sheet is replaced by a custom `Surface` carrying the 80% modifier. The Library currently uses the native `ModalDrawerSheet` with `fillMaxWidth(0.8f)`; on phones (≈400dp wide) 80% ≈ 320dp sits under the 360dp cap, so the custom `Surface` is only needed on wider screens — that value is open as Q3.
 
 ### R4 — Rightmost element: overflow menu
 
@@ -106,6 +110,7 @@ modules stay consistent while remaining autonomous:
 - Q3 — On tablets, foldables and landscape screens, is 80% still the right value, or should an absolute maximum (for example 400dp) apply? **TBD.**
 - Q5 — Is the top app bar scroll behaviour unified (pinned vs. `enterAlways`), or chosen per module? **TBD.**
 - Q6 — Is RTL supported at launch? In RTL the drawer expands from the opposite edge and the icon order mirrors.
+- Q7 — Is the title slot mandatory (every screen shows its name) or optional (a screen may render an empty title, as the Library does)? **TBD.**
 
 Resolved and retired on 2026-09-07: Q1 (drawer content is module-private — now R5 and C6) and Q4 (bottom navigation stays interactive while the drawer is expanded — now R5, C7 and AC9). The retired numbers are intentionally not reused.
 
@@ -117,3 +122,4 @@ Resolved and retired on 2026-09-07: Q1 (drawer content is module-private — now
 - 2026-09-07 — `:core:ui` no longer exists after the single-module move (`FOTLAB-STRUCT-000001`): C1 and the Impacted Modules list now name the `ui/theme` package, which ships theme and shared primitives only — no top app bar, no drawer component. Behaviour contract R2–R5 and verification AC1–AC9 are unchanged.
 - 2026-09-10 — R3 rewritten: the drawer is the **native Material3 `ModalNavigationDrawer`** wrapped around the module's whole region, so it slides over the top bar the way the platform does; it still never leaves the module region, so the bottom navigation region stays uncovered and interactive. R3 now also states that the top bar and the content region are sibling regions and that a module does not stack its own `Scaffold` on the shell's. Added R6 and AC10: the expanded drawer owns the close affordance — an X button in its own top-left corner, aligned with the top bar's three-line icon, so the icon the user pressed is replaced in place. AC1–AC9 needed no change: the bottom bar's visibility and interactivity were never at stake, and the 80% width (AC2/AC8) is kept by the custom `Surface` already permitted by R3.
 - 2026-09-10 — R2 and C4 gained their single exception: while a module is in **selection mode** (`FOTLAB-UIXDES-000006` R3), the leftmost element is the close (X) that leaves the mode, not the three-line drawer icon. The slot is never empty and the three-line icon returns as soon as the mode ends, so the "always present, never conditionally hidden" rule is narrowed to one documented state instead of being silently broken.
+- 2026-09-11 — R1 amended: the title slot is module-owned and optional — a module may render its name or leave it empty (the Library renders an empty title composable, `FOTLAB-UIXDES-000004` R6); the skeleton requires the slot to exist, not that it shows text. R3 implementation note corrected: the Library uses the native `ModalDrawerSheet` with `fillMaxWidth(0.8f)`, so the custom `Surface` is only needed where the 80% width exceeds the 360dp cap (wide screens, Q3). Q7 added for the mandatory-vs-optional title.

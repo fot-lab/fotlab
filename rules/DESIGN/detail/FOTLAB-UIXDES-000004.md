@@ -52,15 +52,17 @@ The Library top bar is laid out as follows, and this order never changes:
 
 - The three-line icon (`Icons.Default.Menu`) is the leftmost element and opens the drawer at 80%
   of the module region (`FOTLAB-UIXDES-000002` R2/R3).
-- Immediately to its right sits the **layout-toggle icon** (`▦`, the grid / 田字 glyph) of R9. It
-  is always present, never moves, and leads the screen-defined middle region. It is part of the
-  inherited skeleton's leading cluster, not an action slot: slots A and B and the overflow menu are
-  still the three rightmost elements in that order.
-- Immediately to the **right of the layout-toggle icon** sits the **refresh icon** (`⟳`,
-  `Icons.Filled.Refresh`) of R10. It is always present and never moves, and is the last element of
-  the leading cluster, still left of the middle region. It is not an action slot: slots A and B and
-  the overflow menu remain the three rightmost elements. It is icon-only like the rest of the bar
-  and carries a `contentDescription` from resources (`library_cd_refresh`).
+- Immediately to its right sits the **layout-toggle icon** (`▦`, the grid / 田字 glyph) of R9. It is
+  part of the inherited skeleton's leading cluster, not an action slot: slots A and B and the overflow
+  menu are still the three rightmost elements in that order. In the Library it is shown **only in browse
+  mode**; in selection mode the leading cluster becomes the selection cluster of R6 and the layout toggle
+  is hidden (the slot is never left empty — it carries the close (X) then the count / rename pencil).
+- Immediately to the **right of the layout-toggle icon** sits the **refresh icon** (`⟳`) of R10. It
+  is not an action slot: slots A and B and the overflow menu remain the three rightmost elements. In
+  the current Library implementation the glyph is `Icons.Filled.Sync` (content description
+  `library_cd_sync`) rather than the `Refresh` constant, and it is shown **only in browse mode** — in
+  selection mode the leading cluster is replaced by the selection cluster of R6. The two glyphs are
+  interchangeable for this function per `FOTLAB-UIXDES-000005` R4; see Q10.
 - The three-dot icon (`Icons.Default.MoreVert`) is the rightmost element and opens the dropdown of
   R5 (`FOTLAB-UIXDES-000002` R4). Nothing is placed to its right and it is never hidden.
 - Slots A and B sit between the middle region and the three-dot icon, in that order: **A, then B,
@@ -137,7 +139,7 @@ The Library top bar is laid out as follows, and this order never changes:
   | Slot | Empty selection | Non-empty selection |
   | --- | --- | --- |
   | A | `Icons.Default.SaveAlt` (import, 入盘) | `Icons.Default.IosShare` (export, 出盘) |
-  | B | `Icons.Default.Add` (new collection) | `Icons.Default.Delete` (delete) |
+  | B | `Icons.Default.CreateNewFolder` (new collection) | `Icons.Default.Delete` (delete) |
 
 - The two slot-A icons were verified on a device and are recorded with their Chinese and English
   names in `FOTLAB-UIXDES-000005` R2: `Upload` / `Download` are **not** used here, they keep the
@@ -168,10 +170,19 @@ entry is **icon + text** (no brackets, no decorative punctuation in the copy):
 
 ### R6 — Middle region
 
-- **Empty selection** — the name of the currently shown virtual directory; at the virtual root the
-  screen title is shown. Single line, truncated on overflow (`FOTLAB-UIXDES-000002` R1).
-- **Non-empty selection** — the number of selected nodes, as a plural resource
-  (`library_selection_count`), for example "3 selected". Single line, truncated on overflow.
+- The Library renders **no text in the title slot** — `TopAppBar`'s `title` is an empty composable.
+  Material3 makes `title` a required parameter, so it cannot be dropped; the bar simply shows nothing
+  there. The directory name is therefore not surfaced in the bar (`FOTLAB-UIXDES-000002` R1 leaves the
+  title content to the module). Whether the directory name should later be shown is open as Q9.
+- **Empty selection** — the leading cluster is the browse cluster (drawer / layout toggle / refresh) of
+  R1; the middle region stays empty.
+- **Non-empty selection** — the selection count is shown in the **leading cluster**, not the title:
+  - a single selection shows a **rename pencil** (`Icons.Filled.Edit`, `library_cd_rename`) in the
+    leading cluster (the layout-toggle slot is repurposed); the count is implicit (one item);
+  - several selections show the bare count as a `Text` (`selectionSize.toString()`, `titleLarge`) in
+    that same slot.
+  This surfaces the count in the leading cluster instead of the title; the bar stays icon-only except
+  for that count text (`FOTLAB-UIXDES-000006` R3).
 - The middle region never holds actions; it is display only.
 
 ### R7 — Actions operate on virtual nodes, never on physical files directly
@@ -202,10 +213,11 @@ entry is **icon + text** (no brackets, no decorative punctuation in the copy):
 Every label, content description and the default collection name comes from the single strings file
 (`FOTLAB-UIXDES-000003` R2/R4). Keys used by this screen:
 
-- `feature: library` block — `library_title`, `library_new_collection_name`, `library_delete_title`,
+- `feature: library` block — `library_new_collection_name`, `library_delete_title`,
   `library_delete_message`, `library_empty_directory` and the content descriptions
   `library_cd_more_options`, `library_cd_new_collection`, `library_cd_delete`,
-  `library_cd_layout_mode`, `library_cd_refresh`.
+  `library_cd_layout_mode`, `library_cd_sync`, `library_cd_rename`. (`library_title` is not used:
+  the Library renders an empty title slot, `FOTLAB-UIXDES-000004` R6.)
 - `common` block — the selection trio and the count: `common_selection_select_all`,
   `common_selection_invert`, `common_selection_deselect_all`, `common_selection_count` (plural);
   the two slot actions: `common_action_import`, `common_action_export`; the drawer:
@@ -393,8 +405,14 @@ selection or the current directory.
   a permission is later revoked or the file disappears (dangling `uri_storage`)? **TBD.**
 - Q8 — New collection naming: if a collection with the default name already exists, is a numeric
   suffix appended, and is the user offered immediate renaming? **TBD.**
-- Q9 — Does the middle region show a breadcrumb for nested directories, or only the current
-  directory name? R6 currently says the current directory name. **TBD.**
+- Q9 — Does the middle region show the current directory name (or a breadcrumb for nested
+  directories), or stay empty? The current Library implementation shows nothing in the title slot
+  (R6) and surfaces the selection count in the leading cluster instead. **TBD.**
+- Q10 — Does the layout-toggle glyph follow the current mode (`ViewList` in detail-list mode,
+  `GridView` in any grid mode per R9/AC18), or stay the grid / 田字 glyph in every mode? The
+  current Library implementation always shows `GridView`. The refresh glyph is likewise `Sync`, not
+  `Refresh` (R1/R10) — both glyphs are interchangeable for these functions per
+  `FOTLAB-UIXDES-000005` R4. **TBD.**
 
 Resolved and retired on 2026-09-08: Q1 (the state holder — a process-scoped object owned by
 `LibraryCore`, read by the screen with plain `remember`; now R3 and C6), Q2 (the type keeps its
@@ -461,3 +479,4 @@ their icons are fixed in R5 and recorded with their Chinese and English names in
 - 2026-09-10 — Slot A corrected after checking the glyphs on a device: import is `Icons.Default.SaveAlt` (入盘 — the arrow comes from outside into the tray) and export is `Icons.Default.IosShare` (出盘 — the arrow rises out of the box), replacing `Download` / `Upload`, which render as an arrow next to a plain line in this project's icon set and keep the network download / upload meaning (`FOTLAB-UIXDES-000005` R2/R4).
 - 2026-09-10 — R5 fixed the three selection entries and their icons: **Select all → `Icons.Default.SelectAll`, Invert selection → `Icons.Default.FlipToBack`, Deselect all → `Icons.Default.Deselect`**, always in that order. "Clear selection" became **"Deselect all"** (`library_menu_deselect_all`, replacing `library_menu_clear`), and `SwapHoriz` / `Clear` are no longer used for these entries; `CheckCircle` / `CheckCircleOutline` stay reserved for a single item's checked state. Q3 (the invert icon) is retired; AC4/AC5 and the copy list of R8 follow the new wording.
 - 2026-09-10 — The interaction around this selection is no longer defined here alone: `FOTLAB-UIXDES-000006` now owns how selection mode is entered (long press), what the top bar shows in it (close (X) at the left, count in the middle), how it is left (close or back) and where the batch actions live. This item keeps what the selection **is** (R2/R3), what the slots mean (R4) and what the overflow menu holds (R5); whether the library adopts an explicit mode flag or keeps deriving it from a non-empty selection is `FOTLAB-UIXDES-000006` Q1.
+- 2026-09-11 — Docs aligned with the shipped Library implementation: the title slot renders empty (R6) with the selection count surfaced in the leading cluster and a rename pencil for a single selection (R6); the layout-toggle and refresh icons are shown in browse mode only, hidden in selection mode (R1); refresh uses `Icons.Filled.Sync` / `library_cd_sync` and new collection uses `Icons.Filled.CreateNewFolder`, both recorded in `FOTLAB-UIXDES-000005` R3 (R1/R4). R8 copy keys follow the implementation (`library_cd_sync`, `library_cd_rename`; `library_title` unused). Q9 reworded to the empty-title choice; Q10 added for the per-mode glyph and the `Sync` / `Refresh` refresh glyph.

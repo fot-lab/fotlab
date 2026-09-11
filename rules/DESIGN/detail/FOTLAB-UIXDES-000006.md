@@ -46,7 +46,9 @@ Goals:
 ### R3 — The top bar in selection mode
 
 - The **leftmost** element becomes the close (X) icon that leaves selection mode — `Icons.Filled.Close` (`FOTLAB-UIXDES-000005` R3), with a `contentDescription` from resources. It takes the place of the three-line drawer icon for the duration of the mode; this is the one exception to `FOTLAB-UIXDES-000002` R2 and is recorded there. The slot itself is never empty.
-- The title becomes the number of selected items, from the same plural resource the screen uses for its count (`FOTLAB-UIXDES-000004` R6).
+- The **selected count is shown in the leading cluster**, not the title slot: the Library does not use
+  the title for text (`FOTLAB-UIXDES-000004` R6). From the same plural resource the screen uses for its
+  count; a single selection additionally shows a rename pencil (`Icons.Filled.Edit`) in that cluster.
 - The action slots carry the actions of the mode: the library shows 导出 + 删除 (`FOTLAB-UIXDES-000004` R4).
 - The three-dot overflow icon stays the rightmost element and is never hidden (`FOTLAB-UIXDES-000002` R4).
 - Leaving the mode restores the three-line icon, the directory title and the browse-mode slots; no other element of the bar moves.
@@ -83,9 +85,9 @@ Goals:
 
 ## Acceptance Criteria
 
-- AC1 — Long pressing an item switches the top bar to its selection state: close (X) at the left, the count in the middle, the mode's actions at the right; the pressed item is selected.
+- AC1 — Long pressing an item switches the top bar to its selection state: close (X) at the left, the count in the leading cluster (the Library shows no title text), the mode's actions at the right; the pressed item is selected.
 - AC2 — In selection mode, tapping an item toggles its selection and updates the count, and no item opens or navigates.
-- AC3 — Tapping the close (X), or pressing back, leaves selection mode: the three-line icon, the directory title and the browse-mode slots return and the selection is empty.
+- AC3 — Tapping the close (X), or pressing back, leaves selection mode: the three-line icon, the (empty) title and the browse-mode slots return and the selection is empty.
 - AC4 — With a selection active, the bottom navigation region is still fully visible and interactive; the batch action bar, if any, sits above it and never overlaps it.
 - AC5 — The overflow menu offers 全选 / 反选 / 全不选, in that order, in both modes.
 - AC6 — A destructive batch action asks for confirmation before it runs.
@@ -111,3 +113,4 @@ Goals:
 ## Change History
 
 - 2026-09-10 — Initial draft. Defines the selection interaction for every list and grid: long press enters selection mode and selects the pressed item (R2), the top bar switches to close (X) + count + the mode's own actions (R3) — the single documented exception to the always-present three-line icon of `FOTLAB-UIXDES-000002` R2 — close or back leaves the mode and clears the selection with the precedence drawer → selection → screen step (R4), items render an explicit checked state while the overflow menu keeps 全选 / 反选 / 全不选 in both modes (R5), and the batch action bar sits at the bottom of the module's content region instead of replacing the bottom navigation region, which stays visible and interactive (R6, C1). Left the library's migration to an explicit mode flag, the pinning of the action bar, long press on collections and the drawer gesture during selection mode open as Q1–Q4.
+- 2026-09-11 — R3 / AC1 / AC3 aligned with the shipped Library: the selection count is shown in the leading cluster (the title slot renders empty, `FOTLAB-UIXDES-000004` R6), and a single selection additionally shows a rename pencil (`Icons.Filled.Edit`) there.

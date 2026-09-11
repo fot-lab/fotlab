@@ -53,11 +53,12 @@ Goals:
 | 关闭抽屉 | `Icons.Filled.Close` | 关闭 | Close (`close`) | 抽屉左上角，`FOTLAB-UIXDES-000002` R6 |
 | 布局切换（网格态） | `Icons.Filled.GridView` | 网格（田字） | GridView (`grid_view`) | 前导区，`FOTLAB-UIXDES-000004` R9 |
 | 布局切换（列表态） | `Icons.Filled.ViewList` | 列表 | ViewList (`view_list`) | 前导区，`FOTLAB-UIXDES-000004` R9 |
-| 刷新 | `Icons.Filled.Refresh` | 刷新 | Refresh (`refresh`) | 前导区，`FOTLAB-UIXDES-000004` R10 |
+| 刷新 | `Icons.Filled.Refresh` | 刷新 | Refresh (`refresh`) | 前导区，`FOTLAB-UIXDES-000004` R10；Library 当前用 `Icons.Filled.Sync`（`library_cd_sync`），二者等价（R4） |
 | 导入文件 | `Icons.Filled.SaveAlt` | 入盘（箭头自外向内进入托盘） | SaveAlt (`save_alt`) | 槽位 A，空选择态，`FOTLAB-UIXDES-000004` R4 |
 | 导出选中 | `Icons.Filled.IosShare` | 出盘（箭头自盒中向上离开） | IosShare (`ios_share`) | 槽位 A，有选择态，`FOTLAB-UIXDES-000004` R4 |
-| 新建集合 | `Icons.Filled.Add` | 新建（加号） | Add (`add`) | 槽位 B，空选择态，`FOTLAB-UIXDES-000004` R4 |
+| 新建集合 | `Icons.Filled.CreateNewFolder` | 新建文件夹 | CreateNewFolder (`create_new_folder`) | 槽位 B，空选择态，`FOTLAB-UIXDES-000004` R4；`Add` 亦可，二者等价 |
 | 删除选中 | `Icons.Filled.Delete` | 删除 | Delete (`delete`) | 槽位 B，有选择态，`FOTLAB-UIXDES-000004` R4 |
+| 重命名 | `Icons.Filled.Edit` | 重命名 | Edit (`edit`) | 前导区，单选态（`FOTLAB-UIXDES-000004` R6），占位布局切换槽 |
 | 溢出菜单 | `Icons.Filled.MoreVert` | 更多（竖三点） | MoreVert (`more_vert`) | 顶栏最右，`FOTLAB-UIXDES-000002` R4 |
 | 全选 | `Icons.Filled.SelectAll` | 全选 | SelectAll (`select_all`) | 溢出菜单第一位，`FOTLAB-UIXDES-000004` R5 |
 | 反选 | `Icons.Filled.FlipToBack` | 反选（翻转） | FlipToBack (`flip_to_back`) | 溢出菜单第二位，`FOTLAB-UIXDES-000004` R5 |
@@ -114,3 +115,4 @@ question. The retired number is intentionally not reused.
 - 2026-09-10 — R2 corrected after checking the glyphs **on a device**: import and export are **not** `Download` / `Upload`, which render as an arrow next to a plain line in the icon set this project uses. 导入 is `Icons.Filled.SaveAlt` (入盘 — the arrow comes from outside into the tray) and 导出 is `Icons.Filled.IosShare` (出盘 — the arrow rises out of the box). R3, C2, AC2 and AC6 follow; R4 now reserves `Upload` / `Download` for the network upload/download meanings.
 - 2026-09-10 — R2 opens with an explicit **standing rule**: 导入 / Import is always `SaveAlt` and 导出 / Export is always `IosShare`, wherever those words appear in the project — no exception, no second judgement per screen. C2 restates it as a constraint and `FOTLAB-UIXDES-000004` R4 references it instead of repeating the icons on its own.
 - 2026-09-10 — AC5 wording follows the withdrawal of the `_cd`-suffix rule (`FOTLAB-UIXDES-000003`): a content description must resolve from a resource, with no required suffix.
+- 2026-09-11 — R3 aligned with the shipped Library: new collection is `Icons.Filled.CreateNewFolder` (Add remains an equivalent alternative); the Library's refresh uses `Icons.Filled.Sync` (`library_cd_sync`) recorded alongside `Refresh` as interchangeable for that function (R4); added the rename row `Icons.Filled.Edit` shown in the leading cluster for a single selection (`FOTLAB-UIXDES-000004` R6).
