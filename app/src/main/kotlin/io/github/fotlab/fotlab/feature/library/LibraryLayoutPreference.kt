@@ -2,6 +2,7 @@ package io.github.fotlab.fotlab.feature.library
 
 import android.content.Context
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
@@ -19,6 +20,13 @@ private val Context.dataStore by preferencesDataStore(name = "library_prefs")
 
 private val KEY_LAYOUT_COLUMNS = intPreferencesKey("library_layout_columns")
 
+/**
+ * Whether the full-screen viewer's detail panel is shown by default. `false` means the panel is
+ * hidden when the dialog opens and the user opts in by tapping the info icon (`FOTLAB-UIXDES`,
+ * viewer layout). Persisted so the last choice is remembered across launches.
+ */
+private val KEY_VIEWER_SHOW_INFO = booleanPreferencesKey("library_viewer_show_info")
+
 class LibraryLayoutPreference(context: Context) {
 
     private val store = context.applicationContext.dataStore
@@ -31,5 +39,15 @@ class LibraryLayoutPreference(context: Context) {
     /** Persist [mode]; called after every cycle (`FOTLAB-UIXDES-000004` R9). */
     suspend fun setMode(mode: LibraryLayoutMode) {
         store.edit { prefs -> prefs[KEY_LAYOUT_COLUMNS] = mode.columns }
+    }
+
+    /** Whether the viewer detail panel is shown by default; `false` (hidden) when unset. */
+    val showViewerInfo: Flow<Boolean> = store.data.map { prefs ->
+        prefs[KEY_VIEWER_SHOW_INFO] ?: false
+    }
+
+    /** Persist the viewer detail-panel visibility so the next open remembers it. */
+    suspend fun setShowViewerInfo(show: Boolean) {
+        store.edit { prefs -> prefs[KEY_VIEWER_SHOW_INFO] = show }
     }
 }

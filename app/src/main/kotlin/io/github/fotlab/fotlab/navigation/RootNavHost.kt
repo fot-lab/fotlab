@@ -24,7 +24,7 @@ fun RootNavHost(
         startDestination = TopLevelDestination.START.route,
         modifier = modifier,
     ) {
-        libraryGraph()
+        libraryGraph(navController)
         studioGraph()
         // Further destinations: one `xxxGraph()` call per feature package.
     }

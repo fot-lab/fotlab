@@ -82,6 +82,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import io.github.fotlab.fotlab.R
+import io.github.fotlab.fotlab.feature.studio.StudioEngine
 import kotlinx.coroutines.launch
 import android.net.Uri
 import java.text.SimpleDateFormat
@@ -129,7 +130,9 @@ private enum class LibraryViewMode { Library, RecycleBin }
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LibraryScreen() {
+fun LibraryScreen(
+    onNavigateToStudio: () -> Unit,
+) {
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     var currentDirectory by remember { mutableStateOf<FsNodeObject?>(null) }
     // Which top-level view the drawer selected; defaults to the Source Library (built so far).
@@ -282,6 +285,7 @@ fun LibraryScreen() {
                             onOpenDrawer = { scope.launch { drawerState.open() } },
                             onCycleLayout = { scope.launch { LibraryCore.cycleLayoutMode() } },
                             onRefresh = { scope.launch { LibraryCore.refresh() } },
+                            onNavigateToStudio = onNavigateToStudio,
                         )
                     }
                 }
@@ -293,6 +297,13 @@ fun LibraryScreen() {
                     items = viewerItems!!,
                     startIndex = viewerStart,
                     onDismiss = { viewerItems = null },
+                    onOpenInStudio = { node ->
+                        // Equivalent to: close the dialog, switch to Studio (nav bar), and open the
+                        // tapped image there (`FOTLAB-UIXDES`, viewer layout).
+                        node.uriStorage?.let { StudioEngine.setCurrentNode(it) }
+                        onNavigateToStudio()
+                        viewerItems = null
+                    },
                 )
             }
         }

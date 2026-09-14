@@ -179,6 +179,15 @@ object LibraryCore {
     }
 
     /**
+     * Whether the full-screen viewer shows its detail panel on open. Read by the viewer; persisted
+     * (`FOTLAB-UIXDES`, viewer layout) so the last choice is remembered. Defaults to `false` (hidden).
+     */
+    val viewerShowInfo: Flow<Boolean> get() = layoutPreference.showViewerInfo
+
+    /** Persist the viewer detail-panel visibility; the viewer calls this when the info icon is tapped. */
+    suspend fun setViewerShowInfo(show: Boolean) = layoutPreference.setShowViewerInfo(show)
+
+    /**
      * Reconcile the virtual tree with the real world (`FOTLAB-UIXDES-000004` R10): soft-delete
      * every live non-folder node whose real object is gone and every live orphan node, reusing
      * the delete path so they share one `time_deleted` timestamp. No physical row is removed and

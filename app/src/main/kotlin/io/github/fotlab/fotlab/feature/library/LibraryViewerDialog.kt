@@ -28,6 +28,7 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material3.Icon
@@ -37,11 +38,11 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -78,6 +79,7 @@ fun LibraryViewerDialog(
     items: List<FsNodeObject>,
     startIndex: Int,
     onDismiss: () -> Unit,
+    onOpenInStudio: (FsNodeObject) -> Unit,
 ) {
     if (items.isEmpty()) {
         LaunchedEffect(Unit) { onDismiss() }
@@ -88,7 +90,10 @@ fun LibraryViewerDialog(
         initialPage = startIndex.coerceIn(0, items.lastIndex),
         pageCount = { items.size },
     )
-    var showDetails by remember { mutableStateOf(true) }
+    // The detail panel follows the persisted preference: hidden on first open, and the user's last
+    // choice (shown / hidden) is remembered for the next open (`FOTLAB-UIXDES`, viewer layout).
+    val scope = rememberCoroutineScope()
+    val showDetails by LibraryCore.viewerShowInfo.collectAsState(initial = false)
     // One shared zoom state for the whole viewer: the page owns the transform, the pager stands
     // down while it is zoomed (or mid-pinch), and switching items returns to the fitted size.
     val zoomState = rememberZoomState()
@@ -143,7 +148,9 @@ fun LibraryViewerDialog(
                 }
             }
 
-            // Top bar: close (top-left X) and a details toggle (top-right).
+            // Top bar: close (top-left X), the item count to its right, then — on the far right —
+            // an "open in Studio" action (just left of the info toggle). The info toggle persists
+            // (`FOTLAB-UIXDES`, viewer layout).
             Row(
                 modifier = Modifier
                     .align(Alignment.TopStart)
@@ -159,13 +166,22 @@ fun LibraryViewerDialog(
                         tint = Color.White,
                     )
                 }
-                Spacer(modifier = Modifier.weight(1f))
                 Text(
                     text = "${pagerState.currentPage + 1} / ${items.size}",
                     color = Color.White.copy(alpha = 0.8f),
                     style = MaterialTheme.typography.labelMedium,
                 )
-                IconButton(onClick = { showDetails = !showDetails }) {
+                Spacer(modifier = Modifier.weight(1f))
+                IconButton(onClick = { onOpenInStudio(items[pagerState.currentPage]) }) {
+                    Icon(
+                        imageVector = Icons.Filled.AddPhotoAlternate,
+                        contentDescription = stringResource(id = R.string.library_viewer_cd_open_in_studio),
+                        tint = Color.White,
+                    )
+                }
+                IconButton(
+                    onClick = { scope.launch { LibraryCore.setViewerShowInfo(!showDetails) } },
+                ) {
                     Icon(
                         imageVector = Icons.Filled.Info,
                         contentDescription = stringResource(id = R.string.library_viewer_cd_info),

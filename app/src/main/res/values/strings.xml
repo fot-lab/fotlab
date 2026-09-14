@@ -79,6 +79,7 @@
     <!-- Library viewer: the full-screen image/video dialog opened on a single tap. -->
     <string name="library_viewer_cd_close">Close viewer</string>
     <string name="library_viewer_cd_info">Show or hide details</string>
+    <string name="library_viewer_cd_open_in_studio">Open in Studio</string>
     <string name="library_viewer_no_preview">No preview available</string>
     <string name="library_viewer_label_name">Name</string>
     <string name="library_viewer_label_type">Type</string>

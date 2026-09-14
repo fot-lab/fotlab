@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.RestoreFromTrash
+import io.github.fotlab.fotlab.feature.studio.StudioEngine
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.AlertDialog
@@ -87,6 +88,7 @@ fun LibraryRecycleScreen(
     onOpenDrawer: () -> Unit,
     onCycleLayout: () -> Unit,
     onRefresh: () -> Unit,
+    onNavigateToStudio: () -> Unit,
 ) {
     var location by remember { mutableStateOf<RecycleLocation>(RecycleLocation.Root) }
     // Media viewer, opened by tapping an image/video tile inside a batch.
@@ -181,7 +183,18 @@ fun LibraryRecycleScreen(
     }
 
     if (viewerItems != null) {
-        LibraryViewerDialog(items = viewerItems!!, startIndex = viewerStart, onDismiss = { viewerItems = null })
+        LibraryViewerDialog(
+            items = viewerItems!!,
+            startIndex = viewerStart,
+            onDismiss = { viewerItems = null },
+            onOpenInStudio = { node ->
+                // Equivalent to: close the dialog, switch to Studio (nav bar), and open the
+                // tapped image there (`FOTLAB-UIXDES`, viewer layout).
+                node.uriStorage?.let { StudioEngine.setCurrentNode(it) }
+                onNavigateToStudio()
+                viewerItems = null
+            },
+        )
     }
 
     if (deleteForeverConfirm) {
