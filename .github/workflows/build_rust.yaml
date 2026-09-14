@@ -118,8 +118,12 @@ jobs:
 
       # The generator is this crate's own `uniffi-bindgen` bin (`--features cli`), so its
       # version can never drift from the `uniffi` runtime linked into the .so. It reads
-      # uniffi.toml (Kotlin `package_name`) from the crate directory. The library is the
-      # positional argument; the Kotlin output is ABI-independent, so one ABI's .so is enough.
+      # uniffi.toml (Kotlin `package_name`) from the crate directory via `cargo metadata`,
+      # which is why we `cd` into the crate first. `--library` is mandatory for the
+      # proc-macro interface (#[uniffi::export], no .udl): bindgen then parses the
+      # UNIFFI_META_* symbols straight out of the ELF (goblin, no dlopen), so the
+      # cross-compiled Android .so works on the x86_64 runner without a host rebuild.
+      # Kotlin output is ABI-independent, so one ABI's .so is enough.
       - name: Generate Kotlin bindings
         run: |
           set -euo pipefail
@@ -127,6 +131,7 @@ jobs:
           cd "$CRATE_DIR"
           cargo run --features cli --bin uniffi-bindgen -- \
             generate \
+            --library \
             --language kotlin \
             --out-dir "$OUT/kotlin" \
             --no-format \
