@@ -54,6 +54,7 @@ import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Text
@@ -767,7 +768,7 @@ internal fun NodeCell(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onClick = { if (selectionActive) onToggleSelect(node) else onNodeClick(node) },
-                onLongClick = onLongPress,
+                onLongClick = { onLongPress(node) },
             ),
             shape = RoundedCornerShape(12.dp),
             colors = CardDefaults.cardColors(
@@ -815,7 +816,7 @@ internal fun NodeCell(
         ListItem(
             modifier = Modifier.combinedClickable(
                 onClick = { if (selectionActive) onToggleSelect(node) else onNodeClick(node) },
-                onLongClick = onLongPress,
+                onLongClick = { onLongPress(node) },
             ),
             // M3's ListItem has no `selected` parameter — the selected tint is
             // expressed through its colours instead.

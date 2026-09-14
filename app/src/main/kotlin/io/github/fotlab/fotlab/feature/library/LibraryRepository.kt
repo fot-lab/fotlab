@@ -26,6 +26,20 @@ class LibraryRepository(private val database: LibraryDatabase) {
     fun collections(): Flow<List<FsNodeObject>> =
         database.nodeObjectDao().observeCollections()
 
+    // --- Recycle bin reads (`FOTLAB-DATABS-000002`, per-batch soft deletion) ---
+
+    /** Distinct delete-batch timestamps, newest first; drives the recycle root listing. */
+    fun deletedBatchTimes(): Flow<List<Long>> =
+        database.nodeObjectDao().deletedBatchTimes()
+
+    /** Nodes soft-deleted in the batch stamped at [time]. */
+    fun deletedNodesAt(time: Long): Flow<List<FsNodeObject>> =
+        database.nodeObjectDao().deletedNodesAt(time)
+
+    /** Edges soft-deleted in the batch stamped at [time]; rebuilds the batch's directory tree. */
+    fun deletedRelationsAt(time: Long): Flow<List<FsNodeRelation>> =
+        database.nodeRelationDao().deletedRelationsAt(time)
+
     /**
      * Insert a node. `uriStorage` must be unique (UNIQUE index) — call [getByUri]
      * first to dedupe a physical file (`FOTLAB-DATABS-000002` R7).
