@@ -2,6 +2,7 @@ package io.github.fotlab.fotlab.media
 
 import android.graphics.BitmapFactory
 import io.github.fotlab.fotlab.binding.dnglab.rawler_fotlab.RawlerFotlabBridge
+import kotlinx.coroutines.InternalCoroutinesApi
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeout
@@ -97,6 +98,7 @@ private object SniffThreads {
  * `tryResume`/`completeResume` are used instead of `resume` so a result that arrives *after*
  * cancellation is silently dropped instead of throwing inside the completion callback.
  */
+@OptIn(InternalCoroutinesApi::class) // tryResume/completeResume: drop late results after cancellation
 private suspend fun <T> CompletableFuture<T>.await(): T = suspendCancellableCoroutine { cont ->
     whenComplete { value, error ->
         val token = if (error != null) cont.tryResumeWithException(error) else cont.tryResume(value)
@@ -210,7 +212,9 @@ sealed interface Route {
     /** Coil can decode the original source. */
     data class ToCoil(override val verdicts: SniffDict, val format: String) : Route
     /** Neither sniffer can decode. */
-    data object Unsupported : Route
+    data object Unsupported : Route {
+        override val verdicts: SniffDict = emptyMap()
+    }
 }
 
 /** Pure routing function: classify the sniff dictionary into a [Route] (R8 / Q6). */

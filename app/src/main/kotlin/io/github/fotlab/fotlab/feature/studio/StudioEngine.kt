@@ -91,7 +91,7 @@ object StudioEngine {
     }
 
     private suspend fun runPipeline(resolver: ContentResolver, uri: Uri): StudioRenderResult {
-        val header = runCatching { resolver.openInputStream(uri)?.use { it.readHeader(HEADER_BYTES) } }
+        val header = runCatching { resolver.openInputStream(uri)?.use { it.readHeader(Constants.HEADER_BYTES) } }
             .getOrNull()
         if (header == null) return StudioRenderResult.Unsupported
 
@@ -122,7 +122,8 @@ object StudioEngine {
         }
     }
 
-    private companion object {
+    // A nested object (not a companion): a standalone `object` cannot itself host a companion.
+    private object Constants {
         /**
          * Bytes handed to [FormatSniffer]. RAW containers are TIFF/BMFF based, so the identification
          * tags (and any embedded-preview IFD entries) can sit far into the file; 1 MiB keeps the
