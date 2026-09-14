@@ -108,15 +108,24 @@ interface FsNodeRelationDao {
     fun deletedRelationsAt(time: Long): Flow<List<FsNodeRelation>>
 
     /**
-     * Restore the parent links of restored nodes (their up-edges stamped in the same batch).
-     * Down-edges are left stamped so the still-deleted children stay in the bin
-     * (`FOTLAB-DATABS-000002` R12, recycle restore).
+     * Restore a whole delete batch's parent/child links: clear the soft-delete stamp on every edge
+     * stamped with [time] so the batch's tree is reconnected (`FOTLAB-DATABS-000002` R12, recycle
+     * restore — batch-level).
+     */
+    @Query("UPDATE fs_node_relation SET time_deleted = NULL WHERE time_deleted = :time")
+    suspend fun restoreRelationsByBatch(time: Long)
+
+    /**
+     * Children of [parentId] reached through edges stamped with [batchTime] — the in-batch subtree
+     * step. Edges stamped with a different (or null) timestamp are excluded, so a live child that
+     * merely shared membership with a deleted collection is never pulled into the (hard) delete
+     * (`delete forever` recursion).
      */
     @Query(
-        "UPDATE fs_node_relation SET time_deleted = NULL " +
-            "WHERE fs_node_id_child IN (:ids) AND time_deleted IS NOT NULL",
+        "SELECT fs_node_id_child FROM fs_node_relation " +
+            "WHERE fs_node_id_parent = :parentId AND time_deleted = :batchTime",
     )
-    suspend fun restoreRelations(ids: List<Long>)
+    suspend fun batchChildIdsOf(parentId: Long, batchTime: Long): List<Long>
 
     /** Permanently remove edges touching the given nodes (`delete forever`). */
     @Query("DELETE FROM fs_node_relation WHERE fs_node_id_child IN (:ids) OR fs_node_id_parent IN (:ids)")

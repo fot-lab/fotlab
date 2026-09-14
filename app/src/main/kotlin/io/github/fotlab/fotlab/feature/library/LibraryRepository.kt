@@ -197,27 +197,60 @@ class LibraryRepository(private val database: LibraryDatabase) {
     // --- Recycle bin actions (`FOTLAB-DATABS-000002` R12, restore / delete forever) ---
 
     /**
-     * Restore soft-deleted nodes back into the live library: clear their `time_deleted` and the
-     * `time_deleted` on their up-edges (parent links). Down-edges are left stamped, so the still
-     * removed children of a restored collection stay in the bin. Runs in one transaction.
+     * Restore soft-deleted nodes back into the live library **by batch**: every node and every edge
+     * stamped with the same `time_deleted` as the selected ids has its stamp cleared, so the whole
+     * delete operation returns to the live tree exactly as it was — the batch becomes a normal,
+     * undeleted object (`FOTLAB-DATABS-000002` R12, recycle restore). Runs in one transaction.
+     *
+     * A selected id is only used to discover its batch timestamp; restore is never limited to the
+     * selected subset, because a delete is one atomic unit that must be undone as one unit.
      */
     suspend fun restoreFromBin(ids: List<Long>) {
         if (ids.isEmpty()) return
+        val objectDao = database.nodeObjectDao()
+        val relationDao = database.nodeRelationDao()
+        val batches = ids.mapNotNull { objectDao.getById(it)?.timeDeleted }.toSet()
+        if (batches.isEmpty()) return
         database.withTransaction {
-            database.nodeObjectDao().restoreNodes(ids)
-            database.nodeRelationDao().restoreRelations(ids)
+            for (time in batches) {
+                objectDao.restoreNodesByBatch(time)
+                relationDao.restoreRelationsByBatch(time)
+            }
         }
     }
 
     /**
-     * Permanently delete nodes and any edges touching them — a real removal, not a soft-delete.
-     * Irreversible (`FOTLAB-DATABS-000002` R12, delete forever).
+     * Permanently delete nodes from the bin — a real removal, not a soft-delete. The whole subtree
+     * rooted at each selected id is collected and dropped together with every edge touching it, so
+     * the record, its child-node records and the DAG edges among them are all gone
+     * (`FOTLAB-DATABS-000002` R12, delete forever).
+     *
+     * The subtree is walked over edges stamped with the same `time_deleted` as the selected node
+     * (`batchChildIdsOf`), which only follows into *other bin nodes* of that batch — a live child
+     * that merely shared membership with a deleted collection keeps its live edge and is never
+     * hard-deleted. Deleting a node row cascade-removes the relations referencing it (R8), and the
+     * explicit edge delete covers the rest, so no dangling edge survives. Runs in one transaction.
      */
     suspend fun deleteForever(ids: List<Long>) {
         if (ids.isEmpty()) return
+        val objectDao = database.nodeObjectDao()
         database.withTransaction {
-            database.nodeRelationDao().deleteRelationsForever(ids)
-            database.nodeObjectDao().deleteNodesForever(ids)
+            val relationDao = database.nodeRelationDao()
+            val toDelete = mutableSetOf<Long>()
+            val queue = ArrayDeque<Pair<Long, Long>>()
+            for (id in ids) {
+                val batch = objectDao.getById(id)?.timeDeleted ?: continue
+                queue.addLast(id to batch)
+            }
+            while (queue.isNotEmpty()) {
+                val (node, batch) = queue.removeFirst()
+                if (!toDelete.add(node)) continue
+                for (childId in relationDao.batchChildIdsOf(node, batch)) {
+                    if (childId !in toDelete) queue.addLast(childId to batch)
+                }
+            }
+            relationDao.deleteRelationsForever(toDelete.toList())
+            objectDao.deleteNodesForever(toDelete.toList())
         }
     }
 }
