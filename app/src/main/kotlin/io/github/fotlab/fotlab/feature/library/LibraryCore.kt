@@ -125,6 +125,12 @@ object LibraryCore {
     /** Edges soft-deleted in the batch stamped at [time]; rebuilds the batch's directory tree. */
     fun recycleBatchRelations(time: Long): Flow<List<FsNodeRelation>> = repo().deletedRelationsAt(time)
 
+    /** Restore soft-deleted nodes (and their parent links) back into the live library. */
+    suspend fun restoreFromBin(ids: List<Long>) = repo().restoreFromBin(ids)
+
+    /** Permanently remove nodes and their edges from the bin (irreversible). */
+    suspend fun deleteForever(ids: List<Long>) = repo().deleteForever(ids)
+
     suspend fun addNode(
         nameDisplay: String,
         typeMime: String,

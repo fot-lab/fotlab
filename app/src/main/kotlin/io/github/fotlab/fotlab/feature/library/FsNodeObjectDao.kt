@@ -52,4 +52,15 @@ interface FsNodeObjectDao {
      */
     @Query("UPDATE fs_node_object SET time_deleted = :timeDeleted WHERE fs_node_id = :id")
     suspend fun markDeleted(id: Long, timeDeleted: Long)
+
+    /**
+     * Restore from the recycle bin: clear the soft-delete stamp so the node is live again
+     * (`FOTLAB-DATABS-000002` R12, recycle restore). The id keeps its slot in the id space.
+     */
+    @Query("UPDATE fs_node_object SET time_deleted = NULL WHERE fs_node_id IN (:ids)")
+    suspend fun restoreNodes(ids: List<Long>)
+
+    /** Permanently remove nodes from the bin — a real delete, not a soft-delete (`delete forever`). */
+    @Query("DELETE FROM fs_node_object WHERE fs_node_id IN (:ids)")
+    suspend fun deleteNodesForever(ids: List<Long>)
 }

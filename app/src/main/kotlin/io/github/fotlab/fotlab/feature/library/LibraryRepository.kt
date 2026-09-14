@@ -193,4 +193,31 @@ class LibraryRepository(private val database: LibraryDatabase) {
 
         database.nodeObjectDao().markDeleted(nodeId, now)
     }
+
+    // --- Recycle bin actions (`FOTLAB-DATABS-000002` R12, restore / delete forever) ---
+
+    /**
+     * Restore soft-deleted nodes back into the live library: clear their `time_deleted` and the
+     * `time_deleted` on their up-edges (parent links). Down-edges are left stamped, so the still
+     * removed children of a restored collection stay in the bin. Runs in one transaction.
+     */
+    suspend fun restoreFromBin(ids: List<Long>) {
+        if (ids.isEmpty()) return
+        database.withTransaction {
+            database.nodeObjectDao().restoreNodes(ids)
+            database.nodeRelationDao().restoreRelations(ids)
+        }
+    }
+
+    /**
+     * Permanently delete nodes and any edges touching them — a real removal, not a soft-delete.
+     * Irreversible (`FOTLAB-DATABS-000002` R12, delete forever).
+     */
+    suspend fun deleteForever(ids: List<Long>) {
+        if (ids.isEmpty()) return
+        database.withTransaction {
+            database.nodeRelationDao().deleteRelationsForever(ids)
+            database.nodeObjectDao().deleteNodesForever(ids)
+        }
+    }
 }

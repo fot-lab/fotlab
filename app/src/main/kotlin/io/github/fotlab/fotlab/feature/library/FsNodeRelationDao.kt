@@ -106,4 +106,19 @@ interface FsNodeRelationDao {
     /** All edges soft-deleted in the batch stamped at [time] — the batch's own subtree edges. */
     @Query("SELECT * FROM fs_node_relation WHERE time_deleted = :time")
     fun deletedRelationsAt(time: Long): Flow<List<FsNodeRelation>>
+
+    /**
+     * Restore the parent links of restored nodes (their up-edges stamped in the same batch).
+     * Down-edges are left stamped so the still-deleted children stay in the bin
+     * (`FOTLAB-DATABS-000002` R12, recycle restore).
+     */
+    @Query(
+        "UPDATE fs_node_relation SET time_deleted = NULL " +
+            "WHERE fs_node_id_child IN (:ids) AND time_deleted IS NOT NULL",
+    )
+    suspend fun restoreRelations(ids: List<Long>)
+
+    /** Permanently remove edges touching the given nodes (`delete forever`). */
+    @Query("DELETE FROM fs_node_relation WHERE fs_node_id_child IN (:ids) OR fs_node_id_parent IN (:ids)")
+    suspend fun deleteRelationsForever(ids: List<Long>)
 }

@@ -181,7 +181,8 @@ fun LibraryScreen() {
     ) {
         // Two sibling regions: the top bar, and the content region below it.
         Column(modifier = Modifier.fillMaxSize()) {
-            LibraryTopBar(
+            if (viewMode == LibraryViewMode.Library) {
+                LibraryTopBar(
                 selectionModeActive = selectionModeActive,
                 selectionSize = selectedIds.size,
                 candidateIds = children.mapNotNull { it.fsNodeId },
@@ -219,6 +220,7 @@ fun LibraryScreen() {
                     }
                 },
             )
+            }
 
             Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
                 when (viewMode) {
@@ -269,7 +271,11 @@ fun LibraryScreen() {
                     }
                     // Recycle Bin: removed nodes, grouped by their shared delete-batch timestamp.
                     LibraryViewMode.RecycleBin -> {
-                        LibraryRecycleScreen()
+                        LibraryRecycleScreen(
+                            onOpenDrawer = { scope.launch { drawerState.open() } },
+                            onCycleLayout = { scope.launch { LibraryCore.cycleLayoutMode() } },
+                            onRefresh = { scope.launch { LibraryCore.refresh() } },
+                        )
                     }
                 }
             }

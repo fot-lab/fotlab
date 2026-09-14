@@ -48,6 +48,12 @@
     <string name="library_recycle_bin_empty">The recycle bin is empty</string>
     <string name="library_cd_library">Open Library</string>
     <string name="library_cd_recycle_bin">Open Recycle Bin</string>
+    <string name="library_restore_from_bin">Restore from bin</string>
+    <string name="library_delete_forever">Delete forever</string>
+    <string name="library_cd_restore_from_bin">Restore selected items from the recycle bin</string>
+    <string name="library_cd_delete_forever">Delete selected items permanently</string>
+    <string name="library_delete_forever_title">Delete permanently?</string>
+    <string name="library_delete_forever_message">The selected items are removed for good. This cannot be undone.</string>
 
     <string name="library_cd_layout_mode">Switch display mode</string>
     <string name="library_cd_sync">Sync library</string>
