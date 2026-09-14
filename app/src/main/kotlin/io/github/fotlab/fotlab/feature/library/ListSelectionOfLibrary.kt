@@ -37,6 +37,12 @@ class ListSelectionOfLibrary internal constructor() {
         mutableIds.value = if (nodeId in current) current - nodeId else current + nodeId
     }
 
+    /** Select the node without removing it; no-op when already present. */
+    fun select(nodeId: Long) {
+        val current = mutableIds.value
+        if (nodeId !in current) mutableIds.value = current + nodeId
+    }
+
     /** Select every node of the given directory listing, leaving other selections alone. */
     fun selectAll(candidates: Collection<Long>) {
         mutableIds.value = mutableIds.value + candidates

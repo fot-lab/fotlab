@@ -45,6 +45,29 @@ object LibraryCore {
     val selection: ListSelectionOfLibrary = ListSelectionOfLibrary()
 
     /**
+     * Whether the library is in the selection action mode. Unlike the bare selection set, this
+     * is an explicit UI mode: it is switched on by a long-press ([enterSelectionMode]) and switched
+     * off only by the top bar's close button ([exitSelectionMode]). Therefore the mode survives the
+     * selection being emptied — deselecting everything (or "deselect all") keeps the mode active so
+     * the user can keep picking; leaving it is a deliberate X press, not the count reaching zero.
+     * Process-scoped like [selection], never persisted and never restored (`FOTLAB-UIXDES-000004` R3).
+     */
+    private val selectionModeState = MutableStateFlow(false)
+    val selectionModeActive: StateFlow<Boolean> = selectionModeState.asStateFlow()
+
+    /** Enter the selection action mode, optionally selecting [nodeId] as the first pick. */
+    fun enterSelectionMode(nodeId: Long? = null) {
+        selectionModeState.value = true
+        if (nodeId != null) selection.select(nodeId)
+    }
+
+    /** Leave the selection action mode and clear any selection it held. */
+    fun exitSelectionMode() {
+        selection.clear()
+        selectionModeState.value = false
+    }
+
+    /**
      * Observable display mode of the content region. Read by the screen, advanced through
      * [cycleLayoutMode]; the chosen mode is persisted to a `DataStore` and restored on start
      * (`FOTLAB-UIXDES-000004` R9).

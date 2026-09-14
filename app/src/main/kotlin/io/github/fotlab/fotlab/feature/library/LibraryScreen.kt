@@ -144,6 +144,7 @@ fun LibraryScreen() {
 
     // Process-scoped state owned by the core: read here, never stored here.
     val selectedIds by LibraryCore.selection.selected.collectAsState()
+    val selectionModeActive by LibraryCore.selectionModeActive.collectAsState()
     val layoutMode by LibraryCore.layoutMode.collectAsState()
 
     val children by remember(currentDirectory) {
@@ -176,6 +177,7 @@ fun LibraryScreen() {
         // Two sibling regions: the top bar, and the content region below it.
         Column(modifier = Modifier.fillMaxSize()) {
             LibraryTopBar(
+                selectionModeActive = selectionModeActive,
                 selectionSize = selectedIds.size,
                 candidateIds = children.mapNotNull { it.fsNodeId },
                 onCycleLayout = { scope.launch { LibraryCore.cycleLayoutMode() } },
@@ -190,7 +192,7 @@ fun LibraryScreen() {
                         )
                     }
                 },
-                onCancelSelection = { LibraryCore.selection.clear() },
+                onExitSelection = { LibraryCore.exitSelectionMode() },
                 onRename = {
                     // Exactly one node is selected (the edit icon only shows then): open its
                     // rename dialog with the current name prefilled.
@@ -220,6 +222,7 @@ fun LibraryScreen() {
                             nodes = children,
                             selectedIds = selectedIds,
                             layoutMode = layoutMode,
+                            selectionActive = selectionModeActive,
                             onNodeClick = { node ->
                                 node.fsNodeId?.let { id ->
                                     when {
@@ -235,9 +238,15 @@ fun LibraryScreen() {
                                     }
                                 }
                             },
-                            // Long press selects a collection too: it can be deleted like any
-                            // other node, and the delete walks its subtree (`FOTLAB-DATABS-000002`
-                            // R12; `FOTLAB-UIXDES-000004` Q4).
+                            // Long press enters the selection action mode and selects the node as
+                            // its first pick (`FOTLAB-UIXDES-000004` selection action mode).
+                            onLongPress = { node ->
+                                node.fsNodeId?.let { id -> LibraryCore.enterSelectionMode(id) }
+                            },
+                            // Plain tap while the action mode is active toggles the node; the
+                            // checkbox also routes here. A long press selects a collection too: it
+                            // can be deleted like any other node, and the delete walks its subtree
+                            // (`FOTLAB-DATABS-000002` R12; `FOTLAB-UIXDES-000004` Q4).
                             onToggleSelect = { node ->
                                 node.fsNodeId?.let { id ->
                                     LibraryCore.selection.toggle(id)
@@ -427,6 +436,7 @@ private fun DrawerNavItem(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun LibraryTopBar(
+    selectionModeActive: Boolean,
     selectionSize: Int,
     candidateIds: List<Long>,
     onCycleLayout: () -> Unit,
@@ -436,7 +446,7 @@ private fun LibraryTopBar(
     onCreateCollection: () -> Unit,
     onExport: () -> Unit,
     onDelete: () -> Unit,
-    onCancelSelection: () -> Unit,
+    onExitSelection: () -> Unit,
     onRename: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -450,12 +460,13 @@ private fun LibraryTopBar(
         title = {},
         modifier = modifier,
         navigationIcon = {
-            // Leading cluster swaps on selection (`FOTLAB-UIXDES-000004`): with nothing selected
-            // it is drawer + grid + sync; once anything is selected the drawer becomes a Close
-            // (clear selection) and the grid slot becomes a rename pencil (single) or the bare
+            // Leading cluster swaps on the selection action mode (`FOTLAB-UIXDES-000004`): with
+            // the mode off it is drawer + grid + sync; once the mode is on the drawer becomes a
+            // Close (exit the mode) and the grid slot becomes a rename pencil (single) or the bare
             // count (multiple) — sync is hidden while selecting. The bar has no title, so the
-            // count is shown only here.
-            if (selectionSize == 0) {
+            // count is shown only here. The mode is independent of the selection count: it stays
+            // on after everything is deselected, so the Close is the only way out.
+            if (!selectionModeActive) {
                 Row {
                     IconButton(onClick = onOpenDrawer) {
                         Icon(
@@ -478,7 +489,7 @@ private fun LibraryTopBar(
                 }
             } else {
                 Row {
-                    IconButton(onClick = onCancelSelection) {
+                    IconButton(onClick = onExitSelection) {
                         Icon(
                             imageVector = Icons.Filled.Close,
                             contentDescription = stringResource(id = R.string.library_cd_clear_selection),
@@ -504,8 +515,10 @@ private fun LibraryTopBar(
             }
         },
         actions = {
-            // Slot A then slot B, then the overflow icon (`FOTLAB-UIXDES-000004` R1).
-            if (selectionSize == 0) {
+            // Slot A then slot B, then the overflow icon (`FOTLAB-UIXDES-000004` R1). The slots
+            // swap on the selection action mode, not on the count: import + new collection when
+            // the mode is off, export + delete when it is on.
+            if (!selectionModeActive) {
                 IconButton(onClick = onImport) {
                     Icon(
                         // Import: the arrow coming from outside down into the tray — data enters
@@ -598,13 +611,15 @@ private fun NodeList(
     nodes: List<FsNodeObject>,
     selectedIds: Set<Long>,
     layoutMode: LibraryLayoutMode,
+    selectionActive: Boolean,
     onNodeClick: (FsNodeObject) -> Unit,
     onToggleSelect: (FsNodeObject) -> Unit,
+    onLongPress: (FsNodeObject) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    // While anything is selected the list is in selection mode: a plain tap then
-    // toggles that node instead of opening it (`FOTLAB-UIXDES-000004`).
-    val selectionActive = selectedIds.isNotEmpty()
+    // [selectionActive] is the selection action mode flag (owned by the core), not the bare
+    // selection count: a plain tap toggles while the mode is on, opens while it is off
+    // (`FOTLAB-UIXDES-000004`). The flag survives an empty selection.
     val cell: @Composable (FsNodeObject) -> Unit = { node ->
         NodeCell(
             node = node,
@@ -613,6 +628,7 @@ private fun NodeList(
             selectionActive = selectionActive,
             onNodeClick = onNodeClick,
             onToggleSelect = onToggleSelect,
+            onLongPress = onLongPress,
         )
     }
     when (layoutMode) {
@@ -640,18 +656,20 @@ private fun NodeCell(
     selectionActive: Boolean,
     onNodeClick: (FsNodeObject) -> Unit,
     onToggleSelect: (FsNodeObject) -> Unit,
+    onLongPress: (FsNodeObject) -> Unit,
 ) {
     if (isGrid) {
         // M3 has no official grid cell, so it stays hand-written but framed like a file manager:
         // a square, rounded thumbnail tile inside a Card, the node name + a short date below, and
-        // a Checkbox shown during selection. Long-press enters selection; a plain tap toggles in
-        // selection mode, otherwise it opens (`FOTLAB-UIXDES-000004`).
+        // a Checkbox shown during selection. Long-press enters the selection action mode (and
+        // selects this node); a plain tap toggles in selection mode, otherwise it opens
+        // (`FOTLAB-UIXDES-000004`).
         Card(
             modifier = Modifier.combinedClickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onClick = { if (selectionActive) onToggleSelect(node) else onNodeClick(node) },
-                onLongClick = { onToggleSelect(node) },
+                onLongClick = onLongPress,
             ),
             shape = RoundedCornerShape(12.dp),
             colors = CardDefaults.cardColors(
@@ -696,11 +714,12 @@ private fun NodeCell(
         // Detail list: the official M3 [ListItem] carries the selected container colour and the
         // proper list-row metrics; a rounded thumbnail sits in the leading slot, the node name is
         // the headline, a short date the supporting line, and a Checkbox appears during selection.
-        // Tapping follows the grid tile's rules (`FOTLAB-UIXDES-000004`).
+        // Tapping follows the grid tile's rules (`FOTLAB-UIXDES-000004`): long-press enters the
+        // selection action mode, a plain tap toggles in it, otherwise it opens.
         ListItem(
             modifier = Modifier.combinedClickable(
                 onClick = { if (selectionActive) onToggleSelect(node) else onNodeClick(node) },
-                onLongClick = { onToggleSelect(node) },
+                onLongClick = onLongPress,
             ),
             // M3's ListItem has no `selected` parameter — the selected tint is
             // expressed through its colours instead.
