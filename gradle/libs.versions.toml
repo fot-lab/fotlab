@@ -13,7 +13,12 @@ junit = "4.13.2"
 datastore = "1.1.1"
 coil = "3.0.4"
 exifinterface = "1.3.7"
-jna = "5.14.0"
+# Floor is 5.18.1: 5.14.0's bundled libjnidispatch.so is not 16 KB page-size compatible, so on
+# Android 15 16 KB devices JNA died with SIGSEGV inside System.loadLibrary("jnidispatch") on the
+# first rawler sniff call, killing the process for every image format (JNA #1618 / #1647).
+# 5.18.1 also carries the Structure.sortFields field-order race fix (JNA #1686). Do NOT use
+# 5.19.0: its MethodHandle change broke older Android (fixed only in 5.19.1).
+jna = "5.18.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }

@@ -100,10 +100,13 @@ object StudioEngine {
         // broken preference store can never block opening a file.
         val timeout = runCatching { mediaPreference.sniffTimeoutMs.first() }
             .getOrDefault(DEFAULT_SNIFF_TIMEOUT_MS)
-        val verdicts = when (val sniff = FormatSniffer.sniff(header, timeout)) {
-            is SniffResult.Ok -> sniff.verdicts
-            is SniffResult.Timeout -> return StudioRenderResult.Unsupported
-        }
+        // Last line of defence: the sniff coroutine escaping with anything (including a timeout
+        // result or an unexpected throwable from the wrapper machinery) degrades to Unsupported
+        // here. It runs on Dispatchers.IO inside a SupervisorJob, where an uncaught throwable
+        // would otherwise kill the whole process — the file must fail closed, the app must not.
+        val sniff = runCatching { FormatSniffer.sniff(header, timeout) }.getOrNull()
+        val verdicts = (sniff as? SniffResult.Ok)?.verdicts
+            ?: return StudioRenderResult.Unsupported
 
         // 2) Route, then execute (R8 / Q6, resolved).
         return when (val r = route(verdicts)) {
