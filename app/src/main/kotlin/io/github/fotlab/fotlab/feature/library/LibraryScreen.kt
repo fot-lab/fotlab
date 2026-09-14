@@ -164,8 +164,9 @@ fun LibraryScreen() {
     }
 
     // Drawer first, then the directory: back closes the drawer before leaving a folder.
+    // The directory back is only for the Library view; the Recycle Bin drives its own back stack.
     BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
-    BackHandler(enabled = !drawerState.isOpen && currentDirectory != null) { currentDirectory = null }
+    BackHandler(enabled = !drawerState.isOpen && viewMode == LibraryViewMode.Library && currentDirectory != null) { currentDirectory = null }
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -265,12 +266,9 @@ fun LibraryScreen() {
                             )
                         }
                     }
-                    // Recycle Bin content is not built yet; the view switches here but stays empty.
+                    // Recycle Bin: removed nodes, grouped by their shared delete-batch timestamp.
                     LibraryViewMode.RecycleBin -> {
-                        Text(
-                            text = stringResource(id = R.string.library_recycle_bin_empty),
-                            modifier = Modifier.padding(16.dp),
-                        )
+                        LibraryRecycleScreen()
                     }
                 }
             }
@@ -707,7 +705,7 @@ private fun splitFileTail(text: String): Pair<String, String> {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun NodeList(
+internal fun NodeList(
     nodes: List<FsNodeObject>,
     selectedIds: Set<Long>,
     layoutMode: LibraryLayoutMode,
@@ -749,7 +747,7 @@ private fun NodeList(
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
-private fun NodeCell(
+internal fun NodeCell(
     node: FsNodeObject,
     selected: Boolean,
     isGrid: Boolean,

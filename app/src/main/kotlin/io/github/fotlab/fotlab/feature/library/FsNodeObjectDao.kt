@@ -34,6 +34,17 @@ interface FsNodeObjectDao {
     @Query("SELECT * FROM fs_node_object WHERE type_mime <> :folderMime AND time_deleted IS NULL")
     suspend fun fileEntryNodes(folderMime: String): List<FsNodeObject>
 
+    /** Distinct soft-delete timestamps, newest first — one virtual batch folder per value. */
+    @Query(
+        "SELECT DISTINCT time_deleted FROM fs_node_object " +
+            "WHERE time_deleted IS NOT NULL ORDER BY time_deleted DESC",
+    )
+    fun deletedBatchTimes(): Flow<List<Long>>
+
+    /** All nodes soft-deleted in the batch stamped at [time] (the batch's content). */
+    @Query("SELECT * FROM fs_node_object WHERE time_deleted = :time ORDER BY name_display")
+    fun deletedNodesAt(time: Long): Flow<List<FsNodeObject>>
+
     /**
      * Soft-delete: stamp `time_deleted` instead of dropping the row (`FOTLAB-DATABS-000002`
      * R10, revised). The id keeps its slot in the live id space; nothing is archived into a

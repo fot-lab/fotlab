@@ -102,4 +102,8 @@ interface FsNodeRelationDao {
             "AND fs_node_id NOT IN (SELECT DISTINCT fs_node_id_child FROM fs_node_relation WHERE time_deleted IS NULL)",
     )
     suspend fun orphanNodeIds(): List<Long?>
+
+    /** All edges soft-deleted in the batch stamped at [time] — the batch's own subtree edges. */
+    @Query("SELECT * FROM fs_node_relation WHERE time_deleted = :time")
+    fun deletedRelationsAt(time: Long): Flow<List<FsNodeRelation>>
 }

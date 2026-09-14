@@ -19,6 +19,9 @@ import kotlinx.coroutines.runBlocking
 /** MIME value that marks a collection (`FOTLAB-DATABS-000002` R4). */
 const val MimeCollection = "application/folder"
 
+/** MIME for the virtual per-batch folder shown at the recycle root; presentation only, not an fs node. */
+const val MimeFolderDeleted = "application/folder_deleted"
+
 /** Fallback MIME when the platform cannot tell us the type of a picked file. */
 private const val MimeUnknown = "application/octet-stream"
 
@@ -110,6 +113,17 @@ object LibraryCore {
     fun parentsOf(childId: Long): Flow<List<FsNodeObject>> = repo().parentsOf(childId)
 
     fun collections(): Flow<List<FsNodeObject>> = repo().collections()
+
+    // --- Recycle bin queries (`FOTLAB-DATABS-000002`, per-batch soft deletion) ---
+
+    /** Distinct delete-batch timestamps, newest first; drives the recycle root listing. */
+    fun deletedBatchTimes(): Flow<List<Long>> = repo().deletedBatchTimes()
+
+    /** Nodes soft-deleted in the batch stamped at [time]. */
+    fun recycleBatchNodes(time: Long): Flow<List<FsNodeObject>> = repo().deletedNodesAt(time)
+
+    /** Edges soft-deleted in the batch stamped at [time]; rebuilds the batch's directory tree. */
+    fun recycleBatchRelations(time: Long): Flow<List<FsNodeRelation>> = repo().deletedRelationsAt(time)
 
     suspend fun addNode(
         nameDisplay: String,

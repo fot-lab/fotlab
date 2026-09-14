@@ -45,7 +45,7 @@ internal fun NodeThumbnail(node: FsNodeObject, modifier: Modifier = Modifier) {
         contentAlignment = Alignment.Center,
     ) {
         when {
-            node.isCollection() -> {
+            node.typeMime == MimeCollection || node.typeMime == MimeFolderDeleted -> {
                 Icon(
                     imageVector = Icons.Filled.Folder,
                     contentDescription = null,
