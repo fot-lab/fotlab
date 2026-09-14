@@ -2,10 +2,12 @@ package io.github.fotlab.fotlab.navigation
 
 import androidx.annotation.StringRes
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.ui.graphics.vector.ImageVector
 import io.github.fotlab.fotlab.R
 import io.github.fotlab.fotlab.navigation.library.LibraryDestination
+import io.github.fotlab.fotlab.navigation.studio.StudioDestination
 
 /**
  * The set of destinations shown in the only persistent UI element of the app
@@ -24,6 +26,11 @@ enum class TopLevelDestination(
         route = LibraryDestination.ROUTE,
         label = R.string.app_nav_library_label,
         icon = Icons.Filled.PhotoLibrary,
+    ),
+    STUDIO(
+        route = StudioDestination.ROUTE,
+        label = R.string.app_nav_studio_label,
+        icon = Icons.Filled.Edit,
     ),
     ;
 

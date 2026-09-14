@@ -78,6 +78,16 @@ object LibraryCore {
     private val layoutModeState = MutableStateFlow(LibraryLayoutMode.DEFAULT)
     val layoutMode: StateFlow<LibraryLayoutMode> = layoutModeState.asStateFlow()
 
+    /**
+     * The directory the Library is currently showing in its normal (non-recycle) view, shared so
+     * other features can target it. `null` means the virtual root. An import fired from another
+     * screen (e.g. Studio's open action) lands here; the recycle-bin view never writes to it
+     * (`FOTLAB-UIXDES-000004`). Process-scoped like [selection].
+     */
+    private val currentDirectoryIdState = MutableStateFlow<Long?>(null)
+    val currentDirectoryId: StateFlow<Long?> = currentDirectoryIdState.asStateFlow()
+    fun setCurrentDirectory(id: Long?) { currentDirectoryIdState.value = id }
+
     private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private lateinit var layoutPreference: LibraryLayoutPreference
 

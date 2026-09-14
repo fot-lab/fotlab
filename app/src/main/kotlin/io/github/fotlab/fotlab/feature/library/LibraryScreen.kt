@@ -64,6 +64,7 @@ import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -150,6 +151,12 @@ fun LibraryScreen() {
     val selectedIds by LibraryCore.selection.selected.collectAsState()
     val selectionModeActive by LibraryCore.selectionModeActive.collectAsState()
     val layoutMode by LibraryCore.layoutMode.collectAsState()
+
+    // Publish the directory the user is currently viewing (normal Library view, never Recycle) so
+    // other screens can import into it (`FOTLAB-UIXDES-000004`).
+    LaunchedEffect(currentDirectory) {
+        LibraryCore.setCurrentDirectory(currentDirectory?.fsNodeId)
+    }
 
     val children by remember(currentDirectory) {
         val parentId = currentDirectory?.fsNodeId

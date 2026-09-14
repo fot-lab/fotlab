@@ -29,6 +29,7 @@
     <!-- ===== app (shell) ===== -->
     <string name="app_name">FotLab</string>
     <string name="app_nav_library_label">Library</string>
+    <string name="app_nav_studio_label">Studio</string>
 
     <!-- ===== feature: library ===== -->
     <string name="library_new_collection_name">New Folder</string>
@@ -64,6 +65,16 @@
     <string name="library_rename_label">Name</string>
     <string name="library_rename_confirm">Rename</string>
     <string name="library_rename_empty">Name cannot be empty</string>
+
+    <!-- ===== feature: studio ===== -->
+    <string name="studio_cd_drawer_open">Open navigation drawer</string>
+    <string name="studio_cd_open_file">Open file</string>
+    <string name="studio_cd_more_options">More options</string>
+    <string name="studio_reset_view">Reset view</string>
+    <string name="studio_open_prompt">Open a file from the toolbar to start editing</string>
+    <string name="studio_tools_looks">Looks</string>
+    <string name="studio_tools">Tools</string>
+    <string name="studio_export">Export</string>
 
     <!-- Library viewer: the full-screen image/video dialog opened on a single tap. -->
     <string name="library_viewer_cd_close">Close viewer</string>
