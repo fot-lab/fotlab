@@ -16,7 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.FileOpen
+import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
@@ -169,7 +169,7 @@ private fun StudioTopBar(
         actions = {
             IconButton(onClick = onOpenFile) {
                 Icon(
-                    imageVector = Icons.Filled.FileOpen,
+                    imageVector = Icons.Filled.AddPhotoAlternate,
                     contentDescription = stringResource(id = R.string.studio_cd_open_file),
                 )
             }
