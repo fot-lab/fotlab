@@ -12,9 +12,9 @@ import java.io.InputStream
  *     `format` produced by step 1 so the native side decodes the already-identified RAW instead of
  *     re-identifying it, and returns PNG-encoded bytes for the frontend to render.
  *
- * The concrete implementation is the native bridge to rawler/dnglab: `rawler::get_decoder(format)` runs
- * the selected decoder to a raster, which is then encoded as PNG. That bridge is **not wired yet**
- * (JNI/UniFFI across the Android NDK targets) — until it lands, use [StubRawDecoder].
+ * The concrete implementation is [RawlerFotlabDecoder]: the bytes are handed to the first-party
+ * `rawler_fotlab` native library (rawler/dnglab over UniFFI), which decodes them and returns PNG.
+ * [StubRawDecoder] stays as the no-op default for builds without the native artifact.
  */
 interface RawDecoder {
 
@@ -27,7 +27,11 @@ interface RawDecoder {
     suspend fun decodeToPng(format: String, open: suspend () -> InputStream): ByteArray?
 }
 
-/** Placeholder: the rawler native decode bridge is not wired yet, so it always reports "cannot decode". */
+/**
+ * No-op [RawDecoder]: always reports "cannot decode", so the Studio pipeline falls through to
+ * `Unsupported`. Only the default until the native bridge is wired, and the fallback for a build
+ * without `librawler_fotlab.so`.
+ */
 object StubRawDecoder : RawDecoder {
     override suspend fun decodeToPng(format: String, open: suspend () -> InputStream): ByteArray? = null
 }

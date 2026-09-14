@@ -12,9 +12,9 @@ import kotlinx.coroutines.flow.map
  *
  * Kept separate from the library display prefs (`LibraryLayoutPreference`) because these are media-layer
  * settings. The settings UI is not built yet (see Open Question Q6), so for now the only value is the
- * sniff-timeout default — and callers that do not yet read it simply use [DEFAULT_SNIFF_TIMEOUT_MS].
- * The [Flow] + setter exist so a future settings screen can read and override it without touching the
- * sniffer code.
+ * sniff-timeout: `StudioEngine` reads it per open and falls back to [DEFAULT_SNIFF_TIMEOUT_MS] if the
+ * store cannot be read. The [Flow] + setter exist so a settings screen can override it later without
+ * touching the sniffer code.
  */
 private val Context.dataStore by preferencesDataStore(name = "studio_prefs")
 
@@ -35,7 +35,7 @@ class MediaPreference(context: Context) {
         prefs[KEY_SNIFF_TIMEOUT_MS] ?: DEFAULT_SNIFF_TIMEOUT_MS
     }
 
-    /** Persist the sniff timeout (future settings UI; not yet wired). */
+    /** Persist the sniff timeout (no settings UI calls this yet). */
     suspend fun setSniffTimeoutMs(value: Long) {
         store.edit { prefs -> prefs[KEY_SNIFF_TIMEOUT_MS] = value }
     }

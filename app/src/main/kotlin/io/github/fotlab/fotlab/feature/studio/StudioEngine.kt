@@ -3,7 +3,9 @@ package io.github.fotlab.fotlab.feature.studio
 import android.content.ContentResolver
 import android.content.Context
 import android.net.Uri
+import io.github.fotlab.fotlab.media.DEFAULT_SNIFF_TIMEOUT_MS
 import io.github.fotlab.fotlab.media.FormatSniffer
+import io.github.fotlab.fotlab.media.MediaPreference
 import io.github.fotlab.fotlab.media.RawDecoder
 import io.github.fotlab.fotlab.media.RawlerFotlabDecoder
 import io.github.fotlab.fotlab.media.Route
@@ -16,6 +18,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.io.InputStream
 import java.nio.ByteBuffer
@@ -33,8 +36,9 @@ import java.nio.ByteBuffer
  *  1. rawler recognizes AND can decode -> decode to PNG via [rawDecoder], then render that raster;
  *  2. otherwise Coil can decode    -> render the original source with Coil;
  *  3. neither                     -> [StudioRenderResult.Unsupported] (the UI shows the dialog).
- * The rawler native decode bridge ([RawDecoder]) is a TODO seam (FOTLAB-STUDIO-000001); until it is
- * wired, [StubRawDecoder] returns null and the source falls through to [StudioRenderResult.Unsupported].
+ * The rawler native decode bridge ([RawDecoder]) is wired to the native `rawler_fotlab` library
+ * ([RawlerFotlabDecoder]); when `librawler_fotlab.so` is absent it returns null and the source falls
+ * through to [StudioRenderResult.Unsupported] (FOTLAB-STUDIO-000001).
  */
 object StudioEngine {
 
@@ -44,6 +48,9 @@ object StudioEngine {
         // Wire the real rawler/UniFFI decode bridge; falls back to null (-> Unsupported) when the
         // librawler_fotlab.so artifact is absent, so a non-native build still runs (FOTLAB-STUDIO-000001).
         rawDecoder = RawlerFotlabDecoder()
+        // The sniff timeout is a user preference (R8 / Q6). Reading it here keeps the sniffer free of
+        // preference plumbing and lets the future settings screen change the bound with no code change.
+        mediaPreference = MediaPreference(appContext)
     }
 
     /**
@@ -57,10 +64,14 @@ object StudioEngine {
     private val renderResultState = MutableStateFlow<StudioRenderResult>(StudioRenderResult.Idle)
     val renderResult: StateFlow<StudioRenderResult> = renderResultState.asStateFlow()
 
-    /** The RAW->PNG decoder. Swap for the native (rawler/UniFFI) bridge when it is wired. */
+    /** The RAW->PNG decoder. Wired to the native rawler/UniFFI bridge by [prepare]. */
     var rawDecoder: RawDecoder = StubRawDecoder
 
     private lateinit var appContext: Context
+
+    /** Media-layer user preferences; the sniff timeout is read from it per open (R8 / Q6). */
+    private lateinit var mediaPreference: MediaPreference
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /** Point the canvas at [uri] (the virtual node's `uri_storage`) and run the render pipeline. */
@@ -85,7 +96,11 @@ object StudioEngine {
         if (header == null) return StudioRenderResult.Unsupported
 
         // 1) Sniff: every input passes through the first-party wrapper (R8). Timeout is a hard error.
-        val verdicts = when (val sniff = FormatSniffer.sniff(header)) {
+        // The bound is the user preference (R8 / Q6); a failed read falls back to the default so a
+        // broken preference store can never block opening a file.
+        val timeout = runCatching { mediaPreference.sniffTimeoutMs.first() }
+            .getOrDefault(DEFAULT_SNIFF_TIMEOUT_MS)
+        val verdicts = when (val sniff = FormatSniffer.sniff(header, timeout)) {
             is SniffResult.Ok -> sniff.verdicts
             is SniffResult.Timeout -> return StudioRenderResult.Unsupported
         }

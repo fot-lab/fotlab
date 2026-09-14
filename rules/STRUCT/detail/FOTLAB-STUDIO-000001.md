@@ -140,8 +140,9 @@ matrix (rules TBD — Open Question Q6).
      `RawlerError::Unsupported` (CLI maps to `AppError::UnsupportedFile`, **exit code 7**) ⇒
      `canDecode == false`, `identifiedFormat == null`.
 3. **Timeout** — a bounded timeout wraps the `awaitBoth`. The **default is 5 s** and is a **user preference**
-   (`MediaPreference.sniffTimeoutMs`, DataStore `studio_prefs`); the settings UI is not wired yet (see Q6),
-   so for now the default is used. It is a preference (not a constant) so it can be tuned per device without
+   (`MediaPreference.sniffTimeoutMs`, DataStore `studio_prefs`), read by `StudioEngine` on every open; the
+   settings screen that writes it is not built yet (see Q6), so the stored value is still the default. It is
+   a preference (not a constant) so it can be tuned per device without
    code changes. If it elapses before **at least one** sniffer returns, the wrapper returns
    `SniffResult.Timeout` (a hard error — the caller must surface "unsupported / retry", never silently fall
    through to either side). Neither sniffer can be cancelled cooperatively (`BitmapFactory` and the native

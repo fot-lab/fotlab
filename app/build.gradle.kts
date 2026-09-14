@@ -57,7 +57,11 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // R8 + resource shrinking for the shipped artifact (rules/ACTION.md Q2). The keep
+            // rules JNA and the UniFFI bindings need live in proguard-rules.pro — R8 must not
+            // rename the generated JNA interface methods, whose names ARE the native symbol names.
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",

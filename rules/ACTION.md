@@ -69,9 +69,9 @@ produces a Release.
 
 ### Submodule Bumps
 
-A bump of a gitlink under `external/` upgrades third-party source. While there is
-no native job yet, the bump still triggers a rebuild so the change is not
-silently ignored:
+A bump of a gitlink under `external/` upgrades third-party source. The bump triggers a
+full rebuild — including the Rust slice that compiles that source — so the change is
+never silently ignored:
 
 - `external/**` is **not** in the ignore list — such a push triggers CI (`rust` → `apk`).
 - The per-language native workflow (`build_rust` today; `build_cmake` etc. later)
@@ -214,8 +214,11 @@ Split across the two rule files, on purpose:
 - Q1 — CI must confirm that AGP `8.7.3` accepts `compileSdk = 36`. If AGP rejects
   it, AGP and Gradle are upgraded **together** (their versions are
   coupled); neither is bumped alone. **TBD.**
-- Q2 — Is R8 minification enabled for release? Currently `isMinifyEnabled = false`
-  in `app/build.gradle.kts`. **TBD.**
+- Q2 — **RESOLVED.** R8 minification and resource shrinking are enabled for release
+  (`isMinifyEnabled` / `isShrinkResources` in `app/build.gradle.kts`). The keep rules JNA and the
+  UniFFI bindings need live in `app/proguard-rules.pro` — R8 must not rename the generated JNA
+  interface methods, whose names ARE the native symbol names. Only release builds are minified, so a
+  debug-only CI run does not exercise this configuration; a release build should be smoke-tested.
 - Q3 — Signing: which keystore, injected through which secret, and is release
   signing part of the first release? **TBD.**
 - Q4 — ABI policy: release `arm64-v8a` only; does debug need `x86_64` for a
@@ -246,3 +249,4 @@ Split across the two rule files, on purpose:
 | 2026-09-09 | Removed the redundant `devenv_android.yaml` reusable workflow and the `native` placeholder job in `build.yaml`; the shared toolchain steps now live in per-component composite actions (`install_jdk` / `install_sdk` / `install_ndk`), reused in-job by `build_gradle.yaml`. Native builds, when needed, will be added as per-language workflows (`build_cmake`/`build_python`/`build_perl`/`build_rust`) — not yet present. Architecture principles extracted to `rules/ACTION/detail/GITHUB-ACTION-000002.md`. |
 | 2026-09-09 | Split the monolithic `devenv-android` composite action into three per-component composite actions — `install_jdk` (JDK), `install_sdk` (SDK + per-component cache), `install_ndk` (NDK + per-component cache) — so NDK install is no longer a parameter switch. `build_gradle.yaml` now calls `install_jdk` + `install_sdk`; future native workflows add `install_ndk`. The old `devenv-android/action.yml` is deleted. |
 | 2026-09-14 | Native slice is now real: `.github/workflows/build_rust.yaml` builds `librawler_fotlab.so` (`cargo ndk -o` for the four ABIs) from the first-party crate at `app/src/rust/binding/dnglab/rawler_fotlab` and generates the Kotlin bindings with the crate's own `uniffi-bindgen` bin, uploading the `rawler_fotlab` artifact. `build_gradle.yaml` places both into `app/build/generated/` (never `src/`), registered as `kotlin.srcDir` / `jniLibs.srcDir`. Trigger table, artifact table, "What CI Has to Build", Native Job Scope and Submodule Bumps updated accordingly. |
+| 2026-09-14 | Closed Q2: release builds now run R8 + resource shrinking, with the JNA / UniFFI keep rules in `app/proguard-rules.pro` (the generated JNA interface method names are native symbol names and must not be obfuscated). Static doc drift removed as well: the Submodule Bumps intro no longer claims there is no native job. |
