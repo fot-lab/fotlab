@@ -29,7 +29,7 @@ runs:
     # below becomes a no-op. On a miss, setup-android installs cmdline-tools and
     # the sdkmanager step fills in the packages, then the result is saved.
     - name: Cache Android SDK (cmdline-tools, platforms, build-tools)
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: |
           ${{ inputs.android-home }}/cmdline-tools
@@ -41,7 +41,7 @@ runs:
           ${{ runner.os }}-android-sdk-
 
     - name: Set up Android SDK
-      uses: android-actions/setup-android@v3
+      uses: android-actions/setup-android@v4
       env:
         ANDROID_HOME: ${{ inputs.android-home }}
         ANDROID_SDK_ROOT: ${{ inputs.android-home }}

@@ -93,7 +93,7 @@ jobs:
       NDK_VERSION: '28.2.13676358'
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           submodules: ${{ inputs.submodules && 'recursive' || 'false' }}
@@ -136,7 +136,7 @@ jobs:
           build-tools: ${{ env.ANDROID_BUILD_TOOLS }}
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v5
         with:
           # Install Gradle 8.14.5 directly on the runner (no checked-in wrapper
           # needed). setup-gradle caches the distribution + dependency caches by
@@ -227,7 +227,7 @@ jobs:
 
       - name: Upload APK artifact
         if: inputs.apk-artifact-name != '' && inputs.apk-path != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.apk-artifact-name }}
           path: ${{ inputs.release-build && 'release-apk/*.apk' || inputs.apk-path }}
@@ -239,7 +239,7 @@ jobs:
       # surface (build logs can carry dependency/SDK/environment detail).
       - name: Upload build log
         if: failure() && inputs.log-artifact-name != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.log-artifact-name }}
           path: build-log.txt
@@ -248,7 +248,7 @@ jobs:
 
       - name: Upload Gradle log
         if: failure() && inputs.gradle-tasks != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: build_log_gradle.log
           path: build_log_gradle.log

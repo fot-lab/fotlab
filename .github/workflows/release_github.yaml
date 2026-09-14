@@ -35,7 +35,7 @@ jobs:
     runs-on: ubuntu-26.04
     steps:
       - name: Download release APK
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: ${{ inputs.apk-artifact-name }}
           path: apk
@@ -45,7 +45,7 @@ jobs:
       # This is what the previous gh CLI step lacked: gh resolves the repo from a
       # local git checkout, and this job had none ("fatal: not a git repository").
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           files: apk/*.apk
