@@ -16,4 +16,5 @@ This file contains **only** the item table. No statistics, no changelog — git 
 | `DNGLAB-SURVEY-000002` | External module study — dnglab rawler: RAW decode pipeline & unified intermediate data model | `STRUCT` | Draft | P2 | [detail](rules/STRUCT/detail/DNGLAB-SURVEY-000002.md) |
 | `DNGLAB-SURVEY-000003` | External module study — dnglab rawler: camera metadata (`data/cameras`) propagation through decode → encode | `STRUCT` | Draft | P2 | [detail](rules/STRUCT/detail/DNGLAB-SURVEY-000003.md) |
 | `EXIFTL-SURVEY-000001` | Research — external/exiftool module: structure, architecture and capabilities | `STRUCT` | Draft | P2 | [detail](rules/STRUCT/detail/EXIFTL-SURVEY-000001.md) |
+| `FOTLAB-STUDIO-000001` | Studio frontend rendering — Coil-only raster decode; RAW converted upstream | `STUDIO` | Draft | P0 | [detail](rules/STRUCT/detail/FOTLAB-STUDIO-000001.md) |
 <!-- Next sequence per category: STRUCT 000004. Append one row per new item; never reuse or renumber IDs. -->

@@ -242,6 +242,54 @@ is not on the main Raw path.
 streams are `analyze`-only debugging aids. It does **not** emit standalone PNG, processed RGB JPEG, or
 RGB TIFF image files.
 
+## 5. Capability boundaries (input / output scope)
+
+This section records the hard limits of what `rawler` / `dnglab` can and cannot ingest or emit. It is a
+**fixed constraint** for fotlab integration (per `STRUCT.md` principle 5 — upstream is out of scope; this
+only records behaviour, it does not request changes). The studio-frontend consequence is enforced by
+`FOTLAB-STUDIO-000001`.
+
+### 5.1 Input scope — camera RAW / TIFF / DNG only
+
+The decode entry point `RawLoader::get_decoder` (`rawler/src/decoders/mod.rs:909`) sniffs a file by magic
+bytes / container and routes **only** to a decoder for camera-RAW families:
+
+- Container signatures: `mrw` (Minolta), `raf` (Fuji), `ari` (ARRIRAW), `qtk` (Kodak DC), `ciff` → `crw`
+  (Canon CIFF), `x3f` (Sigma);
+- BMFF with `crx ` compatible brand → `cr3` (Canon CR3);
+- TIFF container → matched by EXIF `Make` string to a per-vendor decoder (`cr2` / `nef` / `arw` / `pef` /
+  `orf` / `srw` / `rw2` / `iiq` / `tfr` / `mos` / `kdc` / `dcr` / `erf` / `nrw` / `dcs` / …, 30+);
+- TIFF carrying `DngTag::DNGVersion` → `dng::DngDecoder`.
+
+There is **no sniff branch for JPEG or PNG as a top-level input**. Verified findings (see also the
+survey turn that read the submodule source):
+
+- **PNG**: the `image` dependency is enabled for **jpeg only** (000001 §"Key Dependencies"), and no PNG
+  decoder exists anywhere in the decode path. A `.png` misses every `is_*` check, then fails the TIFF
+  parse and returns `RawlerError::Unsupported`.
+- **JPEG**: baseline JPEG is used **only** as an *embedded* compression for previews / thumbnails inside
+  RAW/DNG containers (`JpegDecompressor`, YCbCr — §1.2). The only top-level JFIF branch
+  (`rawler/src/decoders/mod.rs:935`) routes a file **solely** when it is a Konica-Minolta EXIF/JFIF
+  wrapping an MRW; an ordinary `.jpg` is logged as "Unknown make" and falls through to `Unsupported`.
+
+> **Conclusion**: `rawler` / `dnglab` cannot open a standalone JPEG or PNG photograph. It is **not** a
+> general-purpose raster image decoder.
+
+### 5.2 Output scope — DNG only
+
+As concluded in §4.3, the only real output is **DNG** (`convert` / `makedng`). TIFF and raw pixel streams
+are `analyze`-only debugging aids; there is **no** standalone PNG, processed RGB JPEG, or RGB TIFF
+emitter. (JPEG exists only inside the DNG Preview IFD; it is not a top-level artifact.)
+
+### 5.3 Implication for fotlab
+
+`rawler` / `dnglab` is a **RAW → DNG converter**, not an image viewer. It must **not** sit on the path
+that renders already-rendered raster photos (jpg / png / webp / …) in the Library/Studio frontend. Any
+asset handed to the frontend render layer must first be a raster the viewer understands (png / jpg / …);
+RAW inputs must be converted — via `dnglab_lib` or the `dnglab` CLI — to such a raster **before** they
+reach the UI. This boundary is codified by `FOTLAB-STUDIO-000001` (studio frontend renders Coil-supported
+rasters only; RAW is converted upstream).
+
 ## Constraints (STRUCT.md principle 5)
 
 `external/dnglab` is a fixed constraint. This document records `rawler`'s decode behavior and its
@@ -272,3 +320,12 @@ threading model and lifecycle all belong in the first-party native-integration m
   multi-IFD layout, `DngCompression` (`dng/mod.rs:108`) → LJPEG-92 (main Raw) / lossy JPEG (preview) /
   uncompressed RGB (thumbnail) / zlib (embedded original, `dng/original.rs:5,22`), and that dnglab emits
   **DNG only** as a real output (TIFF & raw pixel stream are `analyze`-only debugging aids).
+- 2026-09-14 — Added §5 (Capability boundaries). Recorded, from a direct read of the checked-out
+  `external/dnglab` submodule source, that `RawLoader::get_decoder` (`rawler/src/decoders/mod.rs:909`)
+  sniffs **only** camera-RAW / TIFF / DNG families (mrw/raf/ari/qtk/ciff→crw/x3f, BMFF `crx `→cr3, TIFF
+  by Make, DNGVersion→DngDecoder) — there is **no** JPEG/PNG top-level input branch. Confirmed PNG is
+  absent (the `image` dep is jpeg-only) and baseline JPEG is used only for *embedded* previews
+  (`JpegDecompressor`), with the sole JFIF branch (`mod.rs:935`) routing Konica-Minolta EXIF/JFIF→MRW.
+  Conclusion: `rawler`/`dnglab` cannot open standalone jpg/png and is not a general image viewer. Output
+  remains DNG-only (§4.3). The §5.3 implication — RAW must be converted to a raster upstream, before the
+  UI — is codified by the new `FOTLAB-STUDIO-000001`.
