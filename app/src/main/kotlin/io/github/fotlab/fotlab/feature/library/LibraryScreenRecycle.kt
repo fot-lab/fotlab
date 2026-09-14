@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.weight
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteForever
@@ -22,6 +21,7 @@ import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -215,6 +215,7 @@ fun LibraryRecycleScreen(
  * - Selecting: `restore from bin` + `delete forever`; the leading cluster becomes the Close
  *   (exit the mode) and the selection count, mirroring the library's selection action mode.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun RecycleTopBar(
     selectionActive: Boolean,
@@ -376,7 +377,7 @@ private fun RecycleRoot(
         layoutMode = layoutMode,
         selectionActive = selectionActive,
         onNodeClick = { node ->
-            if (selectionActive) node.fsNodeId?.let { onToggleSelect(it) } else onOpenBatch(node.timeCreated)
+            if (selectionActive) onToggleSelect(node) else onOpenBatch(node.timeCreated)
         },
         onToggleSelect = onToggleSelect,
         onLongPress = onLongPress,
@@ -442,7 +443,7 @@ private fun RecycleBatch(
         selectionActive = selectionActive,
         onNodeClick = { node ->
             if (selectionActive) {
-                node.fsNodeId?.let { onToggleSelect(it) }
+                onToggleSelect(node)
             } else {
                 when {
                     node.isCollection() -> onOpenNode(node)
