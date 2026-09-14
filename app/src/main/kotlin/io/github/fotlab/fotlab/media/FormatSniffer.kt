@@ -16,15 +16,21 @@ import java.io.ByteArrayInputStream
  * The route decision is a separate pure function driven by the emitted
  * [SniffResult] dictionary (rules TBD — Open Question Q6).
  *
- * Flow: parallel Coil-side + rawler-side sniffers, bounded by [timeoutMillis];
- * timeout => [SniffResult.Timeout] (hard error, never a silent fallback).
+ * Flow: parallel Coil-side + rawler-side sniffers, bounded by a timeout (default
+ * [DEFAULT_SNIFF_TIMEOUT_MS], a user preference — see [MediaPreference]); timeout =>
+ * [SniffResult.Timeout] (hard error, never a silent fallback).
  */
 object FormatSniffer {
 
-    /** Bounded time for ALL sniffers to settle. TBD — see Q6. */
-    var timeoutMillis: Long = 2_000L
-
-    suspend fun sniff(header: ByteArray): SniffResult = coroutineScope {
+    /**
+     * Bounded time for ALL sniffers to settle. Defaults to [DEFAULT_SNIFF_TIMEOUT_MS] (5 s), a user
+     * preference ([MediaPreference]) the settings UI will expose later (R8 / Q6). Callers may pass a live
+     * value from [MediaPreference.sniffTimeoutMs]; until that UI is wired, the default is used.
+     */
+    suspend fun sniff(
+        header: ByteArray,
+        timeoutMillis: Long = DEFAULT_SNIFF_TIMEOUT_MS,
+    ): SniffResult = coroutineScope {
         try {
             withTimeout(timeoutMillis) {
                 val coil = async { CoilSideSniffer.sniff(header) }

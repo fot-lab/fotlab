@@ -139,9 +139,12 @@ matrix (rules TBD — Open Question Q6).
      (`rawler/src/decoders/mod.rs:909`). A returned decoder ⇒ `canDecode == true` with the RAW format name;
      `RawlerError::Unsupported` (CLI maps to `AppError::UnsupportedFile`, **exit code 7**) ⇒
      `canDecode == false`, `identifiedFormat == null`.
-3. **Timeout** — a bounded timeout (TBD, see Q6) wraps the `awaitBoth`. If it elapses before **at least
-   one** sniffer returns, the wrapper returns `SniffResult.Timeout` (a hard error — the caller must
-   surface "unsupported / retry", never silently fall through to either side).
+3. **Timeout** — a bounded timeout wraps the `awaitBoth`. The **default is 5 s** and is a **user preference**
+   (`MediaPreference.sniffTimeoutMs`, DataStore `studio_prefs`); the settings UI is not wired yet (see Q6),
+   so for now the default is used. It is a preference (not a constant) so it can be tuned per device without
+   code changes. If it elapses before **at least one** sniffer returns, the wrapper returns
+   `SniffResult.Timeout` (a hard error — the caller must surface "unsupported / retry", never silently fall
+   through to either side).
 4. **Settle** — proceed as soon as at least one sniffer returns within T, or once both return before T
    ends.
 5. **Compose dictionary** — assemble `Map<Sniffer, Verdict>` (one entry per sniffer; extensible by
@@ -217,8 +220,8 @@ matrix (rules TBD — Open Question Q6).
   `{COIL:{format,canDecode}, RAWLER:{format,canDecode}}`), what is the precedence? (e.g.
   `COIL.canDecode && !RAWLER.canDecode` → straight to Coil; `RAWLER.canDecode && !COIL.canDecode` →
   RAW→raster; `!COIL.canDecode && !RAWLER.canDecode` → unsupported; `both decodable` → ?). Also: the
-  timeout value T, and whether a single-side timeout (one returned, other hung) should still proceed.
-  **Pending user specification.**
+  timeout value T (now a **user preference defaulting to 5 s** — `MediaPreference`, UI pending), and whether a
+  single-side timeout (one returned, other hung) should still proceed. **Pending user specification.**
 
 - 2026-09-14 — Initial architecture item. Codified that the Studio frontend renders **Coil-only**
   rasters (R1–R2), with a PNG → JPEG → other-Coil-format preference for any derived asset (R3), that
@@ -255,3 +258,8 @@ matrix (rules TBD — Open Question Q6).
   bytes**; `canDecode == true` iff `outMimeType != null`. SVG (Coil's vector path, invisible to
   `BitmapFactory`) is the single minimal content exception. Updated R8, the wrapper flow, Q6, and the
   `app/media/FormatSniffer.kt` skeleton accordingly.
+- 2026-09-14 — Made the R8 sniff **timeout a user preference** (not a hard-coded constant): added
+  `MediaPreference` (DataStore `studio_prefs`, key `studio_sniff_timeout_ms`) with `DEFAULT_SNIFF_TIMEOUT_MS = 5_000`
+  (5 s) and a `Flow` + setter for a future settings UI. `FormatSniffer.sniff(header, timeoutMillis = DEFAULT_SNIFF_TIMEOUT_MS)`
+  now defaults to that preference; the settings screen to override it is **not yet wired** (Q6). Replaced the
+  previous `var timeoutMillis = 2_000L`. Updated the R8 flow step and Q6 accordingly.
