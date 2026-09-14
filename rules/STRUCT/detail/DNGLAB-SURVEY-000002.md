@@ -261,6 +261,14 @@ bytes / container and routes **only** to a decoder for camera-RAW families:
   `orf` / `srw` / `rw2` / `iiq` / `tfr` / `mos` / `kdc` / `dcr` / `erf` / `nrw` / `dcs` / …, 30+);
 - TIFF carrying `DngTag::DNGVersion` → `dng::DngDecoder`.
 
+All of these checks read **raw file-header bytes, never the filename**. Verified in source: `is_mrw` reads
+`\0MRM` (`rawler/src/decoders/mrw.rs:31`), `is_raf` reads `FUJIFILM` (`raf.rs:63`), `is_ari` reads `ARRI`
+(`ari.rs:18`), `is_ciff` reads `HEAPCCDR` (`formats/ciff/mod.rs:41`), `is_x3f` reads `FOVb` (`x3f.rs:6`), and
+`is_exif` reads `FF D8 FF E1` (`formats/jfif.rs:314`); the TIFF branch then matches the EXIF `Make` tag read
+from bytes. So detection is purely content-based: a RAW renamed `.png` is still recognised as RAW, and a
+PNG renamed `.arw` is still `Unsupported`. (This matters for fotlab — see `FOTLAB-STUDIO-000001`, which
+requires the native layer to emit *genuine* raster bytes, not a rename.)
+
 There is **no sniff branch for JPEG or PNG as a top-level input**. Verified findings (see also the
 survey turn that read the submodule source):
 
@@ -329,3 +337,10 @@ threading model and lifecycle all belong in the first-party native-integration m
   Conclusion: `rawler`/`dnglab` cannot open standalone jpg/png and is not a general image viewer. Output
   remains DNG-only (§4.3). The §5.3 implication — RAW must be converted to a raster upstream, before the
   UI — is codified by the new `FOTLAB-STUDIO-000001`.
+- 2026-09-14 — Reinforced §5.1 with the **content-based (not filename-based) sniffing** proof: every
+  `is_*` guard reads file-header magic — `is_mrw`=`\0MRM` (`mrw.rs:31`), `is_raf`=`FUJIFILM` (`raf.rs:63`),
+  `is_ari`=`ARRI` (`ari.rs:18`), `is_ciff`=`HEAPCCDR` (`formats/ciff/mod.rs:41`), `is_x3f`=`FOVb` (`x3f.rs:6`),
+  `is_exif`=`FF D8 FF E1` (`formats/jfif.rs:314`) — and the TIFF branch matches the EXIF `Make` tag from
+  bytes. Therefore renaming cannot fool the dispatcher (RAW renamed `.png` still RAW; PNG renamed `.arw`
+  still `Unsupported`), which is why `FOTLAB-STUDIO-000001` mandates genuine raster bytes from the native
+  layer rather than a rename.

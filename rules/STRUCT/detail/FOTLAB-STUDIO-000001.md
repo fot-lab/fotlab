@@ -92,6 +92,18 @@ produced upstream* (R4 for Studio, R6 for Library). Two constraints shape the de
   Studio = precise full decode via dnglab (faithful inspection/editing). This mirrors the Snapseed-style
   preview-proxy + on-demand full-res strategy, and keeps Coil as the sole render layer in both surfaces
   (R1).
+- **Format detection is content-based on both sides; file extensions are untrusted.** (a) dnglab/`rawler`
+  sniffs inputs by **magic bytes / container structure, never the filename** — verified in source:
+  `is_mrw` reads `\0MRM` (`rawler/src/decoders/mrw.rs:31`), `is_raf` reads `FUJIFILM` (`raf.rs:63`),
+  `is_ari` reads `ARRI` (`ari.rs:18`), `is_ciff` reads `HEAPCCDR` (`formats/ciff/mod.rs:41`),
+  `is_x3f` reads `FOVb` (`x3f.rs:6`), `is_exif` reads `FF D8 FF E1` (`formats/jfif.rs:314`); the TIFF
+  branch then matches the EXIF `Make` tag read from bytes. (b) Coil detects standard rasters via the
+  platform `BitmapFactory` / `ImageDecoder`, which sniff by **file-header magic**; its `coil-gif`
+  (GIF / `GIF87a`) and `coil-svg` (`<svg`) decoders also use magic bytes. **Only Coil's `coil-video`
+  (video frames via `MediaMetadataRetriever`) keys off the file extension.** Consequence: renaming a file
+  cannot fool either side — an ARW renamed `.jpg` is still rejected by Coil, a PNG renamed `.arw` is still
+  `Unsupported` in dnglab. Therefore the native-integration layer (R4/R6) MUST emit **genuine** PNG/JPEG
+  bytes (a real encoded stream), not merely rename a RAW; Coil validates the bytes, not the name.
 - **Single integration point** — both RAW→raster paths live in the native-integration module
   (`FOTLAB-NATIVE-000001`), not in `external/` (per `STRUCT.md` principle 5) and not in the UI.
 
@@ -109,6 +121,8 @@ produced upstream* (R4 for Studio, R6 for Library). Two constraints shape the de
 - Zoom/pan uses an official viewer class; no custom gesture math in the decode path (R5).
 - The embedded-preview path is provably absent from Studio code and the precise-decode path is provably
   absent from Library hot-path code (R7).
+- Preview/proxy assets emitted by the native layer are **genuine encoded rasters** (Coil validates the
+  bytes, not the filename); an extension-renamed RAW is never passed to Coil as if it were a raster.
 
 ## Impacted Modules
 
@@ -129,6 +143,8 @@ produced upstream* (R4 for Studio, R6 for Library). Two constraints shape the de
 - Q4 — For R6, is the embedded preview extracted by the native layer (reusing rawler/DNG IFD parsing) or
   by a small first-party container reader? Either way it MUST NOT reach Coil as a RAW and MUST stay in the
   native-integration module.
+- Q5 — If video-frame rendering is ever added (Coil `coil-video`, the only extension-based path), the
+  asset naming must keep a correct video extension; photo paths (jpg/png/webp/raw) are unaffected.
 
 ## Change History
 
@@ -147,3 +163,8 @@ produced upstream* (R4 for Studio, R6 for Library). Two constraints shape the de
   embedded-preview extraction, scoped to Library only), with **R7** pinning the scope boundary. Added the
   embedded-preview constraint and the two-tier-fidelity note; updated Acceptance Criteria and Impacted
   Modules so Library and Studio each own one path.
+- 2026-09-14 — Added the **content-based format detection** constraint: dnglab/`rawler` sniffs by magic
+  bytes (not filename; cited `is_mrw`/`is_raf`/`is_ari`/`is_ciff`/`is_x3f`/`is_exif` source), and Coil
+  detects rasters/SVG/GIF by header magic while only `coil-video` keys off the extension. Consequence:
+  renaming can't fool either side, so the native layer must emit **genuine** PNG/JPEG bytes, not a renamed
+  RAW. Added the matching Acceptance Criterion and Open Question Q5 (video-frame extension caveat).
