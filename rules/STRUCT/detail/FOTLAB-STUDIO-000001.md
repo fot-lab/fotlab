@@ -125,10 +125,10 @@ wrapper owns the *format decision*; the *route decision* is a separate pure func
 matrix (rules TBD — Open Question Q6).
 
 ### Flow
-1. **Entry** — a seekable header slice (≥ first 64 KiB: enough for magic bytes and the TIFF/EXIF `Make`
-   tag rawler needs) enters `FormatSniffer.sniff(...)`.
-2. **Parallel dispatch** — the wrapper launches two sniffers concurrently (async, on a coroutine scope)
-   and awaits both:
+1. **Entry** — a seekable header slice (first **1 MiB**: enough for magic bytes and the TIFF/EXIF `Make`
+   tag — and any embedded-preview IFD entry — that rawler needs) enters `FormatSniffer.sniff(...)`.
+2. **Parallel dispatch** — the wrapper launches two sniffers concurrently, each on its own daemon worker
+   thread (`SniffThreads`), and awaits both:
    - **Coil-side sniffer** — reuses the **platform/Coil native** format detector (Android `BitmapFactory`
      `inJustDecodeBounds` → `outMimeType`; this is exactly the decoder Coil wraps for rasters, so its
      verdict equals Coil's raster-decode capability). **No hand-rolled magic bytes.** Outputs
@@ -144,7 +144,10 @@ matrix (rules TBD — Open Question Q6).
    so for now the default is used. It is a preference (not a constant) so it can be tuned per device without
    code changes. If it elapses before **at least one** sniffer returns, the wrapper returns
    `SniffResult.Timeout` (a hard error — the caller must surface "unsupported / retry", never silently fall
-   through to either side).
+   through to either side). Neither sniffer can be cancelled cooperatively (`BitmapFactory` and the native
+   rawler call ignore `Thread.interrupt()`), so the deadline is enforced by **interrupting and abandoning**
+   their daemon worker threads instead of waiting for them: the caller is released immediately and a late
+   result is discarded.
 4. **Settle** — proceed as soon as at least one sniffer returns within T, or once both return before T
    ends.
 5. **Compose dictionary** — assemble `Map<Sniffer, Verdict>` (one entry per sniffer; extensible by
@@ -163,7 +166,7 @@ The route is a pure function of the sniff dictionary (implemented in `FormatSnif
 
 | Condition | Route | What happens |
 | --- | --- | --- |
-| `rawler.canDecode == true` | `RawToRaster` | **Two native calls.** Call #1 already ran inside `FormatSniffer.sniff` (`RawlerProbe` → `Verdict{format, canDecode}`). Call #2 is `RawDecoder.decodeToPng(format, source)` (native rawler/dnglab bridge, TODO seam); the returned PNG is rendered by Coil. |
+| `rawler.canDecode == true` | `RawToRaster` | **Two native calls.** Call #1 already ran inside `FormatSniffer.sniff` (`RawlerProbe` → `Verdict{format, canDecode}`). Call #2 is `RawDecoder.decodeToPng(format, source)` — today `RawlerFotlabDecoder` delegates to `RawlerFotlabBridge`, which calls the **`librawler_fotlab.so` native library** (rawler/dnglab via **UniFFI**); the returned PNG is rendered by Coil. |
 | else `coil.canDecode == true` | `ToCoil` | The original source is handed to Coil (raster/SVG path). |
 | else | `Unsupported` | Studio shows the "Unsupported Format! 不支持的格式！" dialog; no decode. |
 
@@ -174,9 +177,49 @@ parallel inside `FormatSniffer.sniff`): it answers "RAW? which format? can rawle
 RAW instead of re-identifying it. The two are separate native-integration seams.
 
 `RawToRaster` wins over `ToCoil` when both report `canDecode` (rawler's raster is authoritative for RAW,
-and Coil cannot decode RAW anyway). The native rawler decode bridge (`RawDecoder`) is **not wired yet** —
-`StubRawDecoder` returns `null`, so today a RAW that rawler would decode falls through to `Unsupported`
-until the JNI/UniFFI bridge lands (see Impacted Modules / native-integration).
+and Coil cannot decode RAW anyway). The native rawler decode bridge is **now wired**: `StudioEngine` sets
+`rawDecoder = RawlerFotlabDecoder()` in `prepare()`, which delegates to `RawlerFotlabBridge`
+(`app/src/kotlin/io/github/fotlab/fotlab/binding/dnglab/rawler_fotlab`) → the `librawler_fotlab.so`
+native library over UniFFI. When `librawler_fotlab.so` is absent the bridge returns `null` and the source
+falls through to `Unsupported`, so the app still runs without the native artifact.
+
+### Native build (rawler_fotlab — R1 / FOTLAB-NATIVE-000001)
+The raw path needs two native calls, both served by **one** first-party native library,
+**`librawler_fotlab.so`** (the only library that carries a FotLab name; upstream `rawler` is compiled from
+its own source and keeps its name):
+
+- **Naming rule**: only `rawler_fotlab` / `dnglab_fotlab` (and names beginning with either) may name
+  first-party artifacts. Anything produced *directly* by upstream source keeps the upstream name. Cargo
+  `crate-type` keywords such as `cdylib` are build descriptors, never library names.
+- **Source (our tree)**: `app/src/rust/binding/dnglab/rawler_fotlab/` — the first-party binding crate,
+  exposing two UniFFI functions:
+  - `identify(raw) -> Option<String>` — call #1, identification only (wraps `rawler::decode_dummy`).
+  - `decode_to_png(raw) -> Vec<u8>` — call #2, decode the identified RAW to PNG (wraps `rawler::decode` + `image` PNG encode).
+  It is a **standalone** Cargo workspace and reaches upstream through a *path* dependency
+  (`rawler = { path = "../../../../../../external/dnglab/rawler" }`), so the pinned submodule is compiled
+  as-is. It is deliberately **not** a member of the dnglab workspace and `external/dnglab/Cargo.toml` is
+  never edited (`FOTLAB-NATIVE-000001` R4 — upstream is read-only). `uniffi.toml` sets the Kotlin
+  `package_name` to the facade's package.
+- **Kotlin glue**: `app/src/kotlin/io/github/fotlab/fotlab/binding/dnglab/rawler_fotlab/` holds exactly one
+  **hand-written, committed** file — the facade `RawlerFotlabBridge.kt`. The UniFFI bindings it calls are
+  **generated** and land in the build directory (`app/build/generated/uniffi/main/kotlin`, declared as a
+  Kotlin source dir in `app/build.gradle.kts`), never in `src/`, so no generated code is committed and no
+  `.gitignore` entry is needed (`FOTLAB-STRUCT-000002` R1). The facade renames the calls
+  (`identifyFormat` / `decodeRawToPng`) because the generated functions are top-level and would otherwise
+  be shadowed. App code only calls the facade; `RawlerProbe` (call #1) and `RawlerFotlabDecoder` (call #2) use it.
+  JNA (`net.java.dev.jna:jna:<v>@aar`) is the runtime the generated bindings need on Android.
+- **Build & artifact passing**: `build_rust.yaml` builds the library (`cargo ndk -o …` for
+  `arm64-v8a`/`armeabi-v7a`/`x86`/`x86_64`) and generates the Kotlin bindings with the crate's own
+  `uniffi-bindgen` bin (`cargo run --features cli --bin uniffi-bindgen`), which guarantees generator and
+  runtime versions match; it uploads `jniLibs/` + `kotlin/` as the `rawler_fotlab` artifact.
+  `build_gradle.yaml` then downloads it into `app/build/generated/jniLibs/<abi>/` and
+  `app/build/generated/uniffi/main/kotlin/` before Gradle runs — both are build directories, so no
+  downloaded or generated artifact is placed under `src/` (`FOTLAB-STRUCT-000002` R1). Upstream source is
+  compiled from the submodule in place; only our binding carries the `rawler_fotlab` name.
+- **Local builds**: because the bindings are generated in CI, a build without the native artifact cannot
+  compile the facade. All builds run in CI (`rules/ACTION.md`).
+- **Preview quality**: the PNG encode is 8-bit, bayer shown as grayscale; a proper demosaic/gamma pass is
+  future work (FOTLAB-NATIVE-000001).
 
 ### Why run both sniffers in parallel
 - Coil's sniffer is a **positive whitelist** — it knows only standard rasters and returns UNKNOWN for any
@@ -243,9 +286,11 @@ until the JNI/UniFFI bridge lands (see Impacted Modules / native-integration).
   straight to Coil (render the original source); else → unsupported (UI shows
   "Unsupported Format! 不支持的格式！"). Implemented as the pure `route()` function in `FormatSniffer.kt`;
   `RawToRaster` wins when both report `canDecode`. The timeout `T` is a user preference defaulting to 5 s
-  (`MediaPreference`, UI pending). Open: whether a single-side timeout (one returned, other hung) should
-  still proceed — the current `withTimeout` wraps the whole `awaitAll`, so a single-side hang fails the
-  whole sniff → `SniffResult.Timeout` → `Unsupported`.
+  (`MediaPreference`, UI pending). A single-side hang (one sniffer returned, the other wedged) still fails
+  the whole sniff → `SniffResult.Timeout` → `Unsupported`: the deadline wraps both callers, and the wedged
+  call's daemon worker thread is interrupted and abandoned rather than waited on.
+
+## Change History
 
 - 2026-09-14 — Initial architecture item. Codified that the Studio frontend renders **Coil-only**
   rasters (R1–R2), with a PNG → JPEG → other-Coil-format preference for any derived asset (R3), that
@@ -301,3 +346,32 @@ until the JNI/UniFFI bridge lands (see Impacted Modules / native-integration).
   handed the `format` from call #1 so the native side decodes the already-identified RAW instead of
   re-identifying. `decodeToPng` now takes `format: String`; `RawlerProbe`/`RawDecoder` docs and the Routing
   table both state the two-call split.
+- 2026-09-14 — **Wired the rawler native binding (rawler_fotlab, UniFFI).** Added `external/dnglab/rawler_fotlab/`
+  (cdylib `rawler_fotlab`, dnglab workspace member) exposing `identify` (call #1) + `decode_to_png` (call #2)
+  over the upstream `rawler` rlib; `RawlerFotlabBridge.kt` + generated `rawler_fotlab.kt` in
+  `app/src/kotlin/binding/dnglab/rawler_fotlab/`; `RawlerFotlabDecoder` implements `RawDecoder` and
+  `StudioEngine.prepare()` wires it (graceful null fallback when the .so is absent). CI: new `build_rust.yaml`
+  builds the .so + Kotlin bindings and uploads the `rawler_fotlab` artifact; `build_gradle.yaml` downloads it
+  into `jniLibs`/binding dir; `build.yaml` orders `rust` before `apk`. Naming rule: only our binding uses
+  `rawler_fotlab`; external `rawler` keeps its original name.
+- 2026-09-14 — **Moved the binding crate out of the submodule and stopped committing generated code.**
+  The first-party crate now lives at `app/src/rust/binding/dnglab/rawler_fotlab/` and is a standalone
+  workspace with a *path* dependency on `external/dnglab/rawler`; the upstream `external/dnglab/Cargo.toml`
+  member list is restored so upstream stays read-only (the previous layout added our crate as a dnglab
+  workspace member and modified upstream — `FOTLAB-NATIVE-000001` R1/R4/C2/C4). `uniffi.toml` now uses the
+  correct Kotlin key `package_name` (the earlier `namespace` was ignored). The generated bindings are
+  written to `app/build/generated/uniffi/main/kotlin` instead of `src/`, so the dirty `.gitignore`
+  UniFFI entry is gone and the facade `RawlerFotlabBridge.kt` (renamed calls `identifyFormat` /
+  `decodeRawToPng` to avoid shadowing the generated top-level functions) is committed. Added the missing
+  Android runtime dependency JNA (`@aar`) and made the native build use `cargo ndk -o` plus the crate's own
+  `uniffi-bindgen` bin for version parity. Also fixed the `InputStream.readNBytes` (API 33+) call that broke
+  the sniff header read on `minSdk 26`.
+- 2026-09-14 — **Sniff input widened to 1 MiB and the sniff timeout made authoritative.** `StudioEngine`
+  now feeds `FormatSniffer` the first 1 MiB instead of 64 KiB, so TIFF/BMFF-based RAW containers whose
+  `Make`/preview IFD entries sit past the first block are still identified by content. Because neither
+  sniffer can be cancelled once started (`BitmapFactory` and the native rawler call ignore
+  `Thread.interrupt()`), `FormatSniffer.sniff` now runs each sniffer on a dedicated **daemon** worker thread
+  (`SniffThreads`) and, on deadline, interrupts and **abandons** those threads instead of waiting — the
+  caller is always released at the timeout and a late result is dropped (`tryResume`/`completeResume`).
+  Closed the previously open single-side-timeout question: a wedged sniffer fails the whole sniff to
+  `SniffResult.Timeout`, but never blocks the caller.

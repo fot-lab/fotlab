@@ -5,6 +5,7 @@ import android.content.Context
 import android.net.Uri
 import io.github.fotlab.fotlab.media.FormatSniffer
 import io.github.fotlab.fotlab.media.RawDecoder
+import io.github.fotlab.fotlab.media.RawlerFotlabDecoder
 import io.github.fotlab.fotlab.media.Route
 import io.github.fotlab.fotlab.media.SniffResult
 import io.github.fotlab.fotlab.media.StubRawDecoder
@@ -16,6 +17,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.io.InputStream
 import java.nio.ByteBuffer
 
 /**
@@ -39,6 +41,9 @@ object StudioEngine {
     /** Prepare process-wide state; call once from the application context. */
     fun prepare(context: Context) {
         appContext = context.applicationContext
+        // Wire the real rawler/UniFFI decode bridge; falls back to null (-> Unsupported) when the
+        // librawler_fotlab.so artifact is absent, so a non-native build still runs (FOTLAB-STUDIO-000001).
+        rawDecoder = RawlerFotlabDecoder()
     }
 
     /**
@@ -75,7 +80,7 @@ object StudioEngine {
     }
 
     private suspend fun runPipeline(resolver: ContentResolver, uri: Uri): StudioRenderResult {
-        val header = runCatching { resolver.openInputStream(uri)?.use { it.readNBytes(HEADER_BYTES) } }
+        val header = runCatching { resolver.openInputStream(uri)?.use { it.readHeader(HEADER_BYTES) } }
             .getOrNull()
         if (header == null) return StudioRenderResult.Unsupported
 
@@ -103,8 +108,31 @@ object StudioEngine {
     }
 
     private companion object {
-        const val HEADER_BYTES = 64 * 1024
+        /**
+         * Bytes handed to [FormatSniffer]. RAW containers are TIFF/BMFF based, so the identification
+         * tags (and any embedded-preview IFD entries) can sit far into the file; 1 MiB keeps the
+         * sniff content-based instead of guessing from the first block. It is a bounded, single
+         * read, so the cost stays flat regardless of file size.
+         */
+        const val HEADER_BYTES = 1024 * 1024
     }
+}
+
+/**
+ * Read up to [max] bytes, stopping early at end-of-stream.
+ *
+ * `InputStream.readNBytes` only exists from API 33, so it must not be used with `minSdk = 26`;
+ * this is the API-safe equivalent for the sniff header.
+ */
+private fun InputStream.readHeader(max: Int): ByteArray {
+    val buffer = ByteArray(max)
+    var filled = 0
+    while (filled < max) {
+        val read = read(buffer, filled, max - filled)
+        if (read < 0) break
+        filled += read
+    }
+    return if (filled == max) buffer else buffer.copyOf(filled)
 }
 
 /** Result of running the studio render pipeline over the current node (R8). */

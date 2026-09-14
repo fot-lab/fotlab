@@ -1,12 +1,14 @@
 package io.github.fotlab.fotlab.media
 
 import android.graphics.BitmapFactory
+import io.github.fotlab.fotlab.binding.dnglab.rawler_fotlab.RawlerFotlabBridge
 import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeout
 import java.io.ByteArrayInputStream
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 /**
  * First-party format-sniffing wrapper (R8, FOTLAB-STUDIO-000001).
@@ -19,6 +21,12 @@ import java.io.ByteArrayInputStream
  * Flow: parallel Coil-side + rawler-side sniffers, bounded by a timeout (default
  * [DEFAULT_SNIFF_TIMEOUT_MS], a user preference — see [MediaPreference]); timeout =>
  * [SniffResult.Timeout] (hard error, never a silent fallback).
+ *
+ * **A timeout must not depend on the sniffers cooperating.** Neither the platform
+ * `BitmapFactory` call nor the native rawler call can be cancelled — `Thread.interrupt()`
+ * only raises a flag such code never reads — so each sniffer runs on its own daemon worker
+ * thread ([SniffThreads]) and, when the deadline passes, the caller *gives up on the thread*
+ * instead of waiting for it: the worker is interrupted and abandoned. See [SniffThreads].
  */
 object FormatSniffer {
 
@@ -30,23 +38,71 @@ object FormatSniffer {
     suspend fun sniff(
         header: ByteArray,
         timeoutMillis: Long = DEFAULT_SNIFF_TIMEOUT_MS,
-    ): SniffResult = coroutineScope {
-        try {
+    ): SniffResult {
+        val coil = SniffThreads.submit { CoilSideSniffer.sniff(header) }
+        val rawler = SniffThreads.submit { RawlerProbe.sniff(header) }
+        return try {
             withTimeout(timeoutMillis) {
-                val coil = async { CoilSideSniffer.sniff(header) }
-                val rawler = async { RawlerProbe.sniff(header) }
-                val results = awaitAll(coil, rawler)
                 SniffResult.Ok(
                     verdicts = mapOf(
-                        Sniffer.COIL to results[0],
-                        Sniffer.RAWLER to results[1],
+                        Sniffer.COIL to coil.await(),
+                        Sniffer.RAWLER to rawler.await(),
                     ),
                 )
             }
         } catch (_: TimeoutCancellationException) {
+            // Hard timeout. The in-flight calls cannot be asked to stop, so interrupt their worker
+            // threads and abandon them — the abandoned work is discarded because nothing awaits
+            // these futures any more, and being daemon threads they can never hold the process open.
+            coil.cancel(true)
+            rawler.cancel(true)
             SniffResult.Timeout
         }
     }
+}
+
+/**
+ * Worker pool for the blocking sniffers (R8).
+ *
+ * Each sniffer call is a black box that may block in platform or native code for an unbounded
+ * time. Running it on a dedicated **daemon** thread is what makes the sniff timeout authoritative:
+ * once the deadline passes we can stop waiting immediately and simply orphan the thread, rather
+ * than block the caller on a call that may never return. A sniffer that wedges therefore costs one
+ * abandoned daemon thread, never a hang.
+ */
+private object SniffThreads {
+
+    private val pool: ExecutorService = Executors.newCachedThreadPool { runnable ->
+        Thread(runnable, "fotlab-sniff").apply { isDaemon = true }
+    }
+
+    /** Runs [call] on a worker thread; the returned future may be cancelled (interrupt-and-orphan). */
+    fun <T> submit(call: () -> T): CompletableFuture<T> {
+        val future = CompletableFuture<T>()
+        pool.execute {
+            try {
+                future.complete(call())
+            } catch (t: Throwable) {
+                future.completeExceptionally(t)
+            }
+        }
+        return future
+    }
+}
+
+/**
+ * Awaits this future, interrupting the worker thread if the awaiting coroutine is cancelled
+ * (which is how `withTimeout` in [FormatSniffer.sniff] reaches it).
+ *
+ * `tryResume`/`completeResume` are used instead of `resume` so a result that arrives *after*
+ * cancellation is silently dropped instead of throwing inside the completion callback.
+ */
+private suspend fun <T> CompletableFuture<T>.await(): T = suspendCancellableCoroutine { cont ->
+    whenComplete { value, error ->
+        val token = if (error != null) cont.tryResumeWithException(error) else cont.tryResume(value)
+        if (token != null) cont.completeResume(token)
+    }
+    cont.invokeOnCancellation { cancel(true) }
 }
 
 /** Identifies a registered sniffer. The dictionary is keyed by these; add values to extend. */
@@ -115,14 +171,22 @@ internal object CoilSideSniffer {
  * the **second** call, made later by [io.github.fotlab.fotlab.media.RawDecoder.decodeToPng] once the
  * route resolves to [Route.RawToRaster].
  *
- * The actual probe crosses the native boundary (`rawler::get_decoder`, rawler/src/decoders/mod.rs:909)
- * via JNI/UniFFI — that bridge is NOT wired yet (TODO). Map `RawlerError::Unsupported` (CLI exit code 7
- * / `AppError::UnsupportedFile`) to `Verdict()` (unrecognized).
+ * The probe crosses the native boundary through the first-party `rawler_fotlab` library
+ * ([RawlerFotlabBridge.identifyFormat] -> UniFFI -> `rawler::decode_dummy`), which reports the
+ * camera make/model for bytes rawler recognizes and `null` otherwise. `RawlerError::Unsupported`
+ * (CLI exit code 7 / `AppError::UnsupportedFile`) surfaces as `null`, i.e. `Verdict()`.
  */
 internal object RawlerProbe {
-    suspend fun sniff(header: ByteArray): Verdict {
-        // TODO: call native bridge; on RawlerError::Unsupported -> Verdict().
-        return Verdict()
+    // Call #1 of the raw path: identification only. It returns the camera make/model when rawler
+    // recognizes the bytes; null -> Verdict() (unrecognized). The actual decode (call #2) is a
+    // separate native call made later by RawDecoder, after routing to RawToRaster. A missing
+    // librawler_fotlab.so degrades to Verdict() (graceful, no crash).
+    //
+    // Blocking by design and always invoked from a [SniffThreads] worker: this call runs inside
+    // `librawler_fotlab.so` and, once started, cannot be cancelled.
+    fun sniff(header: ByteArray): Verdict {
+        val format = RawlerFotlabBridge.identifyFormat(header)
+        return if (format != null) Verdict(format = format, canDecode = true) else Verdict()
     }
 }
 

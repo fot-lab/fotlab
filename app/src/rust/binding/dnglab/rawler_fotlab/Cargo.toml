@@ -1,0 +1,38 @@
+[package]
+name = "rawler_fotlab"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "FotLab native binding over the upstream rawler crate (external/dnglab)"
+
+# First-party native binding. This is the ONLY native library we ship and it is the
+# only one that carries a FotLab name (`librawler_fotlab.so`). Upstream `rawler` is
+# consumed as a *path* dependency into `external/dnglab/rawler`, so we compile the
+# pinned submodule source directly and never modify it (`FOTLAB-NATIVE-000001` R4).
+#
+# This crate deliberately lives OUTSIDE the dnglab Cargo workspace: the upstream
+# workspace is read-only, so it must not list us as a member. We are a standalone
+# workspace whose only third-party source is reached through the path dependency.
+
+[lib]
+name = "rawler_fotlab"
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[features]
+# Enables the `uniffi-bindgen` binary below. Kept out of the default build so the
+# shipped cdylib does not carry the bindgen CLI (clap) with it.
+cli = ["uniffi/cli"]
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+required-features = ["cli"]
+
+[dependencies]
+rawler = { path = "../../../../../../external/dnglab/rawler" }
+thiserror = "2.0"
+uniffi = "0.28"
+# PNG only: the binding emits PNG (R3 of FOTLAB-STUDIO-000001). Disabling default
+# features avoids pulling every image format the `image` crate can decode.
+image = { version = "0.25", default-features = false, features = ["png"] }

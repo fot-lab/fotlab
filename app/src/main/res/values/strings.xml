@@ -75,6 +75,9 @@
     <string name="studio_tools_looks">Looks</string>
     <string name="studio_tools">Tools</string>
     <string name="studio_export">Export</string>
+    <string name="studio_decoding">Decoding…</string>
+    <string name="studio_unsupported_title">Unsupported Format</string>
+    <string name="studio_unsupported_format">Unsupported Format! 不支持的格式！</string>
 
     <!-- Library viewer: the full-screen image/video dialog opened on a single tap. -->
     <string name="library_viewer_cd_close">Close viewer</string>

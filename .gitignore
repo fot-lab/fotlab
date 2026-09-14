@@ -17,19 +17,24 @@ keystore.properties
 *.ipr
 *.iws
 
-# Android artifacts
+# Android artifacts. bin/gen/out are the legacy Eclipse-style OUTPUT directories at the
+# repository root and are anchored to it on purpose: an unanchored `bin/` also matched
+# source directories such as app/src/rust/binding/dnglab/rawler_fotlab/src/bin (the
+# uniffi-bindgen binary), silently dropping them from the repository.
 *.apk
 *.aab
 *.dex
 *.class
-bin/
-gen/
-out/
+/bin/
+/gen/
+/out/
 
 # Room schema export — a build artifact; never committed (FOTLAB-STRUCT-000002 R1)
 app/schemas/
 
-# Native build artifacts
+# Native build artifacts. Neither the UniFFI-generated Kotlin bindings nor the downloaded
+# librawler_fotlab.so files are listed here: CI writes both to the Gradle build directory,
+# never to src/ (FOTLAB-STRUCT-000002 R1), so `build/` already covers them.
 *.o
 *.so
 *.dylib

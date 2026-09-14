@@ -61,6 +61,13 @@ on:
         required: false
         type: number
         default: 7
+      native-artifact-name:
+        description: >
+          Name of the native artifact (librawler_fotlab.so + Kotlin bindings) to download and
+          place before Gradle. Empty means skip native placement (no rawler_fotlab lib).
+        required: false
+        type: string
+        default: ''
     secrets:
       FOTLAB_KEYSTORE_SECRET:
         description: >
@@ -144,6 +151,28 @@ jobs:
           gradle-version: '8.14.5'
           # We intentionally do not commit a Gradle Wrapper, so skip its validation.
           validate-wrappers: false
+
+      # -------- native (rawler_fotlab) --------
+      # Download the .so + generated Kotlin bindings built by build_rust.yaml and place BOTH in
+      # the Gradle build directory — no downloaded/generated artifact is put under src/
+      # (FOTLAB-STRUCT-000002 R1). app/build.gradle.kts registers both locations (kotlin.srcDir
+      # and jniLibs.srcDir). Skipped when native-artifact-name is empty.
+      - name: Download native artifact (rawler_fotlab)
+        if: inputs.native-artifact-name != ''
+        uses: actions/download-artifact@v7
+        with:
+          name: ${{ inputs.native-artifact-name }}
+          path: native-artifacts
+
+      - name: Place native libs + Kotlin bindings
+        if: inputs.native-artifact-name != ''
+        run: |
+          set -euo pipefail
+          mkdir -p app/build/generated/jniLibs
+          cp -r native-artifacts/jniLibs/* app/build/generated/jniLibs/
+          mkdir -p app/build/generated/uniffi/main/kotlin
+          cp native-artifacts/kotlin/*.kt app/build/generated/uniffi/main/kotlin/
+        shell: bash
 
       # -------- keystore (release only) --------
       # The release signing keystore lives in a dedicated `keystore` repo (branch

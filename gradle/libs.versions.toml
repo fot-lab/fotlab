@@ -13,6 +13,7 @@ junit = "4.13.2"
 datastore = "1.1.1"
 coil = "3.0.4"
 exifinterface = "1.3.7"
+jna = "5.14.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -43,6 +44,11 @@ coil-compose = { group = "io.coil-kt.coil3", name = "coil-compose", version.ref 
 coil-video = { group = "io.coil-kt.coil3", name = "coil-video", version.ref = "coil" }
 
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
+
+# JNA bridges the UniFFI-generated Kotlin bindings to librawler_fotlab.so. It is declared
+# in app/build.gradle.kts as an explicit `@aar` coordinate instead of a catalog entry: a
+# version catalog cannot carry the `@aar` artifact type (gradle/gradle#21267). Only the
+# version lives here, so it stays single-sourced — use `libs.versions.jna.get()`.
 
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 

@@ -1,0 +1,8 @@
+# UniFFI binding configuration for the rawler_fotlab crate.
+#
+# `package_name` is the Kotlin package the generated bindings are placed in. It MUST
+# equal the package of the hand-written facade
+# (app/src/kotlin/io/github/fotlab/fotlab/binding/dnglab/rawler_fotlab/RawlerFotlabBridge.kt)
+# so the facade can call the generated top-level functions without an import.
+[bindings.kotlin]
+package_name = "io.github.fotlab.fotlab.binding.dnglab.rawler_fotlab"

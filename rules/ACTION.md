@@ -28,10 +28,10 @@ its result would prove nothing.
 
 | Aspect | Value |
 | --- | --- |
-| Language | Kotlin (Compose); native code not yet present |
+| Language | Kotlin (Compose) + Rust (one native library) |
 | Build system | Gradle Kotlin DSL + version catalog (`gradle/libs.versions.toml`), Gradle `8.14.5` installed & cached by CI (not committed as a wrapper), AGP `8.7.3` |
-| Modules | `:app` — the only module; layers are the packages `ui`, `navigation`, `data` (`rules/STRUCT/detail/FOTLAB-STRUCT-000001.md`) |
-| Native | **None yet.** The first-party native-integration module is designed by the `NATIVE` items (`rules/DESIGN/detail/FOTLAB-NATIVE-000001.md` R1) and does not exist; until it is created there is nothing for a native job to build. |
+| Modules | `:app` — the only Gradle module; layers are the packages `ui`, `navigation`, `data` (`rules/STRUCT/detail/FOTLAB-STRUCT-000001.md`) |
+| Native | `rawler_fotlab` — the first-party binding crate at `app/src/rust/binding/dnglab/rawler_fotlab` (Rust + UniFFI), built by `build_rust.yaml` against the Android NDK. It consumes upstream source through a *path* dependency on `external/dnglab/rawler`; upstream is never modified (`FOTLAB-STUDIO-000001`, `FOTLAB-NATIVE-000001` R4). |
 | Upstream | git submodules under `external/` — inventory in `docs/external/index.md` |
 | Default branch | `main` |
 
@@ -42,7 +42,8 @@ its result would prove nothing.
 | File | Role |
 | --- | --- |
 | `.github/workflows/build.yaml` | **Orchestrator** — triggers, `paths-ignore`, job order, release decisions. Contains no build steps. |
-| `.github/workflows/build_gradle.yaml` | **Reusable workflow** (`on: workflow_call`) — Android dev env (via the composite action) + Gradle build + APK/log artifact upload. |
+| `.github/workflows/build_gradle.yaml` | **Reusable workflow** (`on: workflow_call`) — Android dev env (via the composite action) + Gradle build + APK/log artifact upload. Places the `rawler_fotlab` native artifact before Gradle runs. |
+| `.github/workflows/build_rust.yaml` | **Reusable workflow** (`on: workflow_call`) — builds `librawler_fotlab.so` for the four ABIs with `cargo ndk` and generates the UniFFI Kotlin bindings with the crate's own `uniffi-bindgen` bin; uploads them as the `rawler_fotlab` artifact. |
 | `.github/workflows/release_github.yaml` | **Reusable workflow** (`on: workflow_call`) — download the APK artifact and publish a GitHub Release (pre-release on `-rc`). |
 | `.github/actions/install_jdk/action.yml`, `.github/actions/install_sdk/action.yml`, `.github/actions/install_ndk/action.yml` | **Composite actions** — the toolchain is split per component: `install_jdk` (JDK), `install_sdk` (SDK + caches), `install_ndk` (NDK + caches). Each runs in-job and is reused by `build_gradle.yaml` (JDK+SDK) and by future per-language native workflows (JDK+SDK+NDK), so no step is duplicated and NDK is pulled in only when needed. |
 
@@ -57,11 +58,11 @@ is a `workflow_call` input.
 
 | Event | Jobs | Behaviour |
 | --- | --- | --- |
-| push to `main` (no `v*` tag) | `apk` | Kotlin/Compose compile + debug APK + unit tests |
-| Pull Request to `main` | `apk` | same as above, no release |
-| push to `main` touching `external/**` (submodule pointer bump) | `apk` | An upstream bump triggers a rebuild; the native job (when added) would compile the changed third-party source. See [Submodule Bumps](#submodule-bumps). |
-| push `v*` tag | `apk` → `github-release` | release APK + GitHub Release |
-| `workflow_dispatch` (`release=true`) | `apk` → `github-release` | manual release |
+| push to `main` (no `v*` tag) | `rust` → `apk` | Rust `librawler_fotlab.so` + Kotlin/Compose compile + debug APK + unit tests |
+| Pull Request to `main` | `rust` → `apk` | same as above, no release |
+| push to `main` touching `external/**` (submodule pointer bump) | `rust` → `apk` | An upstream bump triggers a rebuild, including the Rust slice that compiles the changed third-party source. See [Submodule Bumps](#submodule-bumps). |
+| push `v*` tag | `rust` → `apk` → `github-release` | release APK + GitHub Release |
+| `workflow_dispatch` (`release=true`) | `rust` → `apk` → `github-release` | manual release |
 
 A normal push stays on the fast Kotlin path; only a `v*` tag or `release=true`
 produces a Release.
@@ -72,10 +73,10 @@ A bump of a gitlink under `external/` upgrades third-party source. While there i
 no native job yet, the bump still triggers a rebuild so the change is not
 silently ignored:
 
-- `external/**` is **not** in the ignore list — such a push triggers CI (`apk`).
-- When a native-integration module lands, a dedicated native workflow (split by
-  language, e.g. `build_cmake`) would compile/verify the upstream change instead
-  of a Kotlin-only build (see [Native Job Scope](#native-job-scope)).
+- `external/**` is **not** in the ignore list — such a push triggers CI (`rust` → `apk`).
+- The per-language native workflow (`build_rust` today; `build_cmake` etc. later)
+  compiles/verifies the upstream change rather than relying on the Kotlin-only
+  build (see [Native Job Scope](#native-job-scope)).
 - A submodule bump alone must never produce a GitHub Release: release still
   requires a `v*` tag or `release=true`.
 
@@ -93,6 +94,7 @@ Everything else triggers, `external/**` included.
 | --- | --- | --- |
 | `fotlab-release-apk` | tag push / `release=true` dispatch | 30 days |
 | `debug-apks` | `apk` job success | 1 day |
+| `rawler_fotlab` | `rust` job success — `jniLibs/<abi>/librawler_fotlab.so` + the generated UniFFI Kotlin bindings, consumed by the `apk` job | 7 days |
 | `build-gradle.log` | `apk` job | 7 days |
 | `build_log_gradle.log` | `build_gradle.yaml` gradle step runs (apk job) — gradle-only log, separate from the full log | 7 days |
 
@@ -126,18 +128,22 @@ Everything else triggers, `external/**` included.
 
 ### Native Job Scope
 
-- No native source exists yet, so there is **no native job** in `build.yaml`
-  (the prior `native` placeholder was removed as redundant). When the
-  native-integration module lands, add per-language build workflows — e.g.
-  `build_cmake`, `build_python`, `build_perl`, `build_rust` — each a reusable
-  `on: workflow_call` workflow that calls the `install_jdk`, `install_sdk` and
-  `install_ndk` composite actions (in that order) and compiles its slice. Do not
-  add them until the native code exists.
-- Toolchains to be added with that module: CMake for the JNI bridge, Rust
-  cross-compilation for `dnglab`, and whatever the `NATIVE` items decide for
-  `exiftool` (`docs/architecture.md` records the layering; the integration
-  route is still undecided). Steps are appended when decided — never invented
-  earlier.
+- The Rust slice exists: `.github/workflows/build_rust.yaml` is its reusable
+  `on: workflow_call` workflow. It installs the NDK and the Rust toolchain and
+  compiles only its own slice; the Android toolchain + Gradle slice stays in
+  `build_gradle.yaml`, and `build.yaml` orders `rust` before `apk` and passes the
+  `rawler_fotlab` artifact name down.
+- The native sources live in the first-party module, not in `external/`:
+  `app/src/rust/binding/dnglab/rawler_fotlab` (Rust) and
+  `app/src/kotlin/io/github/fotlab/fotlab/binding/dnglab/rawler_fotlab` (Kotlin
+  facade). Upstream source is reached through a path dependency and is never
+  edited (`FOTLAB-NATIVE-000001` R4).
+- Future native slices follow the same shape: one reusable `build_<language>.yaml`
+  per language (`build_cmake`, `build_python`, `build_perl`), never an all-in-one
+  job. Add each only when its native code exists.
+- Generated output is not committed and is not placed under `src/`: both the UniFFI
+  Kotlin bindings and the downloaded `.so` files live in `app/build/generated/`
+  (`FOTLAB-STRUCT-000002` R1). See `FOTLAB-STUDIO-000001` §"Native build".
 
 ### Test Strategy
 
@@ -239,3 +245,4 @@ Split across the two rule files, on purpose:
 | 2026-09-09 | CI restructured into the orchestrator `build.yaml` plus three reusable workflows — `devenv_android.yaml` (env only), `build_gradle.yaml` (Gradle build + artifacts), `release_github.yaml` (GitHub Release). The shared toolchain steps moved into the composite action `.github/actions/devenv-android/action.yml` so env setup is defined once and reused. Naming clarified: env setup / Gradle build / release are now separate, reusable and composed in `build.yaml`. |
 | 2026-09-09 | Removed the redundant `devenv_android.yaml` reusable workflow and the `native` placeholder job in `build.yaml`; the shared toolchain steps now live in per-component composite actions (`install_jdk` / `install_sdk` / `install_ndk`), reused in-job by `build_gradle.yaml`. Native builds, when needed, will be added as per-language workflows (`build_cmake`/`build_python`/`build_perl`/`build_rust`) — not yet present. Architecture principles extracted to `rules/ACTION/detail/GITHUB-ACTION-000002.md`. |
 | 2026-09-09 | Split the monolithic `devenv-android` composite action into three per-component composite actions — `install_jdk` (JDK), `install_sdk` (SDK + per-component cache), `install_ndk` (NDK + per-component cache) — so NDK install is no longer a parameter switch. `build_gradle.yaml` now calls `install_jdk` + `install_sdk`; future native workflows add `install_ndk`. The old `devenv-android/action.yml` is deleted. |
+| 2026-09-14 | Native slice is now real: `.github/workflows/build_rust.yaml` builds `librawler_fotlab.so` (`cargo ndk -o` for the four ABIs) from the first-party crate at `app/src/rust/binding/dnglab/rawler_fotlab` and generates the Kotlin bindings with the crate's own `uniffi-bindgen` bin, uploading the `rawler_fotlab` artifact. `build_gradle.yaml` places both into `app/build/generated/` (never `src/`), registered as `kotlin.srcDir` / `jniLibs.srcDir`. Trigger table, artifact table, "What CI Has to Build", Native Job Scope and Submodule Bumps updated accordingly. |

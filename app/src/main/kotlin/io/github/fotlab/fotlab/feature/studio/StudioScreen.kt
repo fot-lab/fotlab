@@ -1,6 +1,5 @@
 package io.github.fotlab.fotlab.feature.studio
 
-import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -28,7 +27,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Surface
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.rememberDrawerState
@@ -48,6 +49,7 @@ import androidx.compose.runtime.collectAsState
 import coil3.request.ImageRequest
 import io.github.fotlab.fotlab.R
 import io.github.fotlab.fotlab.feature.library.LibraryCore
+import io.github.fotlab.fotlab.feature.studio.StudioRenderResult
 import io.github.fotlab.fotlab.ui.ZoomableAsyncImage
 import io.github.fotlab.fotlab.ui.rememberZoomState
 import kotlinx.coroutines.launch
@@ -73,12 +75,15 @@ fun StudioScreen() {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
-    val uriString by StudioEngine.currentNodeUri.collectAsState()
-    val uri = uriString?.let(Uri::parse)
+    val zoomState = rememberZoomState()
+    val renderResult by StudioEngine.renderResult.collectAsState()
+    var showUnsupported by remember { mutableStateOf(false) }
+    LaunchedEffect(renderResult) {
+        showUnsupported = renderResult is StudioRenderResult.Unsupported
+        if (renderResult is StudioRenderResult.Ready) zoomState.reset()
+    }
     // Zoom / pan live here so the overflow menu's "Reset view" can snap back to the default; the
     // shared state is what makes the canvas behave exactly like the Library viewer.
-    val zoomState = rememberZoomState()
-    LaunchedEffect(uriString) { zoomState.reset() }
 
     val importLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
@@ -112,22 +117,38 @@ fun StudioScreen() {
                 modifier = Modifier.fillMaxWidth().weight(1f),
                 contentAlignment = Alignment.Center,
             ) {
-                if (uri != null) {
-                    // Rendering path: Coil AsyncImage, the same route the Library viewer uses
-                    // (RAW / format-sniffing decode is a TODO in StudioEngine).
-                    ZoomableAsyncImage(
-                        model = ImageRequest.Builder(context).data(uri).build(),
+                when (val result = renderResult) {
+                    is StudioRenderResult.Ready -> ZoomableAsyncImage(
+                        // rawler path -> decoded PNG ByteBuffer; Coil path -> original Uri.
+                        model = ImageRequest.Builder(context).data(result.model).build(),
                         contentDescription = null,
                         state = zoomState,
                         modifier = Modifier.fillMaxSize(),
                     )
-                } else {
-                    Text(
+                    is StudioRenderResult.Loading -> Text(
+                        text = stringResource(id = R.string.studio_decoding),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    else -> Text(
                         text = stringResource(id = R.string.studio_open_prompt),
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+            }
+
+            if (showUnsupported) {
+                AlertDialog(
+                    onDismissRequest = { showUnsupported = false },
+                    confirmButton = {
+                        TextButton(onClick = { showUnsupported = false }) {
+                            Text(text = stringResource(id = R.string.common_action_ok))
+                        }
+                    },
+                    title = { Text(text = stringResource(id = R.string.studio_unsupported_title)) },
+                    text = { Text(text = stringResource(id = R.string.studio_unsupported_format)) },
+                )
             }
 
             StudioBottomBar()

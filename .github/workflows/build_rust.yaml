@@ -1,0 +1,142 @@
+# Reusable workflow: builds the rawler_fotlab native library (.so + UniFFI Kotlin bindings)
+# and uploads them as one artifact consumed by the Android (build_gradle.yaml) job.
+#
+# Source of truth for the binding crate is our own tree:
+#   app/src/rust/binding/dnglab/rawler_fotlab/     — the first-party Rust crate
+#   app/src/kotlin/.../binding/dnglab/rawler_fotlab — the hand-written Kotlin facade
+#
+# The crate is a standalone workspace that reaches the upstream source through a *path*
+# dependency (`external/dnglab/rawler`), so we compile the pinned submodule directly and
+# never modify it (FOTLAB-NATIVE-000001 R4 — upstream is read-only). The generator ships
+# as a binary inside the crate, guaranteeing generator/runtime version parity.
+# See rules/ACTION.md (Native Job Scope) and FOTLAB-STUDIO-000001.
+
+name: Rust Native Build
+
+on:
+  workflow_call:
+    inputs:
+      submodules:
+        description: Check out git submodules under external/ recursively (the path dependency lives in external/dnglab).
+        required: false
+        type: boolean
+        default: true
+      ndk-version:
+        description: Android NDK version to build against.
+        required: false
+        type: string
+        default: '28.2.13676358'
+      min-api:
+        description: Minimum Android API level the native library is built for.
+        required: false
+        type: string
+        default: '26'
+    outputs:
+      artifact-name:
+        description: Name of the uploaded native artifact (jniLibs + Kotlin bindings).
+        value: rawler_fotlab
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build rawler_fotlab (.so + Kotlin bindings)
+    runs-on: ubuntu-26.04
+    env:
+      NDK_VERSION: ${{ inputs.ndk-version }}
+      MIN_API: ${{ inputs.min-api }}
+      CRATE_DIR: app/src/rust/binding/dnglab/rawler_fotlab
+      ANDROID_API: '36'
+      ANDROID_BUILD_TOOLS: '36.0.0'
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          submodules: ${{ inputs.submodules && 'recursive' || 'false' }}
+
+      # Toolchain, in the order rules/ACTION.md mandates: JDK + SDK first, because install_ndk
+      # drives `sdkmanager` out of $ANDROID_HOME/cmdline-tools (installed by install_sdk), and
+      # cargo-ndk needs ANDROID_NDK_ROOT afterwards. The paths are exported from a step, not set
+      # in the job `env:` block: `$HOME` is a runner variable and the `env` context is not
+      # available inside a job's own `env:` (GitHub rejects it and invalidates the whole file).
+      - name: Export Android SDK path
+        run: |
+          echo "ANDROID_HOME=$HOME/Android/Sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$HOME/Android/Sdk" >> "$GITHUB_ENV"
+        shell: bash
+
+      - name: Install JDK
+        uses: ./.github/actions/install_jdk
+        with:
+          java-version: '17'
+          distribution: temurin
+
+      - name: Install Android SDK
+        uses: ./.github/actions/install_sdk
+        with:
+          android-home: ${{ env.ANDROID_HOME }}
+          api-level: ${{ env.ANDROID_API }}
+          build-tools: ${{ env.ANDROID_BUILD_TOOLS }}
+
+      - name: Install NDK
+        uses: ./.github/actions/install_ndk
+        with:
+          android-home: ${{ env.ANDROID_HOME }}
+          ndk-version: ${{ env.NDK_VERSION }}
+
+      # cargo-ndk accepts either variable; export both so it cannot miss the NDK.
+      - name: Export NDK path
+        run: |
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+        shell: bash
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+        shell: bash
+
+      # `cargo ndk -o <dir>` writes <dir>/<abi>/librawler_fotlab.so directly in the
+      # jniLibs layout Gradle expects, so no ABI->triple mapping is needed here.
+      - name: Build librawler_fotlab.so for all ABIs
+        run: |
+          set -euo pipefail
+          OUT="$GITHUB_WORKSPACE/native-artifacts"
+          mkdir -p "$OUT/jniLibs" "$OUT/kotlin"
+          cd "$CRATE_DIR"
+          cargo ndk --platform "$MIN_API" \
+            --target arm64-v8a --target armeabi-v7a --target x86 --target x86_64 \
+            -o "$OUT/jniLibs" \
+            build --release
+        shell: bash
+
+      # The generator is this crate's own `uniffi-bindgen` bin (`--features cli`), so its
+      # version can never drift from the `uniffi` runtime linked into the .so. It reads
+      # uniffi.toml (Kotlin `package_name`) from the crate directory. The library is the
+      # positional argument; the Kotlin output is ABI-independent, so one ABI's .so is enough.
+      - name: Generate Kotlin bindings
+        run: |
+          set -euo pipefail
+          OUT="$GITHUB_WORKSPACE/native-artifacts"
+          cd "$CRATE_DIR"
+          cargo run --features cli --bin uniffi-bindgen -- \
+            generate \
+            --language kotlin \
+            --out-dir "$OUT/kotlin" \
+            --no-format \
+            "$OUT/jniLibs/arm64-v8a/librawler_fotlab.so"
+        shell: bash
+
+      - name: Upload native artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: rawler_fotlab
+          path: native-artifacts/
+          retention-days: 7
+          if-no-files-found: error
