@@ -98,6 +98,38 @@ jobs:
         with:
           targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
 
+      # The cache key carries the pinned dnglab submodule SHA: a submodule bump
+      # (external/**, see rules/ACTION.md "Submodule Bumps") must start from a fresh
+      # Rust cache instead of reusing artifacts compiled against the old rawler source.
+      - name: Resolve dnglab submodule SHA
+        id: submodule
+        run: echo "sha=$(git -C external/dnglab rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        shell: bash
+
+      # Rust build cache. Without it every run rebuilds the whole rawler dependency
+      # tree four times (one release tree per Android ABI) plus the host debug
+      # uniffi-bindgen stack, and `cargo install cargo-ndk` recompiles from source.
+      # rust-cache covers $CARGO_HOME (registry + git index), $CARGO_HOME/bin
+      # (cache-bin defaults to true, so cargo-ndk is restored too) and the target dir.
+      # Must run AFTER Install Rust (the action runs `cargo metadata`) and BEFORE any
+      # cargo invocation, so the cargo-ndk install and both builds restore first.
+      #
+      # Three project-specific settings:
+      #   workspaces — the crate is a standalone workspace OUTSIDE the repo root, so the
+      #                default ". -> target" would cache nothing; point at its directory.
+      #   key        — the dnglab submodule SHA (rawler is a path dep under external/).
+      #   env-vars   — NDK version and min-api change native compile flags, so they
+      #                belong in the key. rawler is a path *dependency* (not a workspace
+      #                member), so its artifacts are cached by default; cache-all-crates
+      #                also keeps our own tiny crate's artifacts.
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/src/rust/binding/dnglab/rawler_fotlab -> target
+          cache-all-crates: true
+          key: dnglab-${{ steps.submodule.outputs.sha }}
+          env-vars: NDK_VERSION MIN_API
+
       - name: Install cargo-ndk
         run: cargo install cargo-ndk --locked
         shell: bash
