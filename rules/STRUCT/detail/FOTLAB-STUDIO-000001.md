@@ -153,8 +153,30 @@ matrix (rules TBD — Open Question Q6).
    { COIL:   { format?, canDecode? },
      RAWLER: { format?, canDecode? } }
    ```
-6. **Route (pending user spec)** — the matrix is handed to the routing function. The wrapper itself does
-   **not** hard-code the decision (R8 / Q6).
+6. **Route (R8 / Q6, resolved)** — the dictionary is handed to the pure `route()` function. Precedence:
+   `rawler.canDecode` → `RawToRaster` (rawler decodes to PNG, frontend renders the raster); else
+   `coil.canDecode` → `ToCoil` (render the original source with Coil); else → `Unsupported`
+   (UI shows "Unsupported Format! 不支持的格式！"). The wrapper itself does **not** hard-code the decision.
+
+### Routing (R8 / Q6 — resolved)
+The route is a pure function of the sniff dictionary (implemented in `FormatSniffer.kt`, unit-testable):
+
+| Condition | Route | What happens |
+| --- | --- | --- |
+| `rawler.canDecode == true` | `RawToRaster` | **Two native calls.** Call #1 already ran inside `FormatSniffer.sniff` (`RawlerProbe` → `Verdict{format, canDecode}`). Call #2 is `RawDecoder.decodeToPng(format, source)` (native rawler/dnglab bridge, TODO seam); the returned PNG is rendered by Coil. |
+| else `coil.canDecode == true` | `ToCoil` | The original source is handed to Coil (raster/SVG path). |
+| else | `Unsupported` | Studio shows the "Unsupported Format! 不支持的格式！" dialog; no decode. |
+
+**The raw path is two calls, never one.** Call #1 is *identification only* (`RawlerProbe.sniff`, run in
+parallel inside `FormatSniffer.sniff`): it answers "RAW? which format? can rawler decode it?" and emits a
+`Verdict`. Call #2 is *decode only* (`RawDecoder.decodeToPng`), made solely after the route resolves to
+`RawToRaster`, and it receives the `format` from call #1 so the native side decodes the already-identified
+RAW instead of re-identifying it. The two are separate native-integration seams.
+
+`RawToRaster` wins over `ToCoil` when both report `canDecode` (rawler's raster is authoritative for RAW,
+and Coil cannot decode RAW anyway). The native rawler decode bridge (`RawDecoder`) is **not wired yet** —
+`StubRawDecoder` returns `null`, so today a RAW that rawler would decode falls through to `Unsupported`
+until the JNI/UniFFI bridge lands (see Impacted Modules / native-integration).
 
 ### Why run both sniffers in parallel
 - Coil's sniffer is a **positive whitelist** — it knows only standard rasters and returns UNKNOWN for any
@@ -216,12 +238,14 @@ matrix (rules TBD — Open Question Q6).
   native-integration module.
 - Q5 — If video-frame rendering is ever added (Coil `coil-video`, the only extension-based path), the
   asset naming must keep a correct video extension; photo paths (jpg/png/webp/raw) are unaffected.
-- Q6 — **Routing rules over the sniff dictionary (R8).** Given `Map<Sniffer, Verdict>` (e.g.
-  `{COIL:{format,canDecode}, RAWLER:{format,canDecode}}`), what is the precedence? (e.g.
-  `COIL.canDecode && !RAWLER.canDecode` → straight to Coil; `RAWLER.canDecode && !COIL.canDecode` →
-  RAW→raster; `!COIL.canDecode && !RAWLER.canDecode` → unsupported; `both decodable` → ?). Also: the
-  timeout value T (now a **user preference defaulting to 5 s** — `MediaPreference`, UI pending), and whether a
-  single-side timeout (one returned, other hung) should still proceed. **Pending user specification.**
+- Q6 — **Routing rules over the sniff dictionary (R8) — RESOLVED.** Precedence (user-specified):
+  `rawler.canDecode` → RAW→raster (rawler decodes to PNG, frontend renders it); else `coil.canDecode` →
+  straight to Coil (render the original source); else → unsupported (UI shows
+  "Unsupported Format! 不支持的格式！"). Implemented as the pure `route()` function in `FormatSniffer.kt`;
+  `RawToRaster` wins when both report `canDecode`. The timeout `T` is a user preference defaulting to 5 s
+  (`MediaPreference`, UI pending). Open: whether a single-side timeout (one returned, other hung) should
+  still proceed — the current `withTimeout` wraps the whole `awaitAll`, so a single-side hang fails the
+  whole sniff → `SniffResult.Timeout` → `Unsupported`.
 
 - 2026-09-14 — Initial architecture item. Codified that the Studio frontend renders **Coil-only**
   rasters (R1–R2), with a PNG → JPEG → other-Coil-format preference for any derived asset (R3), that
@@ -263,3 +287,17 @@ matrix (rules TBD — Open Question Q6).
   (5 s) and a `Flow` + setter for a future settings UI. `FormatSniffer.sniff(header, timeoutMillis = DEFAULT_SNIFF_TIMEOUT_MS)`
   now defaults to that preference; the settings screen to override it is **not yet wired** (Q6). Replaced the
   previous `var timeoutMillis = 2_000L`. Updated the R8 flow step and Q6 accordingly.
+- 2026-09-14 — **Implemented the R8 studio render pipeline** (Q6 resolved): added the pure `route()` function
+  + `Route` sealed interface (`RawToRaster` / `ToCoil` / `Unsupported`) in `app/media/FormatSniffer.kt`. Wired
+  `StudioEngine` (now `prepare(context)`-initialized) to run every opened node through `FormatSniffer.sniff`
+  → `route` → `renderResult` (`Idle`/`Loading`/`Ready(model)`/`Unsupported`); the rawler path calls the new
+  `RawDecoder.decodeToPng` seam (rendered as a PNG `ByteBuffer` by Coil), the Coil path renders the original
+  `Uri`, and `Unsupported` shows the "Unsupported Format! 不支持的格式！" dialog in `StudioScreen`. Added
+  `RawDecoder`/`StubRawDecoder` (native bridge TODO) and the three strings. Documented the three-way route
+  table and closed Q6 (single-side-timeout behaviour left noted as open).
+- 2026-09-14 — **Clarified the raw path is two separate native calls, not one.** Call #1 = identification
+  only (`RawlerProbe.sniff`, run inside `FormatSniffer.sniff`) → `Verdict{format, canDecode}`; Call #2 =
+  decode only (`RawDecoder.decodeToPng(format, source)`), made solely after routing to `RawToRaster` and
+  handed the `format` from call #1 so the native side decodes the already-identified RAW instead of
+  re-identifying. `decodeToPng` now takes `format: String`; `RawlerProbe`/`RawDecoder` docs and the Routing
+  table both state the two-call split.

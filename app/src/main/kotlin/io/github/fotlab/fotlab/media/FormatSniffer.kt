@@ -14,7 +14,7 @@ import java.io.ByteArrayInputStream
  * Every image byte stream entering the app MUST pass through [sniff] before any
  * routing decision. It **classifies only** — it never decodes pixels or renders.
  * The route decision is a separate pure function driven by the emitted
- * [SniffResult] dictionary (rules TBD — Open Question Q6).
+ * [SniffResult] dictionary via [route] (R8 / Q6, resolved).
  *
  * Flow: parallel Coil-side + rawler-side sniffers, bounded by a timeout (default
  * [DEFAULT_SNIFF_TIMEOUT_MS], a user preference — see [MediaPreference]); timeout =>
@@ -109,9 +109,14 @@ internal object CoilSideSniffer {
 }
 
 /**
- * RAW-center sniffer backed by rawler/dnglab. The actual probe crosses the native
- * boundary (`rawler::get_decoder`, rawler/src/decoders/mod.rs:909) via JNI/UniFFI —
- * that bridge is NOT wired yet (TODO). Map `RawlerError::Unsupported` (CLI exit code 7
+ * RAW-center sniffer backed by rawler/dnglab. This is the **first** of the two raw-path calls:
+ * format *identification* only — it answers "is this a RAW rawler recognizes, and can it decode?" and
+ * returns a [Verdict] (`format` + `canDecode`). It does **not** decode pixels. The decode itself is
+ * the **second** call, made later by [io.github.fotlab.fotlab.media.RawDecoder.decodeToPng] once the
+ * route resolves to [Route.RawToRaster].
+ *
+ * The actual probe crosses the native boundary (`rawler::get_decoder`, rawler/src/decoders/mod.rs:909)
+ * via JNI/UniFFI — that bridge is NOT wired yet (TODO). Map `RawlerError::Unsupported` (CLI exit code 7
  * / `AppError::UnsupportedFile`) to `Verdict()` (unrecognized).
  */
 internal object RawlerProbe {
@@ -121,14 +126,38 @@ internal object RawlerProbe {
     }
 }
 
-/*
- * Routing decision (R8 / Open Question Q6) — PENDING USER SPECIFICATION.
- * Implement as a pure function of [SniffResult.Ok.verdicts], e.g.:
- *   val coil = verdicts[Sniffer.COIL]; val rawler = verdicts[Sniffer.RAWLER]
- *   when {
- *     coil.canDecode && !rawler.canDecode -> Route.ToCoil(coil.format)
- *     rawler.canDecode && !coil.canDecode -> Route.RawToRaster(rawler.format)
- *     !coil.canDecode && !rawler.canDecode -> Route.Unsupported
- *     else -> TODO("both decodable — precedence TBD")
- *   }
+/**
+ * Studio routing decision over the sniff dictionary (R8 / Q6, resolved).
+ *
+ * Precedence (user-specified):
+ *  1. rawler recognizes AND can decode -> [Route.RawToRaster]: the rawler path decodes the source to a
+ *     PNG and the frontend renders that raster.
+ *  2. otherwise Coil can decode    -> [Route.ToCoil]: hand the original source to Coil.
+ *  3. neither can decode           -> [Route.Unsupported]: the UI shows "Unsupported Format".
+ *
+ * [Route.RawToRaster] wins when both report `canDecode` (rawler's raster is authoritative for RAW, and
+ * Coil cannot decode RAW anyway, so this only ever triggers for formats rawler also handles).
  */
+sealed interface Route {
+    /** The sniff dictionary this route was derived from. */
+    val verdicts: SniffDict
+    /** rawler recognized and can decode -> decode to PNG, then render the raster. */
+    data class RawToRaster(override val verdicts: SniffDict, val format: String) : Route
+    /** Coil can decode the original source. */
+    data class ToCoil(override val verdicts: SniffDict, val format: String) : Route
+    /** Neither sniffer can decode. */
+    data object Unsupported : Route
+}
+
+/** Pure routing function: classify the sniff dictionary into a [Route] (R8 / Q6). */
+fun route(verdicts: SniffDict): Route {
+    val coil = verdicts[Sniffer.COIL]
+    val rawler = verdicts[Sniffer.RAWLER]
+    return when {
+        rawler != null && rawler.canDecode ->
+            Route.RawToRaster(verdicts, rawler.format ?: "raw")
+        coil != null && coil.canDecode ->
+            Route.ToCoil(verdicts, coil.format ?: "application/octet-stream")
+        else -> Route.Unsupported
+    }
+}
