@@ -4,7 +4,6 @@ import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,6 +33,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -41,19 +41,15 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.collectAsState
-import androidx.compose.ui.input.pointer.PointerEvent
-import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import io.github.fotlab.fotlab.R
 import io.github.fotlab.fotlab.feature.library.LibraryCore
+import io.github.fotlab.fotlab.ui.ZoomableAsyncImage
+import io.github.fotlab.fotlab.ui.rememberZoomState
 import kotlinx.coroutines.launch
 
 /**
@@ -75,12 +71,14 @@ import kotlinx.coroutines.launch
 fun StudioScreen() {
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
 
     val uriString by StudioEngine.currentNodeUri.collectAsState()
     val uri = uriString?.let(Uri::parse)
-    // Zoom / pan live here so the overflow menu's "Reset view" can snap them back to the default.
-    val scale = remember(uriString) { mutableStateOf(1f) }
-    val offset = remember(uriString) { mutableStateOf(Offset.Zero) }
+    // Zoom / pan live here so the overflow menu's "Reset view" can snap back to the default; the
+    // shared state is what makes the canvas behave exactly like the Library viewer.
+    val zoomState = rememberZoomState()
+    LaunchedEffect(uriString) { zoomState.reset() }
 
     val importLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
@@ -107,10 +105,7 @@ fun StudioScreen() {
             StudioTopBar(
                 onOpenDrawer = { scope.launch { drawerState.open() } },
                 onOpenFile = { importLauncher.launch(arrayOf("*/*")) },
-                onResetView = {
-                    scale.value = 1f
-                    offset.value = Offset.Zero
-                },
+                onResetView = { zoomState.reset() },
             )
 
             Box(
@@ -120,10 +115,10 @@ fun StudioScreen() {
                 if (uri != null) {
                     // Rendering path: Coil AsyncImage, the same route the Library viewer uses
                     // (RAW / format-sniffing decode is a TODO in StudioEngine).
-                    StudioZoomImage(
-                        uri = uri,
-                        scale = scale,
-                        offset = offset,
+                    ZoomableAsyncImage(
+                        model = ImageRequest.Builder(context).data(uri).build(),
+                        contentDescription = null,
+                        state = zoomState,
                         modifier = Modifier.fillMaxSize(),
                     )
                 } else {
@@ -231,34 +226,6 @@ private fun StudioDrawer(
 }
 
 /**
- * Single image on the Studio canvas. Decoded through Coil and scaled to fit; two-finger pinch zooms
- * and one-finger drag pans while zoomed, via [Modifier.zoomable] — a reworked, flicker-free version
- * of the Library viewer's detector (anchored to the focal point, pan only while zoomed).
- */
-@Composable
-private fun StudioZoomImage(
-    uri: Uri,
-    scale: androidx.compose.runtime.MutableState<Float>,
-    offset: androidx.compose.runtime.MutableState<Offset>,
-    modifier: Modifier = Modifier,
-) {
-    val context = LocalContext.current
-    AsyncImage(
-        model = ImageRequest.Builder(context).data(uri).build(),
-        contentDescription = null,
-        contentScale = ContentScale.Fit,
-        modifier = modifier
-            .graphicsLayer {
-                scaleX = scale.value
-                scaleY = scale.value
-                translationX = offset.value.x
-                translationY = offset.value.y
-            }
-            .zoomable(scale, offset),
-    )
-}
-
-/**
  * Snapseed-style bottom action bar: Looks / Tools / Export. Editing itself is not built yet — these
  * are the home for those actions, kept here so the layout matches the reference app.
  */
@@ -275,70 +242,5 @@ private fun StudioBottomBar(modifier: Modifier = Modifier) {
             Text(text = stringResource(id = R.string.studio_tools))
             Text(text = stringResource(id = R.string.studio_export))
         }
-    }
-}
-
-/**
- * Robust pinch-zoom / pan detector. Unlike the Library viewer's version it anchors the zoom to the
- * gesture's focal point so the pixel under the fingers stays put, clamps to [minScale]–[maxScale],
- * snaps back to the default when scale reaches [minScale], and only pans once actually zoomed — which
- * removes the high-frequency flicker the old detector caused. A single finger at scale 1 is left
- * untouched so the page can still be paged / scrolled by the parent.
- */
-private fun Modifier.zoomable(
-    scale: androidx.compose.runtime.MutableState<Float>,
-    offset: androidx.compose.runtime.MutableState<Offset>,
-    minScale: Float = 1f,
-    maxScale: Float = 5f,
-): Modifier = pointerInput(Unit) {
-    awaitEachGesture {
-        var lastCentroid: Offset? = null
-        var lastSpacing = 0f
-        do {
-            val event: PointerEvent = awaitPointerEvent()
-            val down = event.changes.filter { it.pressed }
-            if (down.isEmpty()) break
-
-            val centroid = if (down.size == 1) {
-                down[0].position
-            } else {
-                var sx = 0f
-                var sy = 0f
-                for (c in down) {
-                    sx += c.position.x
-                    sy += c.position.y
-                }
-                Offset(sx / down.size, sy / down.size)
-            }
-            val spacing = if (down.size >= 2) {
-                (down[0].position - down[1].position).getDistance()
-            } else {
-                0f
-            }
-
-            if (lastCentroid != null) {
-                when {
-                    down.size >= 2 && lastSpacing > 0f -> {
-                        val factor = spacing / lastSpacing
-                        val raw = (scale.value * factor).coerceIn(minScale, maxScale)
-                        if (raw <= minScale) {
-                            scale.value = minScale
-                            offset.value = Offset.Zero
-                        } else {
-                            // Keep the focal point stationary: scale around the centroid.
-                            val ratio = raw / scale.value
-                            offset.value = centroid + (offset.value - centroid) * ratio
-                            scale.value = raw
-                        }
-                    }
-                    down.size == 1 && scale.value > minScale -> {
-                        offset.value = offset.value + (centroid - lastCentroid)
-                    }
-                }
-            }
-            down.forEach { it.consume() }
-            lastCentroid = centroid
-            lastSpacing = spacing
-        } while (event.changes.any { it.pressed })
     }
 }

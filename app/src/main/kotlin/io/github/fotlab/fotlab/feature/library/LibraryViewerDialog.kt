@@ -10,7 +10,6 @@ import android.text.format.Formatter
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -39,17 +38,13 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -57,9 +52,10 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.exifinterface.media.ExifInterface
-import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import io.github.fotlab.fotlab.R
+import io.github.fotlab.fotlab.ui.ZoomableAsyncImage
+import io.github.fotlab.fotlab.ui.rememberZoomState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
@@ -93,8 +89,10 @@ fun LibraryViewerDialog(
         pageCount = { items.size },
     )
     var showDetails by remember { mutableStateOf(true) }
-    // While the image is zoomed, single-finger gestures pan it instead of paging.
-    var transformed by remember { mutableStateOf(false) }
+    // One shared zoom state for the whole viewer: the page owns the transform, the pager stands
+    // down while it is zoomed (or mid-pinch), and switching items returns to the fitted size.
+    val zoomState = rememberZoomState()
+    LaunchedEffect(pagerState.currentPage) { zoomState.reset() }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -109,7 +107,7 @@ fun LibraryViewerDialog(
             HorizontalPager(
                 state = pagerState,
                 modifier = Modifier.fillMaxSize(),
-                userScrollEnabled = !transformed,
+                userScrollEnabled = !zoomState.isZoomed && !zoomState.isTransforming,
                 key = { items.getOrNull(it)?.fsNodeId ?: it },
             ) { page ->
                 val node = items[page]
@@ -126,10 +124,13 @@ fun LibraryViewerDialog(
                         node.typeMime.startsWith("video/") ->
                             ViewerVideo(uri = uri, modifier = Modifier.fillMaxSize())
                         node.typeMime.startsWith("image/") ->
-                            ViewerImage(
-                                uri = uri,
+                            ZoomableAsyncImage(
+                                model = ImageRequest.Builder(LocalContext.current).data(uri).build(),
+                                contentDescription = node.nameDisplay,
+                                state = zoomState,
                                 modifier = Modifier.fillMaxSize(),
-                                onTransformChanged = { transformed = it },
+                                // A one-finger swipe at the fitted size still changes items.
+                                keepParentDraggable = true,
                             )
                         else ->
                             Icon(
@@ -184,101 +185,6 @@ fun LibraryViewerDialog(
                 )
             }
         }
-    }
-}
-
-/**
- * Image page: decoded at full size by Coil and scaled to fit, with two-finger pinch zoom and
- * one-finger pan. [onTransformChanged] lets the pager disable horizontal paging while the image
- * is zoomed, so a single-finger horizontal swipe still switches items when the image sits at its
- * default size ([zoomPan] only consumes the gesture once a second finger is down or the image is
- * already transformed).
- */
-@Composable
-private fun ViewerImage(
-    uri: Uri,
-    modifier: Modifier = Modifier,
-    onTransformChanged: (Boolean) -> Unit,
-) {
-    val context = LocalContext.current
-    var scale by remember(uri) { mutableFloatStateOf(1f) }
-    var offset by remember(uri) { mutableStateOf(Offset.Zero) }
-
-    LaunchedEffect(scale) {
-        onTransformChanged(scale != 1f)
-    }
-
-    AsyncImage(
-        model = ImageRequest.Builder(context).data(uri).build(),
-        contentDescription = null,
-        modifier = modifier
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-                translationX = offset.x
-                translationY = offset.y
-            }
-            .zoomPan(
-                getScale = { scale },
-                getOffset = { offset },
-                setScale = { scale = it },
-                setOffset = { offset = it },
-            ),
-        contentScale = androidx.compose.ui.layout.ContentScale.Fit,
-    )
-}
-
-/**
- * Custom pinch-zoom / pan detector that coexists with the pager's horizontal swipe: a gesture is
- * only consumed (and applied) once a second finger is down or the image is already zoomed. A
- * single-finger drag at the default size is left untouched so the pager can page to the next item.
- * Zoom is clamped to [1f, 5f]; returning to scale 1 also resets the pan so the image snaps back to
- * its fit.
- */
-private fun Modifier.zoomPan(
-    getScale: () -> Float,
-    getOffset: () -> Offset,
-    setScale: (Float) -> Unit,
-    setOffset: (Offset) -> Unit,
-): Modifier = pointerInput(Unit) {
-    awaitEachGesture {
-        val startScale = getScale()
-        var prevSpacing = 0f
-        var prevCentroid: Offset? = null
-        do {
-            val event = awaitPointerEvent()
-            val changes = event.changes.filter { it.pressed }
-            val n = changes.size
-            if (n == 0) break
-            val centroid = if (n == 1) {
-                changes.first().position
-            } else {
-                changes.fold(Offset.Zero) { acc, c -> acc + c.position } / n.toFloat()
-            }
-            val spacing = if (n >= 2) (changes[0].position - changes[1].position).getDistance() else 0f
-
-            // Consume only when this is a real transform (pinch, or pan while already zoomed).
-            val consume = startScale != 1f || n >= 2
-            if (consume && prevCentroid != null) {
-                val s = getScale()
-                val o = getOffset()
-                val zoom = if (prevSpacing > 0f && n >= 2) spacing / prevSpacing else 1f
-                val pan = centroid - prevCentroid
-
-                var newScale = (s * zoom).coerceIn(1f, 5f)
-                var newOffset = o + pan
-                if (newScale <= 1.0001f) {
-                    newScale = 1f
-                    newOffset = Offset.Zero
-                }
-                setScale(newScale)
-                setOffset(newOffset)
-                changes.forEach { it.consume() }
-            }
-
-            prevSpacing = spacing
-            prevCentroid = centroid
-        } while (event.changes.any { it.pressed })
     }
 }
 
