@@ -71,7 +71,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -605,6 +608,103 @@ private fun nodeSubtitle(node: FsNodeObject): String {
     return nodeDateformat.format(Date(t))
 }
 
+/**
+ * Single-line text that truncates the **middle** (`head…tail`) so both the start of the string
+ * and its trailing suffix (file extension) stay fully visible (`FOTLAB-UIXDES-000004`). The
+ * standard [TextOverflow.Ellipsis] only keeps the head and cuts the tail, which would hide the
+ * extension; for file names we must keep the extension, so we measure and split manually.
+ *
+ * The displayed string is recomputed in [androidx.compose.foundation.text.onTextLayout] against
+ * the real available width, so it tracks container resizes (grows back to the full name when it
+ * fits, shrinks again when it does not).
+ */
+@Composable
+private fun MiddleEllipsisText(
+    text: String,
+    modifier: Modifier = Modifier,
+    color: Color = Color.Unspecified,
+    style: TextStyle = LocalTextStyle.current,
+    ellipsis: String = "…",
+) {
+    val resolvedStyle = LocalTextStyle.current.merge(style)
+    val textMeasurer = rememberTextMeasurer()
+    var displayText by remember(text) { mutableStateOf(text) }
+
+    val measure: (String) -> Int = { str ->
+        textMeasurer.measure(
+            text = str,
+            style = resolvedStyle,
+            constraints = Constraints(maxWidth = Int.MAX_VALUE),
+        ).size.width
+    }
+
+    Text(
+        text = displayText,
+        modifier = modifier,
+        color = color,
+        style = resolvedStyle,
+        softWrap = false,
+        overflow = TextOverflow.Visible,
+        maxLines = 1,
+        onTextLayout = { layoutResult ->
+            val maxWidthPx = layoutResult.layoutInput.constraints.maxWidth
+            if (maxWidthPx == Constraints.Infinity) return@Text
+
+            if (!layoutResult.didOverflowWidth) {
+                // Current text fits; prefer the full name when it would now fit (resize).
+                if (displayText != text && measure(text) <= maxWidthPx) displayText = text
+                return@Text
+            }
+            val fitted = middleTruncated(text, maxWidthPx, ellipsis, measure)
+            if (fitted != displayText) displayText = fitted
+        },
+    )
+}
+
+/**
+ * Produce a middle-truncated copy of [text] that fits [maxWidthPx]: the trailing suffix (file
+ * extension, or a short tail when there is none) is always kept whole, and as much of the leading
+ * head as fits is shown before the [ellipsis].
+ */
+private fun middleTruncated(
+    text: String,
+    maxWidthPx: Int,
+    ellipsis: String,
+    measure: (String) -> Int,
+): String {
+    if (measure(text) <= maxWidthPx) return text
+    val ellipsisWidth = measure(ellipsis)
+    val (head, tail) = splitFileTail(text)
+    val tailWidth = measure(tail)
+    val availableForHead = (maxWidthPx - ellipsisWidth - tailWidth).coerceAtLeast(0)
+
+    // Binary-search the longest head that fits beside the ellipsis + tail.
+    var lo = 0
+    var hi = head.length
+    while (lo < hi) {
+        val mid = (lo + hi + 1) / 2
+        if (measure(head.take(mid)) <= availableForHead) lo = mid else hi = mid - 1
+    }
+    return if (lo == 0) {
+        // Head does not fit at all: fall back to the ellipsis plus as much tail as fits.
+        val fallback = ellipsis + tail
+        if (measure(fallback) <= maxWidthPx) fallback else ellipsis
+    } else {
+        head.take(lo) + ellipsis + tail
+    }
+}
+
+/** Split [text] into (head, tail) where tail is the file extension, or a short trailing chunk. */
+private fun splitFileTail(text: String): Pair<String, String> {
+    val dot = text.lastIndexOf('.')
+    return if (dot in 1 until text.length - 1) {
+        text.substring(0, dot) to text.substring(dot)
+    } else {
+        val tailLen = minOf(4, text.length)
+        text.dropLast(tailLen) to text.takeLast(tailLen)
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun NodeList(
@@ -694,10 +794,8 @@ private fun NodeCell(
                     )
                 }
             }
-            Text(
+            MiddleEllipsisText(
                 text = node.nameDisplay,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 2.dp),
             )
@@ -734,7 +832,7 @@ private fun NodeCell(
                 NodeThumbnail(node = node, modifier = Modifier.size(40.dp).clip(RoundedCornerShape(8.dp)))
             },
             headlineContent = {
-                Text(text = node.nameDisplay, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                MiddleEllipsisText(text = node.nameDisplay)
             },
             supportingContent = {
                 Text(
