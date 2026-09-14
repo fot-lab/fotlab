@@ -66,6 +66,16 @@ produced upstream* (R4 for Studio, R6 for Library). Two constraints shape the de
   decode (R4).
 - **R7 — Scope boundary between the two surfaces.** Embedded-preview extraction (R6) ∈ **Library only**.
   Precise full decode (R4) ∈ **Studio only**. Neither surface ever hands a RAW file to Coil (R1/R2).
+- **R8 — Every input passes through a first-party format-sniffing wrapper before routing.** The wrapper
+  runs the **Coil-side** sniffer and the **rawler/dnglab-side** sniffer (RAW-center; `rawler::get_decoder`,
+  `rawler/src/decoders/mod.rs:909`) **in parallel with a timeout**, and emits a **dictionary** keyed by
+  sniffer — `Map<Sniffer, Verdict>` where each `Verdict = { format?, canDecode }`. The Coil-side sniffer
+  MUST reuse the platform/Coil native format detector (Android `BitmapFactory` with `inJustDecodeBounds`,
+  i.e. the same decoder Coil wraps — **no hand-rolled magic bytes**) and reports `canDecode = true` only
+  when the platform returns a non-null `outMimeType`. The wrapper classifies only — it never decodes
+  pixels. The **route decision** is a separate pure function of that dictionary; its rules are TBD (see Q6).
+  A dictionary (not a fixed matrix) is used so future sniffers are added as new keys without restructuring
+  the result type.
 
 ## Constraints
 
@@ -107,6 +117,57 @@ produced upstream* (R4 for Studio, R6 for Library). Two constraints shape the de
 - **Single integration point** — both RAW→raster paths live in the native-integration module
   (`FOTLAB-NATIVE-000001`), not in `external/` (per `STRUCT.md` principle 5) and not in the UI.
 
+## Format Sniffing Wrapper (router entry)
+
+Every incoming image byte stream MUST pass through a single first-party format-sniffing wrapper
+**before any routing decision** (R8). It classifies only — it never decodes pixels or renders. The
+wrapper owns the *format decision*; the *route decision* is a separate pure function of the emitted
+matrix (rules TBD — Open Question Q6).
+
+### Flow
+1. **Entry** — a seekable header slice (≥ first 64 KiB: enough for magic bytes and the TIFF/EXIF `Make`
+   tag rawler needs) enters `FormatSniffer.sniff(...)`.
+2. **Parallel dispatch** — the wrapper launches two sniffers concurrently (async, on a coroutine scope)
+   and awaits both:
+   - **Coil-side sniffer** — reuses the **platform/Coil native** format detector (Android `BitmapFactory`
+     `inJustDecodeBounds` → `outMimeType`; this is exactly the decoder Coil wraps for rasters, so its
+     verdict equals Coil's raster-decode capability). **No hand-rolled magic bytes.** Outputs
+     `Verdict { format = mime, canDecode = (mime != null) }`. Only a non-null `outMimeType` means Coil can
+     render it as a raster; SVG (Coil's vector path, invisible to `BitmapFactory`) is the single minimal
+     content exception.
+   - **rawler/dnglab-side sniffer** — calls `rawler::get_decoder`
+     (`rawler/src/decoders/mod.rs:909`). A returned decoder ⇒ `canDecode == true` with the RAW format name;
+     `RawlerError::Unsupported` (CLI maps to `AppError::UnsupportedFile`, **exit code 7**) ⇒
+     `canDecode == false`, `identifiedFormat == null`.
+3. **Timeout** — a bounded timeout (TBD, see Q6) wraps the `awaitBoth`. If it elapses before **at least
+   one** sniffer returns, the wrapper returns `SniffResult.Timeout` (a hard error — the caller must
+   surface "unsupported / retry", never silently fall through to either side).
+4. **Settle** — proceed as soon as at least one sniffer returns within T, or once both return before T
+   ends.
+5. **Compose dictionary** — assemble `Map<Sniffer, Verdict>` (one entry per sniffer; extensible by
+   adding keys) and emit a `SniffResult`:
+   ```
+   { COIL:   { format?, canDecode? },
+     RAWLER: { format?, canDecode? } }
+   ```
+6. **Route (pending user spec)** — the matrix is handed to the routing function. The wrapper itself does
+   **not** hard-code the decision (R8 / Q6).
+
+### Why run both sniffers in parallel
+- Coil's sniffer is a **positive whitelist** — it knows only standard rasters and returns UNKNOWN for any
+  RAW.
+- rawler's sniffer is a **RAW-center negative test** — it returns `Unsupported` for everything outside its
+  RAW set, including plain JPEG/PNG **and** corrupt files.
+- Neither alone can drive routing. The only reliable "truly unsupported" signal is
+  `coil.UNKNOWN + rawler.Unsupported`. Running both concurrently bounds latency (the slow/uncertain side
+  can't block the fast side) and yields a cross-validated verdict.
+
+### Hard rules
+- Classification only — **no pixel decode**, **no render**.
+- **Extensions ignored** — both sniffers are content-based (see Constraints); renaming can't fool either
+  side.
+- Timeout ⇒ distinct error state, never a default route.
+
 ## Acceptance Criteria
 
 - A Studio render call accepts only a Coil-supported raster URI; loading a RAW file directly through Coil
@@ -123,12 +184,19 @@ produced upstream* (R4 for Studio, R6 for Library). Two constraints shape the de
   absent from Library hot-path code (R7).
 - Preview/proxy assets emitted by the native layer are **genuine encoded rasters** (Coil validates the
   bytes, not the filename); an extension-renamed RAW is never passed to Coil as if it were a raster.
+- Every render/routing entry goes through `FormatSniffer`; no code path may invoke Coil decode or rawler
+  decode without a prior `SniffResult` (R8).
+- `SniffResult` carries the full 2×2 matrix; the route decision is a pure function of that matrix (rules
+  TBD, Q6). A timeout yields a distinct error state, not a default route.
+- Extension-renamed files are classified by content, not name (both sniffers are content-based).
 
 ## Impacted Modules
 
 - `app` / studio feature package (render layer — Coil + viewer class, R1/R5).
 - `app` / library feature package (grid/thumbnail viewer — Coil + viewer class; consumes embedded-preview
   rasters, R6).
+- `app` / media package — **`FormatSniffer`** (first-party format-sniffing wrapper, R8): runs the
+  Coil-side and rawler-side sniffers in parallel with a timeout, emits the 2×2 matrix. No pixel decode.
 - Native-integration module (`external/dnglab` consumer) — **two paths**: (a) Library = extract embedded
   RAW preview (cheap, R6); (b) Studio = precise `rawler` RAW→raster conversion (R4).
 
@@ -145,8 +213,12 @@ produced upstream* (R4 for Studio, R6 for Library). Two constraints shape the de
   native-integration module.
 - Q5 — If video-frame rendering is ever added (Coil `coil-video`, the only extension-based path), the
   asset naming must keep a correct video extension; photo paths (jpg/png/webp/raw) are unaffected.
-
-## Change History
+- Q6 — **Routing rules over the sniff dictionary (R8).** Given `Map<Sniffer, Verdict>` (e.g.
+  `{COIL:{format,canDecode}, RAWLER:{format,canDecode}}`), what is the precedence? (e.g.
+  `COIL.canDecode && !RAWLER.canDecode` → straight to Coil; `RAWLER.canDecode && !COIL.canDecode` →
+  RAW→raster; `!COIL.canDecode && !RAWLER.canDecode` → unsupported; `both decodable` → ?). Also: the
+  timeout value T, and whether a single-side timeout (one returned, other hung) should still proceed.
+  **Pending user specification.**
 
 - 2026-09-14 — Initial architecture item. Codified that the Studio frontend renders **Coil-only**
   rasters (R1–R2), with a PNG → JPEG → other-Coil-format preference for any derived asset (R3), that
@@ -168,3 +240,18 @@ produced upstream* (R4 for Studio, R6 for Library). Two constraints shape the de
   detects rasters/SVG/GIF by header magic while only `coil-video` keys off the extension. Consequence:
   renaming can't fool either side, so the native layer must emit **genuine** PNG/JPEG bytes, not a renamed
   RAW. Added the matching Acceptance Criterion and Open Question Q5 (video-frame extension caveat).
+- 2026-09-14 — Added **R8 + the first-party Format Sniffing Wrapper** design: every input passes through
+  `FormatSniffer`, which runs the **Coil-side** (positive R2 whitelist) and **rawler/dnglab-side**
+  (`rawler::get_decoder`, exit code 7 on `UnsupportedFile`) sniffers **in parallel with a timeout**, emits
+  a 2×2 capability matrix `[[coil.id?, coil.dec?],[rawler.id?, rawler.dec?]]`, and leaves the *route
+  decision* as a separate pure function (rules TBD → Open Question Q6). Rationale: Coil's sniffer is a
+  positive whitelist (RAW ⇒ UNKNOWN) while rawler's is a RAW-center negative test (JPEG/PNG/corrupt ⇒
+  `Unsupported`); only `coil.UNKNOWN + rawler.Unsupported` is a reliable "truly unsupported" signal, so
+  both must run and be cross-validated. Timeout ⇒ hard error, never a silent fallback.
+- 2026-09-14 — Refined R8 / wrapper per review: (1) the sniff result is now a **dictionary**
+  `Map<Sniffer, Verdict>` (one key per sniffer; extensible by adding keys) instead of a fixed 2×2 matrix;
+  (2) the **Coil-side sniffer reuses the platform/Coil native detector** — Android `BitmapFactory` with
+  `inJustDecodeBounds` (the same decoder Coil wraps) reading `outMimeType` — so **no hand-rolled magic
+  bytes**; `canDecode == true` iff `outMimeType != null`. SVG (Coil's vector path, invisible to
+  `BitmapFactory`) is the single minimal content exception. Updated R8, the wrapper flow, Q6, and the
+  `app/media/FormatSniffer.kt` skeleton accordingly.
