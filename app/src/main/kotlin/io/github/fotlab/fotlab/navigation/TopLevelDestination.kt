@@ -3,7 +3,7 @@ package io.github.fotlab.fotlab.navigation
 import androidx.annotation.StringRes
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.PermMedia
 import androidx.compose.ui.graphics.vector.ImageVector
 import io.github.fotlab.fotlab.R
 import io.github.fotlab.fotlab.navigation.library.LibraryDestination
@@ -25,7 +25,7 @@ enum class TopLevelDestination(
     LIBRARY(
         route = LibraryDestination.ROUTE,
         label = R.string.app_nav_library_label,
-        icon = Icons.Filled.PhotoLibrary,
+        icon = Icons.Filled.PermMedia,
     ),
     STUDIO(
         route = StudioDestination.ROUTE,
