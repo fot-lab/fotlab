@@ -35,7 +35,7 @@ The `VERSION_NAME` and `VERSION_CODE` files are **off-limits** by default. Do no
 - **Formal**: `v{YYYY.MM.DD.HH.MM}`
 - **Examples**: `v2026.06.13.05.22-rc`, `v2026.06.13.05.22`
 - CI triggers on `startsWith(github.ref, 'refs/tags/v')` for: native build, APK upload, GitHub Release
-- Release APK is renamed to `DreamHub-{VERSION}-arm64-v8a-release.apk` (drops `v` prefix)
+- Release APK asset is named `FotLab-{VERSION}-universal-release.apk` (drops `v` prefix; `universal` = one APK for all four ABIs)
 
 ## ⚠️ Bump = Tag (Mandatory)
 

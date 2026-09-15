@@ -26,8 +26,9 @@ on:
         default: false
       release-build:
         description: >
-          Rename the produced APK to FotLab-<VERSION_NAME>-arm64-v8a-release.apk
-          and upload that instead of the raw output directory.
+          Build (and sign) the release variant. The APK is uploaded under the name
+          Gradle produced it — the release asset name is decided by the release
+          stage, not here.
         required: false
         type: boolean
         default: false
@@ -243,20 +244,14 @@ jobs:
           echo "No gradle-tasks requested — toolchain set up, nothing to build." | tee build-log.txt
         shell: bash
 
-      - name: Rename release APK
-        if: inputs.release-build
-        run: |
-          version="${{ steps.version.outputs.version-name }}"
-          mkdir -p release-apk
-          cp app/build/outputs/apk/release/*.apk "release-apk/FotLab-$version-arm64-v8a-release.apk"
-        shell: bash
-
+      # No rename here: the APK is uploaded exactly as Gradle produced it. The
+      # release asset name is owned by the release stage (release_github.yaml).
       - name: Upload APK artifact
         if: inputs.apk-artifact-name != '' && inputs.apk-path != ''
         uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.apk-artifact-name }}
-          path: ${{ inputs.release-build && 'release-apk/*.apk' || inputs.apk-path }}
+          path: ${{ inputs.apk-path }}
           retention-days: ${{ inputs.apk-retention-days }}
           if-no-files-found: error
 

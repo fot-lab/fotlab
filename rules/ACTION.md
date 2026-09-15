@@ -122,7 +122,7 @@ Everything else triggers, `external/**` included.
 
 | Artifact | Condition | Retention |
 | --- | --- | --- |
-| `fotlab-release-apk` | tag push / `release=true` dispatch | 30 days |
+| `fotlab-release-apk` | tag push / `release=true` dispatch — holds the APK under the name Gradle produced it; the release asset name is assigned by the release stage | 30 days |
 | `debug-apks` | `apk` job success | 1 day |
 | `rawler_fotlab` | `rust` job success — `jniLibs/<abi>/librawler_fotlab.so` + the generated UniFFI Kotlin bindings, consumed by the `apk` job | 7 days |
 | `build-gradle.log` | `apk` job | 7 days |
@@ -194,7 +194,11 @@ Do **not** prune to fewer than one entry per family, and leave the deliberate sa
 - The `apk` job validates `VERSION_NAME` against
   `^\d{4}\.\d{2}\.\d{2}\.\d{2}\.\d{2}(-rc)?$` and fails fast otherwise.
 - Current: `VERSION_NAME` = `2026.09.07.05.48-rc`, `VERSION_CODE` = `1`.
-- Release APK is renamed to `FotLab-{VERSION_NAME}-arm64-v8a-release.apk`.
+- Release APK is a single **universal** APK (no ABI splits — the four ABIs built
+  by `build_rust.yaml` are all packaged into one artifact). Its release asset
+  name is `FotLab-{VERSION_NAME}-universal-release.apk`, assigned by the
+  **release stage** (`.github/workflows/release_github.yaml`), not by the build
+  stage: `build_gradle.yaml` uploads the APK exactly as Gradle produced it.
 - A `VERSION_NAME` ending in `-rc` publishes the GitHub Release as a
   **pre-release** (`gh release create --prerelease`); without the suffix it is a
   formal release. The meaning of `-rc` is owned by [`rules/VERSION.md`](rules/VERSION.md).
@@ -309,8 +313,11 @@ Split across the two rule files, on purpose:
   debug-only CI run does not exercise this configuration; a release build should be smoke-tested.
 - Q3 — Signing: which keystore, injected through which secret, and is release
   signing part of the first release? **TBD.**
-- Q4 — **RESOLVED.** Release stays `arm64-v8a` only; the debug build keeps all four
-  ABIs, and the emulator job needs `x86_64`, which `build_rust.yaml` already builds
+- Q4 — **RESOLVED.** Release ships one **universal** APK containing all four
+  ABIs; per-ABI splitting (and per-ABI asset names) is explicitly not done, to
+  keep the packaging pipeline simple. `app/build.gradle.kts` declares no
+  `splits`/`abiFilters`, so both the release and the debug build are universal;
+  the four ABIs come from `build_rust.yaml`
   (`cargo ndk` targets `arm64-v8a armeabi-v7a x86 x86_64`). The smoke workflow pins
   `arch: x86_64` so the AVD and the library agree.
 - Q5 — **RESOLVED.** Instrumentation tests are introduced with the `emulator-smoke`
@@ -351,3 +358,4 @@ Split across the two rule files, on purpose:
 | 2026-09-15 | First smoke run failed and its cache audit landed two fixes. (a) The job never enabled KVM: the emulator fell back to `-accel off`, its adb daemon never came up and the AVD-creation step died. The job now writes the emulator-runner action's documented `99-kvm4all.rules` udev rule before starting the emulator. (b) The AVD cache was extended into a single **emulator** cache that also carries `$ANDROID_HOME/system-images`, `$ANDROID_HOME/emulator` and `$ANDROID_HOME/build-tools` — the ~1.4 GB the action otherwise re-downloaded from `dl.google.com` every run; the AVD and its system image must share one entry, since an AVD without its image cannot boot. The test run now adds `-no-snapshot-save` so the cached snapshot is never overwritten by a run that has our APK installed. New "Downloads deliberately left uncached" subsection records what still crosses the network and why (`~/.rustup`, git submodules, the actions' own repositories). |
 | 2026-09-15 | Cache-quota audit. The repository was at **8.66 GiB of its 10 GiB budget across 116 entries**, almost all of it superseded Gradle generations (`gradle-transforms-v1-*`: 18 entries / 4.11 GiB; `gradle-dependencies-v1-*`: 6 / 1.52 GiB; `gradle-home-v1\|…\|<commit-sha>`: 31 / 0.64 GiB) plus two orphaned `v0-rust-build-*` and `v0-rust-dnglab-*` archives (~1.9 GiB) left behind by the crate-path moves, whose `lastAccessedAt` equalled `createdAt` — i.e. never restored. 55 dead entries deleted, taking usage to 2.26 GiB, and a new "Quota hygiene" subsection states the rule (keep the newest generation per family, never drop below one, leave the NDK/SDK safety nets) with the dry-run command. |
 | 2026-09-15 | Rust toolchain download cached, superseding the previous entry's decision to leave `~/.rustup` uncached. `build_rust.yaml` now restores `~/.rustup` by prefix **before** `Install Rust`, then saves it immediately after the install under `<os>-rustup-<rustc version>` (the key is unknowable beforehand, and a constant key cannot work because `actions/cache` never re-saves a restored entry — the archive would freeze on creation-day `stable` and re-download the difference forever). The save is skipped when `cache-matched-key` already equals the computed key, so it can never collide with an existing entry, and it runs before anything that can fail so a later build failure cannot discard a successful toolchain download. This removes the last recurring download of size in the `rust` job (~250 MB, four Android target std libraries). The rustup layer was inserted as layer 3 of the cache table, the `~/.rustup` row was dropped from "Downloads deliberately left uncached", and quota hygiene now also names `<os>-rustup-<version>` as a per-release family. |
+| 2026-09-15 | Release packaging is **universal**: `app/build.gradle.kts` declares no ABI splits, so the release APK carries all four ABIs in one artifact and the asset is named `FotLab-{VERSION_NAME}-universal-release.apk` (was `-arm64-v8a-`, which misdescribed a universal APK). Per-ABI packaging was considered and rejected to keep the pipeline simple. The name is now assigned by the **release stage** — `build_gradle.yaml` dropped its "Rename release APK" step and uploads the APK exactly as Gradle produced it; `release_github.yaml` copies it to `FotLab-<VERSION_NAME>-universal-release.apk` before publishing. `rules/VERSION.md` updated (it also still said `DreamHub-`). Q4 rewritten to record the universal decision. |
