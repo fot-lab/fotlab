@@ -76,25 +76,6 @@ jobs:
           echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
         shell: bash
 
-      # TEMPORARY (remove after 2026-09 preinstalled-layout verification): dump
-      # what the image actually ships at each candidate SDK root.
-      - name: Diagnose preinstalled Android SDK layout
-        run: |
-          echo "process env: ANDROID_HOME=${ANDROID_HOME:-<unset>} ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-<unset>}"
-          for d in /usr/local/lib/android/sdk /home/runner/.android/sdk; do
-            echo "----- $d"
-            if [ -d "$d" ]; then
-              ls -1 "$d" || true
-              echo "  platforms:    $(ls -1 "$d/platforms" 2>/dev/null | tr '\n' ' ')"
-              echo "  build-tools:  $(ls -1 "$d/build-tools" 2>/dev/null | tr '\n' ' ')"
-              echo "  ndk:          $(ls -1 "$d/ndk" 2>/dev/null | tr '\n' ' ')"
-              echo "  cmdline-tools:$(ls -1 "$d/cmdline-tools" 2>/dev/null | tr '\n' ' ')"
-            else
-              echo "  (absent)"
-            fi
-          done
-        shell: bash
-
       - name: Install JDK
         uses: ./.github/actions/install_jdk
         with:
@@ -126,37 +107,48 @@ jobs:
         with:
           targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
 
-      # The cache key carries the pinned dnglab submodule SHA: a submodule bump
-      # (external/**, see rules/ACTION.md "Submodule Bumps") must start from a fresh
-      # Rust cache instead of reusing artifacts compiled against the old rawler source.
+      # Publish the pinned dnglab submodule SHA as an env var so it lands in the
+      # VOLATILE tail of the rust-cache key (see the cache layering note below),
+      # rather than in a mid-chain custom key that blocks prefix fallback.
       - name: Resolve dnglab submodule SHA
-        id: submodule
-        run: echo "sha=$(git -C external/dnglab rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        run: echo "DNGLAB_SHA=$(git -C external/dnglab rev-parse HEAD)" >> "$GITHUB_ENV"
         shell: bash
 
-      # Rust build cache. Without it every run rebuilds the whole rawler dependency
-      # tree four times (one release tree per Android ABI) plus the host debug
-      # uniffi-bindgen stack, and `cargo install cargo-ndk` recompiles from source.
-      # rust-cache covers $CARGO_HOME (registry + git index), $CARGO_HOME/bin
-      # (cache-bin defaults to true, so cargo-ndk is restored too) and the target dir.
-      # Must run AFTER Install Rust (the action runs `cargo metadata`) and BEFORE any
-      # cargo invocation, so the cargo-ndk install and both builds restore first.
+      # Rust build cache — two logical layers over one rust-cache archive:
       #
-      # Three project-specific settings:
-      #   workspaces — the crate is a standalone workspace OUTSIDE the repo root, so the
-      #                default ". -> target" would cache nothing; point at its directory.
-      #   key        — the dnglab submodule SHA (rawler is a path dep under external/).
-      #   env-vars   — NDK version and min-api change native compile flags, so they
-      #                belong in the key. rawler is a path *dependency* (not a workspace
-      #                member), so its artifacts are cached by default; cache-all-crates
-      #                also keeps our own tiny crate's artifacts.
+      #   Stable layer   $CARGO_HOME/registry + /git + /bin (crates.io sources and
+      #                  the cargo-ndk binary). Changes only when dependency
+      #                  manifests/lockfiles change; rust-cache hashes that into the
+      #                  lockfile segment of the key.
+      #   Volatile layer <crate>/target — rawler is a path dep under external/, so
+      #                  its artifacts change with the dnglab submodule SHA. The SHA
+      #                  is passed through env-vars so it is folded into the trailing
+      #                  segment of the key.
+      #
+      # rust-cache restores with progressively shortened prefix keys. Because the
+      # SHA sits at the TAIL, a submodule bump still matches the previous run at the
+      # lockfile prefix: the stable dependency layer (and stale rlibs cargo can
+      # re-fingerprint) is restored, while cargo rebuilds only rawler/our crate.
+      # Putting the SHA in `key` instead would sit before the lockfile segment and
+      # invalidate the dependency layer on every bump for no reason.
+      # NDK_VERSION/MIN_API are env-vars too — they change native compile flags.
+      #
+      # The NDK itself is a separate cache layer: preinstalled on the runner image,
+      # and the fallback install_ndk cache is keyed by NDK version only, so neither
+      # our code nor rust rebuilds ever invalidate it.
+      #
+      # workspaces — the crate is a standalone workspace OUTSIDE the repo root, so
+      #              the default ". -> target" would cache nothing; point at it.
+      # cache-all-crates — rawler is a path *dependency* (not a workspace member);
+      #              this also keeps our own tiny crate's artifacts.
+      # Must run AFTER Install Rust (the action runs `cargo metadata`) and BEFORE
+      # any cargo invocation.
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: app/src/rust/binding/dnglab/rawler_fotlab -> target
           cache-all-crates: true
-          key: dnglab-${{ steps.submodule.outputs.sha }}
-          env-vars: NDK_VERSION MIN_API
+          env-vars: NDK_VERSION MIN_API DNGLAB_SHA
 
       - name: Install cargo-ndk
         run: cargo install cargo-ndk --locked
