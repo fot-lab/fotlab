@@ -231,11 +231,17 @@ jobs:
           # dump the full logcat (incl. the `crash` buffer) and list any tombstones. A rawler
           # FFI call that aborts the process leaves a SIGSEGV/SIGABRT backtrace here — without
           # this we are blind to WHY the cross-language call dies (`DNGLAB-RAWLER-000002`).
+          # NOTE: this `script` is executed by the runner via `/usr/bin/sh` (dash on
+          # the ubuntu image), NOT bash. Bash-only syntax such as `PIPESTATUS` or
+          # `set -o pipefail` fails there with "Bad substitution" and wrongly reds the
+          # job even when the tests passed. Use POSIX sh only.
           script: |
-            set -o pipefail
             adb logcat -c || true
-            gradle --no-daemon --stacktrace connectedDebugAndroidTest 2>&1 | tee smoke-log.txt
-            STATUS=${PIPESTATUS[0]}
+            gradle --no-daemon --stacktrace connectedDebugAndroidTest > smoke-log.txt 2>&1
+            STATUS=$?
+            # Surface the Gradle output in the Actions UI; it is also uploaded as an
+            # artifact on failure by the step below.
+            cat smoke-log.txt
             adb logcat -d -b all > logcat.txt 2>&1 || true
             adb shell ls -l /data/tombstones > tombstones.txt 2>&1 || true
             exit $STATUS
