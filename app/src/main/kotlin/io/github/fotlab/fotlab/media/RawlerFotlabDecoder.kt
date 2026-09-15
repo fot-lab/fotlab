@@ -1,6 +1,6 @@
 package io.github.fotlab.fotlab.media
 
-import io.github.fotlab.fotlab.binding.dnglab.rawler_fotlab.RawlerFotlabBridge
+import io.github.fotlab.fotlab_rawler.RawlerFotlabBridge
 import java.io.InputStream
 
 /**

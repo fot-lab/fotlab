@@ -182,7 +182,7 @@ jobs:
           cp -r native-artifacts/jniLibs/* app/build/generated/jniLibs/
           mkdir -p app/build/generated/uniffi/main/kotlin
           # UniFFI nests the generated file under its Kotlin package directories —
-          # kotlin/io/github/fotlab/fotlab/binding/dnglab/rawler_fotlab/rawler_fotlab.kt —
+          # kotlin/io/github/fotlab/fotlab_rawler/rawler_fotlab.kt —
           # so a flat `*.kt` glob would match nothing. Copy the whole tree; the .kt
           # carries its own `package` line, so the srcDir layout does not have to be flat.
           cp -r native-artifacts/kotlin/. app/build/generated/uniffi/main/kotlin/

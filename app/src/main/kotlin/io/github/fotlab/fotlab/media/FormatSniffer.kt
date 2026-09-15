@@ -1,7 +1,7 @@
 package io.github.fotlab.fotlab.media
 
 import android.graphics.BitmapFactory
-import io.github.fotlab.fotlab.binding.dnglab.rawler_fotlab.RawlerFotlabBridge
+import io.github.fotlab.fotlab_rawler.RawlerFotlabBridge
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.InternalCoroutinesApi
 import kotlinx.coroutines.TimeoutCancellationException

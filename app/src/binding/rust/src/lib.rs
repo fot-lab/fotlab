@@ -10,11 +10,24 @@
 //!   * `identify`      — call #1: format identification only, never pixel decode.
 //!   * `decode_to_png` — call #2: decode the already-identified RAW to PNG bytes.
 //!
-//! The Kotlin side of the seam is the hand-written facade
-//! `app/src/kotlin/io/github/fotlab/fotlab/binding/dnglab/rawler_fotlab/RawlerFotlabBridge.kt`.
+//! # Crash hardening (FOTLAB-CRASH-000001)
+//!
+//! Rawler's decoders call `panic!` / `unreachable!` / index out of bounds on input they
+//! do not expect (truncated files, formats they half-support, non-RAW bytes probed by the
+//! sniffer). A Rust panic that unwinds across the `extern "C"` FFI frame is **undefined
+//! behaviour** and the runtime aborts the whole process (SIGABRT). Kotlin's
+//! `runCatching` only catches JVM `Throwable`, so it *cannot* catch this — which is exactly
+//! why every image, RAW or PNG, used to crash the app the moment rawler was called.
+//!
+//! The fix is to wrap every rawler entry point in [`std::panic::catch_unwind`] so a panic
+//! is contained inside Rust and turned into a normal return value (a `None` / `Err`) that
+//! crosses the FFI boundary safely. This is FFI-mechanism-independent: JNI or a hand-rolled
+//! C ABI would have crashed identically. UniFFI is therefore kept; only the panic boundary
+//! is hardened.
 
 use image::codecs::png::PngEncoder;
 use image::{ExtendedColorType, ImageEncoder};
+use std::panic::{self, AssertUnwindSafe};
 
 use rawler::decoders::RawDecodeParams;
 use rawler::rawsource::RawSource;
@@ -29,7 +42,7 @@ pub enum RawlerFotlabError {
     /// rawler does not recognize the input as a camera RAW it supports.
     #[error("unsupported input: {0}")]
     Unsupported(String),
-    /// rawler recognized the input but failed while decoding it.
+    /// rawler recognized the input but failed while decoding it (incl. a caught panic).
     #[error("decode failed: {0}")]
     Decode(String),
 }
@@ -39,25 +52,46 @@ pub enum RawlerFotlabError {
 /// Returns `make/model` (the format label the app routes on) when rawler recognizes the
 /// bytes, else `None`. Never decodes pixels — this is the cheap probe that runs in
 /// parallel with the Coil-side sniffer inside `FormatSniffer.sniff`.
+///
+/// The rawler work is wrapped in `catch_unwind`: a panic (e.g. on malformed/non-RAW input)
+/// degrades to `None` instead of aborting the process. Empty input is rejected outright to
+/// avoid any unwrap-panic inside `RawSource::new_from_slice`.
 #[uniffi::export]
 pub fn identify(raw: &[u8]) -> Option<String> {
-    let src = RawSource::new_from_slice(raw);
-    match rawler::decode_dummy(&src) {
-        Ok(img) => Some(format!("{}/{}", img.make, img.model)),
-        Err(_) => None,
+    if raw.is_empty() {
+        return None;
     }
+    panic::catch_unwind(AssertUnwindSafe(|| {
+        let src = RawSource::new_from_slice(raw);
+        match rawler::decode_dummy(&src) {
+            Ok(img) => Some(format!("{}/{}", img.make, img.model)),
+            Err(_) => None,
+        }
+    }))
+    .unwrap_or(None)
 }
 
 /// Call #2 — decode the already-identified RAW to PNG-encoded bytes.
 ///
 /// Made only after the route resolved to the raw path, which is why it takes the bytes
-/// directly instead of re-running identification.
+/// directly instead of re-running identification. Any rawler panic is caught and reported
+/// as `RawlerFotlabError::Decode` so the FFI call always returns rather than aborts.
 #[uniffi::export]
 pub fn decode_to_png(raw: &[u8]) -> Result<Vec<u8>, RawlerFotlabError> {
-    let src = RawSource::new_from_slice(raw);
-    let img = rawler::decode(&src, &RawDecodeParams::default())
-        .map_err(|e| RawlerFotlabError::Decode(e.to_string()))?;
-    encode_png(&img).map_err(RawlerFotlabError::Decode)
+    if raw.is_empty() {
+        return Err(RawlerFotlabError::Decode("empty input".to_string()));
+    }
+    panic::catch_unwind(AssertUnwindSafe(|| {
+        let src = RawSource::new_from_slice(raw);
+        let img = rawler::decode(&src, &RawDecodeParams::default())
+            .map_err(|e| RawlerFotlabError::Decode(e.to_string()))?;
+        encode_png(&img).map_err(RawlerFotlabError::Decode)
+    }))
+    .unwrap_or_else(|_| {
+        Err(RawlerFotlabError::Decode(
+            "rawler panicked during decode".to_string(),
+        ))
+    })
 }
 
 /// Encode a decoded [`RawImage`] to PNG.

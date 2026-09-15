@@ -21,4 +21,4 @@
 # The generated `UniffiLib` interface declares one method per exported Rust function, and JNA maps
 # the Java method NAME to the native symbol name. Obfuscating those names would break the bridge
 # at runtime, so the whole binding package is kept (it is a handful of small classes).
--keep class io.github.fotlab.fotlab.binding.dnglab.rawler_fotlab.** { *; }
+-keep class io.github.fotlab.fotlab_rawler.** { *; }

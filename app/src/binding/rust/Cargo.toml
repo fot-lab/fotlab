@@ -30,7 +30,7 @@ path = "src/bin/uniffi-bindgen.rs"
 required-features = ["cli"]
 
 [dependencies]
-rawler = { path = "../../../../../../external/dnglab/rawler" }
+rawler = { path = "../../../../external/dnglab/rawler" }
 thiserror = "2.0"
 uniffi = "0.28"
 # PNG only: the binding emits PNG (R3 of FOTLAB-STUDIO-000001). Disabling default

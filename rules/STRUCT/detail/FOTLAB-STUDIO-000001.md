@@ -180,7 +180,7 @@ RAW instead of re-identifying it. The two are separate native-integration seams.
 `RawToRaster` wins over `ToCoil` when both report `canDecode` (rawler's raster is authoritative for RAW,
 and Coil cannot decode RAW anyway). The native rawler decode bridge is **now wired**: `StudioEngine` sets
 `rawDecoder = RawlerFotlabDecoder()` in `prepare()`, which delegates to `RawlerFotlabBridge`
-(`app/src/kotlin/io/github/fotlab/fotlab/binding/dnglab/rawler_fotlab`) → the `librawler_fotlab.so`
+(`app/src/binding/kotlin/io/github/fotlab/fotlab_rawler`) → the `librawler_fotlab.so`
 native library over UniFFI. When `librawler_fotlab.so` is absent the bridge returns `null` and the source
 falls through to `Unsupported`, so the app still runs without the native artifact.
 
@@ -192,16 +192,16 @@ its own source and keeps its name):
 - **Naming rule**: only `rawler_fotlab` / `dnglab_fotlab` (and names beginning with either) may name
   first-party artifacts. Anything produced *directly* by upstream source keeps the upstream name. Cargo
   `crate-type` keywords such as `cdylib` are build descriptors, never library names.
-- **Source (our tree)**: `app/src/rust/binding/dnglab/rawler_fotlab/` — the first-party binding crate,
+- **Source (our tree)**: `app/src/binding/rust/` — the first-party binding crate,
   exposing two UniFFI functions:
   - `identify(raw) -> Option<String>` — call #1, identification only (wraps `rawler::decode_dummy`).
   - `decode_to_png(raw) -> Vec<u8>` — call #2, decode the identified RAW to PNG (wraps `rawler::decode` + `image` PNG encode).
   It is a **standalone** Cargo workspace and reaches upstream through a *path* dependency
-  (`rawler = { path = "../../../../../../external/dnglab/rawler" }`), so the pinned submodule is compiled
+  (`rawler = { path = "../../../../external/dnglab/rawler" }`), so the pinned submodule is compiled
   as-is. It is deliberately **not** a member of the dnglab workspace and `external/dnglab/Cargo.toml` is
   never edited (`FOTLAB-NATIVE-000001` R4 — upstream is read-only). `uniffi.toml` sets the Kotlin
   `package_name` to the facade's package.
-- **Kotlin glue**: `app/src/kotlin/io/github/fotlab/fotlab/binding/dnglab/rawler_fotlab/` holds exactly one
+- **Kotlin glue**: `app/src/binding/kotlin/io/github/fotlab/fotlab_rawler/` holds exactly one
   **hand-written, committed** file — the facade `RawlerFotlabBridge.kt`. The UniFFI bindings it calls are
   **generated** and land in the build directory (`app/build/generated/uniffi/main/kotlin`, declared as a
   Kotlin source dir in `app/build.gradle.kts`), never in `src/`, so no generated code is committed and no
@@ -350,13 +350,13 @@ its own source and keeps its name):
 - 2026-09-14 — **Wired the rawler native binding (rawler_fotlab, UniFFI).** Added `external/dnglab/rawler_fotlab/`
   (cdylib `rawler_fotlab`, dnglab workspace member) exposing `identify` (call #1) + `decode_to_png` (call #2)
   over the upstream `rawler` rlib; `RawlerFotlabBridge.kt` + generated `rawler_fotlab.kt` in
-  `app/src/kotlin/binding/dnglab/rawler_fotlab/`; `RawlerFotlabDecoder` implements `RawDecoder` and
+  `app/src/binding/kotlin/io/github/fotlab/fotlab_rawler/`; `RawlerFotlabDecoder` implements `RawDecoder` and
   `StudioEngine.prepare()` wires it (graceful null fallback when the .so is absent). CI: new `build_rust.yaml`
   builds the .so + Kotlin bindings and uploads the `rawler_fotlab` artifact; `build_gradle.yaml` downloads it
   into `jniLibs`/binding dir; `build.yaml` orders `rust` before `apk`. Naming rule: only our binding uses
   `rawler_fotlab`; external `rawler` keeps its original name.
 - 2026-09-14 — **Moved the binding crate out of the submodule and stopped committing generated code.**
-  The first-party crate now lives at `app/src/rust/binding/dnglab/rawler_fotlab/` and is a standalone
+  The first-party crate now lives at `app/src/binding/rust/` and is a standalone
   workspace with a *path* dependency on `external/dnglab/rawler`; the upstream `external/dnglab/Cargo.toml`
   member list is restored so upstream stays read-only (the previous layout added our crate as a dnglab
   workspace member and modified upstream — `FOTLAB-NATIVE-000001` R1/R4/C2/C4). `uniffi.toml` now uses the

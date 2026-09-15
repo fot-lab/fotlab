@@ -5,7 +5,7 @@
 - Priority: P2
 - Created: 2026-09-14
 - Owner: —
-- Related: `rules/STRUCT/detail/FOTLAB-STUDIO-000001.md` (native media pipeline; develop pipeline deferred), `rules/DESIGN/detail/FOTLAB-NATIVE-000001.md` (first-party binding over read-only upstream rawler), `app/src/rust/binding/dnglab/rawler_fotlab/src/lib.rs`, `app/src/main/kotlin/io/github/fotlab/fotlab/media/FormatSniffer.kt`, `app/src/main/kotlin/io/github/fotlab/fotlab/feature/studio/StudioEngine.kt`
+- Related: `rules/STRUCT/detail/FOTLAB-STUDIO-000001.md` (native media pipeline; develop pipeline deferred), `rules/DESIGN/detail/FOTLAB-NATIVE-000001.md` (first-party binding over read-only upstream rawler), `app/src/binding/rust/src/lib.rs`, `app/src/main/kotlin/io/github/fotlab/fotlab/media/FormatSniffer.kt`, `app/src/main/kotlin/io/github/fotlab/fotlab/feature/studio/StudioEngine.kt`
 
 ## Background & Goal
 
@@ -17,7 +17,7 @@ This review records exactly what image processing that PNG has — and has not �
 
 ### 1. The PNG is full sensor resolution — no crop and no downscale
 
-`encode_png` allocates one RGBA output pixel per decoded sensor pixel using `RawImage.width` / `RawImage.height` and writes a single PNG (`app/src/rust/binding/dnglab/rawler_fotlab/src/lib.rs:69-101`). Nothing reads `RawImage.active_area` or `RawImage.crop_area`, so the optical-black masking border is included. The Kotlin side forwards the complete PNG byte array unchanged (`RawlerFotlabDecoder.kt:16-19`); only Coil's display pass downsamples for the view. The PNG artifact itself is full-size.
+`encode_png` allocates one RGBA output pixel per decoded sensor pixel using `RawImage.width` / `RawImage.height` and writes a single PNG (`app/src/binding/rust/src/lib.rs:69-101`). Nothing reads `RawImage.active_area` or `RawImage.crop_area`, so the optical-black masking border is included. The Kotlin side forwards the complete PNG byte array unchanged (`RawlerFotlabDecoder.kt:16-19`); only Coil's display pass downsamples for the view. The PNG artifact itself is full-size.
 
 ### 2. rawler is a decoder, not a developer — processing coefficients are delivered as metadata only
 
@@ -32,7 +32,7 @@ The decoder constructors (`ok_cfa_image*` in `external/dnglab/rawler/src/decoder
 
 ### 3. Our binding reads none of those fields — the only per-sample operation is a bit shift
 
-`encode_png` iterates `RawImageData` directly (`app/src/rust/binding/dnglab/rawler_fotlab/src/lib.rs:77-94`):
+`encode_png` iterates `RawImageData` directly (`app/src/binding/rust/src/lib.rs:77-94`):
 
 - 16-bit integer data: each channel is `v >> 8` saturated to 255 (`shrink_u16`);
 - float data: `clamp(0,1) * 255` (`shrink_f32`);

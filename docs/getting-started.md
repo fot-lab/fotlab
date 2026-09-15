@@ -23,7 +23,7 @@ git submodule update --init --recursive
 | --- | --- |
 | Android Studio | 应用开发与调试 |
 | Android NDK | 编译首方原生绑定 `rawler_fotlab`（当前 pin：`28.2.13676358`） |
-| Rust toolchain | 构建首方绑定 crate `app/src/rust/binding/dnglab/rawler_fotlab`；其上游 `rawler` 源码来自 `external/dnglab`（`cargo-ndk` 交叉编译到 Android ABI） |
+| Rust toolchain | 构建首方绑定 crate `app/src/binding/rust`；其上游 `rawler` 源码来自 `external/dnglab`（`cargo-ndk` 交叉编译到 Android ABI） |
 | CMake | 原生构建编排 |
 | Perl | 运行 `external/exiftool` |
 | C++17 编译器（NDK clang） | 构建 `external/RawTherapee`（`rtengine`） |
@@ -38,8 +38,8 @@ git submodule update --init --recursive
 
 | 路径 | 内容 |
 | --- | --- |
-| `app/src/rust/binding/dnglab/rawler_fotlab` | 首方 Rust 绑定 crate（唯一产出物：`librawler_fotlab.so`），以 path 依赖引用 `external/dnglab/rawler` |
-| `app/src/kotlin/io/github/fotlab/fotlab/binding/dnglab/rawler_fotlab` | Kotlin 侧胶水（`RawlerFotlabBridge`）；UniFFI 生成物落在构建目录，不进入源码 |
+| `app/src/binding/rust` | 首方 Rust 绑定 crate（唯一产出物：`librawler_fotlab.so`），以 path 依赖引用 `external/dnglab/rawler` |
+| `app/src/binding/kotlin/io/github/fotlab/fotlab_rawler` | Kotlin 侧胶水（`RawlerFotlabBridge`）；UniFFI 生成物落在构建目录，不进入源码 |
 | `external/dnglab` | Rust 实现的 DNG 处理工具链（workspace：`bin`、`rawler`、`embedftp`） |
 | `external/exiftool` | Perl 实现的元数据处理工具（`lib/` + `exiftool` 入口脚本） |
 | `external/RawTherapee` | C++ 实现的 RAW 处理引擎（`rtengine/` + `rtdata/` 配置数据） |
