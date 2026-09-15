@@ -80,9 +80,10 @@ path, where no release is produced to verify.
 | Aspect | Value |
 | --- | --- |
 | Gate | `preflight.release != 'true'` **and** `apk` succeeded — a release run skips it |
-| Runner | `ubuntu-26.04` (needs KVM, which the hosted image provides) |
+| Runner | `ubuntu-26.04` |
+| KVM | **Required, and not granted by default.** `/dev/kvm` exists on the image but is owned by group `kvm`, which the runner user is not in, so the emulator starts with `-accel off` and its adb daemon never comes up (`ProbeKVM: This user doesn't have permissions to use KVM`). The job writes `/etc/udev/rules.d/99-kvm4all.rules` with `MODE="0666"` and reloads udev — the recipe published by the emulator-runner action. Group membership cannot be granted mid-job, because a new supplementary group only applies to a fresh login session. |
 | AVD | API `36`, system-image target `google_apis`, arch `x86_64` (an ABI present in `librawler_fotlab.so`) |
-| Emulator flags | `-no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none`, defined once as a job env value so the cache-warming run and the test run cannot diverge |
+| Emulator flags | `-no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none`, defined as job env values (not inputs, which could let a caller break the snapshot invariants). The test run adds `-no-snapshot-save`: it loads the cached snapshot but never overwrites it, so our APK cannot contaminate the cached emulator. |
 | Tests | `app/src/androidTest/kotlin` — the AGP-default instrumented source set (Google's recommended app layout); run via `connectedDebugAndroidTest`, which installs the debug APK plus its test APK |
 | Job timeout | 45 min (test step 20 min) — a wedged emulator fails rather than holding the runner |
 
@@ -90,7 +91,9 @@ The emulator cache is written **after** the AVD has been created and **before**
 the first APK install, so the cached snapshot is a clean warm emulator that every
 later build reuses. That ordering is why the job uses the split
 `actions/cache/restore` + `actions/cache/save` pair instead of `actions/cache`,
-whose save would run as a post-job step — after our APK had been installed.
+whose save would run as a post-job step — after our APK had been installed. The
+entry also carries the SDK packages the AVD boots (see [CI cache layers](#ci-cache-layers-slow--fast-changing)),
+so a warm run downloads nothing from `dl.google.com` at all.
 
 See the [Test Strategy](#test-strategy) for what the cases assert.
 
@@ -136,7 +139,7 @@ Everything else triggers, `external/**` included.
 | Android SDK | `platforms;android-36`, `build-tools;36.0.0` — **preinstalled on the image** (with cmdline-tools, platform-tools, licenses accepted); `install_sdk` verifies and installs only what a future image is missing |
 | `compileSdk` / `targetSdk` | `36` / `36` (set in every module's `build.gradle.kts`) |
 | NDK | `28.2.13676358` — **preinstalled on the image** (among 27.3 / 28.2.13676358 / 29.0); `install_ndk` verifies and installs only when missing |
-| Emulator (smoke) | AVD API `36`, target `google_apis`, arch `x86_64`; managed by `reactivecircus/android-emulator-runner` and reused from the AVD cache |
+| Emulator (smoke) | AVD API `36`, target `google_apis`, arch `x86_64`; managed by `reactivecircus/android-emulator-runner` and reused from the emulator cache (AVD + snapshot + the `system-images` / `emulator` / `build-tools` packages). Needs the [KVM udev rule](#emulator-smoke-test); the action additionally force-installs the latest `build-tools` (37.0.0). |
 | Gradle tasks — push/PR | `testDebugUnitTest` `assembleDebug` |
 | Gradle tasks — emulator smoke | `connectedDebugAndroidTest` |
 | Gradle tasks — release | `assembleRelease` |
@@ -145,14 +148,42 @@ Everything else triggers, `external/**` included.
 
 #### CI cache layers (slow → fast changing)
 
-1. **AVD (emulator)** — `~/.android/avd` + `~/.android/adb*`, owned by `smoke_emulator.yaml` and keyed by API level + system-image target + arch. It changes only when the AVD definition does, so it is the slowest-changing layer of all. It is written **after** the AVD exists and **before** our APK is installed, so the snapshot stays app-free and reusable (`actions/cache/restore` + `actions/cache/save`, not `actions/cache`).
+1. **Emulator (AVD + the SDK packages it boots)** — one entry covering `~/.android/avd`, `~/.android/adb*`, `$ANDROID_HOME/system-images`, `$ANDROID_HOME/emulator` and `$ANDROID_HOME/build-tools`, owned by `smoke_emulator.yaml` and keyed by API level + system-image target + arch. It changes only when the AVD definition does, so it is the slowest-changing layer of all. It is written **after** the AVD exists and **before** our APK is installed, so the snapshot stays app-free and reusable (`actions/cache/restore` + `actions/cache/save`, not `actions/cache`).
+   The AVD and the system image it boots are cached **together on purpose**: an AVD whose system image is missing cannot start, so splitting them would let the AVD hit while the image missed. Caching `system-images` + `emulator` removes ~1.4 GB of `dl.google.com` traffic per run, and restoring them also short-circuits the emulator-runner action's `sdkmanager --install`, because each package's own `package.xml` metadata travels inside the cached directory. `build-tools` is in the entry only because that action force-installs the *latest* build-tools (37.0.0 today) next to the pinned 36.0.0 from `install_sdk`.
 2. **NDK** — preinstalled at `$ANDROID_HOME/ndk/<ver>` on the image; the `install_ndk` fallback `actions/cache` is keyed by NDK version alone (`Linux-ndk-<ver>`). Our code and Rust rebuilds never invalidate it.
-3. **Rust dependencies** — `$CARGO_HOME/registry`, `/git`, `/bin` (crates.io sources, git deps, the `cargo-ndk` binary) inside `Swatinem/rust-cache`; the key segment is the lockfile/manifest hash.
-4. **Rust build products** — the crate's `target/` (four Android ABIs + host bindgen) in the same rust-cache archive; the volatile key tail is `NDK_VERSION MIN_API DNGLAB_SHA`.
+3. **Rust toolchain** — `~/.rustup` (host `rustc`/`cargo` plus the four Android target std libraries), owned by `build_rust.yaml`. `rust-cache` never covered this, so `dtolnay/rust-toolchain` re-fetched `info: downloading 4 components` (~250 MB) on **every** run. It changes only when the `stable` channel moves (every ~6 weeks), hence its place near the top. The restore is by **prefix** and the save is keyed by the toolchain actually installed (`<os>-rustup-<rustc version>`), because a constant key cannot work: `actions/cache` never re-saves an entry it restored, so a fixed key would freeze the archive at the release current on creation day and re-download the difference forever. Each Rust release therefore mints one new entry; the previous one is dead weight and falls to the quota-hygiene pass. See [the layer's comment](.github/workflows/build_rust.yaml) for the full reasoning.
+4. **Rust dependencies** — `$CARGO_HOME/registry`, `/git`, `/bin` (crates.io sources, git deps, the `cargo-ndk` binary) inside `Swatinem/rust-cache`; the key segment is the lockfile/manifest hash.
+5. **Rust build products** — the crate's `target/` (four Android ABIs + host bindgen) in the same rust-cache archive; the volatile key tail is `NDK_VERSION MIN_API DNGLAB_SHA`.
 
-`DNGLAB_SHA` is fed via rust-cache `env-vars` (tail of the key), **not** via `key` (which sits before the lockfile segment): on a submodule bump the progressive prefix restore still matches the previous run at the lockfile segment, so layer 3 stays warm and cargo re-fingerprints/rebuilds only rawler + the first-party crate. A mid-chain `key: dnglab-<sha>` would discard the dependency layer on every bump. Layers 3–4 live in one archive because rust-cache always caches `$CARGO_HOME` together with the workspace target; the layering is expressed through key-chain fallback, not separate archives.
+`DNGLAB_SHA` is fed via rust-cache `env-vars` (tail of the key), **not** via `key` (which sits before the lockfile segment): on a submodule bump the progressive prefix restore still matches the previous run at the lockfile segment, so layer 4 stays warm and cargo re-fingerprints/rebuilds only rawler + the first-party crate. A mid-chain `key: dnglab-<sha>` would discard the dependency layer on every bump. Layers 4–5 live in one archive because rust-cache always caches `$CARGO_HOME` together with the workspace target; the layering is expressed through key-chain fallback, not separate archives.
 
-Layer 1 belongs to the `emulator-smoke` job; layers 2–4 belong to the `rust` job. The Gradle dependency/output cache restored by `gradle/actions/setup-gradle` is a fifth, unlisted layer: `smoke_emulator.yaml` restores what the `apk` job wrote, so `connectedDebugAndroidTest` re-runs only the androidTest slice instead of recompiling the application.
+Layer 1 belongs to the `emulator-smoke` job; layers 2–5 belong to the `rust` job. The Gradle dependency/output cache restored by `gradle/actions/setup-gradle` is a further, unlisted layer: `smoke_emulator.yaml` restores what the `apk` job wrote, so `connectedDebugAndroidTest` re-runs only the androidTest slice instead of recompiling the application. That layer is real, not theoretical: the `apk` job's log shows most tasks `FROM-CACHE` (resources, manifests, dexing) and `~/.gradle/caches/build-cache-1` inside the restored entry, because `setup-gradle` passes `--build-cache`.
+
+#### Downloads deliberately left uncached
+
+These still cross the network on every run. Each is a conscious trade, not an oversight.
+
+| Download | Cost per run | Why it is not cached |
+| --- | --- | --- |
+| Git submodules — `external/**` (dnglab, RawTherapee, colour, exiftool, rawloader) | a full clone of each, every run | The checked-out submodule tree is exactly what the Rust slice *compiles*, so a stale entry would silently build the wrong source — the one outcome an `external/**` bump must never produce. `actions/checkout` re-clones instead. |
+| The actions themselves — `Download action repository '<owner>/<repo>@<ref>'` | small, per action | Fetching each action's code is inherent to hosted runners; there is nothing in the workflow to cache. |
+
+#### Quota hygiene
+
+The repository has a **10 GiB** Actions-cache budget, and most families key on something that changes: `gradle-transforms-v1-<hash>`, `gradle-dependencies-v1-<hash>` and `gradle-home-v1|…|<commit-sha>` mint a **new generation per build-config change or per commit**, and `<os>-rustup-<rustc version>` mints one **per Rust release**. The superseded entries keep occupying the budget until something evicts them, and `gh cache` never garbage-collects by itself.
+
+This is not theoretical: before this rule was written the repository sat at **8.66 GiB of 10 GiB across 116 entries**, of which 6.27 GiB was superseded Gradle generations — `gradle-transforms-v1-*` alone held 18 entries / 4.11 GiB. At that occupancy GitHub starts evicting, and the first casualties are the expensive layers (`v0-rust-build-*` at 653 MiB, `Linux-ndk-*` at 651 MiB) whose loss costs ~9 minutes per run.
+
+Keep the newest generation of every family and delete the rest. This is safe precisely because `setup-gradle` and `rust-cache` restore by **key prefix** — the surviving newest entry is the one a prefix restore would have picked anyway:
+
+```bash
+# dry run first: print what would go
+gh cache list --limit 1000 --json id,key,sizeInBytes,createdAt \
+  | jq -r 'group_by(.key | sub("[0-9a-f]{6,}.*$"; ""))[] | sort_by(.createdAt) | reverse | .[1:][] | .id' \
+  | xargs -r -n1 gh cache delete
+```
+
+Do **not** prune to fewer than one entry per family, and leave the deliberate safety nets alone: `Linux-ndk-*` and `Linux-android-sdk-*` exist so a runner image that loses a preinstalled component heals itself instead of failing deep inside Gradle.
 
 ### Version Handling
 
@@ -317,3 +348,6 @@ Split across the two rule files, on purpose:
 | 2026-09-15 | SDK root resolution made robust on the `ubuntu-26.04` preview image: the runner exports `ANDROID_HOME` only as an inherited process variable (the workflow `env` context evaluates it empty, and an empty composite-step `env:` silently overrides the inherited value). Both reusable workflows now resolve the root in bash (`/usr/local/lib/android/sdk` first, then the well-known fallbacks) and publish it via `$GITHUB_ENV`. Verified against image `ubuntu26/20260907.131.1`: all pinned components present, happy path performs zero downloads and no SDK/NDK cache restore. |
 | 2026-09-15 | Rust cache split into logical layers (new "CI cache layers" table under Key Configuration): NDK stays its own image/version-keyed layer; inside rust-cache the dnglab submodule SHA moved from the mid-chain `key` input to `env-vars` (`NDK_VERSION MIN_API DNGLAB_SHA`), so a submodule bump no longer discards the slow-changing `$CARGO_HOME` dependency layer — progressive prefix restore keeps it warm while cargo rebuilds only the changed rawler path-dep and the first-party crate. |
 | 2026-09-15 | Emulator smoke test added as the sibling of the release job: `.github/workflows/smoke_emulator.yaml` (reusable) boots an AVD and runs `connectedDebugAndroidTest` against the debug build, and `build.yaml` gains `emulator-smoke` gated on `preflight.release != 'true'` — a release run publishes instead, a normal run smoke-tests instead of publishing. Instrumented cases live in the new AGP-default source set `app/src/androidTest/kotlin` (`MainActivitySmokeTest`, `RawlerNativeSmokeTest`) with `androidx.test` runner/core/ext-junit added to the version catalog and `androidTestImplementation`. The AVD cache uses the split `actions/cache/restore` + `actions/cache/save` pair so it is written after the emulator exists and before any APK is installed. The SDK-root resolution shared by three workflows was extracted into the new `locate_sdk` composite action. Closes Q4 and Q5; the "CI cache layers" table gained the AVD layer and the release/PR trigger rows now run the smoke job. |
+| 2026-09-15 | First smoke run failed and its cache audit landed two fixes. (a) The job never enabled KVM: the emulator fell back to `-accel off`, its adb daemon never came up and the AVD-creation step died. The job now writes the emulator-runner action's documented `99-kvm4all.rules` udev rule before starting the emulator. (b) The AVD cache was extended into a single **emulator** cache that also carries `$ANDROID_HOME/system-images`, `$ANDROID_HOME/emulator` and `$ANDROID_HOME/build-tools` — the ~1.4 GB the action otherwise re-downloaded from `dl.google.com` every run; the AVD and its system image must share one entry, since an AVD without its image cannot boot. The test run now adds `-no-snapshot-save` so the cached snapshot is never overwritten by a run that has our APK installed. New "Downloads deliberately left uncached" subsection records what still crosses the network and why (`~/.rustup`, git submodules, the actions' own repositories). |
+| 2026-09-15 | Cache-quota audit. The repository was at **8.66 GiB of its 10 GiB budget across 116 entries**, almost all of it superseded Gradle generations (`gradle-transforms-v1-*`: 18 entries / 4.11 GiB; `gradle-dependencies-v1-*`: 6 / 1.52 GiB; `gradle-home-v1\|…\|<commit-sha>`: 31 / 0.64 GiB) plus two orphaned `v0-rust-build-*` and `v0-rust-dnglab-*` archives (~1.9 GiB) left behind by the crate-path moves, whose `lastAccessedAt` equalled `createdAt` — i.e. never restored. 55 dead entries deleted, taking usage to 2.26 GiB, and a new "Quota hygiene" subsection states the rule (keep the newest generation per family, never drop below one, leave the NDK/SDK safety nets) with the dry-run command. |
+| 2026-09-15 | Rust toolchain download cached, superseding the previous entry's decision to leave `~/.rustup` uncached. `build_rust.yaml` now restores `~/.rustup` by prefix **before** `Install Rust`, then saves it immediately after the install under `<os>-rustup-<rustc version>` (the key is unknowable beforehand, and a constant key cannot work because `actions/cache` never re-saves a restored entry — the archive would freeze on creation-day `stable` and re-download the difference forever). The save is skipped when `cache-matched-key` already equals the computed key, so it can never collide with an existing entry, and it runs before anything that can fail so a later build failure cannot discard a successful toolchain download. This removes the last recurring download of size in the `rust` job (~250 MB, four Android target std libraries). The rustup layer was inserted as layer 3 of the cache table, the `~/.rustup` row was dropped from "Downloads deliberately left uncached", and quota hygiene now also names `<os>-rustup-<version>` as a per-release family. |

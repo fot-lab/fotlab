@@ -85,10 +85,54 @@ jobs:
           echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
         shell: bash
 
+      # rustup keeps the toolchain in ~/.rustup, which Swatinem/rust-cache does NOT
+      # cover — it caches $CARGO_HOME and target/ only. Without this the
+      # `dtolnay/rust-toolchain` step below re-fetches the host toolchain plus the four
+      # Android target std libraries from static.rust-lang.org on every run
+      # (`info: syncing channel updates` + `info: downloading 4 components`, ~250 MB).
+      #
+      # The save key is deliberately unknown at restore time: a constant key cannot
+      # work here, because actions/cache never re-saves an entry it restored, so the
+      # archive would freeze at whatever `stable` was the day it was created and every
+      # later run would re-download the difference forever. So we restore by PREFIX and
+      # then save under the key of the toolchain we actually ended up with
+      # (`<os>-rustup-<rustc version>`): restoring an archive of the same release is a
+      # no-op, and a channel bump mints one new entry while the previous one becomes
+      # dead weight for the quota-hygiene pass (rules/ACTION.md).
+      #
+      # Must run BEFORE `Install Rust`: the whole point is to have the components on
+      # disk before rustup decides what it still has to download.
+      - name: Restore Rust toolchain cache
+        id: rustup-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.rustup
+          key: ${{ runner.os }}-rustup-current
+          restore-keys: |
+            ${{ runner.os }}-rustup-
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - name: Resolve Rust toolchain cache key
+        id: rustup-key
+        run: |
+          set -euo pipefail
+          echo "key=${{ runner.os }}-rustup-$(rustc -vV | sed -n 's/^release: //p')" >> "$GITHUB_OUTPUT"
+        shell: bash
+
+      # Skipped when the restored archive already IS this toolchain (same key) — saving
+      # it again would merely collide with an existing entry. Saved here, immediately
+      # after the install and before anything that can fail, so a later build failure
+      # cannot throw away a toolchain download that already succeeded.
+      - name: Save Rust toolchain cache
+        if: steps.rustup-key.outputs.key != steps.rustup-cache.outputs.cache-matched-key
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.rustup
+          key: ${{ steps.rustup-key.outputs.key }}
 
       # Publish the pinned dnglab submodule SHA as an env var so it lands in the
       # VOLATILE tail of the rust-cache key (see the cache layering note below),

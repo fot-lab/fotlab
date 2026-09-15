@@ -7,12 +7,20 @@
 # set `app/src/androidTest/kotlin` (Google's recommended app layout), so the tests
 # execute against the packaged application on a real Android runtime.
 #
+# Two prerequisites the job cannot skip, both learned the hard way:
+#   * KVM must be made accessible BEFORE the emulator starts. /dev/kvm exists on the
+#     image but belongs to group `kvm`, which the runner user is not in; without the
+#     udev rule below the emulator silently falls back to -accel off and its adb
+#     daemon never comes up.
+#   * the AVD and the emulator's SDK packages (system image, emulator, build-tools)
+#     must be cached TOGETHER — an AVD with no system image cannot boot.
+#
 # Emulator reuse (why the cache steps are ordered the way they are):
-#   1. restore the AVD cache;
-#   2. on a miss, create the AVD and generate its snapshot;
-#   3. SAVE the AVD cache — at this point the emulator exists but our APK has never
-#      been installed, so the cached snapshot carries no app state and stays valid
-#      for every later build;
+#   1. restore the emulator cache (AVD + snapshot + the SDK packages it boots);
+#   2. on a miss, install those packages, create the AVD and generate its snapshot;
+#   3. SAVE the emulator cache — at this point the emulator exists but our APK has
+#      never been installed, so the cached snapshot carries no app state and stays
+#      valid for every later build;
 #   4. only now run the tests, which install the APK.
 # Steps 1/3 use `cache/restore` + `cache/save` rather than plain `actions/cache`
 # precisely because the save has to happen HERE — mid-job, before the APK is
@@ -73,12 +81,15 @@ jobs:
     env:
       ANDROID_API: '36'
       ANDROID_BUILD_TOOLS: '36.0.0'
-      # Emulator flags. Deliberately a job env value, not an input: the cache-warming
-      # run and the test run MUST use identical options or the cached snapshot is
-      # not reusable, and an input would let a caller break that invariant.
-      # No -no-snapshot-save / -no-snapshot-load: quick-boot snapshots are exactly
-      # what makes the cached AVD boot fast.
+      # Emulator flags. Deliberately job env values, not inputs — an input would let a
+      # caller break the snapshot invariants below:
+      #  * Cache-warming run passes nothing snapshot-related, so the emulator WRITES
+      #    the quick-boot snapshot on exit and the cache captures it.
+      #  * The test run adds -no-snapshot-save: it LOADS that snapshot but never
+      #    overwrites it, so our APK can never contaminate the cached emulator. The
+      #    two option sets differ by exactly that flag and nothing else.
       EMULATOR_OPTIONS: '-no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none'
+      EMULATOR_OPTIONS_TEST: '-no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot-save'
     steps:
       - name: Check out
         uses: actions/checkout@v7
@@ -98,6 +109,23 @@ jobs:
           android-home: ${{ env.ANDROID_HOME }}
           api-level: ${{ env.ANDROID_API }}
           build-tools: ${{ env.ANDROID_BUILD_TOOLS }}
+
+      # Mandatory on Linux runners, and the reason the first smoke run failed:
+      # /dev/kvm exists on the image but is owned by group `kvm`, which the runner
+      # user is not in, so the emulator started with `-accel off` and its adb daemon
+      # never came up ("ProbeKVM: This user doesn't have permissions to use KVM").
+      # The udev rule widens the mode to 0666 — group membership can't be granted
+      # mid-job, because a new supplementary group only applies to a fresh login
+      # session, which agent processes are not. This is the recipe published by the
+      # emulator-runner action itself.
+      - name: Enable KVM
+        run: |
+          set -euo pipefail
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+        shell: bash
 
       # The Gradle build cache is written by the apk job and restored here, so
       # connectedDebugAndroidTest re-runs only what the apk job could not hand over
@@ -128,20 +156,38 @@ jobs:
           cp -r native-artifacts/kotlin/. app/build/generated/uniffi/main/kotlin/
         shell: bash
 
-      # -------- emulator (AVD cache) --------
-      - name: Restore AVD cache
-        id: avd-cache
+      # -------- emulator (AVD + emulator SDK cache) --------
+      # ONE entry on purpose. An AVD is useless without the system image it boots, so
+      # the AVD and the SDK packages the emulator-runner installs are cached under a
+      # single key; splitting them would allow the AVD to hit while the system image
+      # missed, leaving the emulator with nothing to boot.
+      # Cached paths and why each is there:
+      #  * ~/.android/avd + ~/.android/adb* — the AVD, its config and its snapshot.
+      #  * system-images + emulator         — what the action otherwise re-downloads
+      #    from dl.google.com on EVERY run (the API-36 google_apis x86_64 image plus
+      #    the emulator package, ~1.4 GB). Restoring them also short-circuits the
+      #    action's `sdkmanager --install`, because each package's own package.xml
+      #    metadata travels inside the cached directory.
+      #  * build-tools                      — present only because the action
+      #    force-installs the LATEST build-tools (37.0.0 as of writing) alongside the
+      #    pinned 36.0.0 install_sdk guarantees; without this that is another ~110 MB
+      #    on every run.
+      - name: Restore emulator cache
+        id: emulator-cache
         uses: actions/cache/restore@v6
         with:
           path: |
             ~/.android/avd/*
             ~/.android/adb*
-          key: ${{ runner.os }}-avd-${{ inputs.api-level }}-${{ inputs.target }}-${{ inputs.arch }}
+            ${{ env.ANDROID_HOME }}/system-images
+            ${{ env.ANDROID_HOME }}/emulator
+            ${{ env.ANDROID_HOME }}/build-tools
+          key: ${{ runner.os }}-emulator-${{ inputs.api-level }}-${{ inputs.target }}-${{ inputs.arch }}
 
-      # Cold path only: build the AVD and let the emulator write its snapshot, which
-      # is what the following save captures.
+      # Cold path only: install the SDK packages, build the AVD and let the emulator
+      # write its snapshot, which is what the following save captures.
       - name: Create AVD and generate a snapshot for caching
-        if: steps.avd-cache.outputs.cache-hit != 'true'
+        if: steps.emulator-cache.outputs.cache-hit != 'true'
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: ${{ inputs.api-level }}
@@ -153,16 +199,19 @@ jobs:
           disable-animations: false
           script: echo "Generated AVD snapshot for caching."
 
-      # Warm path only. Saved BEFORE any APK is installed, so the cached emulator is a
+      # Cold path only. Saved BEFORE any APK is installed, so the cached emulator is a
       # clean one and is reused by every subsequent run.
-      - name: Save AVD cache
-        if: steps.avd-cache.outputs.cache-hit != 'true'
+      - name: Save emulator cache
+        if: steps.emulator-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
         with:
           path: |
             ~/.android/avd/*
             ~/.android/adb*
-          key: ${{ runner.os }}-avd-${{ inputs.api-level }}-${{ inputs.target }}-${{ inputs.arch }}
+            ${{ env.ANDROID_HOME }}/system-images
+            ${{ env.ANDROID_HOME }}/emulator
+            ${{ env.ANDROID_HOME }}/build-tools
+          key: ${{ runner.os }}-emulator-${{ inputs.api-level }}-${{ inputs.target }}-${{ inputs.arch }}
 
       # -------- instrumented smoke tests --------
       # Installs the debug APK + its test APK on the emulator and runs
@@ -176,7 +225,7 @@ jobs:
           target: ${{ inputs.target }}
           arch: ${{ inputs.arch }}
           force-avd-creation: false
-          emulator-options: ${{ env.EMULATOR_OPTIONS }}
+          emulator-options: ${{ env.EMULATOR_OPTIONS_TEST }}
           disable-animations: true
           script: |
             set -o pipefail
