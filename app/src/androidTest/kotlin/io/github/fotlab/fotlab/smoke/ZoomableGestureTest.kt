@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.test.TouchInjectionScope
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performTouchInput
@@ -39,10 +40,13 @@ import org.junit.runner.RunWith
  *  2. **Finger added/lifted mid-gesture** — the precise scenario the rewrite targets, where a
  *     hand-rolled centroid jumps; here `calculateCentroid` can return `Offset.Unspecified`,
  *     which `ZoomState.transform` must fall back from.
- *  3. **Clamping** — a huge pinch out/in must stay inside `[minScale, maxScale]`.
+ *  3. **Clamping** — a wide two-finger spread must clamp inside `[minScale, maxScale]`.
  *  4. **The REAL dialog** — [LibraryViewerDialog] itself (Dialog + HorizontalPager +
- *     ZoomableAsyncImage with `keepParentDraggable`), paged with swipes, the literal user
+ *     ZoomableAsyncImage with `keepParentDraggable`), paged with drags, the literal user
  *     journey that crashes on the device.
+ *
+ * Gestures are built from the injection primitives (`down`/`moveBy`/`up`) with explicit
+ * pointer ids, which also lets us interleave finger add/lift exactly mid-stream.
  *
  * Everything logs under `GESTURE-E2E` with timestamps; smoke_emulator.yaml attaches logcat.txt
  * on failure, so an emulator failure here names the crashing line directly.
@@ -56,9 +60,9 @@ class ZoomableGestureTest {
     private val tag = "GESTURE-E2E"
     private var t0 = 0L
 
-    private fun step(detail: String) {
+    private fun step(phase: String, detail: String) {
         val ms = (System.nanoTime() - t0) / 1_000_000
-        Log.i(tag, "[T+${ms}ms] $detail")
+        Log.i(tag, "[T+${ms}ms][$phase] $detail")
     }
 
     private lateinit var pngFile: File
@@ -114,6 +118,27 @@ class ZoomableGestureTest {
             }
         }
         composeRule.waitForIdle()
+    }
+
+    /** Two-finger spread from `span0` to `span1` around the center, built from primitives. */
+    private fun TouchInjectionScope.spread(span0: Float, span1: Float, steps: Int = 10) {
+        down(0, center - Offset(span0 / 2f, 0f))
+        down(1, center + Offset(span0 / 2f, 0f))
+        val halfDelta = (span1 - span0) / 2f / steps
+        repeat(steps) {
+            moveBy(0, Offset(-halfDelta, 0f))
+            moveBy(1, Offset(halfDelta, 0f))
+        }
+        up(0)
+        up(1)
+    }
+
+    /** One-finger horizontal drag of `dx` px built from primitives. */
+    private fun TouchInjectionScope.dragX(dx: Float, steps: Int = 10) {
+        down(0, center)
+        val delta = dx / steps
+        repeat(steps) { moveBy(0, Offset(delta, 0f)) }
+        up(0)
     }
 
     // -------------------------------------------------- 1: open, no touch
@@ -179,24 +204,14 @@ class ZoomableGestureTest {
         setContentWithZoomable { state = it }
         val node = composeRule.onNodeWithContentDescription(CD)
 
-        node.performTouchInput {
-            pinch(
-                start0 = center - Offset(200f, 0f), end0 = center - Offset(2000f, 0f),
-                start1 = center + Offset(200f, 0f), end1 = center + Offset(2000f, 0f),
-            )
-        }
+        node.performTouchInput { spread(span0 = 100f, span1 = 6000f) }
         composeRule.waitForIdle()
         val zoomed = state!!
         step("clamp", "after pinch-out: scale=${zoomed.scale} offset=${zoomed.offset}")
         assertTrue("pinch-out must clamp at $MAX_SCALE", zoomed.scale <= MAX_SCALE + 0.001f)
         assertTrue("pinch-out must actually zoom", zoomed.scale > 1.5f)
 
-        node.performTouchInput {
-            pinch(
-                start0 = center - Offset(2000f, 0f), end0 = center - Offset(50f, 0f),
-                start1 = center + Offset(2000f, 0f), end1 = center + Offset(50f, 0f),
-            )
-        }
+        node.performTouchInput { spread(span0 = 4000f, span1 = 10f) }
         composeRule.waitForIdle()
         val fitted = state!!
         step("clamp", "after pinch-in: scale=${fitted.scale} offset=${fitted.offset}")
@@ -208,7 +223,7 @@ class ZoomableGestureTest {
     /**
      * The literal user journey that crashes on the device: [LibraryViewerDialog] opens on the
      * tapped image (Dialog + HorizontalPager + ZoomableAsyncImage with `keepParentDraggable`),
-     * then pages back and forth with one-finger swipes. Each swipe is injected on the CURRENT
+     * then pages back and forth with one-finger drags. Each drag is injected on the CURRENT
      * page's image (centered and visible); paging itself must hand the gesture to the pager
      * because the image stays fitted. Composition and paging must survive.
      */
@@ -229,26 +244,26 @@ class ZoomableGestureTest {
 
         // Forward: inject on the page we are on, then the next page becomes centered.
         composeRule.onNodeWithContentDescription("gesture_0.png")
-            .performTouchInput { swipeLeft() }
+            .performTouchInput { dragX(dx = -900f) }
         composeRule.waitForIdle()
         step("dialog", "paged to item 1")
         composeRule.onNodeWithContentDescription(closeDesc).assertExists()
 
         composeRule.onNodeWithContentDescription("gesture_1.png")
-            .performTouchInput { swipeLeft() }
+            .performTouchInput { dragX(dx = -900f) }
         composeRule.waitForIdle()
         step("dialog", "paged to item 2")
         composeRule.onNodeWithContentDescription(closeDesc).assertExists()
 
         // Back again.
         composeRule.onNodeWithContentDescription("gesture_2.png")
-            .performTouchInput { swipeRight() }
+            .performTouchInput { dragX(dx = 900f) }
         composeRule.waitForIdle()
         step("dialog", "paged back to item 1")
         composeRule.onNodeWithContentDescription(closeDesc).assertExists()
 
         composeRule.onNodeWithContentDescription("gesture_1.png")
-            .performTouchInput { swipeRight() }
+            .performTouchInput { dragX(dx = 900f) }
         composeRule.waitForIdle()
         step("dialog", "paged back to item 0")
         composeRule.onNodeWithContentDescription(closeDesc).assertExists()

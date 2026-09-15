@@ -211,7 +211,7 @@ class PngEndToEndFlowTest {
 
             // Dedupe: a second import of the same Uri must reuse the node, not create a twin.
             importAtRoot(uri)
-            val again = LibraryCore.getByUri(uri.toString())
+            val again = runBlocking { LibraryCore.getByUri(uri.toString()) }
             step("dedupe", "after re-import fsNodeId=${again?.fsNodeId} (first=${node.fsNodeId})")
             assertEquals("re-import must reuse the existing node", node.fsNodeId, again?.fsNodeId)
 
@@ -250,18 +250,19 @@ class PngEndToEndFlowTest {
             // ImageLoader executing an ImageRequest over the content uri.
             val request = ImageRequest.Builder(context).data(viewerUri).build()
             val t = System.nanoTime()
-            val result = context.imageLoader.execute(request)
+            val result = runBlocking { context.imageLoader.execute(request) }
             step("viewer", "Coil execute took ${(System.nanoTime() - t) / 1_000_000} ms, " +
                 "result=${result.javaClass.simpleName}")
             assertTrue("Coil must succeed on the PNG", result is SuccessResult)
-            val drawable = (result as SuccessResult).drawable
+            // coil3 replaced Drawable with Image, which carries the intrinsic dimensions directly.
+            val image = (result as SuccessResult).image
             step(
                 "viewer",
-                "decoded drawable=${drawable.javaClass.simpleName} " +
-                    "intrinsic=${drawable.intrinsicWidth}x${drawable.intrinsicHeight}",
+                "decoded image=${image.javaClass.simpleName} " +
+                    "intrinsic=${image.width}x${image.height}",
             )
-            assertTrue("decoded bitmap must have real dimensions", drawable.intrinsicWidth > 0)
-            assertEquals(256, drawable.intrinsicHeight)
+            assertTrue("decoded bitmap must have real dimensions", image.width > 0)
+            assertEquals(256, image.height)
         } finally {
             sourceUri?.let(::deleteSource)
         }
@@ -292,7 +293,9 @@ class PngEndToEndFlowTest {
 
             // The real parallel sniff (COIL + RAWLER workers, bounded by the sniff timeout).
             val t = System.nanoTime()
-            val sniff = FormatSniffer.sniff(header!!, timeoutMillis = DEFAULT_SNIFF_TIMEOUT_MS)
+            val sniff = runBlocking {
+                FormatSniffer.sniff(header!!, timeoutMillis = DEFAULT_SNIFF_TIMEOUT_MS)
+            }
             step("sniff", "FormatSniffer.sniff took ${(System.nanoTime() - t) / 1_000_000} ms")
             assertTrue("sniff must not time out on a PNG", sniff is SniffResult.Ok)
             val verdicts = (sniff as SniffResult.Ok).verdicts
@@ -332,7 +335,7 @@ class PngEndToEndFlowTest {
             // What StudioScreen then does with a Ready(uri): Coil renders it.
             val request = ImageRequest.Builder(context).data(model as Uri).build()
             val t2 = System.nanoTime()
-            val result = context.imageLoader.execute(request)
+            val result = runBlocking { context.imageLoader.execute(request) }
             step("studio", "Studio Coil render took ${(System.nanoTime() - t2) / 1_000_000} ms, " +
                 "result=${result.javaClass.simpleName}")
             assertTrue("Studio render must succeed on the PNG", result is SuccessResult)
