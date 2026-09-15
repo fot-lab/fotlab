@@ -32,7 +32,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Source
 import androidx.compose.material.icons.filled.Deselect
-import androidx.compose.material.icons.filled.DriveFileRename
+import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.FlipToBack
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.IosShare
@@ -526,7 +526,7 @@ private fun LibraryTopBar(
                     if (selectionSize == 1) {
                         IconButton(onClick = onRename) {
                             Icon(
-                                imageVector = Icons.Filled.DriveFileRename,
+                                imageVector = Icons.Filled.DriveFileRenameOutline,
                                 contentDescription = stringResource(id = R.string.library_cd_rename),
                             )
                         }
