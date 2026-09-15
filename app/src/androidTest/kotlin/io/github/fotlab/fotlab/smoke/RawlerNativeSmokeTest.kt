@@ -3,8 +3,10 @@ package io.github.fotlab.fotlab.smoke
 import android.graphics.Bitmap
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.github.fotlab.fotlab_rawler.RawlerFotlabBridge
+import io.github.fotlab.fotlab_rawler.identify
 import java.io.ByteArrayOutputStream
 import org.junit.Assert.assertNull
+import org.junit.Assert.fail
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -72,5 +74,27 @@ class RawlerNativeSmokeTest {
     @Test
     fun decodeOfPngSurvives() {
         RawlerFotlabBridge.decodeRawToPng(pngBytes)
+    }
+
+    /**
+     * Direct, un-swallowed probe of the generated native `identify` (NOT the `runCatching`-wrapped
+     * [RawlerFotlabBridge]). Every other case here funnels calls through the facade, which reduces any
+     * *JVM-level* failure (a JNA `UnsatisfiedLinkError`, an `ExceptionInInitializerError` from a broken
+     * UniFFI binding, a `RuntimeException` in the generated lower/raise glue) to `null` — making a dead
+     * JVM binding indistinguishable from "rawler declined the input".
+     *
+     * A native abort (SIGSEGV/SIGABRT inside `librawler_fotlab.so`) still kills the process and fails
+     * the instrumentation — that is the case the other tests already guard, and the tombstone/logcat
+     * capture in `smoke_emulator.yaml` now records its backtrace. This case closes the *other* half:
+     * if the call fails in the JVM (not natively), we fail loudly with the exception type + message so
+     * the failure mode is unambiguous (`DNGLAB-RAWLER-000002`).
+     */
+    @Test
+    fun identifyCallSurfacesJvmExceptions() {
+        try {
+            identify(notAnImage)
+        } catch (t: Throwable) {
+            fail("rawler identify threw a JVM exception (not a native abort): ${t.javaClass} — ${t.message}")
+        }
     }
 }

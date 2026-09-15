@@ -227,11 +227,22 @@ jobs:
           force-avd-creation: false
           emulator-options: ${{ env.EMULATOR_OPTIONS_TEST }}
           disable-animations: true
+          # Capture the native crash context: clear logcat, run the instrumented tests, then
+          # dump the full logcat (incl. the `crash` buffer) and list any tombstones. A rawler
+          # FFI call that aborts the process leaves a SIGSEGV/SIGABRT backtrace here — without
+          # this we are blind to WHY the cross-language call dies (`DNGLAB-RAWLER-000002`).
           script: |
             set -o pipefail
+            adb logcat -c || true
             gradle --no-daemon --stacktrace connectedDebugAndroidTest 2>&1 | tee smoke-log.txt
+            STATUS=${PIPESTATUS[0]}
+            adb logcat -d -b all > logcat.txt 2>&1 || true
+            adb shell ls -l /data/tombstones > tombstones.txt 2>&1 || true
+            exit $STATUS
 
-      # Reports and the Gradle log are kept only on failure, matching build_gradle.yaml.
+      # Reports, the Gradle log, and the captured native diagnostics are kept on failure
+      # (matching build_gradle.yaml). logcat.txt / tombstones.txt are what turn a silent
+      # "process died" into a readable SIGSEGV/SIGABRT backtrace for the rawler FFI path.
       - name: Upload smoke logs
         if: failure() && inputs.log-artifact-name != ''
         uses: actions/upload-artifact@v7
@@ -239,6 +250,8 @@ jobs:
           name: ${{ inputs.log-artifact-name }}
           path: |
             smoke-log.txt
+            logcat.txt
+            tombstones.txt
             app/build/reports/androidTests/connected
             app/build/outputs/androidTest-results/connected
           retention-days: ${{ inputs.log-retention-days }}
