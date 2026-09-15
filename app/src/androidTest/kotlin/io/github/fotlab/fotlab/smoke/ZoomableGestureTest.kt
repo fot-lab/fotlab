@@ -132,8 +132,8 @@ class ZoomableGestureTest {
      * view in onCreate (AppTheme + nav scaffold), so the test rule's `setContent` is illegal
      * ("has already set content"). Replace the activity's content view with a brand-new
      * ComposeView instead — setContentView detaches and disposes the old composition, and the
-     * compose test framework discovers semantics owners by walking the window, so all
-     * onNode*/gesture assertions keep working against our replacement.
+     * compose test framework discovers semantics owners by walking the window, so all node
+     * lookup and gesture assertions keep working against our replacement.
      */
     private fun hostContent(content: @androidx.compose.runtime.Composable () -> Unit) {
         composeRule.runOnUiThread {
