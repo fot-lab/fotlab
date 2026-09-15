@@ -12,4 +12,5 @@ This file contains **only** the item table. No statistics, no changelog — git 
 | `ACTION-PREPIN-000001` | Preflight toolchain caching audit — SDK/NDK/Gradle cached; Rust NDK & python-for-android pending | `PREPIN` | Observation | P3 | [detail](rules/REVIEW/detail/ACTION-PREPIN-000001.md) |
 | `ACTION-LIBRND-000001` | Library one-level rendering audit — current view renders only direct children; Recycle must mirror one-level queries and reset navigation on switch so the views never mix | `LIBRND` | Observation | P2 | [detail](rules/REVIEW/detail/ACTION-LIBRND-000001.md) |
 | `DNGLAB-RAWLER-000001` | rawler_fotlab PNG preview is an unprocessed full-sensor dump — no black level, white balance, demosaic, colour mapping or gamma | `RAWLER` | Observation | P2 | [detail](rules/REVIEW/detail/DNGLAB-RAWLER-000001.md) |
-<!-- Next sequence per category: PREPIN 000002, LIBRND 000002, RAWLER 000002. Append one row per new item; never reuse or renumber IDs. -->
+| `DNGLAB-RAWLER-000002` | Rewriting external/dnglab (rawler) in Kotlin — cost / benefit assessment, triggered by a Rust-library-invocation crash | `RAWLER` | Observation | P2 | [detail](rules/REVIEW/detail/DNGLAB-RAWLER-000002.md) |
+<!-- Next sequence per category: PREPIN 000002, LIBRND 000002, RAWLER 000003. Append one row per new item; never reuse or renumber IDs. -->
