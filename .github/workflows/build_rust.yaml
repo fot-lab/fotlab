@@ -2,7 +2,7 @@
 # and uploads them as one artifact consumed by the Android (build_gradle.yaml) job.
 #
 # Source of truth for the binding crate is our own tree:
-#   app/src/binding/rust/                            — the first-party Rust crate
+#   app/src/binding/rust/rawler_fotlab/              — the first-party Rust crate
 #   app/src/binding/kotlin/io/github/fotlab/fotlab_rawler — the hand-written Kotlin facade
 #
 # The crate is a standalone workspace that reaches the upstream source through a *path*
@@ -46,7 +46,7 @@ jobs:
     env:
       NDK_VERSION: ${{ inputs.ndk-version }}
       MIN_API: ${{ inputs.min-api }}
-      CRATE_DIR: app/src/binding/rust
+      CRATE_DIR: app/src/binding/rust/rawler_fotlab
       ANDROID_API: '36'
       ANDROID_BUILD_TOOLS: '36.0.0'
     steps:
@@ -146,7 +146,7 @@ jobs:
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: app/src/binding/rust -> target
+          workspaces: app/src/binding/rust/rawler_fotlab -> target
           cache-all-crates: true
           env-vars: NDK_VERSION MIN_API DNGLAB_SHA
 

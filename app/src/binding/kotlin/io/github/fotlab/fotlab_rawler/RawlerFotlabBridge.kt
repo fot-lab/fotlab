@@ -5,11 +5,11 @@ package io.github.fotlab.fotlab_rawler
  *
  * This file is the **only** hand-written file in this package, and it is committed. The
  * UniFFI bindings it calls (`identify`, `decodeToPng`) are **generated** from
- * `app/src/binding/rust` by CI and dropped into a build directory
+ * `app/src/binding/rust/rawler_fotlab` by CI and dropped into a build directory
  * (`app/build/generated/uniffi/main/kotlin`), never into `src/` — generated code is a build
  * artifact and is not tracked (`FOTLAB-STRUCT-000002` R1). The generated code lands in this
- * same package (see `app/src/binding/rust/uniffi.toml` `package_name`), so the top-level
- * functions are called below without an import.
+ * same package (see `app/src/binding/rust/rawler_fotlab/uniffi.toml` `package_name`), so the
+ * top-level functions are called below without an import.
  *
  * The facade deliberately renames the calls (`identifyFormat` / `decodeRawToPng`): the
  * generated bindings are top-level functions with the upstream names, and a same-named
