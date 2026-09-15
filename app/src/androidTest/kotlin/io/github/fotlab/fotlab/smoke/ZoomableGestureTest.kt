@@ -8,7 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.TouchInjectionScope
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -17,6 +17,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import io.github.fotlab.fotlab.MainActivity
 import io.github.fotlab.fotlab.R
 import io.github.fotlab.fotlab.feature.library.FsNodeObject
 import io.github.fotlab.fotlab.feature.library.LibraryCore
@@ -66,8 +67,18 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class ZoomableGestureTest {
 
+    /**
+     * Hosted on the app's own [MainActivity] rather than ui-test-manifest's empty activity:
+     * an activity declared in the test APK either resolves to the `.test` process (rejected by
+     * `Instrumentation#startActivitySync`, "Intent in process ... resolved to different
+     * process ...") or, when pinned into the app process via `android:process`, dies with
+     * ClassNotFoundException because the app process' classloader cannot see the test APK's
+     * classes. Launching the real MainActivity avoids both — its package, process and
+     * classloader are all the app's own (proven green by MainActivitySmokeTest). `setContent`
+     * then replaces the activity's content view with the composition under test.
+     */
     @get:Rule
-    val composeRule = createComposeRule()
+    val composeRule = createAndroidComposeRule<MainActivity>()
 
     private val tag = "GESTURE-E2E"
     private var t0 = 0L
