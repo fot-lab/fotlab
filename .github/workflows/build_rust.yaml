@@ -56,15 +56,20 @@ jobs:
           fetch-depth: 0
           submodules: ${{ inputs.submodules && 'recursive' || 'false' }}
 
-      # Toolchain, in the order rules/ACTION.md mandates: JDK + SDK first, because install_ndk
-      # drives `sdkmanager` out of $ANDROID_HOME/cmdline-tools (installed by install_sdk), and
-      # cargo-ndk needs ANDROID_NDK_ROOT afterwards. The paths are exported from a step, not set
-      # in the job `env:` block: `$HOME` is a runner variable and the `env` context is not
-      # available inside a job's own `env:` (GitHub rejects it and invalidates the whole file).
-      - name: Export Android SDK path
+      # Use the runner image's prebuilt ANDROID_HOME (/usr/local/lib/android/sdk on
+      # ubuntu-26.04): cmdline-tools, platform-tools, platforms;android-36,
+      # build-tools;36.0.0 and NDK 28.2.13676358 are all preinstalled there.
+      # install_sdk/install_ndk verify the pinned components and only download
+      # anything if a future image rotation is missing one. Fail fast on runners
+      # that do not provide ANDROID_HOME rather than silently using an empty tree.
+      # Toolchain order per rules/ACTION.md: JDK + SDK before NDK (the NDK fallback
+      # drives sdkmanager out of $ANDROID_HOME/cmdline-tools).
+      - name: Use prebuilt Android SDK path
         run: |
-          echo "ANDROID_HOME=$HOME/Android/Sdk" >> "$GITHUB_ENV"
-          echo "ANDROID_SDK_ROOT=$HOME/Android/Sdk" >> "$GITHUB_ENV"
+          set -euo pipefail
+          : "${ANDROID_HOME:?ANDROID_HOME is not exported on this runner}"
+          test -d "$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
         shell: bash
 
       - name: Install JDK

@@ -1,24 +1,47 @@
-# Composite action: install the pinned NDK (and cache it) on the caller's
-# runner, with per-component caching. Kept separate from install_sdk so a Kotlin
-# build does not pay for an NDK it never uses — native builds add this action on
-# top of install_jdk + install_sdk. The install path and NDK version are inputs,
-# so the caller is the single source of truth (rules/ACTION.md).
+# Composite action: ensure the pinned NDK exists on the caller's runner.
+#
+# Preinstalled-first: the GitHub-hosted ubuntu-26.04 image ships NDK
+# 27.3 / 28.2.13676358 / 29.0 under its prebuilt ANDROID_HOME, so when the
+# pinned version is already on disk nothing is downloaded or cached. A missing
+# version takes the fallback path (cache + sdkmanager --install); that path
+# requires cmdline-tools, which install_sdk guarantees when it runs first
+# (rules/ACTION.md toolchain order). Kept separate from install_sdk so a Kotlin
+# build does not pay for an NDK it never uses.
 
 name: Install Android NDK
-description: Install the pinned NDK (and cache it) with per-component caching.
+description: Ensure the pinned NDK exists (prefer runner preinstall, install+cache only when missing).
 
 inputs:
   android-home:
-    description: ANDROID_HOME path the NDK is installed into.
+    description: ANDROID_HOME path the NDK lives in.
     required: true
   ndk-version:
     description: NDK version, used as ndk;<version>, e.g. 28.2.13676358.
     required: true
 
 runs:
-  using: composite
+  using: 'composite'
   steps:
+    - name: Check preinstalled NDK
+      id: precheck
+      shell: bash
+      env:
+        ANDROID_HOME: ${{ inputs.android-home }}
+        NDK_VERSION: ${{ inputs.ndk-version }}
+      run: |
+        NDK_DIR="$ANDROID_HOME/ndk/$NDK_VERSION"
+        # source.properties is written by every sdkmanager NDK install and is
+        # what AGP itself probes; its presence means the toolchain is complete.
+        if [ -f "$NDK_DIR/source.properties" ]; then
+          echo "NDK $NDK_VERSION already present at $NDK_DIR — nothing to install."
+          echo "need-install=false" >> "$GITHUB_OUTPUT"
+        else
+          echo "NDK $NDK_VERSION missing at $NDK_DIR"
+          echo "need-install=true" >> "$GITHUB_OUTPUT"
+        fi
+
     - name: Cache Android NDK
+      if: steps.precheck.outputs.need-install == 'true'
       uses: actions/cache@v6
       with:
         path: ${{ inputs.android-home }}/ndk/${{ inputs.ndk-version }}
@@ -27,10 +50,26 @@ runs:
           ${{ runner.os }}-ndk-
 
     - name: Install NDK
+      if: steps.precheck.outputs.need-install == 'true'
       shell: bash
       env:
         ANDROID_HOME: ${{ inputs.android-home }}
         ANDROID_SDK_ROOT: ${{ inputs.android-home }}
+        NDK_VERSION: ${{ inputs.ndk-version }}
       run: |
+        set -euo pipefail
         export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
-        sdkmanager --install "ndk;${{ inputs.ndk-version }}"
+        sdkmanager --install "ndk;$NDK_VERSION"
+
+    - name: Verify NDK
+      shell: bash
+      env:
+        ANDROID_HOME: ${{ inputs.android-home }}
+        NDK_VERSION: ${{ inputs.ndk-version }}
+      run: |
+        NDK_DIR="$ANDROID_HOME/ndk/$NDK_VERSION"
+        [ -f "$NDK_DIR/source.properties" ] || {
+          echo "::error::ndk;$NDK_VERSION missing under $ANDROID_HOME (and install fallback did not provide it)"
+          exit 1
+        }
+        echo "NDK verified: $NDK_DIR"
