@@ -42,6 +42,13 @@ runs:
 
     - name: Set up Android SDK
       uses: android-actions/setup-android@v4
+      # setup-android's default package set is "tools platform-tools", but Google removed the
+      # legacy `tools` (SDK Tools 26.x) package from the repository — `sdkmanager tools` now
+      # exits 1 with "Failed to find package 'tools'" and kills the whole job. We never use it
+      # (cmdline-tools/latest is what the install steps below invoke); platform-tools alone is
+      # enough and is still maintained.
+      with:
+        packages: platform-tools
       env:
         ANDROID_HOME: ${{ inputs.android-home }}
         ANDROID_SDK_ROOT: ${{ inputs.android-home }}
