@@ -112,3 +112,16 @@ jobs:
     with:
       apk-artifact-name: fotlab-release-apk
       version-name: ${{ needs.apk.outputs.version-name }}
+
+  # Smoke stage — the release stage's sibling, and its exact complement: a normal
+  # run (push/PR, no v* tag, release flag false) boots a cached AVD and runs the
+  # instrumented smoke tests, while a release run skips it entirely and publishes
+  # instead. Both key off the same release flag computed in preflight.
+  emulator-smoke:
+    name: Emulator Smoke Test
+    needs: [preflight, rust, apk]
+    if: ${{ always() && needs.preflight.outputs.release != 'true' && needs.apk.result == 'success' }}
+    uses: ./.github/workflows/smoke_emulator.yaml
+    with:
+      native-artifact-name: ${{ needs.rust.outputs.artifact-name }}
+      log-artifact-name: build-smoke.log

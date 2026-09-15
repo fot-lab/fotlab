@@ -125,25 +125,8 @@ jobs:
           java-version: '17'
           distribution: temurin
 
-      # Resolve the runner's Android SDK root in bash and publish it back to the
-      # GitHub env. On the ubuntu-26.04 preview images the SDK root is exported
-      # only as an inherited PROCESS variable: ${{ env.ANDROID_HOME }} evaluates
-      # empty in workflow expressions, and an empty `env:` on a composite step
-      # silently overrides the inherited value inside bash. Falling back to the
-      # well-known image paths keeps this working on self-hosted runners too.
       - name: Locate Android SDK
-        run: |
-          set -euo pipefail
-          if [ -z "${ANDROID_HOME:-}" ] || [ ! -d "$ANDROID_HOME" ]; then
-            for candidate in /usr/local/lib/android/sdk /home/runner/.android/sdk "$HOME/.android/sdk" "$HOME/Android/Sdk"; do
-              if [ -d "$candidate" ]; then ANDROID_HOME="$candidate"; break; fi
-            done
-          fi
-          : "${ANDROID_HOME:?No Android SDK root found on this runner}"
-          echo "Using ANDROID_HOME=$ANDROID_HOME"
-          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
-          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
-        shell: bash
+        uses: ./.github/actions/locate_sdk
 
       - name: Install Android SDK
         uses: ./.github/actions/install_sdk

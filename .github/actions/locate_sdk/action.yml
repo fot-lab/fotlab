@@ -1,0 +1,46 @@
+# Composite action: resolve the runner's Android SDK root and publish it to the
+# GitHub env as ANDROID_HOME / ANDROID_SDK_ROOT.
+#
+# Why this is a step of its own (and not just a job env value): on the
+# ubuntu-26.04 preview images the SDK root is exported only as an inherited
+# PROCESS variable. The workflow `env` context evaluates ${{ env.ANDROID_HOME }}
+# empty, and an empty `env:` on a composite step silently overrides the inherited
+# value inside bash — so the root has to be resolved in bash and published back
+# through $GITHUB_ENV before any toolchain action runs. Falling back to the
+# well-known image paths keeps this working on self-hosted runners too.
+#
+# Shared by every workflow that needs the Android toolchain (build_gradle.yaml,
+# build_rust.yaml, smoke_emulator.yaml) so the resolution logic exists once.
+
+name: Locate Android SDK
+description: Resolve the Android SDK root and export ANDROID_HOME / ANDROID_SDK_ROOT.
+
+inputs:
+  sdk-root:
+    description: >
+      Explicit SDK root override. Leave empty to use the runner's inherited
+      ANDROID_HOME / ANDROID_SDK_ROOT, then the well-known image paths.
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Locate Android SDK
+      shell: bash
+      env:
+        # Passed under a dedicated name so an empty input cannot clobber the
+        # inherited ANDROID_HOME (see the header note).
+        SDK_ROOT_PREFERRED: ${{ inputs.sdk-root }}
+      run: |
+        set -euo pipefail
+        ANDROID_HOME="${SDK_ROOT_PREFERRED:-${ANDROID_HOME:-}}"
+        if [ -z "$ANDROID_HOME" ] || [ ! -d "$ANDROID_HOME" ]; then
+          for candidate in /usr/local/lib/android/sdk /home/runner/.android/sdk "$HOME/.android/sdk" "$HOME/Android/Sdk"; do
+            if [ -d "$candidate" ]; then ANDROID_HOME="$candidate"; break; fi
+          done
+        fi
+        : "${ANDROID_HOME:?No Android SDK root found on this runner}"
+        echo "Using ANDROID_HOME=$ANDROID_HOME"
+        echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+        echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"

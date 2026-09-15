@@ -155,4 +155,15 @@ dependencies {
 
     debugImplementation(libs.androidx.compose.ui.tooling)
     testImplementation(libs.junit)
+
+    // Instrumented smoke tests, run on an emulator by `connectedDebugAndroidTest` in
+    // .github/workflows/smoke_emulator.yaml. The cases live in the AGP-default instrumented
+    // source set `app/src/androidTest/kotlin` — no extra `kotlin.srcDir` is needed because
+    // `src/<source-set>/kotlin` is registered out of the box.
+    // `runner` is what `testInstrumentationRunner` above names; `core` supplies
+    // ActivityScenario and `ext-junit` the AndroidJUnit4 bridge.
+    androidTestImplementation(libs.junit)
+    androidTestImplementation(libs.androidx.test.core)
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.androidx.test.runner)
 }

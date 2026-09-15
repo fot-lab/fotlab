@@ -1,0 +1,196 @@
+# Reusable workflow: smoke-tests the debug build on an Android emulator.
+#
+# Called by build.yaml as the sibling of release_github.yaml, and only for a
+# NON-release run: a release is verified by publishing the APK, not by booting an
+# emulator. `connectedDebugAndroidTest` installs the debug APK together with its
+# instrumented test APK and runs the cases in the AGP-default instrumented source
+# set `app/src/androidTest/kotlin` (Google's recommended app layout), so the tests
+# execute against the packaged application on a real Android runtime.
+#
+# Emulator reuse (why the cache steps are ordered the way they are):
+#   1. restore the AVD cache;
+#   2. on a miss, create the AVD and generate its snapshot;
+#   3. SAVE the AVD cache — at this point the emulator exists but our APK has never
+#      been installed, so the cached snapshot carries no app state and stays valid
+#      for every later build;
+#   4. only now run the tests, which install the APK.
+# Steps 1/3 use `cache/restore` + `cache/save` rather than plain `actions/cache`
+# precisely because the save has to happen HERE — mid-job, before the APK is
+# installed — instead of in a post-job step.
+#
+# See rules/ACTION.md (Test Strategy, CI cache layers) and FOTLAB-CRASH-000001.
+
+name: Emulator Smoke Test
+
+on:
+  workflow_call:
+    inputs:
+      native-artifact-name:
+        description: >
+          Name of the native artifact (librawler_fotlab.so + Kotlin bindings) to download and
+          place before Gradle. Empty means skip native placement (no rawler_fotlab lib).
+        required: false
+        type: string
+        default: ''
+      api-level:
+        description: API level of the AVD's system image.
+        required: false
+        type: string
+        default: '36'
+      target:
+        description: System-image flavour (google_apis, default, aosp_atd, ...).
+        required: false
+        type: string
+        default: google_apis
+      arch:
+        description: >
+          AVD architecture. Must be an ABI present in librawler_fotlab.so — x86_64 for the
+          hosted ubuntu runners.
+        required: false
+        type: string
+        default: x86_64
+      log-artifact-name:
+        description: Name of the uploaded failure log artifact. Empty means no log artifact.
+        required: false
+        type: string
+        default: ''
+      log-retention-days:
+        description: Retention of the failure log artifact, in days.
+        required: false
+        type: number
+        default: 7
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Emulator Smoke Test
+    runs-on: ubuntu-26.04
+    # A wedged emulator must fail the job, not hold the runner until the default
+    # 6-hour ceiling.
+    timeout-minutes: 45
+    env:
+      ANDROID_API: '36'
+      ANDROID_BUILD_TOOLS: '36.0.0'
+      # Emulator flags. Deliberately a job env value, not an input: the cache-warming
+      # run and the test run MUST use identical options or the cached snapshot is
+      # not reusable, and an input would let a caller break that invariant.
+      # No -no-snapshot-save / -no-snapshot-load: quick-boot snapshots are exactly
+      # what makes the cached AVD boot fast.
+      EMULATOR_OPTIONS: '-no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none'
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Install JDK
+        uses: ./.github/actions/install_jdk
+        with:
+          java-version: '17'
+          distribution: temurin
+
+      - name: Locate Android SDK
+        uses: ./.github/actions/locate_sdk
+
+      - name: Install Android SDK
+        uses: ./.github/actions/install_sdk
+        with:
+          android-home: ${{ env.ANDROID_HOME }}
+          api-level: ${{ env.ANDROID_API }}
+          build-tools: ${{ env.ANDROID_BUILD_TOOLS }}
+
+      # The Gradle build cache is written by the apk job and restored here, so
+      # connectedDebugAndroidTest re-runs only what the apk job could not hand over
+      # (the androidTest APK) instead of recompiling the application.
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v5
+        with:
+          gradle-version: '8.14.5'
+          validate-wrappers: false
+
+      # -------- native (rawler_fotlab) --------
+      # Same placement as build_gradle.yaml: the .so + generated Kotlin bindings go into
+      # the Gradle build directory, never under src/ (FOTLAB-STRUCT-000002 R1).
+      - name: Download native artifact (rawler_fotlab)
+        if: inputs.native-artifact-name != ''
+        uses: actions/download-artifact@v7
+        with:
+          name: ${{ inputs.native-artifact-name }}
+          path: native-artifacts
+
+      - name: Place native libs + Kotlin bindings
+        if: inputs.native-artifact-name != ''
+        run: |
+          set -euo pipefail
+          mkdir -p app/build/generated/jniLibs
+          cp -r native-artifacts/jniLibs/* app/build/generated/jniLibs/
+          mkdir -p app/build/generated/uniffi/main/kotlin
+          cp -r native-artifacts/kotlin/. app/build/generated/uniffi/main/kotlin/
+        shell: bash
+
+      # -------- emulator (AVD cache) --------
+      - name: Restore AVD cache
+        id: avd-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.android/avd/*
+            ~/.android/adb*
+          key: ${{ runner.os }}-avd-${{ inputs.api-level }}-${{ inputs.target }}-${{ inputs.arch }}
+
+      # Cold path only: build the AVD and let the emulator write its snapshot, which
+      # is what the following save captures.
+      - name: Create AVD and generate a snapshot for caching
+        if: steps.avd-cache.outputs.cache-hit != 'true'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ inputs.api-level }}
+          target: ${{ inputs.target }}
+          arch: ${{ inputs.arch }}
+          # Reuse the AVD this action already created rather than recreating it.
+          force-avd-creation: false
+          emulator-options: ${{ env.EMULATOR_OPTIONS }}
+          disable-animations: false
+          script: echo "Generated AVD snapshot for caching."
+
+      # Warm path only. Saved BEFORE any APK is installed, so the cached emulator is a
+      # clean one and is reused by every subsequent run.
+      - name: Save AVD cache
+        if: steps.avd-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.android/avd/*
+            ~/.android/adb*
+          key: ${{ runner.os }}-avd-${{ inputs.api-level }}-${{ inputs.target }}-${{ inputs.arch }}
+
+      # -------- instrumented smoke tests --------
+      # Installs the debug APK + its test APK on the emulator and runs
+      # app/src/androidTest/kotlin. This is the first point at which our app touches
+      # the emulator — see the ordering note at the top of this file.
+      - name: Run emulator smoke tests
+        timeout-minutes: 20
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ inputs.api-level }}
+          target: ${{ inputs.target }}
+          arch: ${{ inputs.arch }}
+          force-avd-creation: false
+          emulator-options: ${{ env.EMULATOR_OPTIONS }}
+          disable-animations: true
+          script: |
+            set -o pipefail
+            gradle --no-daemon --stacktrace connectedDebugAndroidTest 2>&1 | tee smoke-log.txt
+
+      # Reports and the Gradle log are kept only on failure, matching build_gradle.yaml.
+      - name: Upload smoke logs
+        if: failure() && inputs.log-artifact-name != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ inputs.log-artifact-name }}
+          path: |
+            smoke-log.txt
+            app/build/reports/androidTests/connected
+            app/build/outputs/androidTest-results/connected
+          retention-days: ${{ inputs.log-retention-days }}
+          if-no-files-found: warn

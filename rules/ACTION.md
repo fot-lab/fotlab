@@ -31,7 +31,7 @@ its result would prove nothing.
 | Language | Kotlin (Compose) + Rust (one native library) |
 | Build system | Gradle Kotlin DSL + version catalog (`gradle/libs.versions.toml`), Gradle `8.14.5` installed & cached by CI (not committed as a wrapper), AGP `8.7.3` |
 | Modules | `:app` — the only Gradle module; layers are the packages `ui`, `navigation`, `data` (`rules/STRUCT/detail/FOTLAB-STRUCT-000001.md`) |
-| Native | `rawler_fotlab` — the first-party binding crate at `app/src/binding/rust` (Rust + UniFFI), built by `build_rust.yaml` against the Android NDK. It consumes upstream source through a *path* dependency on `external/dnglab/rawler`; upstream is never modified (`FOTLAB-STUDIO-000001`, `FOTLAB-NATIVE-000001` R4). |
+| Native | `rawler_fotlab` — the first-party binding crate at `app/src/binding/rust/rawler_fotlab` (Rust + UniFFI), built by `build_rust.yaml` against the Android NDK. It consumes upstream source through a *path* dependency on `external/dnglab/rawler`; upstream is never modified (`FOTLAB-STUDIO-000001`, `FOTLAB-NATIVE-000001` R4). |
 | Upstream | git submodules under `external/` — inventory in `docs/external/index.md` |
 | Default branch | `main` |
 
@@ -45,12 +45,13 @@ its result would prove nothing.
 | `.github/workflows/build_gradle.yaml` | **Reusable workflow** (`on: workflow_call`) — Android dev env (via the composite action) + Gradle build + APK/log artifact upload. Places the `rawler_fotlab` native artifact before Gradle runs. |
 | `.github/workflows/build_rust.yaml` | **Reusable workflow** (`on: workflow_call`) — builds `librawler_fotlab.so` for the four ABIs with `cargo ndk` and generates the UniFFI Kotlin bindings with the crate's own `uniffi-bindgen` bin; uploads them as the `rawler_fotlab` artifact. |
 | `.github/workflows/release_github.yaml` | **Reusable workflow** (`on: workflow_call`) — download the APK artifact and publish a GitHub Release (pre-release on `-rc`). |
-| `.github/actions/install_jdk/action.yml`, `.github/actions/install_sdk/action.yml`, `.github/actions/install_ndk/action.yml` | **Composite actions** — the toolchain is split per component: `install_jdk` (JDK), `install_sdk` (SDK), `install_ndk` (NDK). `install_sdk` / `install_ndk` are **preinstalled-first**: they probe the runner's existing `ANDROID_HOME` for the pinned components and only run the cache + `setup-android` / `sdkmanager --install` fallback when something is actually missing, ending with a fail-fast verification. Each runs in-job and is reused by `build_gradle.yaml` (JDK+SDK) and by future per-language native workflows (JDK+SDK+NDK), so no step is duplicated and NDK is pulled in only when needed. |
+| `.github/workflows/smoke_emulator.yaml` | **Reusable workflow** (`on: workflow_call`) — boot an AVD from the emulator cache and run the instrumented smoke tests (`connectedDebugAndroidTest`) against the debug build. Called on the **non**-release path only; it is the sibling of `release_github.yaml`. See [Emulator Smoke Test](#emulator-smoke-test). |
+| `.github/actions/locate_sdk/action.yml`, `.github/actions/install_jdk/action.yml`, `.github/actions/install_sdk/action.yml`, `.github/actions/install_ndk/action.yml` | **Composite actions** — the toolchain is split per component: `locate_sdk` (SDK root resolution), `install_jdk` (JDK), `install_sdk` (SDK), `install_ndk` (NDK). `install_sdk` / `install_ndk` are **preinstalled-first**: they probe the runner's existing `ANDROID_HOME` for the pinned components and only run the cache + `setup-android` / `sdkmanager --install` fallback when something is actually missing, ending with a fail-fast verification. Each runs in-job and is reused by `build_gradle.yaml` (JDK+SDK), `smoke_emulator.yaml` (JDK+SDK) and by future per-language native workflows (JDK+SDK+NDK), so no step is duplicated and NDK is pulled in only when needed. |
 
-The orchestrator composes the build and release workflows; the shared toolchain
-steps live in the composite action, so every pinned toolchain version and every
-build step is in one place and a second caller (e.g. a future emulator job, or a
-`build_cmake` / `build_rust` native workflow) reuses it instead of copying.
+The orchestrator composes the build, smoke and release workflows; the shared
+toolchain steps live in the composite actions, so every pinned toolchain version
+and every build step is in one place and a second caller (the emulator job, or a
+`build_cmake` / `build_python` native workflow) reuses it instead of copying.
 Everything a caller may vary — tasks, submodules, artifact names and retention —
 is a `workflow_call` input.
 
@@ -58,14 +59,40 @@ is a `workflow_call` input.
 
 | Event | Jobs | Behaviour |
 | --- | --- | --- |
-| push to `main` (no `v*` tag) | `rust` → `apk` | Rust `librawler_fotlab.so` + Kotlin/Compose compile + debug APK + unit tests |
-| Pull Request to `main` | `rust` → `apk` | same as above, no release |
-| push to `main` touching `external/**` (submodule pointer bump) | `rust` → `apk` | An upstream bump triggers a rebuild, including the Rust slice that compiles the changed third-party source. See [Submodule Bumps](#submodule-bumps). |
-| push `v*` tag | `rust` → `apk` → `github-release` | release APK + GitHub Release |
-| `workflow_dispatch` (`release=true`) | `rust` → `apk` → `github-release` | manual release |
+| push to `main` (no `v*` tag) | `rust` → `apk` → `emulator-smoke` | Rust `librawler_fotlab.so` + Kotlin/Compose compile + debug APK + unit tests, then the emulator smoke tests |
+| Pull Request to `main` | `rust` → `apk` → `emulator-smoke` | same as above, no release |
+| push to `main` touching `external/**` (submodule pointer bump) | `rust` → `apk` → `emulator-smoke` | An upstream bump triggers a rebuild, including the Rust slice that compiles the changed third-party source. See [Submodule Bumps](#submodule-bumps). |
+| push `v*` tag | `rust` → `apk` → `github-release` | release APK + GitHub Release — **no** emulator smoke job |
+| `workflow_dispatch` (`release=true`) | `rust` → `apk` → `github-release` | manual release — **no** emulator smoke job |
 
 A normal push stays on the fast Kotlin path; only a `v*` tag or `release=true`
-produces a Release.
+produces a Release. `emulator-smoke` and `github-release` are siblings gated on
+the same `release` flag from `preflight`, and they are exact complements: a
+release run publishes instead of smoke-testing, a normal run smoke-tests instead
+of publishing.
+
+### Emulator Smoke Test
+
+`emulator-smoke` (reusable workflow `.github/workflows/smoke_emulator.yaml`)
+answers "does the built application actually run on Android?" on the normal
+path, where no release is produced to verify.
+
+| Aspect | Value |
+| --- | --- |
+| Gate | `preflight.release != 'true'` **and** `apk` succeeded — a release run skips it |
+| Runner | `ubuntu-26.04` (needs KVM, which the hosted image provides) |
+| AVD | API `36`, system-image target `google_apis`, arch `x86_64` (an ABI present in `librawler_fotlab.so`) |
+| Emulator flags | `-no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none`, defined once as a job env value so the cache-warming run and the test run cannot diverge |
+| Tests | `app/src/androidTest/kotlin` — the AGP-default instrumented source set (Google's recommended app layout); run via `connectedDebugAndroidTest`, which installs the debug APK plus its test APK |
+| Job timeout | 45 min (test step 20 min) — a wedged emulator fails rather than holding the runner |
+
+The emulator cache is written **after** the AVD has been created and **before**
+the first APK install, so the cached snapshot is a clean warm emulator that every
+later build reuses. That ordering is why the job uses the split
+`actions/cache/restore` + `actions/cache/save` pair instead of `actions/cache`,
+whose save would run as a post-job step — after our APK had been installed.
+
+See the [Test Strategy](#test-strategy) for what the cases assert.
 
 ### Submodule Bumps
 
@@ -97,6 +124,7 @@ Everything else triggers, `external/**` included.
 | `rawler_fotlab` | `rust` job success — `jniLibs/<abi>/librawler_fotlab.so` + the generated UniFFI Kotlin bindings, consumed by the `apk` job | 7 days |
 | `build-gradle.log` | `apk` job | 7 days |
 | `build_log_gradle.log` | `build_gradle.yaml` gradle step runs (apk job) — gradle-only log, separate from the full log | 7 days |
+| `build-smoke.log` | `emulator-smoke` job **failure only** — the Gradle log plus the `connectedAndroidTest` reports/XML under `app/build/{reports,outputs}/androidTest-results` | 7 days |
 
 ### Key Configuration
 
@@ -108,18 +136,23 @@ Everything else triggers, `external/**` included.
 | Android SDK | `platforms;android-36`, `build-tools;36.0.0` — **preinstalled on the image** (with cmdline-tools, platform-tools, licenses accepted); `install_sdk` verifies and installs only what a future image is missing |
 | `compileSdk` / `targetSdk` | `36` / `36` (set in every module's `build.gradle.kts`) |
 | NDK | `28.2.13676358` — **preinstalled on the image** (among 27.3 / 28.2.13676358 / 29.0); `install_ndk` verifies and installs only when missing |
+| Emulator (smoke) | AVD API `36`, target `google_apis`, arch `x86_64`; managed by `reactivecircus/android-emulator-runner` and reused from the AVD cache |
 | Gradle tasks — push/PR | `testDebugUnitTest` `assembleDebug` |
+| Gradle tasks — emulator smoke | `connectedDebugAndroidTest` |
 | Gradle tasks — release | `assembleRelease` |
 | Release APK output | `app/build/outputs/apk/release/*.apk` |
 | Debug APK output | `app/build/outputs/apk/debug/*.apk` |
 
 #### CI cache layers (slow → fast changing)
 
-1. **NDK** — preinstalled at `$ANDROID_HOME/ndk/<ver>` on the image; the `install_ndk` fallback `actions/cache` is keyed by NDK version alone (`Linux-ndk-<ver>`). Our code and Rust rebuilds never invalidate it.
-2. **Rust dependencies** — `$CARGO_HOME/registry`, `/git`, `/bin` (crates.io sources, git deps, the `cargo-ndk` binary) inside `Swatinem/rust-cache`; the key segment is the lockfile/manifest hash.
-3. **Rust build products** — the crate's `target/` (four Android ABIs + host bindgen) in the same rust-cache archive; the volatile key tail is `NDK_VERSION MIN_API DNGLAB_SHA`.
+1. **AVD (emulator)** — `~/.android/avd` + `~/.android/adb*`, owned by `smoke_emulator.yaml` and keyed by API level + system-image target + arch. It changes only when the AVD definition does, so it is the slowest-changing layer of all. It is written **after** the AVD exists and **before** our APK is installed, so the snapshot stays app-free and reusable (`actions/cache/restore` + `actions/cache/save`, not `actions/cache`).
+2. **NDK** — preinstalled at `$ANDROID_HOME/ndk/<ver>` on the image; the `install_ndk` fallback `actions/cache` is keyed by NDK version alone (`Linux-ndk-<ver>`). Our code and Rust rebuilds never invalidate it.
+3. **Rust dependencies** — `$CARGO_HOME/registry`, `/git`, `/bin` (crates.io sources, git deps, the `cargo-ndk` binary) inside `Swatinem/rust-cache`; the key segment is the lockfile/manifest hash.
+4. **Rust build products** — the crate's `target/` (four Android ABIs + host bindgen) in the same rust-cache archive; the volatile key tail is `NDK_VERSION MIN_API DNGLAB_SHA`.
 
-`DNGLAB_SHA` is fed via rust-cache `env-vars` (tail of the key), **not** via `key` (which sits before the lockfile segment): on a submodule bump the progressive prefix restore still matches the previous run at the lockfile segment, so layer 2 stays warm and cargo re-fingerprints/rebuilds only rawler + the first-party crate. A mid-chain `key: dnglab-<sha>` would discard the dependency layer on every bump. Layers 2–3 live in one archive because rust-cache always caches `$CARGO_HOME` together with the workspace target; the layering is expressed through key-chain fallback, not separate archives.
+`DNGLAB_SHA` is fed via rust-cache `env-vars` (tail of the key), **not** via `key` (which sits before the lockfile segment): on a submodule bump the progressive prefix restore still matches the previous run at the lockfile segment, so layer 3 stays warm and cargo re-fingerprints/rebuilds only rawler + the first-party crate. A mid-chain `key: dnglab-<sha>` would discard the dependency layer on every bump. Layers 3–4 live in one archive because rust-cache always caches `$CARGO_HOME` together with the workspace target; the layering is expressed through key-chain fallback, not separate archives.
+
+Layer 1 belongs to the `emulator-smoke` job; layers 2–4 belong to the `rust` job. The Gradle dependency/output cache restored by `gradle/actions/setup-gradle` is a fifth, unlisted layer: `smoke_emulator.yaml` restores what the `apk` job wrote, so `connectedDebugAndroidTest` re-runs only the androidTest slice instead of recompiling the application.
 
 ### Version Handling
 
@@ -143,7 +176,7 @@ Everything else triggers, `external/**` included.
   `build_gradle.yaml`, and `build.yaml` orders `rust` before `apk` and passes the
   `rawler_fotlab` artifact name down.
 - The native sources live in the first-party module, not in `external/`:
-  `app/src/binding/rust` (Rust) and
+  `app/src/binding/rust/rawler_fotlab` (Rust) and
   `app/src/binding/kotlin/io/github/fotlab/fotlab_rawler` (Kotlin
   facade). Upstream source is reached through a path dependency and is never
   edited (`FOTLAB-NATIVE-000001` R4).
@@ -158,9 +191,24 @@ Everything else triggers, `external/**` included.
 
 - Unit tests (`testDebugUnitTest`) run on the JVM: Room DAO tests against an
   in-memory database (`FOTLAB-DATABS-000001` R8), no device needed.
-- Instrumentation tests: **no source set and no cases exist yet**, so no emulator
-  job is configured. Adding one (a workflow that downloads `debug-apks` instead
-  of rebuilding) is a later decision — see Open Questions.
+- Instrumented smoke tests live in the AGP-default instrumented source set
+  `app/src/androidTest/kotlin` (Google's recommended app layout — no extra
+  `kotlin.srcDir` registration, unlike the hand-written binding facade) and run on
+  the emulator via `connectedDebugAndroidTest`, driven by the `emulator-smoke` job
+  on the non-release path. They answer "does the built application actually run?",
+  so they assert survival and wiring, not feature detail:
+  - `MainActivitySmokeTest` — `MainActivity` reaches `RESUMED`, exercising
+    `MainApplication`, the Room/DataStore wiring and the JNA load of
+    `librawler_fotlab.so`.
+  - `RawlerNativeSmokeTest` — the native bridge survives the two call shapes that
+    used to abort the process: a PNG and arbitrary non-image bytes, through both
+    `identifyFormat` and `decodeRawToPng`. A process-level abort (native panic,
+    `SIGSEGV`, `UnsatisfiedLinkError` on the emulator ABI) fails the run by
+    construction, because `RawlerFotlabBridge` swallows JVM exceptions with
+    `runCatching` — only a process death can be observed. See
+    `FOTLAB-CRASH-000001`.
+- The emulator job runs on PRs as well as on `main`, since both take the
+  non-release path.
 
 ## Agent Behaviour Rules
 
@@ -230,10 +278,16 @@ Split across the two rule files, on purpose:
   debug-only CI run does not exercise this configuration; a release build should be smoke-tested.
 - Q3 — Signing: which keystore, injected through which secret, and is release
   signing part of the first release? **TBD.**
-- Q4 — ABI policy: release `arm64-v8a` only; does debug need `x86_64` for a
-  future emulator job? **TBD.**
-- Q5 — When are instrumentation tests introduced, and does the emulator workflow
-  reuse `debug-apks` instead of rebuilding? **TBD.**
+- Q4 — **RESOLVED.** Release stays `arm64-v8a` only; the debug build keeps all four
+  ABIs, and the emulator job needs `x86_64`, which `build_rust.yaml` already builds
+  (`cargo ndk` targets `arm64-v8a armeabi-v7a x86 x86_64`). The smoke workflow pins
+  `arch: x86_64` so the AVD and the library agree.
+- Q5 — **RESOLVED.** Instrumentation tests are introduced with the `emulator-smoke`
+  job: the cases live in `app/src/androidTest/kotlin` and run via
+  `connectedDebugAndroidTest`. The job does **not** consume the `debug-apks`
+  artifact — Gradle restores the `apk` job's build cache and rebuilds only the
+  androidTest slice, which keeps the debug APK and its test APK guaranteed to come
+  from one build rather than being paired across artifacts.
 - Q6 — Does a submodule bump need the *full* native toolchain (Rust/Perl), or is
   a compile-only check of the bridge enough? Depends on the pending `NATIVE`
   decisions. **TBD.**
@@ -262,3 +316,4 @@ Split across the two rule files, on purpose:
 | 2026-09-15 | Toolchain actions switched to **preinstalled-first**: the `ubuntu-26.04` image ships cmdline-tools, platform-tools, `platforms;android-36`, `build-tools;36.0.0` and NDK `28.2.13676358` at its own `ANDROID_HOME` (`/usr/local/lib/android/sdk`, licenses accepted). Workflows no longer redirect `ANDROID_HOME` to an empty `$HOME/Android/Sdk` (which re-downloaded platform-tools on every run); they assert the prebuilt SDK and `install_sdk` / `install_ndk` probe for the pinned components, running the cache + `setup-android` / `sdkmanager --install` fallback only when a component is missing, then fail-fast verify. Dead `NDK_VERSION` env removed from `build_gradle.yaml` (Gradle never uses an NDK). Also fixed `setup-android@v4` failing on Google's removal of the legacy `tools` package by passing `packages: platform-tools`. |
 | 2026-09-15 | SDK root resolution made robust on the `ubuntu-26.04` preview image: the runner exports `ANDROID_HOME` only as an inherited process variable (the workflow `env` context evaluates it empty, and an empty composite-step `env:` silently overrides the inherited value). Both reusable workflows now resolve the root in bash (`/usr/local/lib/android/sdk` first, then the well-known fallbacks) and publish it via `$GITHUB_ENV`. Verified against image `ubuntu26/20260907.131.1`: all pinned components present, happy path performs zero downloads and no SDK/NDK cache restore. |
 | 2026-09-15 | Rust cache split into logical layers (new "CI cache layers" table under Key Configuration): NDK stays its own image/version-keyed layer; inside rust-cache the dnglab submodule SHA moved from the mid-chain `key` input to `env-vars` (`NDK_VERSION MIN_API DNGLAB_SHA`), so a submodule bump no longer discards the slow-changing `$CARGO_HOME` dependency layer — progressive prefix restore keeps it warm while cargo rebuilds only the changed rawler path-dep and the first-party crate. |
+| 2026-09-15 | Emulator smoke test added as the sibling of the release job: `.github/workflows/smoke_emulator.yaml` (reusable) boots an AVD and runs `connectedDebugAndroidTest` against the debug build, and `build.yaml` gains `emulator-smoke` gated on `preflight.release != 'true'` — a release run publishes instead, a normal run smoke-tests instead of publishing. Instrumented cases live in the new AGP-default source set `app/src/androidTest/kotlin` (`MainActivitySmokeTest`, `RawlerNativeSmokeTest`) with `androidx.test` runner/core/ext-junit added to the version catalog and `androidTestImplementation`. The AVD cache uses the split `actions/cache/restore` + `actions/cache/save` pair so it is written after the emulator exists and before any APK is installed. The SDK-root resolution shared by three workflows was extracted into the new `locate_sdk` composite action. Closes Q4 and Q5; the "CI cache layers" table gained the AVD layer and the release/PR trigger rows now run the smoke job. |
