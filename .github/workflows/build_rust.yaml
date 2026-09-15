@@ -56,20 +56,43 @@ jobs:
           fetch-depth: 0
           submodules: ${{ inputs.submodules && 'recursive' || 'false' }}
 
-      # Use the runner image's prebuilt ANDROID_HOME (/usr/local/lib/android/sdk on
-      # ubuntu-26.04): cmdline-tools, platform-tools, platforms;android-36,
-      # build-tools;36.0.0 and NDK 28.2.13676358 are all preinstalled there.
-      # install_sdk/install_ndk verify the pinned components and only download
-      # anything if a future image rotation is missing one. Fail fast on runners
-      # that do not provide ANDROID_HOME rather than silently using an empty tree.
-      # Toolchain order per rules/ACTION.md: JDK + SDK before NDK (the NDK fallback
-      # drives sdkmanager out of $ANDROID_HOME/cmdline-tools).
-      - name: Use prebuilt Android SDK path
+      # Resolve the runner's Android SDK root in bash and publish it back to the
+      # GitHub env. On the ubuntu-26.04 preview images the SDK root is exported
+      # only as an inherited PROCESS variable: ${{ env.ANDROID_HOME }} evaluates
+      # empty in workflow expressions, and an empty `env:` on a composite step
+      # silently overrides the inherited value inside bash. Falling back to the
+      # well-known image paths keeps this working on self-hosted runners too.
+      - name: Locate Android SDK
         run: |
           set -euo pipefail
-          : "${ANDROID_HOME:?ANDROID_HOME is not exported on this runner}"
-          test -d "$ANDROID_HOME"
+          if [ -z "${ANDROID_HOME:-}" ] || [ ! -d "$ANDROID_HOME" ]; then
+            for candidate in /usr/local/lib/android/sdk /home/runner/.android/sdk "$HOME/.android/sdk" "$HOME/Android/Sdk"; do
+              if [ -d "$candidate" ]; then ANDROID_HOME="$candidate"; break; fi
+            done
+          fi
+          : "${ANDROID_HOME:?No Android SDK root found on this runner}"
+          echo "Using ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+        shell: bash
+
+      # TEMPORARY (remove after 2026-09 preinstalled-layout verification): dump
+      # what the image actually ships at each candidate SDK root.
+      - name: Diagnose preinstalled Android SDK layout
+        run: |
+          echo "process env: ANDROID_HOME=${ANDROID_HOME:-<unset>} ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-<unset>}"
+          for d in /usr/local/lib/android/sdk /home/runner/.android/sdk; do
+            echo "----- $d"
+            if [ -d "$d" ]; then
+              ls -1 "$d" || true
+              echo "  platforms:    $(ls -1 "$d/platforms" 2>/dev/null | tr '\n' ' ')"
+              echo "  build-tools:  $(ls -1 "$d/build-tools" 2>/dev/null | tr '\n' ' ')"
+              echo "  ndk:          $(ls -1 "$d/ndk" 2>/dev/null | tr '\n' ' ')"
+              echo "  cmdline-tools:$(ls -1 "$d/cmdline-tools" 2>/dev/null | tr '\n' ' ')"
+            else
+              echo "  (absent)"
+            fi
+          done
         shell: bash
 
       - name: Install JDK

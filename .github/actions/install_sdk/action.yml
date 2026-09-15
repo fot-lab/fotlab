@@ -37,11 +37,9 @@ runs:
       run: |
         set -euo pipefail
         missing=()
-        # cmdline-tools/latest is required only by the fallback install path,
-        # but count it as missing up front so setup-android gets invoked.
-        if [ ! -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
-          missing+=("cmdline-tools;latest")
-        fi
+        # Only the packages Gradle consumes matter for the happy path; whether
+        # cmdline-tools exist is irrelevant when nothing has to be installed
+        # (the fallback brings its own sdkmanager via setup-android + PATH).
         if [ ! -f "$ANDROID_HOME/platforms/android-$ANDROID_API/android.jar" ]; then
           missing+=("platforms;android-$ANDROID_API")
         fi
@@ -88,12 +86,17 @@ runs:
       if: steps.precheck.outputs.need-install == 'true'
       shell: bash
       env:
+        # Step-level env wins over the GITHUB_ENV values setup-android exports:
+        # it pins its own SDK root, but the packages must land in the caller's.
         ANDROID_HOME: ${{ inputs.android-home }}
+        ANDROID_SDK_ROOT: ${{ inputs.android-home }}
         ANDROID_API: ${{ inputs.api-level }}
         ANDROID_BUILD_TOOLS: ${{ inputs.build-tools }}
       run: |
         set -euo pipefail
-        export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
+        # setup-android prepends its bundled cmdline-tools/<ver>/bin to PATH
+        # (GITHUB_PATH); the tool binary does not have to live under our root.
+        command -v sdkmanager
         yes | sdkmanager --licenses > /dev/null 2>&1 || true
         sdkmanager --install "platforms;android-$ANDROID_API" "build-tools;$ANDROID_BUILD_TOOLS"
 
@@ -115,4 +118,9 @@ runs:
           echo "::error::build-tools;$ANDROID_BUILD_TOOLS missing under $ANDROID_HOME"
           exit 1
         }
+        # setup-android rewrites GITHUB_ENV to its own SDK root on the fallback
+        # path; re-publish the caller's root so later steps (NDK path export,
+        # Gradle) resolve every component under one ANDROID_HOME.
+        echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+        echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
         echo "SDK verified: platforms;android-$ANDROID_API + build-tools;$ANDROID_BUILD_TOOLS at $ANDROID_HOME"
