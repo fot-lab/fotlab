@@ -42,6 +42,10 @@ android {
         versionCode = appVersionCode
         versionName = appVersionName
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // The androidTest manifest pins the compose-test host activity into the app process;
+        // it must stay in sync with the applicationId (same APP_ID source).
+        manifestPlaceholders["instrumentationTargetPackage"] =
+            providers.gradleProperty("APP_ID").get()
     }
 
     signingConfigs {

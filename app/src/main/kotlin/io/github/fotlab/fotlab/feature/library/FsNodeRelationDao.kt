@@ -19,6 +19,23 @@ interface FsNodeRelationDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(relation: FsNodeRelation)
 
+    /**
+     * Insert a root edge (`NULL` parent) only when the child has no live root edge yet.
+     * The UNIQUE index cannot deduplicate `(child, NULL)` rows because SQLite treats
+     * `NULL`s as distinct, so a plain `OnConflictStrategy.IGNORE` insert would let a
+     * re-imported root file be listed twice by [rootChildren] (verified by the
+     * `pngImportAndVirtualMapping` instrumented test). This guard makes the root link
+     * idempotent (`FOTLAB-DATABS-000002` R3).
+     */
+    @Query(
+        "INSERT INTO fs_node_relation (fs_node_id_child, fs_node_id_parent, time_deleted) " +
+            "SELECT :childId, NULL, NULL " +
+            "WHERE NOT EXISTS (" +
+            "SELECT 1 FROM fs_node_relation WHERE fs_node_id_child = :childId " +
+            "AND fs_node_id_parent IS NULL)",
+    )
+    suspend fun insertRootLinkIfAbsent(childId: Long)
+
     @Update
     suspend fun update(relation: FsNodeRelation)
 

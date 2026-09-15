@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Pin every component of the test package — including the androidx.activity.ComponentActivity
+  host that ui-test-manifest contributes for createComposeRule() — into the app under test's
+  process. Without this, the host activity resolves to the <applicationId>.test process and
+  API 34+ Instrumentation#startActivitySync rejects the launch with "Intent in process ...
+  resolved to different process ...", which is how all ZoomableGestureTest tests failed on the
+  API 36 emulator (run 34980681082).
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:process="${instrumentationTargetPackage}" />
+</manifest>
