@@ -1,6 +1,7 @@
 package io.github.fotlab.fotlab.smoke
 
 import android.graphics.Bitmap
+import android.net.Uri
 import android.util.Log
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -8,18 +9,26 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.TouchInjectionScope
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.fotlab.fotlab.R
 import io.github.fotlab.fotlab.feature.library.FsNodeObject
+import io.github.fotlab.fotlab.feature.library.LibraryCore
+import io.github.fotlab.fotlab.feature.library.LibraryScreen
 import io.github.fotlab.fotlab.feature.library.LibraryViewerDialog
+import io.github.fotlab.fotlab.ui.theme.AppTheme
 import io.github.fotlab.fotlab.ui.ZoomableAsyncImage
 import io.github.fotlab.fotlab.ui.ZoomState
 import io.github.fotlab.fotlab.ui.rememberZoomState
 import java.io.File
 import java.io.FileOutputStream
+import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -44,6 +53,9 @@ import org.junit.runner.RunWith
  *  4. **The REAL dialog** — [LibraryViewerDialog] itself (Dialog + HorizontalPager +
  *     ZoomableAsyncImage with `keepParentDraggable`), paged with drags, the literal user
  *     journey that crashes on the device.
+ *  5. **Tap thumbnail → viewer opens** — the crash window BEFORE the viewer comes up:
+ *     the REAL [LibraryScreen] grid, a real click on a real thumbnail cell, driving the
+ *     screen's own `onNodeClick` → `viewerItems` state → dialog composition path.
  *
  * Gestures are built from the injection primitives (`down`/`moveBy`/`up`) with explicit
  * pointer ids, which also lets us interleave finger add/lift exactly mid-stream.
@@ -266,6 +278,53 @@ class ZoomableGestureTest {
             .performTouchInput { dragX(dx = 900f) }
         composeRule.waitForIdle()
         step("dialog", "paged back to item 0")
+        composeRule.onNodeWithContentDescription(closeDesc).assertExists()
+    }
+
+    // -------------------------------------------------- 5: tap thumbnail → viewer opens
+
+    /**
+     * The reported crash window BEFORE the viewer comes up: tapping a Library thumbnail must
+     * flip the screen's `viewerItems` state and compose [LibraryViewerDialog] without dying.
+     * This drives the REAL [LibraryScreen] — grid cell `onNodeClick`, state transition, dialog
+     * composition — with a real click, inside the app process (MainApplication prepared the
+     * core, so the import below hits the same Room/DataStore path the device uses). Any
+     * exception in the tap-to-open window fails here with a debug-emulator stack trace.
+     */
+    @Test
+    fun tapThumbnailInLibraryScreenOpensViewer() {
+        // Import the fixture at the library root, like a picker import would (unique per run).
+        val source: Uri = Uri.fromFile(pngFile)
+        val t = System.nanoTime()
+        runBlocking { LibraryCore.importUris(parentId = null, uris = listOf(source)) }
+        step("import", "importUris(${source}) done in ${(System.nanoTime() - t) / 1_000_000} ms")
+
+        val closeDesc = context.getString(R.string.library_viewer_cd_close)
+        composeRule.setContent { AppTheme { LibraryScreen(onNavigateToStudio = {}) } }
+
+        // Wait for the real rootChildren flow to emit the imported node into the grid.
+        composeRule.waitUntil(15_000) {
+            composeRule.onAllNodesWithText(pngFile.name).fetchSemanticsNodes().isNotEmpty()
+        }
+        step("grid", "thumbnail '${pngFile.name}' visible in the real LibraryScreen grid")
+
+        // The actual user gesture: tap the thumbnail cell (the Card's clickable wraps the cell).
+        composeRule.onNodeWithText(pngFile.name).performClick()
+        step("tap", "clicked the thumbnail cell")
+
+        // The viewer dialog must appear; on the way there, every composition must survive.
+        composeRule.waitUntil(15_000) {
+            composeRule.onAllNodesWithContentDescription(closeDesc).fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithContentDescription(closeDesc).assertExists()
+        composeRule.onNodeWithContentDescription(pngFile.name).assertExists()
+        step("dialog", "LibraryViewerDialog opened from the tap with the tapped image loaded")
+
+        // One gesture on the live dialog for good measure.
+        composeRule.onNodeWithContentDescription(pngFile.name)
+            .performTouchInput { dragX(dx = -200f) }
+        composeRule.waitForIdle()
+        step("dialog", "post-open drag injected, dialog still up")
         composeRule.onNodeWithContentDescription(closeDesc).assertExists()
     }
 }
