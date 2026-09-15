@@ -20,3 +20,7 @@
 	path = external/rawloader
 	url = ../rawloader.git
 	branch = master
+[submodule "external/rawdb"]
+	path = external/rawdb
+	url = ../rawdb.git
+	branch = main
