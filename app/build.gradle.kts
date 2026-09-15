@@ -57,11 +57,12 @@ android {
 
     buildTypes {
         release {
-            // R8 + resource shrinking for the shipped artifact (rules/ACTION.md Q2). The keep
-            // rules JNA and the UniFFI bindings need live in proguard-rules.pro — R8 must not
-            // rename the generated JNA interface methods, whose names ARE the native symbol names.
-            isMinifyEnabled = true
-            isShrinkResources = true
+            // R8 minification / resource shrinking stay OFF (rules/ACTION.md Q2): the project is
+            // open source, obfuscation has no anti-reverse-engineering value, and the user never
+            // requested it — an earlier agent resolution enabling them was reverted. The keep
+            // rules for JNA and the UniFFI bindings are kept in proguard-rules.pro and stay
+            // wired via proguardFiles, so they apply automatically if minification is ever
+            // re-enabled; while R8 is off this declaration is inert.
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
@@ -166,4 +167,10 @@ dependencies {
     androidTestImplementation(libs.androidx.test.core)
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.runner)
+    // Compose UI tests (ZoomableGestureTest): the rule injects real multi-pointer events through
+    // `performTouchInput`; `ui-test-manifest` supplies the empty activity the rule launches.
+    // Both are BOM-managed, hence the platform() line on the androidTest configuration too.
+    androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+    androidTestImplementation(libs.androidx.compose.ui.test.manifest)
 }

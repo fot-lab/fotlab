@@ -306,11 +306,13 @@ Split across the two rule files, on purpose:
 - Q1 — CI must confirm that AGP `8.7.3` accepts `compileSdk = 36`. If AGP rejects
   it, AGP and Gradle are upgraded **together** (their versions are
   coupled); neither is bumped alone. **TBD.**
-- Q2 — **RESOLVED.** R8 minification and resource shrinking are enabled for release
-  (`isMinifyEnabled` / `isShrinkResources` in `app/build.gradle.kts`). The keep rules JNA and the
-  UniFFI bindings need live in `app/proguard-rules.pro` — R8 must not rename the generated JNA
-  interface methods, whose names ARE the native symbol names. Only release builds are minified, so a
-  debug-only CI run does not exercise this configuration; a release build should be smoke-tested.
+- Q2 — **RESOLVED (reversed 2026-09-15).** Release builds do **not** run R8
+  minification or resource shrinking. The project is open source, so obfuscation
+  has no anti-reverse-engineering value, and the user never requested it — the
+  earlier "user-specified R8" resolution was an agent hallucination and has been
+  reverted (`isMinifyEnabled` stays at its `false` default). `app/proguard-rules.pro`
+  with its JNA/UniFFI keep rules is **kept** and stays wired via `proguardFiles`,
+  inert while minification is off and effective again if it is ever re-enabled.
 - Q3 — Signing: which keystore, injected through which secret, and is release
   signing part of the first release? **TBD.**
 - Q4 — **RESOLVED.** Release ships one **universal** APK containing all four
@@ -359,3 +361,4 @@ Split across the two rule files, on purpose:
 | 2026-09-15 | Cache-quota audit. The repository was at **8.66 GiB of its 10 GiB budget across 116 entries**, almost all of it superseded Gradle generations (`gradle-transforms-v1-*`: 18 entries / 4.11 GiB; `gradle-dependencies-v1-*`: 6 / 1.52 GiB; `gradle-home-v1\|…\|<commit-sha>`: 31 / 0.64 GiB) plus two orphaned `v0-rust-build-*` and `v0-rust-dnglab-*` archives (~1.9 GiB) left behind by the crate-path moves, whose `lastAccessedAt` equalled `createdAt` — i.e. never restored. 55 dead entries deleted, taking usage to 2.26 GiB, and a new "Quota hygiene" subsection states the rule (keep the newest generation per family, never drop below one, leave the NDK/SDK safety nets) with the dry-run command. |
 | 2026-09-15 | Rust toolchain download cached, superseding the previous entry's decision to leave `~/.rustup` uncached. `build_rust.yaml` now restores `~/.rustup` by prefix **before** `Install Rust`, then saves it immediately after the install under `<os>-rustup-<rustc version>` (the key is unknowable beforehand, and a constant key cannot work because `actions/cache` never re-saves a restored entry — the archive would freeze on creation-day `stable` and re-download the difference forever). The save is skipped when `cache-matched-key` already equals the computed key, so it can never collide with an existing entry, and it runs before anything that can fail so a later build failure cannot discard a successful toolchain download. This removes the last recurring download of size in the `rust` job (~250 MB, four Android target std libraries). The rustup layer was inserted as layer 3 of the cache table, the `~/.rustup` row was dropped from "Downloads deliberately left uncached", and quota hygiene now also names `<os>-rustup-<version>` as a per-release family. |
 | 2026-09-15 | Release packaging is **universal**: `app/build.gradle.kts` declares no ABI splits, so the release APK carries all four ABIs in one artifact and the asset is named `FotLab-{VERSION_NAME}-universal-release.apk` (was `-arm64-v8a-`, which misdescribed a universal APK). Per-ABI packaging was considered and rejected to keep the pipeline simple. The name is now assigned by the **release stage** — `build_gradle.yaml` dropped its "Rename release APK" step and uploads the APK exactly as Gradle produced it; `release_github.yaml` copies it to `FotLab-<VERSION_NAME>-universal-release.apk` before publishing. `rules/VERSION.md` updated (it also still said `DreamHub-`). Q4 rewritten to record the universal decision. |
+| 2026-09-15 | **Q2 reversed — R8 disabled.** The 2026-09-14 "user-specified R8" resolution was an agent hallucination: the user never requested obfuscation, and for an open-source project it has no anti-RE value. `isMinifyEnabled` / `isShrinkResources` removed from the release build type (defaults apply: unminified). `app/proguard-rules.pro` with its JNA/UniFFI keep rules is kept and stays wired via `proguardFiles` — inert while R8 is off, effective again if minification is ever re-enabled. The JNA/UniFFI symbol-name concern only ever existed under obfuscation and does not apply while R8 is off. |
