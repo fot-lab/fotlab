@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.test.TouchInjectionScope
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
@@ -126,9 +127,28 @@ class ZoomableGestureTest {
         )
     }
 
+    /**
+     * Install [content] into the real MainActivity. MainActivity already populated its content
+     * view in onCreate (AppTheme + nav scaffold), so the test rule's `setContent` is illegal
+     * ("has already set content"). Replace the activity's content view with a brand-new
+     * ComposeView instead — setContentView detaches and disposes the old composition, and the
+     * compose test framework discovers semantics owners by walking the window, so all
+     * onNode*/gesture assertions keep working against our replacement.
+     */
+    private fun hostContent(content: @androidx.compose.runtime.Composable () -> Unit) {
+        composeRule.runOnUiThread {
+            val activity = composeRule.activity
+            ComposeView(activity).let { cv ->
+                cv.setContent(content)
+                activity.setContentView(cv)
+            }
+        }
+        composeRule.waitForIdle()
+    }
+
     /** Composition identical to what the viewer's image page creates. */
     private fun setContentWithZoomable(onState: (ZoomState) -> Unit) {
-        composeRule.setContent {
+        hostContent {
             val s = rememberZoomState()
             onState(s)
             Box(Modifier.fillMaxSize()) {
@@ -140,7 +160,6 @@ class ZoomableGestureTest {
                 )
             }
         }
-        composeRule.waitForIdle()
     }
 
     /** Two-finger spread from `span0` to `span1` around the center, built from primitives. */
@@ -253,7 +272,7 @@ class ZoomableGestureTest {
     @Test
     fun realViewerDialogOpensAndPages() {
         val closeDesc = context.getString(R.string.library_viewer_cd_close)
-        composeRule.setContent {
+        hostContent {
             LibraryViewerDialog(
                 items = nodes(),
                 startIndex = 0,
@@ -261,7 +280,6 @@ class ZoomableGestureTest {
                 onOpenInStudio = {},
             )
         }
-        composeRule.waitForIdle()
         step("dialog", "LibraryViewerDialog composed over 3 nodes without throwing")
         composeRule.onNodeWithContentDescription(closeDesc).assertExists()
 
@@ -311,7 +329,7 @@ class ZoomableGestureTest {
         step("import", "importUris(${source}) done in ${(System.nanoTime() - t) / 1_000_000} ms")
 
         val closeDesc = context.getString(R.string.library_viewer_cd_close)
-        composeRule.setContent { AppTheme { LibraryScreen(onNavigateToStudio = {}) } }
+        hostContent { AppTheme { LibraryScreen(onNavigateToStudio = {}) } }
 
         // Wait for the real rootChildren flow to emit the imported node into the grid.
         composeRule.waitUntil(15_000) {
