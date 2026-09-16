@@ -90,6 +90,7 @@ The detail file name **must** equal its ID plus `.md`.
 | --- | --- | --- |
 | `PREPIN` | Preflight / Toolchain Cache | Runner toolchain bootstrap and caching of SDK, NDK, Gradle, Rust NDK, python-for-android, and other build tools |
 | `LIBRND` | Library Rendering | Library / Recycle view one-level rendering, query scoping, and view-isolation audit for the virtual fs feature |
+| `KOTLIN` | Kotlin Code Quality | First-party Kotlin / Compose source audits: Android & Compose best-practice compliance, control-flow flattening, duplication extraction, localization, and platform / data-layer API usage |
 
 ## Status & Priority
 
