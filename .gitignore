@@ -17,6 +17,18 @@ keystore.properties
 *.ipr
 *.iws
 
+# AI agent workspace (scripts/skills/state for CI watch automation) — never committed
+.agents/
+
+.vscode/
+.trae/
+.trae-cn/
+# CodeBuddy local config (memory/skills/user data) — never committed
+.codebuddy/
+.workbuddy/
+.codebuddy-cn/
+.workbuddy-cn/
+
 # Android artifacts. bin/gen/out are the legacy Eclipse-style OUTPUT directories at the
 # repository root and are anchored to it on purpose: an unanchored `bin/` also matched
 # source directories such as app/src/rust/binding/dnglab/rawler_fotlab/src/bin (the
@@ -53,5 +65,5 @@ docs/_build/
 log/
 tmp/
 
-# CodeBuddy local config (memory/skills/user data) — never committed
-.codebuddy/
+
+
