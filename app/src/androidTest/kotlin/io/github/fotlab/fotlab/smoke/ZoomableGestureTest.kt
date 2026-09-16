@@ -1,7 +1,10 @@
 package io.github.fotlab.fotlab.smoke
 
+import android.content.ContentValues
 import android.graphics.Bitmap
 import android.net.Uri
+import android.os.Build
+import android.provider.MediaStore
 import android.util.Log
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -16,6 +19,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeWithVelocity
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.fotlab.fotlab.MainActivity
@@ -28,8 +32,8 @@ import io.github.fotlab.fotlab.ui.theme.AppTheme
 import io.github.fotlab.fotlab.ui.ZoomableAsyncImage
 import io.github.fotlab.fotlab.ui.ZoomState
 import io.github.fotlab.fotlab.ui.rememberZoomState
+import java.io.ByteArrayOutputStream
 import java.io.File
-import java.io.FileOutputStream
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -90,7 +94,11 @@ class ZoomableGestureTest {
         Log.i(tag, "[T+${ms}ms][$phase] $detail")
     }
 
-    private lateinit var pngFile: File
+    /** The published fixture: a real decodable PNG reachable under a uri the app can read. */
+    private lateinit var sourceUri: Uri
+
+    /** Its display name — short, see [setUp] for why that matters. */
+    private lateinit var pngName: String
 
     private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
 
@@ -100,24 +108,62 @@ class ZoomableGestureTest {
         const val MAX_SCALE = 6f
     }
 
-    /** A real decodable PNG in the app cache, referenced by a file Uri (same-process reads only). */
+    /**
+     * A real decodable PNG published the way a real photo lives on a device: MediaStore
+     * (`content://`, API 29+) or a file below that.
+     *
+     * Two properties of the fixture are load-bearing, and both were got wrong before:
+     *
+     * - **It must be a `content://` uri.** `LibraryCore.importUris` types the node with
+     *   `contentResolver.getType(uri)`, and a `file://` uri answers `null` → the node is stored
+     *   as an unknown type → `LibraryScreen` no longer sees it as media, so a tap *selects* it
+     *   instead of opening the viewer. That is why the viewer never appeared here.
+     * - **Its name must be short.** The grid renders names through `MiddleEllipsisText`, which
+     *   middle-truncates on overflow, and `onNodeWithText` matches the DISPLAYED string.
+     */
     @Before
     fun setUp() {
         t0 = System.nanoTime()
         val bitmap = Bitmap.createBitmap(256, 256, Bitmap.Config.ARGB_8888)
         bitmap.eraseColor(android.graphics.Color.MAGENTA)
-        // Short on purpose: the grid renders names through MiddleEllipsisText, which truncates
-        // in the middle once the text overflows the tile, and onNodeWithText matches the
-        // DISPLAYED string. A long name is what made the grid lookup time out before.
-        pngFile = File(context.cacheDir, "g${System.currentTimeMillis() % 1000}.png")
-        FileOutputStream(pngFile).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        val bytes = ByteArrayOutputStream().use { out ->
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+            out.toByteArray()
+        }
         bitmap.recycle()
-        step("fixture", "PNG at ${pngFile.toURI()} (${pngFile.length()} bytes)")
+
+        pngName = "g${System.currentTimeMillis() % 1000}.png"
+        sourceUri = if (Build.VERSION.SDK_INT >= 29) {
+            val values = ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, pngName)
+                put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/FotLabE2E")
+                put(MediaStore.Images.Media.IS_PENDING, 1)
+            }
+            val uri = context.contentResolver.insert(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values,
+            ) ?: throw AssertionError("MediaStore insert returned null")
+            context.contentResolver.openOutputStream(uri)!!.use { it.write(bytes) }
+            values.clear()
+            values.put(MediaStore.Images.Media.IS_PENDING, 0)
+            context.contentResolver.update(uri, values, null, null)
+            uri
+        } else {
+            val dir = context.getExternalFilesDir(null) ?: context.filesDir
+            File(dir, pngName).apply { writeBytes(bytes) }.let { Uri.fromFile(it) }
+        }
+        step("fixture", "PNG at $sourceUri (${bytes.size} bytes)")
     }
 
     @After
     fun tearDown() {
-        runCatching { pngFile.delete() }.onFailure { Log.w(tag, "cleanup failed", it) }
+        runCatching {
+            if (sourceUri.scheme == "content") {
+                context.contentResolver.delete(sourceUri, null, null)
+            } else {
+                sourceUri.path?.let { File(it).delete() }
+            }
+        }.onFailure { Log.w(tag, "cleanup failed", it) }
     }
 
     /** Media list shaped like the Library grid's: distinct display names are the image CD. */
@@ -126,7 +172,7 @@ class ZoomableGestureTest {
             fsNodeId = i + 1L,
             nameDisplay = "gesture_$i.png",
             typeMime = "image/png",
-            uriStorage = pngFile.toURI().toString(),
+            uriStorage = sourceUri.toString(),
             timeCreated = System.currentTimeMillis(),
         )
     }
@@ -157,7 +203,7 @@ class ZoomableGestureTest {
             onState(s)
             Box(Modifier.fillMaxSize()) {
                 ZoomableAsyncImage(
-                    model = pngFile.toURI().toString(),
+                    model = sourceUri,
                     contentDescription = CD,
                     state = s,
                     modifier = Modifier.fillMaxSize(),
@@ -185,6 +231,25 @@ class ZoomableGestureTest {
         val delta = dx / steps
         repeat(steps) { moveBy(0, Offset(delta, 0f)) }
         up(0)
+    }
+
+    /**
+     * A fast horizontal fling across 70% of the node, used to page the viewer's pager.
+     *
+     * A pager settles on *velocity* as much as on travel, and a step-drag from the centre also
+     * leaves the screen half-way through (the injected pointer stops at x=0), which is why paging
+     * never happened with [dragX]. Start and end are taken from the visible bounds so no injection
+     * ever falls outside the node.
+     */
+    private fun TouchInjectionScope.flingX(dx: Float) {
+        val w = visibleSize().width.toFloat()
+        val fromX = if (dx < 0) w * 0.85f else w * 0.15f
+        val toX = if (dx < 0) w * 0.15f else w * 0.85f
+        swipeWithVelocity(
+            start = Offset(fromX, visibleSize().height / 2f),
+            end = Offset(toX, visibleSize().height / 2f),
+            endVelocity = if (dx < 0) -2_000f else 2_000f,
+        )
     }
 
     // -------------------------------------------------- 1: open, no touch
@@ -287,28 +352,28 @@ class ZoomableGestureTest {
         step("dialog", "LibraryViewerDialog composed over 3 nodes without throwing")
         composeRule.onNodeWithContentDescription(closeDesc).assertExists()
 
-        // Forward: inject on the page we are on, then the next page becomes centered.
+        // Forward: fling from the page we are on, then the next page becomes centered.
         composeRule.onNodeWithContentDescription("gesture_0.png")
-            .performTouchInput { dragX(dx = -900f) }
+            .performTouchInput { flingX(dx = -900f) }
         composeRule.waitForIdle()
         step("dialog", "paged to item 1")
         composeRule.onNodeWithContentDescription(closeDesc).assertExists()
 
         composeRule.onNodeWithContentDescription("gesture_1.png")
-            .performTouchInput { dragX(dx = -900f) }
+            .performTouchInput { flingX(dx = -900f) }
         composeRule.waitForIdle()
         step("dialog", "paged to item 2")
         composeRule.onNodeWithContentDescription(closeDesc).assertExists()
 
         // Back again.
         composeRule.onNodeWithContentDescription("gesture_2.png")
-            .performTouchInput { dragX(dx = 900f) }
+            .performTouchInput { flingX(dx = 900f) }
         composeRule.waitForIdle()
         step("dialog", "paged back to item 1")
         composeRule.onNodeWithContentDescription(closeDesc).assertExists()
 
         composeRule.onNodeWithContentDescription("gesture_1.png")
-            .performTouchInput { dragX(dx = 900f) }
+            .performTouchInput { flingX(dx = 900f) }
         composeRule.waitForIdle()
         step("dialog", "paged back to item 0")
         composeRule.onNodeWithContentDescription(closeDesc).assertExists()
@@ -326,8 +391,8 @@ class ZoomableGestureTest {
      */
     @Test
     fun tapThumbnailInLibraryScreenOpensViewer() {
-        // Import the fixture at the library root, like a picker import would (unique per run).
-        val source: Uri = Uri.fromFile(pngFile)
+        // Import the fixture at the library root, like a picker import would.
+        val source: Uri = sourceUri
         val t = System.nanoTime()
         runBlocking { LibraryCore.importUris(parentId = null, uris = listOf(source)) }
         step("import", "importUris(${source}) done in ${(System.nanoTime() - t) / 1_000_000} ms")
@@ -343,13 +408,13 @@ class ZoomableGestureTest {
 
         // Wait for the real rootChildren flow to emit the imported node into the grid.
         composeRule.waitUntil(15_000) {
-            composeRule.onAllNodesWithText(pngFile.name, substring = true)
+            composeRule.onAllNodesWithText(pngName, substring = true)
                 .fetchSemanticsNodes().isNotEmpty()
         }
-        step("grid", "thumbnail '${pngFile.name}' visible in the real LibraryScreen grid")
+        step("grid", "thumbnail '$pngName' visible in the real LibraryScreen grid")
 
         // The actual user gesture: tap the thumbnail cell (the Card's clickable wraps the cell).
-        composeRule.onAllNodesWithText(pngFile.name, substring = true)[0].performClick()
+        composeRule.onAllNodesWithText(pngName, substring = true)[0].performClick()
         step("tap", "clicked the thumbnail cell")
 
         // The viewer dialog must appear; on the way there, every composition must survive.
@@ -357,11 +422,11 @@ class ZoomableGestureTest {
             composeRule.onAllNodesWithContentDescription(closeDesc).fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNodeWithContentDescription(closeDesc).assertExists()
-        composeRule.onNodeWithContentDescription(pngFile.name).assertExists()
+        composeRule.onNodeWithContentDescription(pngName).assertExists()
         step("dialog", "LibraryViewerDialog opened from the tap with the tapped image loaded")
 
         // One gesture on the live dialog for good measure.
-        composeRule.onNodeWithContentDescription(pngFile.name)
+        composeRule.onNodeWithContentDescription(pngName)
             .performTouchInput { dragX(dx = -200f) }
         composeRule.waitForIdle()
         step("dialog", "post-open drag injected, dialog still up")
