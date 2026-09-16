@@ -150,12 +150,14 @@ class RawRoutingTest {
             }
             val coilMs = (System.nanoTime() - tCoil) / 1_000_000
             val coilInfo = coilResult.getOrNull()
-            val drawable = (coilInfo as? SuccessResult)?.drawable
+            // Coil 3 has no `SuccessResult.drawable` — the decoded result is an `Image`
+            // (width/height are on the interface itself, whatever the concrete type).
+            val coilImage = (coilInfo as? SuccessResult)?.image
             step(
                 "coil",
                 "direct Coil execute: ${coilInfo?.javaClass?.simpleName ?: coilResult.exceptionOrNull()?.javaClass?.simpleName} " +
-                    "in $coilMs ms" + if (drawable != null) {
-                        " preview=${drawable.intrinsicWidth}x${drawable.intrinsicHeight}"
+                    "in $coilMs ms" + if (coilImage != null) {
+                        " preview=${coilImage.width}x${coilImage.height}"
                     } else {
                         ""
                     },
