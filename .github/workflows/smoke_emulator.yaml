@@ -282,11 +282,14 @@ jobs:
           # `set -o pipefail` fails there with "Bad substitution" and wrongly reds the
           # job even when the tests passed. Use POSIX sh only.
           script: |
-            # The RAW corpus goes into the app's own external files dir: readable by the app
-            # with no storage permission, and outside any MediaStore/legacy-storage rules.
-            adb shell mkdir -p /sdcard/Android/data/io.github.fotlab.fotlab/files/rawdb
-            adb push raw-samples/. /sdcard/Android/data/io.github.fotlab.fotlab/files/rawdb/
-            adb shell ls -l /sdcard/Android/data/io.github.fotlab.fotlab/files/rawdb
+            # The corpus lands in the emulated SD card's Pictures directory — the same place a
+            # camera or a file manager drops photos — so the tests can pick it up the way the
+            # app picks up a real photo: indexed into MediaStore, then imported by uri.
+            # (Not /sdcard/Android/data/<pkg>: a directory created by `adb shell mkdir` is owned
+            # by `shell`, so the app cannot traverse it and the files are invisible to it.)
+            adb shell mkdir -p /sdcard/Pictures/rawdb
+            adb push raw-samples/. /sdcard/Pictures/rawdb/
+            adb shell ls -l /sdcard/Pictures/rawdb
             adb logcat -c || true
             gradle --no-daemon --stacktrace connectedDebugAndroidTest > smoke-log.txt 2>&1
             STATUS=$?
