@@ -53,6 +53,15 @@ pub enum RawlerFotlabError {
 /// bytes, else `None`. Never decodes pixels — this is the cheap probe that runs in
 /// parallel with the Coil-side sniffer inside `FormatSniffer.sniff`.
 ///
+/// Identification is done with `rawler::get_decoder` + `Decoder::raw_metadata`, NOT
+/// `rawler::decode_dummy`. `decode_dummy` runs the *full* decoder — it still parses and
+/// walks the compressed pixel data to size its output buffer — so it requires the entire
+/// RAW on hand and fails when fed the 1 MiB sniff header `StudioEngine` provides. That
+/// failure was silent: the probe returned `None`, so large RAWs (Nikon NEF, Canon CR2)
+/// were wrongly demoted to the Coil branch. `get_decoder` only matches the
+/// container/format and `raw_metadata` reads the EXIF block at the file head, so both
+/// settle from the header alone (`FOTLAB-STUDIO-000001` R8).
+///
 /// The rawler work is wrapped in `catch_unwind`: a panic (e.g. on malformed/non-RAW input)
 /// degrades to `None` instead of aborting the process. Empty input is rejected outright to
 /// avoid any unwrap-panic inside `RawSource::new_from_slice`.
@@ -63,10 +72,9 @@ pub fn identify(raw: &[u8]) -> Option<String> {
     }
     panic::catch_unwind(AssertUnwindSafe(|| {
         let src = RawSource::new_from_slice(raw);
-        match rawler::decode_dummy(&src) {
-            Ok(img) => Some(format!("{}/{}", img.make, img.model)),
-            Err(_) => None,
-        }
+        let decoder = rawler::get_decoder(&src).ok()?;
+        let meta = decoder.raw_metadata(&src, &RawDecodeParams::default()).ok()?;
+        Some(format!("{}/{}", meta.make, meta.model))
     }))
     .unwrap_or(None)
 }
