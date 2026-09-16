@@ -248,10 +248,11 @@ class ZoomableGestureTest {
         val h = center.y * 2f
         val fromX = if (dx < 0) w * 0.85f else w * 0.15f
         val toX = if (dx < 0) w * 0.15f else w * 0.85f
+        // endVelocity is a magnitude — it must be positive; the direction comes from start→end.
         swipeWithVelocity(
             start = Offset(fromX, h / 2f),
             end = Offset(toX, h / 2f),
-            endVelocity = if (dx < 0) -2_000f else 2_000f,
+            endVelocity = 2_000f,
         )
     }
 
