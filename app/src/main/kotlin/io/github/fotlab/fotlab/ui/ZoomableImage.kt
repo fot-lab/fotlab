@@ -173,9 +173,18 @@ fun ZoomableAsyncImage(
 ) {
     val painter = rememberAsyncImagePainter(model = model)
     // The decoded size is what the pan limits are measured against; it is known once painted.
+    //
+    // Coil reports `Size.Unspecified` until the decode finishes, and reading `width` / `height`
+    // off an unspecified Size **throws** — they are not NaN fields but guarded accessors
+    // (`IllegalStateException: Size is unspecified`). Touching them here crashed the whole
+    // process the moment a zoomable composed for an image that was not decoded yet, which is
+    // exactly what opening the Library viewer on a cold Coil cache did. Hence the explicit
+    // guard: the size is forwarded only once the painter actually has one.
     val decoded = painter.intrinsicSize
     SideEffect {
-        if (decoded.width > 0f && decoded.height > 0f) state.onImageSize(decoded)
+        if (decoded != Size.Unspecified && decoded.width > 0f && decoded.height > 0f) {
+            state.onImageSize(decoded)
+        }
     }
     Image(
         painter = painter,
@@ -270,6 +279,6 @@ private fun Modifier.zoomable(
 /** Zoom is treated as "fitted" below this, so float noise never keeps a parent scroller disabled. */
 private const val SCALE_EPSILON = 1.001f
 
-/** A size that has not been measured yet (zero, or the unspecified size, whose fields are NaN). */
+/** A size that has not been measured yet — zero, or the unspecified size, whose accessors throw. */
 private val Size.isUnmeasured: Boolean
-    get() = !(width > 0f && height > 0f)
+    get() = this == Size.Unspecified || !(width > 0f && height > 0f)

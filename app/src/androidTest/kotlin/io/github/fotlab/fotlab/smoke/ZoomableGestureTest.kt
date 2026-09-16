@@ -30,6 +30,7 @@ import io.github.fotlab.fotlab.ui.ZoomState
 import io.github.fotlab.fotlab.ui.rememberZoomState
 import java.io.File
 import java.io.FileOutputStream
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertTrue
@@ -105,7 +106,10 @@ class ZoomableGestureTest {
         t0 = System.nanoTime()
         val bitmap = Bitmap.createBitmap(256, 256, Bitmap.Config.ARGB_8888)
         bitmap.eraseColor(android.graphics.Color.MAGENTA)
-        pngFile = File(context.cacheDir, "gesture_test_${System.currentTimeMillis()}.png")
+        // Short on purpose: the grid renders names through MiddleEllipsisText, which truncates
+        // in the middle once the text overflows the tile, and onNodeWithText matches the
+        // DISPLAYED string. A long name is what made the grid lookup time out before.
+        pngFile = File(context.cacheDir, "g${System.currentTimeMillis() % 1000}.png")
         FileOutputStream(pngFile).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
         bitmap.recycle()
         step("fixture", "PNG at ${pngFile.toURI()} (${pngFile.length()} bytes)")
@@ -328,17 +332,24 @@ class ZoomableGestureTest {
         runBlocking { LibraryCore.importUris(parentId = null, uris = listOf(source)) }
         step("import", "importUris(${source}) done in ${(System.nanoTime() - t) / 1_000_000} ms")
 
+        // Split the two possible failure modes before waiting: an empty row set means the
+        // import/flow never reached the DB, a non-empty one means only the on-screen text is
+        // missing (truncation, wrong query) — the log says which.
+        val children = runBlocking { LibraryCore.rootChildren().first() }
+        step("import", "rootChildren=${children.size}: ${children.joinToString { it.nameDisplay }}")
+
         val closeDesc = context.getString(R.string.library_viewer_cd_close)
         hostContent { AppTheme { LibraryScreen(onNavigateToStudio = {}) } }
 
         // Wait for the real rootChildren flow to emit the imported node into the grid.
         composeRule.waitUntil(15_000) {
-            composeRule.onAllNodesWithText(pngFile.name).fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithText(pngFile.name, substring = true)
+                .fetchSemanticsNodes().isNotEmpty()
         }
         step("grid", "thumbnail '${pngFile.name}' visible in the real LibraryScreen grid")
 
         // The actual user gesture: tap the thumbnail cell (the Card's clickable wraps the cell).
-        composeRule.onNodeWithText(pngFile.name).performClick()
+        composeRule.onAllNodesWithText(pngFile.name, substring = true)[0].performClick()
         step("tap", "clicked the thumbnail cell")
 
         // The viewer dialog must appear; on the way there, every composition must survive.
