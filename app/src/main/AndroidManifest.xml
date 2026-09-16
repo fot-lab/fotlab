@@ -1,6 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Read images (incl. camera RAW) from MediaStore / the SD card. Needed both by the
+         app (importing and demosaicing RAW via rawler) and by the emulator smoke test, which
+         scans the rawdb corpus and opens the resulting content:// uri. On API 33+ READ_MEDIA_IMAGES
+         replaces READ_EXTERNAL_STORAGE (kept for minSdk 26..32). -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+
     <application
         android:name=".MainApplication"
         android:allowBackup="false"
