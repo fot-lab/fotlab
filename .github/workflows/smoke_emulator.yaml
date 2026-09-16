@@ -76,8 +76,8 @@ jobs:
     name: Emulator Smoke Test
     runs-on: ubuntu-26.04
     # A wedged emulator must fail the job, not hold the runner until the default
-    # 6-hour ceiling.
-    timeout-minutes: 45
+    # 6-hour ceiling. 75 min: booting the AVD plus five 36..50 MP software demosaics.
+    timeout-minutes: 75
     env:
       ANDROID_API: '36'
       ANDROID_BUILD_TOOLS: '36.0.0'
@@ -156,6 +156,50 @@ jobs:
           cp -r native-artifacts/kotlin/. app/build/generated/uniffi/main/kotlin/
         shell: bash
 
+      # -------- RAW corpus (fot-lab/rawdb) --------
+      # Real camera RAW files (Canon CR2, Sony ARW x2, Nikon NEF, Panasonic RW2 — 36..50 MP,
+      # ~250 MB) for RawRoutingTest, which proves the RAW path decodes a full frame through
+      # rawler instead of Coil pulling the embedded preview. They are immutable, so they are
+      # fetched once and cached; the emulator step pushes them into the app's external files
+      # dir, which the app reads with no storage permission at all.
+      - name: Restore RAW sample cache
+        id: raw-samples-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: raw-samples
+          key: rawdb-samples-v1
+
+      - name: Download RAW samples
+        if: steps.raw-samples-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p raw-samples
+          base="https://github.com/fot-lab/rawdb/raw/refs/heads/samples"
+          curl -fL --retry 3 --retry-delay 5 \
+            -o "raw-samples/Canon EOS 5DS_ISO_1000_RAW.CR2" \
+            "$base/Canon/EOS%205DS/Canon%20EOS%205DS_ISO_1000_RAW.CR2"
+          curl -fL --retry 3 --retry-delay 5 \
+            -o "raw-samples/ILCE-7R_ISO_50_14bits_Sony ARW Compressed.ARW" \
+            "$base/Sony/ILCE-7R/ILCE-7R_ISO_50_14bits_Sony%20ARW%20Compressed.ARW"
+          curl -fL --retry 3 --retry-delay 5 \
+            -o "raw-samples/ILCE-7RM2_ISO_100_14bits_Compressed RAW.ARW" \
+            "$base/Sony/ILCE-7RM2/ILCE-7RM2_ISO_100_14bits_Compressed%20RAW.ARW"
+          curl -fL --retry 3 --retry-delay 5 \
+            -o "raw-samples/NIKON D850_Large_ISO_64_14bits_Lossless.NEF" \
+            "$base/Nikon/D850/NIKON%20D850_Large_ISO_64_14bits_Lossless.NEF"
+          curl -fL --retry 3 --retry-delay 5 \
+            -o "raw-samples/DC-S1R_ISO_100_6fmt_8368x5584.RW2" \
+            "$base/Panasonic/DC-S1R/DC-S1R_ISO_100_6fmt_8368x5584.RW2"
+          ls -l raw-samples
+        shell: bash
+
+      - name: Save RAW sample cache
+        if: steps.raw-samples-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: raw-samples
+          key: rawdb-samples-v1
+
       # -------- emulator (AVD + emulator SDK cache) --------
       # ONE entry on purpose. An AVD is useless without the system image it boots, so
       # the AVD and the SDK packages the emulator-runner installs are cached under a
@@ -218,7 +262,9 @@ jobs:
       # app/src/androidTest/kotlin. This is the first point at which our app touches
       # the emulator — see the ordering note at the top of this file.
       - name: Run emulator smoke tests
-        timeout-minutes: 20
+        # Raised from 20 to 60 min: RawRoutingTest demosaics five 36..50 MP RAW files in
+        # software on the emulator, which is minutes per sample, not seconds.
+        timeout-minutes: 60
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: ${{ inputs.api-level }}
@@ -236,6 +282,11 @@ jobs:
           # `set -o pipefail` fails there with "Bad substitution" and wrongly reds the
           # job even when the tests passed. Use POSIX sh only.
           script: |
+            # The RAW corpus goes into the app's own external files dir: readable by the app
+            # with no storage permission, and outside any MediaStore/legacy-storage rules.
+            adb shell mkdir -p /sdcard/Android/data/io.github.fotlab.fotlab/files/rawdb
+            adb push raw-samples/. /sdcard/Android/data/io.github.fotlab.fotlab/files/rawdb/
+            adb shell ls -l /sdcard/Android/data/io.github.fotlab.fotlab/files/rawdb
             adb logcat -c || true
             gradle --no-daemon --stacktrace connectedDebugAndroidTest > smoke-log.txt 2>&1
             STATUS=$?
