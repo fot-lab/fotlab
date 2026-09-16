@@ -242,12 +242,15 @@ class ZoomableGestureTest {
      * ever falls outside the node.
      */
     private fun TouchInjectionScope.flingX(dx: Float) {
-        val w = visibleSize().width.toFloat()
+        // The scope exposes no size property; in node-local coordinates the centre IS the half
+        // size, so the width/height follow from it and every point stays inside the node.
+        val w = center.x * 2f
+        val h = center.y * 2f
         val fromX = if (dx < 0) w * 0.85f else w * 0.15f
         val toX = if (dx < 0) w * 0.15f else w * 0.85f
         swipeWithVelocity(
-            start = Offset(fromX, visibleSize().height / 2f),
-            end = Offset(toX, visibleSize().height / 2f),
+            start = Offset(fromX, h / 2f),
+            end = Offset(toX, h / 2f),
             endVelocity = if (dx < 0) -2_000f else 2_000f,
         )
     }
