@@ -124,25 +124,35 @@ class RawRoutingTest {
     private data class Sample(
         val file: String,
         val mime: String,
-        /** Short leading text that survives the grid's middle-ellipsis truncation. */
+        /**
+         * Text used to find the node in the grid. Must be the file EXTENSION: `MiddleEllipsisText`
+         * keeps the trailing suffix whole and truncates the head, so the extension is the only
+         * part of a long camera filename guaranteed to survive truncation on screen.
+         */
         val gridText: String,
         val label: String,
     )
 
+    // The grid is matched by the file EXTENSION, not by a leading prefix. `MiddleEllipsisText`
+    // keeps the trailing suffix (the extension) whole and truncates the head, so on the
+    // emulator's 320px-wide screen a long camera filename loses its head entirely — "Canon EOS
+    // 5DS" is cut away and only ".CR2" is still on screen. A prefix can therefore never be
+    // relied on; the extension always can. `clearLibrary()` leaves exactly one node in the grid
+    // per test, so the extension is unambiguous even though the two Sony samples share ".ARW".
     private val canonCr2 = Sample(
-        "Canon EOS 5DS_ISO_1000_RAW.CR2", "image/x-canon-cr2", "Canon EOS 5DS", "Canon EOS 5DS CR2",
+        "Canon EOS 5DS_ISO_1000_RAW.CR2", "image/x-canon-cr2", ".CR2", "Canon EOS 5DS CR2",
     )
     private val sonyArw7r = Sample(
-        "ILCE-7R_ISO_50_14bits_Sony ARW Compressed.ARW", "image/x-sony-arw", "ILCE-7R", "Sony ILCE-7R ARW",
+        "ILCE-7R_ISO_50_14bits_Sony ARW Compressed.ARW", "image/x-sony-arw", ".ARW", "Sony ILCE-7R ARW",
     )
     private val sonyArw7rm2 = Sample(
-        "ILCE-7RM2_ISO_100_14bits_Compressed RAW.ARW", "image/x-sony-arw", "ILCE-7RM2", "Sony ILCE-7RM2 ARW",
+        "ILCE-7RM2_ISO_100_14bits_Compressed RAW.ARW", "image/x-sony-arw", ".ARW", "Sony ILCE-7RM2 ARW",
     )
     private val nikonNef = Sample(
-        "NIKON D850_Large_ISO_64_14bits_Lossless.NEF", "image/x-nikon-nef", "NIKON D850", "Nikon D850 NEF",
+        "NIKON D850_Large_ISO_64_14bits_Lossless.NEF", "image/x-nikon-nef", ".NEF", "Nikon D850 NEF",
     )
     private val panasonicRw2 = Sample(
-        "DC-S1R_ISO_100_6fmt_8368x5584.RW2", "image/x-panasonic-rw2", "DC-S1R", "Panasonic DC-S1R RW2",
+        "DC-S1R_ISO_100_6fmt_8368x5584.RW2", "image/x-panasonic-rw2", ".RW2", "Panasonic DC-S1R RW2",
     )
 
     // ---------------------------------------------------------------- tests
