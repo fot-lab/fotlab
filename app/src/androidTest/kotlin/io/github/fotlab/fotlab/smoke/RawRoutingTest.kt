@@ -107,6 +107,10 @@ class RawRoutingTest {
             InstrumentationRegistry.getInstrumentation().uiAutomation
                 .grantRuntimePermission(context.packageName, permission)
         }.onFailure { Log.w(tag, "grantRuntimePermission failed", it) }
+        // Isolate each journey: the emulator screen is tiny (320x640) and the library grid is lazy,
+        // so a node buried under imports from earlier tests would never be composed into the
+        // semantics tree and the grid-wait would time out. Start every test from an empty library.
+        runBlocking { clearLibrary() }
     }
 
     @After
@@ -265,7 +269,19 @@ class RawRoutingTest {
      */
     private fun indexAndFind(sample: Sample): Uri? {
         val path = "/sdcard/Pictures/rawdb/${sample.file}"
-        scanFile(path, sample.mime)
+        // The pushed RAW files live on the SD card: scanFile indexes them and returns the content://
+        // uri the scanner produced. Use that directly — it is the authoritative result and avoids the
+        // race where a DISPLAY_NAME re-query right after the scan returns nothing (the 5 raw failures:
+        // scan returned media/19, the re-query a moment later found no row).
+        val scanned = scanFile(path, sample.mime)
+        if (scanned != null) {
+            step("mediaStore", "content uri=$scanned")
+            return scanned
+        }
+        // The PNG control is published straight into MediaStore (not on the SD card), so scanning the
+        // sdcard path yields nothing. Fall back to a DISPLAY_NAME lookup, which is stable here because
+        // the insert committed long before this call.
+        step("mediaStore", "sdcard scan empty for ${sample.file}, querying MediaStore by name")
         val projection = arrayOf(
             MediaStore.Images.Media._ID,
             MediaStore.Images.Media.DISPLAY_NAME,
@@ -292,14 +308,28 @@ class RawRoutingTest {
         return null
     }
 
-    /** MediaScanner is async; the callback is awaited so the query below cannot race it. */
-    private fun scanFile(path: String, mime: String) {
+    /**
+     * Index [path] into MediaStore via MediaScannerConnection and return the content:// uri the
+     * scanner hands back. The callback uri is authoritative — re-querying MediaStore by DISPLAY_NAME
+     * immediately afterwards races the scanner's own transaction commit and can return null. Returns
+     * null when the scanner has nothing to index (e.g. the PNG control fixture, not on the SD card).
+     */
+    private fun scanFile(path: String, mime: String): Uri? {
         val latch = CountDownLatch(1)
+        var result: Uri? = null
         MediaScannerConnection.scanFile(context, arrayOf(path), arrayOf(mime)) { scanned, uri ->
             step("scan", "scanned='$scanned' -> $uri")
+            result = uri
             latch.countDown()
         }
         latch.await(60, TimeUnit.SECONDS)
+        return result
+    }
+
+    /** Remove every live node so each test starts from an empty library grid. */
+    private suspend fun clearLibrary() {
+        LibraryCore.rootChildren().first().forEach { LibraryCore.removeNode(it) }
+        LibraryCore.collections().first().forEach { LibraryCore.removeNode(it) }
     }
 
     /** A tiny PNG published through MediaStore, as the Coil-branch control. */
