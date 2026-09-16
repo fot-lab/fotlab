@@ -195,7 +195,6 @@ object LibraryCore {
      * revised).
      */
     suspend fun refresh() {
-        val now = System.currentTimeMillis()
         val missing = repo().fileEntryNodes().filter { node ->
             node.uriStorage != null && !uriExists(node.uriStorage)
         }.mapNotNull { it.fsNodeId }
@@ -206,13 +205,20 @@ object LibraryCore {
         }
     }
 
-    /** True when the real object behind [uriString] is still resolvable; false on any failure. */
+    /**
+     * True when the real object behind [uriString] is still resolvable; false on any failure.
+     *
+     * The row count must be tested with `> 0`, never `>= 0`. `Cursor.count` is a number of rows
+     * and is never negative, so `>= 0` answers "the provider handed back a cursor" — which stays
+     * true for a gone object, because a provider answers with an *empty* cursor rather than
+     * `null`. That made [refresh] blind to deleted files (`ACTION-KOTLIN-000002`).
+     */
     private fun uriExists(uriString: String): Boolean {
         val uri = Uri.parse(uriString)
         return runCatching {
             applicationContext.contentResolver
                 .query(uri, null, null, null, null)
-                ?.use { it.count >= 0 } ?: false
+                ?.use { it.count > 0 } ?: false
         }.getOrDefault(false)
     }
 
