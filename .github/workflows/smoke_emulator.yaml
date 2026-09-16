@@ -262,9 +262,9 @@ jobs:
       # app/src/androidTest/kotlin. This is the first point at which our app touches
       # the emulator — see the ordering note at the top of this file.
       - name: Run emulator smoke tests
-        # Raised from 20 to 60 min: RawRoutingTest demosaics five 36..50 MP RAW files in
-        # software on the emulator, which is minutes per sample, not seconds.
-        timeout-minutes: 60
+        # Raised from 20 to 75 min: RawRoutingTest demosaics five 36..50 MP RAW files in
+        # software on the emulator (minutes per sample, not seconds), plus the rest of the suite.
+        timeout-minutes: 75
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: ${{ inputs.api-level }}

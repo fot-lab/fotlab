@@ -332,9 +332,17 @@ class RawRoutingTest {
         LibraryCore.collections().first().forEach { LibraryCore.removeNode(it) }
     }
 
-    /** A tiny PNG published through MediaStore, as the Coil-branch control. */
+    /**
+     * A tiny PNG published through MediaStore, as the Coil-branch control.
+     *
+     * The name is kept SHORT on purpose: the library grid renders names through
+     * MiddleEllipsisText, which middle-truncates on the emulator's tiny 320px-wide screen, and
+     * `onAllNodesWithText` matches the DISPLAYED (possibly truncated) string — so a long name like
+     * `png_control.png` never satisfies the substring wait. `e2e.png` fits and matches, the same
+     * convention the gesture tests use (`gNNN.png`).
+     */
     private fun pngControl(): Sample {
-        val name = "png_control.png"
+        val name = "e2e.png"
         val bitmap = Bitmap.createBitmap(256, 256, Bitmap.Config.ARGB_8888).apply {
             eraseColor(android.graphics.Color.MAGENTA)
         }
@@ -380,7 +388,7 @@ class RawRoutingTest {
         /** An embedded preview is at most ~2k px wide; every RAW here is 36 MP and up (7360 px+). */
         const val FULL_FRAME_MIN_WIDTH = 3000
 
-        /** A 36..50 MP software demosaic on the emulator is slow; 5 min per sample. */
-        const val DECODE_TIMEOUT_MS = 300_000L
+        /** A 36..50 MP software demosaic on the emulator is slow; 8 min per sample (safety margin). */
+        const val DECODE_TIMEOUT_MS = 480_000L
     }
 }
