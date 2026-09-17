@@ -287,7 +287,7 @@ class RawRoutingTest {
     /**
      * The demosaic develop path, driven through the REAL Studio UI the way a user triggers it:
      * the journey lands the RAW in Studio as a grayscale raw-preview (call #2, `decode_to_png`), then
-     * the bottom-bar "Looks" action opens the demosaic pull-up menu and picking an algorithm invokes
+     * the bottom-bar "Demosaic" action opens the demosaic pull-up menu and picking an algorithm invokes
      * [StudioEngine.develop] → [io.github.fotlab.fotlab.media.RawDecoder.developToPng] →
      * [io.github.fotlab.fotlab_rawler.RawlerFotlabBridge.developRawToPng] → rawler's `develop_to_png`
      * (call #3). The engine must re-render a full-frame **linear** PNG that differs from the grayscale
