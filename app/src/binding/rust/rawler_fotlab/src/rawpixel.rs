@@ -40,7 +40,8 @@
 use std::collections::BTreeMap;
 use std::io::Cursor;
 
-use rawler::dng::{CropMode, DngCompression, DngPhotometricConversion, DngWriter, DNG_VERSION_V1_4};
+use rawler::dng::writer::DngWriter;
+use rawler::dng::{CropMode, DngCompression, DngPhotometricConversion, DNG_VERSION_V1_4};
 use rawler::formats::tiff::{IFD, Value};
 use rawler::imgop::Rect;
 use rawler::tags::{DngTag, ExifTag, TiffCommonTag};

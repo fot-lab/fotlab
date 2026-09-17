@@ -15,7 +15,8 @@
 use rawler::imgop::develop::Intermediate;
 use rawler::imgop::matrix::{multiply, normalize, pseudo_inverse};
 use rawler::imgop::raw::clip_euclidean_norm_avg;
-use rawler::imgop::xyz::{adapt_bradford, Illuminant, SRGB_TO_XYZ_D65};
+use rawler::imgop::chromatic_adaption::adapt_bradford;
+use rawler::imgop::xyz::{Illuminant, SRGB_TO_XYZ_D65};
 use rawler::RawImage;
 
 use crate::develop::LinearImage;

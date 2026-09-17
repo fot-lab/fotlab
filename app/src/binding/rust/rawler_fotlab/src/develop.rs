@@ -60,7 +60,7 @@ pub fn develop(raw: &[u8], params: DevelopParams) -> Result<LinearImage, RawlerF
     let mut image = decode_to_rawimage(raw)?;
     image
       .apply_scaling()
-      .map_err(|e| RawlerFotlabError::Decode(e))?;
+      .map_err(|e| RawlerFotlabError::Decode(e.to_string()))?;
 
     let intermediate = demosaic(&image, params.demosaic_algorithm)?;
     let intermediate = crop_default(&image, intermediate);
