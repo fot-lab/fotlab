@@ -23,6 +23,18 @@ interface FsNodeObjectDao {
     @Query("SELECT * FROM fs_node_object WHERE uri_storage = :uri AND time_deleted IS NULL")
     suspend fun getByUri(uri: String): FsNodeObject?
 
+    /**
+     * Find any node with this URI regardless of soft-delete status. Used by `importUris` to
+     * revive a soft-deleted node when the same file is re-imported, instead of hitting the
+     * UNIQUE index on `uri_storage` with a duplicate INSERT.
+     */
+    @Query("SELECT * FROM fs_node_object WHERE uri_storage = :uri ORDER BY time_deleted IS NULL DESC LIMIT 1")
+    suspend fun getByUriAnyStatus(uri: String): FsNodeObject?
+
+    /** Clear the soft-delete stamp so a previously removed node becomes live again. */
+    @Query("UPDATE fs_node_object SET time_deleted = NULL, name_display = :nameDisplay, type_mime = :typeMime WHERE fs_node_id = :id")
+    suspend fun revive(id: Long, nameDisplay: String, typeMime: String)
+
     /** Rename a node in place (R-name only); selection rename path (`FOTLAB-UIXDES-000004`). */
     @Query("UPDATE fs_node_object SET name_display = :name WHERE fs_node_id = :id")
     suspend fun rename(id: Long, name: String)

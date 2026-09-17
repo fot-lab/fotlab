@@ -115,6 +115,12 @@ class LibraryRepository(private val database: LibraryDatabase) {
     suspend fun getByUri(uri: String): FsNodeObject? =
         database.nodeObjectDao().getByUri(uri)
 
+    suspend fun getByUriAnyStatus(uri: String): FsNodeObject? =
+        database.nodeObjectDao().getByUriAnyStatus(uri)
+
+    suspend fun revive(id: Long, nameDisplay: String, typeMime: String) =
+        database.nodeObjectDao().revive(id, nameDisplay, typeMime)
+
     /** Rename a node by id (display name only); reused by the single-selection rename action. */
     suspend fun renameNode(id: Long, name: String) =
         database.nodeObjectDao().rename(id, name)
