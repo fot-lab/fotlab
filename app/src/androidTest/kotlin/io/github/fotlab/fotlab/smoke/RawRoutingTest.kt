@@ -309,13 +309,13 @@ class RawRoutingTest {
         composeRule.waitForIdle()
 
         // The bottom-bar "Demosaic" action opens the demosaic pull-up menu.
-        val looks = context.getString(R.string.studio_bottombar_demosaic)
+        val demosaic = context.getString(R.string.studio_bottombar_demosaic)
         composeRule.waitUntil(30_000) {
-            composeRule.onAllNodesWithText(looks).fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithText(demosaic).fetchSemanticsNodes().isNotEmpty()
         }
-        step("ui", "bottom-bar '$looks' present")
-        composeRule.onNodeWithText(looks).performClick()
-        step("ui", "clicked '$looks'")
+        step("ui", "bottom-bar '$demosaic' present")
+        composeRule.onNodeWithText(demosaic).performClick()
+        step("ui", "clicked '$demosaic'")
 
         // The demosaic sheet offers the algorithms; pick PPG.
         val ppg = context.getString(R.string.studio_demosaic_ppg)
