@@ -284,19 +284,42 @@ class RawRoutingTest {
 
     // ---------------------------------------------------------------- develop path
 
+    // Every RAW corpus file must survive the COMPLETE user journey, develop included:
+    // import → grid tap → viewer → Open in Studio → grayscale preview → bottom-bar Demosaic
+    // sheet → pick PPG → re-rendered full-frame COLOR png. The develop step used to panic inside
+    // rawler's crop stage on every file whose crop area is offset in full-sensor coordinates
+    // (CR2's embedded sensor-area crop, DNG's DefaultCropOrigin) — the catch_unwind boundary
+    // turned that into "Unsupported Format" in the UI. Sony ILCE-7R alone has an uncropped
+    // active area, which is why develop previously appeared to pass when only it was tested.
+    // One @Test per sample keeps the failing brand visible in the CI report.
+    @Test
+    fun canonCr2DevelopsThroughDemosaicMenu() = developThroughUserJourney(canonCr2)
+
+    @Test
+    fun sonyIlce7rArwDevelopsThroughDemosaicMenu() = developThroughUserJourney(sonyArw7r)
+
+    @Test
+    fun sonyIlce7rm2ArwDevelopsThroughDemosaicMenu() = developThroughUserJourney(sonyArw7rm2)
+
+    @Test
+    fun nikonD850NefDevelopsThroughDemosaicMenu() = developThroughUserJourney(nikonNef)
+
+    @Test
+    fun panasonicDcS1rRw2DevelopsThroughDemosaicMenu() = developThroughUserJourney(panasonicRw2)
+
     /**
      * The demosaic develop path, driven through the REAL Studio UI the way a user triggers it:
-     * the journey lands the RAW in Studio as a grayscale raw-preview (call #2, `decode_to_png`), then
-     * the bottom-bar "Demosaic" action opens the demosaic pull-up menu and picking an algorithm invokes
-     * [StudioEngine.develop] → [io.github.fotlab.fotlab.media.RawDecoder.developToPng] →
-     * [io.github.fotlab.fotlab_rawler.RawlerFotlabBridge.developRawToPng] → rawler's `develop_to_png`
-     * (call #3). The engine must re-render a full-frame **linear** PNG that differs from the grayscale
-     * preview (proving demosaic actually ran, not a cached frame). This is the Kotlin user-flow
-     * coverage for the new bottom-bar menu end to end (`FOTLAB-STUDIO-000001` R4).
+     * the journey lands the RAW in Studio as a grayscale raw-preview (call #2, `decode_to_png`),
+     * then the bottom-bar "Demosaic" action opens the demosaic pull-up menu and picking an
+     * algorithm invokes [StudioEngine.develop] → [io.github.fotlab.fotlab.media.RawDecoder.developToPng]
+     * → [io.github.fotlab.fotlab_rawler.RawlerFotlabBridge.developRawToPng] → rawler's
+     * `develop_to_png` (call #3). The engine must re-render a full-frame **linear COLOR** PNG
+     * that differs from the grayscale preview (proving demosaic + calibrate actually ran, not a
+     * cached frame). This is the complete user-flow coverage for the bottom-bar menu end to end
+     * (`FOTLAB-STUDIO-000001` R4), run for every RAW in the corpus.
      */
-    @Test
-    fun sonyArwDevelopsThroughDemosaicMenu() {
-        journey(sonyArw7r, expectRawler = true) // grayscale preview + rawler routing assertion
+    private fun developThroughUserJourney(sample: Sample) {
+        journey(sample, expectRawler = true) // grayscale preview + rawler routing assertion
 
         // Capture the grayscale preview the journey left on the engine.
         val gray = StudioEngine.renderResult.value as? StudioRenderResult.Ready
@@ -317,7 +340,8 @@ class RawRoutingTest {
         composeRule.onNodeWithText(demosaic).performClick()
         step("ui", "clicked '$demosaic'")
 
-        // The demosaic sheet offers the algorithms; pick PPG.
+        // The demosaic sheet offers the algorithms; PPG is the Bayer choice for every camera in
+        // the corpus (Canon/Sony/Nikon/Panasonic sensors are Bayer RGB).
         val ppg = context.getString(R.string.studio_demosaic_ppg)
         composeRule.waitUntil(30_000) {
             composeRule.onAllNodesWithText(ppg).fetchSemanticsNodes().isNotEmpty()
@@ -326,20 +350,25 @@ class RawRoutingTest {
         composeRule.onNodeWithText(ppg).performClick()
         step("ui", "picked '$ppg' — triggers StudioEngine.develop")
 
-        // The engine re-develops; wait for a fresh full-frame linear PNG.
+        // The engine re-develops; wait for a fresh full-frame linear COLOR PNG.
         val developed = runBlocking {
             withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame(grayBytes) }
         }
-        step("develop", "developed via UI menu: ${developed.outWidth}x${developed.outHeight} (${developed.bytes.size} bytes)")
+        step(
+            "develop",
+            "developed via UI menu: ${developed.outWidth}x${developed.outHeight} (${developed.bytes.size} bytes)",
+        )
+        assertDevelopedIsColor(developed.bytes, sample.label)
     }
 
     /**
      * Every demosaic algorithm the menu exposes must run the full develop pipeline (decode → black/white
-     * scaling → demosaic → crop → calibrate → LinearImage → PNG) without error and produce a full-frame
-     * PNG. Drives the engine directly (the same [StudioEngine.develop] the menu calls) so each Rust
-     * demosaic algorithm branch is exercised through the real native `develop_to_png` path — this is the
-     * Rust step coverage the new develop feature needs, on a 36 MP Sony ARW to keep the emulator budget
-     * sane.
+     * scaling → demosaic → calibrate → crop-default → LinearImage → PNG) without error and produce a
+     * full-frame COLOR PNG. Drives the engine directly (the same [StudioEngine.develop] the menu calls)
+     * so each Rust demosaic algorithm branch is exercised through the real native `develop_to_png` path
+     * — this is the Rust step coverage the new develop feature needs, on a 36 MP Sony ARW to keep the
+     * emulator budget sane. The per-brand user journey is covered by
+     * [developThroughUserJourney] for every corpus sample.
      */
     @Test
     fun developEachDemosaicAlgorithmProducesFullFrame() {
@@ -372,7 +401,49 @@ class RawRoutingTest {
                 withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame(grayBytes) }
             }
             step("develop", "$algo -> ${developed.outWidth}x${developed.outHeight} (${developed.bytes.size} bytes)")
+            assertDevelopedIsColor(developed.bytes, "Sony ILCE-7R $algo")
         }
+    }
+
+    /**
+     * Assert the developed PNG actually carries chroma: independent R/G/B channels. The grayscale
+     * raw preview ([io.github.fotlab.fotlab.media.RawDecoder.decodeToPng]) writes R == G == B for
+     * every pixel; a frame that merely "differs" from the preview could still be a re-encoded
+     * grayscale, so a developed image must show a channel spread on a meaningful share of pixels.
+     *
+     * The 36-50 MP frame is decoded at [COLOR_CHECK_SAMPLE_SHIFT] downsampling — a full ARGB8
+     * bitmap would not fit the emulator heap, but chroma presence survives a 32x downsample and
+     * the int[] stays a few hundred KB.
+     */
+    private fun assertDevelopedIsColor(bytes: ByteArray, label: String) {
+        val opts = BitmapFactory.Options().apply { inSampleSize = COLOR_CHECK_SAMPLE_SHIFT }
+        val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+        assertTrue("$label: developed PNG is not decodable for the color check", bmp != null)
+        val pixels = IntArray(bmp.width * bmp.height)
+        bmp.getPixels(pixels, 0, bmp.width, 0, 0, bmp.width, bmp.height)
+        bmp.recycle()
+
+        var colored = 0
+        var maxSpread = 0
+        for (c in pixels) {
+            val r = android.graphics.Color.red(c)
+            val g = android.graphics.Color.green(c)
+            val b = android.graphics.Color.blue(c)
+            val spread = maxOf(kotlin.math.abs(r - g), kotlin.math.abs(g - b), kotlin.math.abs(r - b))
+            if (spread > maxSpread) maxSpread = spread
+            if (spread >= COLOR_SPREAD_MIN_LEVELS) colored++
+        }
+        val coloredRatio = colored.toDouble() / pixels.size
+        step(
+            "develop",
+            "color check: $colored/${pixels.size} sampled pixels (${"%.2f".format(coloredRatio * 100)}%) " +
+                "with channel spread >= $COLOR_SPREAD_MIN_LEVELS, max spread $maxSpread",
+        )
+        assertTrue(
+            "$label: developed frame is grayscale — demosaic/white-balance/calibrate did not produce " +
+                "color ($colored/${pixels.size} sampled pixels with channel spread >= $COLOR_SPREAD_MIN_LEVELS)",
+            colored >= pixels.size / COLOR_COLORED_MIN_FRACTION,
+        )
     }
 
     /** Read a `ByteBuffer` model out of [StudioRenderResult.Ready] without disturbing the buffer. */
@@ -548,5 +619,14 @@ class RawRoutingTest {
 
         /** A 36..50 MP software demosaic on the emulator is slow; 8 min per sample (safety margin). */
         const val DECODE_TIMEOUT_MS = 480_000L
+
+        /** BitmapFactory inSampleSize for the chroma check — keeps the decoded probe a few hundred KB. */
+        const val COLOR_CHECK_SAMPLE_SHIFT = 32
+
+        /** Min per-pixel R/G/B spread (8-bit levels) counted as "colored" on the linear (dark) PNG. */
+        const val COLOR_SPREAD_MIN_LEVELS = 6
+
+        /** At least 1/50 (2 %) of sampled pixels must be colored for the frame to count as demosaiced. */
+        const val COLOR_COLORED_MIN_FRACTION = 50
     }
 }
