@@ -20,22 +20,33 @@
 //!   `isodng` → `fotlab` → `dnglab` ([`read_shape`], doc R2b) — **never** from
 //!   `data`, and never defaulted.
 //!
-//! [`rawimage_to_rawpixel`] is the projection: it copies the decoded samples into
-//! [`RawPixelData`] **without re-encoding** (no LJPEG, no pixel pass) and
-//! re-expresses the rawler `RawImage` metadata as tags. The DNG-ISO spine mirrors
-//! rawler's own `DngWriter::write_rawimage` / `load_base_tags` emission
-//! (`external/dnglab/rawler/src/dng/writer.rs`) so a `RawPixel` can later be
-//! written back to DNG 1:1; rawler-only fields go to `dnglab`.
+//! [`rawimage_to_rawpixel`] is the projection: it captures the decoded samples
+//! into [`RawPixelData`] **without re-encoding** (no LJPEG, no pixel pass) and
+//! re-expresses the rawler `RawImage` metadata as tags. Crucially, the DNG-ISO
+//! spine is **not hand-rolled**: we feed the `RawImage` (with its pixel buffer
+//! shrunk to a single sample) to rawler's own `DngWriter::raw_image` — the exact
+//! code path that `dnglab`'s `makedng` / rawler's `convert` use — and read the
+//! emitted raw sub-IFD back as a flat tag map
+//! (`external/dnglab/rawler/src/dng/writer.rs`). A `RawPixel` can therefore later
+//! be written back to a real DNG 1:1. rawler-only fields go to `dnglab`.
+//!
+//! **Zero-pixel-I/O trick**: rawler's `dng_put_raw_uncompressed` only ever
+//! streams `rawimage.data` to the output and never checks that its length
+//! matches `width*height*cpp`. So after capturing the real samples we swap
+//! `data` for a 1-sample placeholder; every shape/format tag is still emitted
+//! from the real `width/height/cpp/blacklevel/...` fields, while the throwaway
+//! in-memory DNG carries a negligible image strip.
 
 use std::collections::BTreeMap;
+use std::io::Cursor;
 
-use rawler::dng::{rect_to_dng_area, DNG_VERSION_V1_4};
-use rawler::formats::tiff::{PhotometricInterpretation, Rational, SRational, Value};
-use rawler::imgop::xyz::Illuminant;
-use rawler::imgop::{Dim2, Point, Rect};
-use rawler::rawimage::RawPhotometricInterpretation;
+use rawler::dng::{CropMode, DngCompression, DngPhotometricConversion, DngWriter, DNG_VERSION_V1_4};
+use rawler::formats::tiff::{IFD, Value};
+use rawler::imgop::Rect;
 use rawler::tags::{DngTag, ExifTag, TiffCommonTag};
 use rawler::{RawImage, RawImageData};
+
+use crate::RawlerFotlabError;
 
 // ---------------------------------------------------------------------------
 // The IR (FOTLAB-IPIXEL-000001 R1)
@@ -204,19 +215,32 @@ fn map_u32(map: &BTreeMap<String, TagValue>, key: &str) -> Option<u32> {
 
 /// Project a decoded rawler [`RawImage`] into the canonical [`RawPixel`] IR.
 ///
-/// The pixel buffer is copied as-is (uncompressed, no LJPEG re-encode); every
-/// non-pixel property becomes a tag in one of the three namespaces.
-pub(crate) fn rawimage_to_rawpixel(image: &RawImage) -> RawPixel {
-    RawPixel {
-        data: RawPixelData {
-            buffer: pixel_buffer(&image.data),
-        },
+/// Takes ownership of `image`. The pure pixel buffer is captured **first**
+/// (uncompressed, no LJPEG re-encode), then `image.data` is shrunk to a single
+/// sample so the DNG-ISO spine can be emitted by rawler's own `DngWriter`
+/// without streaming the full pixel buffer (see [`isodng_tags`]).
+pub(crate) fn rawimage_to_rawpixel(image: RawImage) -> Result<RawPixel, RawlerFotlabError> {
+    // Capture the pure pixel buffer before we shrink the source data.
+    let buffer = pixel_buffer(&image.data);
+
+    // Shrink the pixel buffer to one sample. rawler's `dng_put_raw_uncompressed`
+    // never checks `data.len()` against `width*height*cpp`, so every shape/format
+    // tag is still emitted from the real fields while the image strip becomes a
+    // single sample. The original samples have already been copied into `buffer`.
+    let mut tag_src = image;
+    tag_src.data = match &tag_src.data {
+        RawImageData::Integer(_) => RawImageData::Integer(vec![0u16]),
+        RawImageData::Float(_) => RawImageData::Float(vec![0.0f32]),
+    };
+
+    Ok(RawPixel {
+        data: RawPixelData { buffer },
         meta: RawPixelMeta {
-            isodng: isodng_tags(image),
-            dnglab: dnglab_tags(image),
+            isodng: isodng_tags(&tag_src)?,
+            dnglab: dnglab_tags(&tag_src),
             fotlab: fotlab_tags(),
         },
-    }
+    })
 }
 
 fn pixel_buffer(data: &RawImageData) -> RawPixelBuffer {
@@ -226,175 +250,85 @@ fn pixel_buffer(data: &RawImageData) -> RawPixelBuffer {
     }
 }
 
-/// Build the flat DNG-ISO tag set (doc R4).
+/// Build the flat DNG-ISO tag set (doc R4) by **reusing rawler's own DNG
+/// emission** — no hand-rolled tag mapping.
 ///
-/// Mirrors rawler's `DngWriter::write_rawimage` (Original photometric path) and
-/// `load_base_tags`, plus the DNG-version spine from `DngWriter::new`, so the
-/// result can be written back to a DNG 1:1. `Compression` is intentionally left
-/// out (it is a serialization-boundary concern, doc C3); `DefaultScale` /
-/// `BestQualityScale` are left to DNG defaults.
-fn isodng_tags(image: &RawImage) -> TagsIsoDng {
-    let img = image;
-    let mut t: BTreeMap<u16, Value> = BTreeMap::new();
-
-    // DNG version spine (DngWriter::new).
-    t.insert(DngTag::DNGVersion as u16, Value::from(DNG_VERSION_V1_4));
-    t.insert(DngTag::DNGBackwardVersion as u16, Value::from(DNG_VERSION_V1_4));
-
-    // Geometry/format: the authoritative shape home (doc R2b).
-    t.insert(TiffCommonTag::ImageWidth as u16, Value::from(img.width as u32));
-    t.insert(TiffCommonTag::ImageLength as u16, Value::from(img.height as u32));
-    t.insert(TiffCommonTag::SamplesPerPixel as u16, Value::from(img.cpp as u16));
-    t.insert(TiffCommonTag::BitsPerSample as u16, Value::from(img.bps as u16));
-    t.insert(TiffCommonTag::PlanarConfiguration as u16, Value::from(1_u16));
-    t.insert(ExifTag::Orientation as u16, Value::from(img.orientation.to_u16()));
-
-    // Active area / crop (CropMode::Best, mirrors write_rawimage).
-    let full = Rect::new(Point::new(0, 0), Dim2::new(img.width, img.height));
-    let active = img.active_area.unwrap_or(full);
-    let crop = img.crop_area.unwrap_or(active);
-    t.insert(DngTag::ActiveArea as u16, Value::from(rect_to_dng_area(&active)));
-    t.insert(
-        DngTag::DefaultCropOrigin as u16,
-        Value::from([
-            crop.p.x.saturating_sub(active.p.x) as u16,
-            crop.p.y.saturating_sub(active.p.y) as u16,
-        ]),
-    );
-    t.insert(
-        DngTag::DefaultCropSize as u16,
-        Value::from([crop.d.w as u16, crop.d.h as u16]),
-    );
-
-    // White level.
-    if img.whitelevel.0.iter().all(|x| *x <= u16::MAX as u32) {
-        let v: Vec<u16> = img.whitelevel.0.iter().map(|x| *x as u16).collect();
-        t.insert(DngTag::WhiteLevel as u16, Value::from(v.as_slice()));
-    } else {
-        t.insert(DngTag::WhiteLevel as u16, Value::from(img.whitelevel.0.as_slice()));
+/// `image.data` has already been shrunk to a single sample by the caller
+/// (`rawimage_to_rawpixel`), so rawler's `DngWriter::raw_image` streams ~0 bytes
+/// of image data yet still emits every shape/format tag from the real fields.
+/// We then read the raw sub-IFD back and flatten it into `TagsIsoDng`.
+///
+/// This is the exact code path `dnglab`'s `makedng` / rawler's `convert` use, so
+/// the IR's DNG-ISO spine is what rawler would write to a real DNG — and can be
+/// written back 1:1.
+fn isodng_tags(image: &RawImage) -> Result<TagsIsoDng, RawlerFotlabError> {
+    // 1. Build a throwaway DNG in memory via rawler's own writer.
+    let mut buf: Cursor<Vec<u8>> = Cursor::new(Vec::new());
+    {
+        let mut dng = DngWriter::new(&mut buf, DNG_VERSION_V1_4)
+            .map_err(|e| RawlerFotlabError::Decode(e.to_string()))?;
+        {
+            let mut sub = dng.subframe(0);
+            sub
+                .raw_image(
+                    image,
+                    CropMode::Best,
+                    DngCompression::Uncompressed,
+                    DngPhotometricConversion::Original,
+                    0,
+                )
+                .map_err(|e| RawlerFotlabError::Decode(e.to_string()))?;
+            sub
+                .finalize()
+                .map_err(|e| RawlerFotlabError::Decode(e.to_string()))?;
+        }
+        dng
+            .load_base_tags(image)
+            .map_err(|e| RawlerFotlabError::Decode(e.to_string()))?;
+        dng
+            .close()
+            .map_err(|e| RawlerFotlabError::Decode(e.to_string()))?;
     }
 
-    // Black level (shifted into the active area, mirrors write_rawimage).
-    let black = img.blacklevel.shift(active.p.x, active.p.y);
-    t.insert(
-        DngTag::BlackLevelRepeatDim as u16,
-        Value::from([black.height as u16, black.width as u16]),
-    );
-    if black.levels.iter().all(|r| r.d == 1) {
-        let as_u32: Vec<u32> = black.levels.iter().map(|r| r.n).collect();
-        if as_u32.iter().all(|x| *x <= u16::MAX as u32) {
-            let as_u16: Vec<u16> = as_u32.iter().map(|x| *x as u16).collect();
-            t.insert(DngTag::BlackLevel as u16, Value::from(as_u16.as_slice()));
-        } else {
-            t.insert(DngTag::BlackLevel as u16, Value::from(as_u32.as_slice()));
-        }
-    } else {
-        t.insert(DngTag::BlackLevel as u16, Value::from(black.levels.as_slice()));
-    }
+    // 2. Read the emitted DNG back and harvest the raw sub-IFD tags.
+    let mut reader = Cursor::new(buf.into_inner());
+    let root = IFD::new_root(&mut reader, 0)
+        .map_err(|e| RawlerFotlabError::Decode(e.to_string()))?;
 
-    if !img.blackareas.is_empty() {
-        let masked: Vec<u16> = img.blackareas.iter().flat_map(rect_to_dng_area).collect();
-        t.insert(DngTag::MaskedAreas as u16, Value::from(masked.as_slice()));
-    }
+    let sub_offset = root
+        .entries()
+        .get(&(TiffCommonTag::SubIFDs as u16))
+        .map(|e| e.value.force_u32(0))
+        .ok_or_else(|| RawlerFotlabError::Decode("built DNG has no SubIFDs".to_string()))?;
+    let sub = IFD::new(&mut reader, sub_offset, 0, 0, root.endian, &[])
+        .map_err(|e| RawlerFotlabError::Decode(e.to_string()))?;
 
-    // Photometric interpretation + CFA (mirrors write_rawimage).
-    match &img.photometric {
-        RawPhotometricInterpretation::BlackIsZero => {
-            t.insert(
-                TiffCommonTag::PhotometricInt as u16,
-                Value::from(PhotometricInterpretation::BlackIsZero),
-            );
-        }
-        RawPhotometricInterpretation::Cfa(config) => {
-            let cfa = config.cfa.shift(active.p.x, active.p.y);
-            t.insert(
-                TiffCommonTag::CFARepeatPatternDim as u16,
-                Value::from([cfa.width as u16, cfa.height as u16]),
-            );
-            t.insert(
-                TiffCommonTag::CFAPattern as u16,
-                Value::from(cfa.flat_pattern().as_slice()),
-            );
-            t.insert(
-                TiffCommonTag::PhotometricInt as u16,
-                Value::from(PhotometricInterpretation::CFA),
-            );
-            t.insert(DngTag::CFAPlaneColor as u16, Value::from(&config.colors));
-            t.insert(DngTag::CFALayout as u16, Value::from(1_u16));
-        }
-        RawPhotometricInterpretation::LinearRaw => {
-            t.insert(
-                TiffCommonTag::PhotometricInt as u16,
-                Value::from(PhotometricInterpretation::LinearRaw),
-            );
-        }
-    }
-
-    // White balance (AsShotNeutral) + colour matrices (mirrors write_rawimage).
-    if img.cpp > 1 || matches!(img.photometric, RawPhotometricInterpretation::Cfa(_)) {
-        t.insert(
-            DngTag::AsShotNeutral as u16,
-            Value::from(as_shot_neutral(img).as_slice()),
-        );
-
-        let mut matrices = img.color_matrix.clone();
-        if let Some(first_key) = matrices.keys().next().cloned() {
-            let (illu1, m1) = matrices
-                .remove_entry(&Illuminant::A)
-                .or_else(|| matrices.remove_entry(&first_key))
-                .expect("no colour matrix found");
-            t.insert(DngTag::CalibrationIlluminant1 as u16, Value::from(u16::from(illu1)));
-            t.insert(DngTag::ColorMatrix1 as u16, Value::from(matrix_to_srational(&m1).as_slice()));
-            if let Some((illu2, m2)) = matrices
-                .remove_entry(&Illuminant::D65)
-                .or_else(|| matrices.remove_entry(&Illuminant::D50))
-            {
-                t.insert(DngTag::CalibrationIlluminant2 as u16, Value::from(u16::from(illu2)));
-                t.insert(DngTag::ColorMatrix2 as u16, Value::from(matrix_to_srational(&m2).as_slice()));
-            }
-        }
-    }
-
-    // Camera identity (mirrors load_base_tags).
-    t.insert(TiffCommonTag::Make as u16, Value::from(img.clean_make.as_str()));
-    t.insert(TiffCommonTag::Model as u16, Value::from(img.clean_model.as_str()));
-    t.insert(
-        DngTag::UniqueCameraModel as u16,
-        Value::from(format!("{} {}", img.clean_make, img.clean_model)),
-    );
-
-    TagsIsoDng(t)
-}
-
-/// RAW white-balance coefficients → DNG `AsShotNeutral` (reciprocals), mirroring
-/// rawler's `wbcoeff_to_tiff_value`.
-fn as_shot_neutral(image: &RawImage) -> Vec<Rational> {
-    let wb = &image.wb_coeffs;
-    let recip = |i: usize| Rational::new_f32(1.0 / wb[i], 100_000);
-    match &image.photometric {
-        RawPhotometricInterpretation::BlackIsZero => vec![Rational::new(1, 1)],
-        RawPhotometricInterpretation::Cfa(config) => {
-            let mut v = vec![recip(0), recip(1), recip(2)];
-            if config.cfa.unique_colors() == 4 {
-                v.push(recip(3));
-            }
-            v
-        }
-        RawPhotometricInterpretation::LinearRaw => match image.cpp {
-            3 => vec![recip(0), recip(1), recip(2)],
-            _ => vec![Rational::new(1, 1)],
-        },
-    }
-}
-
-/// XYZ→camera matrix → DNG `ColorMatrix` (signed rationals), mirroring rawler's
-/// `matrix_to_tiff_value`.
-fn matrix_to_srational(matrix: &[f32]) -> Vec<SRational> {
-    let d = 10_000_i32;
-    matrix
+    let mut map: BTreeMap<u16, Value> = sub
+        .entries()
         .iter()
-        .map(|a| SRational::new((a * d as f32) as i32, d))
-        .collect()
+        .map(|(&k, e)| (k, e.value.clone()))
+        .collect();
+
+    // 3. Camera identity lives in the root IFD in a real DNG; fold it into the
+    //    same DNG-ISO namespace (reusing rawler's `load_base_tags` emission).
+    for id in [
+        TiffCommonTag::Make as u16,
+        TiffCommonTag::Model as u16,
+        DngTag::UniqueCameraModel as u16,
+    ] {
+        if let Some(e) = root.entries().get(&id) {
+            map.insert(id, e.value.clone());
+        }
+    }
+
+    // 4. Orientation is part of the DNG-ISO spine but rawler's raw sub-IFD omits
+    //    it; carry it over from the source (single-value form).
+    map.insert(
+        ExifTag::Orientation as u16,
+        Value::from(image.orientation.to_u16()),
+    );
+
+    Ok(TagsIsoDng(map))
 }
 
 /// rawler/dnglab-upstream extras that have no DNG-ISO slot (doc R5).

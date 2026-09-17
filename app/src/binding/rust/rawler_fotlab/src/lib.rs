@@ -111,7 +111,7 @@ pub fn decode_to_png(raw: &[u8]) -> Result<Vec<u8>, RawlerFotlabError> {
     }
     panic::catch_unwind(AssertUnwindSafe(|| {
         let image = decode_to_rawimage(raw)?;
-        let pixel = rawpixel::rawimage_to_rawpixel(&image);
+        let pixel = rawpixel::rawimage_to_rawpixel(image)?;
         png::rawpixel_to_png(&pixel).map_err(RawlerFotlabError::Decode)
     }))
     .unwrap_or_else(|_| {
