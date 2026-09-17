@@ -5,10 +5,15 @@
 //! as its original crate and keeps its own name (`FOTLAB-NATIVE-000001` R4 — upstream is
 //! read-only; we never edit or re-publish it).
 //!
-//! It exposes two UniFFI functions, matching the two separate native calls of the raw
-//! render path (`FOTLAB-STUDIO-000001` R8):
+//! It exposes three UniFFI functions, matching the native calls of the raw render
+//! path (`FOTLAB-STUDIO-000001` R8):
 //!   * `identify`      — call #1: format identification only, never pixel decode.
 //!   * `decode_to_png` — call #2: decode the already-identified RAW to PNG bytes.
+//!     (PNG export is owned by `bound::rawpixel_to_png`; this function never runs the
+//!      develop pipeline.)
+//!   * `develop`       — render call: decode + demosaic + calibrate into a **linear**
+//!     RGB image (`LinearImage`), with no sRGB/BT.709 gamma applied. The pixel→display
+//!     transform (gamma) is owned by the client (`FOTLAB-RAWLER-000003`).
 //!
 //! # Pipeline split (`FOTLAB-IPIXEL-000001`)
 //!
@@ -18,7 +23,7 @@
 //! 1. [`decode::decode_to_rawimage`] — decode the RAW into rawler's `RawImage`.
 //! 2. [`rawpixel::rawimage_to_rawpixel`] — project `RawImage` into our canonical
 //!    IR `RawPixel` (pure pixel buffer + three tag namespaces).
-//! 3. [`png::rawpixel_to_png`] — bit-shift preview encode `RawPixel` → PNG.
+//! 3. [`bound::rawpixel_to_png`] — bit-shift preview encode `RawPixel` → PNG.
 //!
 //! The `RawPixel` IR does **not** cross any FFI boundary yet; it is an in-Rust
 //! intermediate and only PNG bytes are returned to Kotlin. `rawpixel.rs` is the
@@ -44,8 +49,11 @@ use std::panic::{self, AssertUnwindSafe};
 use rawler::decoders::RawDecodeParams;
 use rawler::rawsource::RawSource;
 
+mod bound;
+mod calibrate;
 mod decode;
-mod png;
+mod demosaic;
+mod develop;
 mod rawpixel;
 
 use decode::decode_to_rawimage;
@@ -112,7 +120,7 @@ pub fn decode_to_png(raw: &[u8]) -> Result<Vec<u8>, RawlerFotlabError> {
     panic::catch_unwind(AssertUnwindSafe(|| {
         let image = decode_to_rawimage(raw)?;
         let pixel = rawpixel::rawimage_to_rawpixel(image)?;
-        png::rawpixel_to_png(&pixel).map_err(RawlerFotlabError::Decode)
+        bound::rawpixel_to_png(&pixel).map_err(RawlerFotlabError::Decode)
     }))
     .unwrap_or_else(|_| {
         Err(RawlerFotlabError::Decode(
