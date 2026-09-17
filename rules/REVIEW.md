@@ -91,6 +91,7 @@ The detail file name **must** equal its ID plus `.md`.
 | `PREPIN` | Preflight / Toolchain Cache | Runner toolchain bootstrap and caching of SDK, NDK, Gradle, Rust NDK, python-for-android, and other build tools |
 | `LIBRND` | Library Rendering | Library / Recycle view one-level rendering, query scoping, and view-isolation audit for the virtual fs feature |
 | `KOTLIN` | Kotlin Code Quality | First-party Kotlin / Compose source audits: Android & Compose best-practice compliance, control-flow flattening, duplication extraction, localization, and platform / data-layer API usage |
+| `RAWLER` | RAW Decoder / dnglab binding | First-party `rawler_fotlab` Rust binding and integration lessons with the external `dnglab` rawler (Rust) decoder — FFI call selection, header-vs-full-decode contracts, preview quality. Area prefix `DNGLAB` for upstream dnglab findings, `FOTLAB` (or `ACTION`) for first-party binding lessons |
 
 ## Status & Priority
 

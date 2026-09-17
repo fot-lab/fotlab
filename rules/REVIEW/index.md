@@ -20,4 +20,5 @@ This file contains **only** the item table. No statistics, no changelog — git 
 | `ACTION-KOTLIN-000005` | Control flow — six nesting sites, three non-exhaustive `when`, and one concept modelled three ways | `KOTLIN` | Observation | P2 | [detail](rules/REVIEW/detail/ACTION-KOTLIN-000005.md) |
 | `ACTION-KOTLIN-000006` | Localization and formatting — English hard-coded in the viewer detail panel, unsafe and locale-implicit date formatting | `KOTLIN` | Observation | P1 | [detail](rules/REVIEW/detail/ACTION-KOTLIN-000006.md) |
 | `ACTION-KOTLIN-000007` | Platform API and data layer — Media3, N+1 queries, nullable primary key, duplicated plumbing | `KOTLIN` | Observation | P2 | [detail](rules/REVIEW/detail/ACTION-KOTLIN-000007.md) |
-<!-- Next sequence per category: PREPIN 000002, LIBRND 000002, RAWLER 000003, KOTLIN 000008. Append one row per new item; never reuse or renumber IDs. -->
+| `FOTLAB-RAWLER-000001` | External C/Rust library internal-call detail differences — lesson from the rawler_fotlab binding | `RAWLER` | Observation | P2 | [detail](rules/REVIEW/detail/FOTLAB-RAWLER-000001.md) |
+<!-- Next sequence per category: PREPIN 000002, LIBRND 000002, RAWLER 000003, KOTLIN 000008, FOTLAB-RAWLER 000002. Append one row per new item; never reuse or renumber IDs. -->
