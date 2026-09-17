@@ -121,6 +121,36 @@ RawPixel
 - First-party native-integration layer — the FFI boundary that encodes/decodes the serialized `RawPixel` per R8.
 - Any Kotlin-side holder of the decoded RAW model — now typed as `RawPixel`.
 
+## Bindings
+
+The Rust implementation of this spec is the first-party binding crate
+`app/src/binding/rust/rawler_fotlab`. Each element below maps to a concrete item
+there, and `rawpixel.rs` points back at this document as the contract.
+
+| Spec element | Rust item | File |
+| --- | --- | --- |
+| `RawPixel` | `RawPixel` | `src/rawpixel.rs` |
+| `RawPixelData` (buffer only) | `RawPixelData { buffer: RawPixelBuffer }` | `src/rawpixel.rs` |
+| `TagsIsoDng` (flat) | `TagsIsoDng(BTreeMap<u16, rawler::formats::tiff::Value>)` | `src/rawpixel.rs` |
+| `TagsDngLab` | `TagsDngLab(BTreeMap<String, TagValue>)` | `src/rawpixel.rs` |
+| `TagsFotLab` | `TagsFotLab(BTreeMap<String, TagValue>)` | `src/rawpixel.rs` |
+| `rawImage → RawPixel` (R2/R3) | `rawimage_to_rawpixel(&RawImage) -> RawPixel` | `src/rawpixel.rs` |
+| shape read-back `isodng`→`fotlab`→`dnglab` (R2b) | `read_shape(&RawPixel) -> Option<Shape>` | `src/rawpixel.rs` |
+
+The old monolithic `decode_to_png` is decomposed so each stage matches one
+concept of this document:
+
+| Stage | Function | File |
+| --- | --- | --- |
+| decode the RAW → rawler `RawImage` | `decode_to_rawimage` | `src/decode.rs` |
+| project `RawImage` → `RawPixel` | `rawimage_to_rawpixel` | `src/rawpixel.rs` |
+| encode `RawPixel` → PNG (bit-shift preview) | `rawpixel_to_png` | `src/png.rs` |
+| UniFFI export wiring the three stages | `decode_to_png` | `src/lib.rs` |
+
+`RawPixel` still crosses no FFI boundary: it is an in-Rust intermediate for now,
+and only PNG bytes are returned to Kotlin (R8 untouched). `RawPixelData` is copied
+into the IR **without re-encoding** (no LJPEG; C3).
+
 ## Open Questions
 
 - Q1 — (Resolved) DNG-ISO (TIFF-based) mandates shape tags — `ImageWidth` (256), `ImageLength` (257), `BitsPerSample` (258), `PhotometricInterpretation` (262), `SamplesPerPixel` (277), plus DNG `PixelAspectRatio` (0xC617), `DefaultCropSize` (0xC61E), `ActiveArea` (0xC68D), `Orientation` (0x0112). Shape is therefore canonically a DNG-ISO concern and lives **only** in the tags (`TagsIsoDng`, written whenever a `RawPixel` is emitted per R4). `RawPixelData` holds **no** shape — it is a pure pixel buffer (R2); geometry/format is read back from the tags using the conservative fallback `isodng` → `fotlab` → `dnglab` (R2b). No further decision required.
@@ -132,3 +162,4 @@ RawPixel
 - 2026-09-17 — Initial draft. Fixed `RawPixel` as the canonical decoded-but-undeveloped RAW intermediate, superseding the `RawNegative` name used in the `DNGLAB-SURVEY` studies. Defined `RawPixel = RawPixelData + RawPixelMeta`, with `RawPixelData` as the uncompressed pixel buffer plus shape only (no semantic tags) and `RawPixelMeta` split into three namespaces: `TagsIsoDng` (DNG-ISO conformant, flat), `TagsDngLab` (rawler/dnglab RawImage non-data tags, nested allowed, tracks upstream), `TagsFotLab` (FotLab-private, nested allowed). Recorded the FFI projection `RawPixel` → `RawFrame` as the frozen wire contract and the nesting/flatness invariants.
 - 2026-09-17 — Revision. (a) Deprecated the `RawFrame` name used in earlier discussion/survey docs; the FFI wire form is now simply the serialized `RawPixel` (R8, C5, AC6, Impacted Modules, terminology note updated). (b) Resolved Q1: DNG-ISO (TIFF-based) mandates shape tags (`ImageWidth` 256, `ImageLength` 257, `BitsPerSample` 258, `PhotometricInterpretation` 262, `SamplesPerPixel` 277, plus DNG `PixelAspectRatio` 0xC617, `DefaultCropSize` 0xC61E, `ActiveArea` 0xC68D, `Orientation` 0x0112), so authoritative shape lives in `TagsIsoDng` (R4); `RawPixelData` keeps a mirrored copy as a zero-copy FFI fast path (R2). (c) Strengthened `TagsDngLab` ownership: namespace is chosen by source of authority — any dnglab/rawler-upstream tag MUST live in `TagsDngLab` (R5, C2).
 - 2026-09-17 — Revision (d). Corrected the data/meta split: `RawPixelData` is now a **pure pixel buffer** — no shape, no format, no metadata (R2 rewritten; removed the `width`/`height`/`cpp`/`photometric`/`layout`/`datum` fields and the zero-copy shape mirror). All geometry/format and **every** DNG tag now live only in the three tag namespaces (R3 broadened, C4 tightened, AC2 updated). Reading geometry/format back uses a conservative fallback — `isodng` first, then `fotlab`, then `dnglab` (new R2b). The FFI wire carries the sample bytes only, with no shape header (R8 encoding updated). Q1's resolution and revision (b)'s "mirrored copy" statement are superseded.
+- 2026-09-17 — Revision (e). Added the **Bindings** section pointing this spec at its Rust implementation in `app/src/binding/rust/rawler_fotlab`: the IR types (`RawPixel`/`RawPixelData`/three tag namespaces), the `rawimage_to_rawpixel` projection, the `read_shape` fallback (R2b), and the pipeline split (`decode_to_rawimage` → `rawimage_to_rawpixel` → `rawpixel_to_png`, wired by the `decode_to_png` UniFFI export). `rawpixel.rs` carries the reciprocal comment pointing back at this document. No requirement changed; `RawPixel` still crosses no FFI boundary.

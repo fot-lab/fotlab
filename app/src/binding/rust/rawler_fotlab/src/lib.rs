@@ -10,6 +10,20 @@
 //!   * `identify`      — call #1: format identification only, never pixel decode.
 //!   * `decode_to_png` — call #2: decode the already-identified RAW to PNG bytes.
 //!
+//! # Pipeline split (`FOTLAB-IPIXEL-000001`)
+//!
+//! `decode_to_png` used to be a single monolithic function. It is now a thin
+//! orchestrator over the three stages of the canonical RAW intermediate spec:
+//!
+//! 1. [`decode::decode_to_rawimage`] — decode the RAW into rawler's `RawImage`.
+//! 2. [`rawpixel::rawimage_to_rawpixel`] — project `RawImage` into our canonical
+//!    IR `RawPixel` (pure pixel buffer + three tag namespaces).
+//! 3. [`png::rawpixel_to_png`] — bit-shift preview encode `RawPixel` → PNG.
+//!
+//! The `RawPixel` IR does **not** cross any FFI boundary yet; it is an in-Rust
+//! intermediate and only PNG bytes are returned to Kotlin. `rawpixel.rs` is the
+//! Rust implementation of `rules/STRUCT/detail/FOTLAB-IPIXEL-000001.md`.
+//!
 //! # Crash hardening (FOTLAB-CRASH-000001)
 //!
 //! Rawler's decoders call `panic!` / `unreachable!` / index out of bounds on input they
@@ -23,15 +37,18 @@
 //! is contained inside Rust and turned into a normal return value (a `None` / `Err`) that
 //! crosses the FFI boundary safely. This is FFI-mechanism-independent: JNI or a hand-rolled
 //! C ABI would have crashed identically. UniFFI is therefore kept; only the panic boundary
-//! is hardened.
+//! is hardened. The whole split pipeline runs inside one `catch_unwind` boundary.
 
-use image::codecs::png::PngEncoder;
-use image::{ExtendedColorType, ImageEncoder};
 use std::panic::{self, AssertUnwindSafe};
 
 use rawler::decoders::RawDecodeParams;
 use rawler::rawsource::RawSource;
-use rawler::{RawImage, RawImageData};
+
+mod decode;
+mod png;
+mod rawpixel;
+
+use decode::decode_to_rawimage;
 
 /// Error type surfaced to Kotlin over UniFFI.
 ///
@@ -81,75 +98,27 @@ pub fn identify(raw: &[u8]) -> Option<String> {
 
 /// Call #2 — decode the already-identified RAW to PNG-encoded bytes.
 ///
-/// Made only after the route resolved to the raw path, which is why it takes the bytes
-/// directly instead of re-running identification. Any rawler panic is caught and reported
-/// as `RawlerFotlabError::Decode` so the FFI call always returns rather than aborts.
+/// Orchestrates the three stages of the canonical RAW intermediate spec
+/// (`FOTLAB-IPIXEL-000001`): decode → `RawImage`, project → `RawPixel`, encode →
+/// PNG. Made only after the route resolved to the raw path, which is why it takes
+/// the bytes directly instead of re-running identification. Any rawler panic is
+/// caught and reported as `RawlerFotlabError::Decode` so the FFI call always
+/// returns rather than aborts.
 #[uniffi::export]
 pub fn decode_to_png(raw: &[u8]) -> Result<Vec<u8>, RawlerFotlabError> {
     if raw.is_empty() {
         return Err(RawlerFotlabError::Decode("empty input".to_string()));
     }
     panic::catch_unwind(AssertUnwindSafe(|| {
-        let src = RawSource::new_from_slice(raw);
-        let img = rawler::decode(&src, &RawDecodeParams::default())
-            .map_err(|e| RawlerFotlabError::Decode(e.to_string()))?;
-        encode_png(&img).map_err(RawlerFotlabError::Decode)
+        let image = decode_to_rawimage(raw)?;
+        let pixel = rawpixel::rawimage_to_rawpixel(&image);
+        png::rawpixel_to_png(&pixel).map_err(RawlerFotlabError::Decode)
     }))
     .unwrap_or_else(|_| {
         Err(RawlerFotlabError::Decode(
             "rawler panicked during decode".to_string(),
         ))
     })
-}
-
-/// Encode a decoded [`RawImage`] to PNG.
-///
-/// Preview quality only: the 16-bit linear samples are shifted down to 8-bit without a
-/// demosaic/white-balance/gamma pass, so bayer data (`cpp == 1`) shows as grayscale and
-/// RGB (`cpp >= 3`) as RGB. The precise develop pipeline is future work
-/// (`FOTLAB-STUDIO-000001` R4, `FOTLAB-NATIVE-000001`).
-fn encode_png(img: &RawImage) -> Result<Vec<u8>, String> {
-    let (w, h) = (img.width as u32, img.height as u32);
-    if w == 0 || h == 0 {
-        return Err("decoded image has no pixels".to_string());
-    }
-    let cpp = img.cpp.max(1);
-    let mut rgba: Vec<u8> = Vec::with_capacity((w as usize) * (h as usize) * 4);
-
-    match &img.data {
-        RawImageData::Integer(data) => {
-            for px in data.chunks(cpp) {
-                let r = shrink_u16(px.first().copied().unwrap_or(0));
-                let g = if cpp > 1 { shrink_u16(px.get(1).copied().unwrap_or(0)) } else { r };
-                let b = if cpp > 2 { shrink_u16(px.get(2).copied().unwrap_or(0)) } else { r };
-                rgba.extend_from_slice(&[r, g, b, 255]);
-            }
-        }
-        RawImageData::Float(data) => {
-            for px in data.chunks(cpp) {
-                let r = shrink_f32(px.first().copied().unwrap_or(0.0));
-                let g = if cpp > 1 { shrink_f32(px.get(1).copied().unwrap_or(0.0)) } else { r };
-                let b = if cpp > 2 { shrink_f32(px.get(2).copied().unwrap_or(0.0)) } else { r };
-                rgba.extend_from_slice(&[r, g, b, 255]);
-            }
-        }
-    }
-
-    let mut out: Vec<u8> = Vec::new();
-    PngEncoder::new(&mut out)
-        .write_image(&rgba, w, h, ExtendedColorType::Rgba8)
-        .map_err(|e| e.to_string())?;
-    Ok(out)
-}
-
-/// 16-bit linear sample -> 8-bit (`>> 8`), saturating.
-fn shrink_u16(v: u16) -> u8 {
-    (v >> 8).min(255) as u8
-}
-
-/// Normalized float sample -> 8-bit, clamped.
-fn shrink_f32(v: f32) -> u8 {
-    (v.clamp(0.0, 1.0) * 255.0) as u8
 }
 
 uniffi::setup_scaffolding!();
