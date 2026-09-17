@@ -250,10 +250,20 @@ class RawRoutingTest {
                     "(that is the Coil branch)",
                 model is java.nio.ByteBuffer,
             )
-            val png = (model as java.nio.ByteBuffer).let { b -> ByteArray(b.remaining()).also { b.get(it) } }
-            step("studio", "rawler returned ${png.size} bytes")
+            val png = model as java.nio.ByteBuffer
+            step("studio", "rawler returned ${png.remaining()} bytes")
             val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeByteArray(png, 0, png.size, opts)
+            val dup = png.duplicate()
+            val stream = object : java.io.InputStream() {
+                override fun read(): Int = if (dup.hasRemaining()) (dup.get().toInt() and 0xFF) else -1
+                override fun read(b: ByteArray, off: Int, len: Int): Int {
+                    if (!dup.hasRemaining()) return -1
+                    val n = minOf(len, dup.remaining())
+                    dup.get(b, off, n)
+                    return n
+                }
+            }
+            BitmapFactory.decodeStream(stream, null, opts)
             step("decode", "decoded PNG = ${opts.outWidth}x${opts.outHeight} (${opts.outMimeType})")
             assertTrue("rawler output is not a decodable PNG for ${sample.label}", opts.outWidth > 0)
             assertTrue(
