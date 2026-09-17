@@ -72,9 +72,9 @@
     <string name="studio_cd_more_options">More options</string>
     <string name="studio_reset_view">Reset view</string>
     <string name="studio_open_prompt">Open a file from the toolbar to start editing</string>
-    <string name="studio_tools_looks">Looks</string>
-    <string name="studio_tools">Tools</string>
-    <string name="studio_export">Export</string>
+    <string name="studio_bottombar_demosaic">Demosaic</string>
+    <string name="studio_bottombar_exposure">Exposure</string>
+    <string name="studio_bottombar_whitebalance">White Balance</string>
     <string name="studio_decoding">Decoding…</string>
     <string name="studio_unsupported_title">Unsupported Format</string>
     <string name="studio_unsupported_format">Unsupported Format! 不支持的格式！</string>

@@ -14,9 +14,11 @@ import java.io.InputStream
  * call #1 — and the returned PNG is rendered by Coil. Without the .so, [decodeToPng] returns null and
  * the Studio pipeline falls through to Unsupported.
  *
- * [developToPng] is the same pattern routed through [RawlerFotlabBridge.developRawToPng]: it builds a
- * `DevelopParams` (demosaic algorithm from the Studio bottom-bar menu, default exposure/WB) and returns
- * the developed **linear** PNG. Both functions reach the native library only via the bridge.
+ * [developToPng] is the same pattern routed through [RawlerFotlabBridge.developRawToPng]. Until the
+ * Studio bottom bar exposes Exposure / White Balance pickers, every develop call uses the RAW's
+ * **as-shot** values: `exposureEv = 0f` (no compensation — the sensor data as captured) and
+ * `wb = null` (which the Rust side resolves to `RawImage.wb_coeffs`, the camera's as-shot white
+ * balance). The demosaic algorithm is the only user-selectable parameter for now.
  */
 class RawlerFotlabDecoder : RawDecoder {
     override suspend fun decodeToPng(format: String, open: suspend () -> InputStream): ByteArray? {
@@ -30,6 +32,7 @@ class RawlerFotlabDecoder : RawDecoder {
         open: suspend () -> InputStream,
     ): ByteArray? {
         val bytes = runCatching { open().use { it.readBytes() } }.getOrNull() ?: return null
+        // As-shot exposure (0 EV = no compensation) + as-shot WB (null -> RawImage.wb_coeffs).
         val params = DevelopParams(demosaicAlgorithm = algorithm, exposureEv = 0.0f, wb = null)
         return RawlerFotlabBridge.developRawToPng(bytes, params)
     }

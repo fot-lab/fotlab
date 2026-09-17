@@ -157,11 +157,11 @@ fun StudioScreen() {
                 )
             }
 
-            StudioBottomBar(onLooks = { showDemosaicSheet = true })
+            StudioBottomBar(onDemosaic = { showDemosaicSheet = true })
         }
     }
 
-    // Demosaic pull-up menu: replacing the original "Looks" action. The first Studio render is a
+    // Demosaic pull-up menu: opened by the bottom-bar Demosaic action. The first Studio render is a
     // grayscale raw preview; picking an algorithm here triggers `StudioEngine.develop`, which re-runs
     // the develop pipeline (demosaic + calibrate) and pushes the resulting linear PNG to the canvas.
     if (showDemosaicSheet) {
@@ -288,15 +288,17 @@ private fun StudioDrawer(
 }
 
 /**
- * Snapseed-style bottom action bar: Looks / Tools / Export. Editing itself is not built yet — these
- * are the home for those actions, kept here so the layout matches the reference app.
+ * Studio bottom action bar: Demosaic / Exposure / White Balance.
  *
- * The "Looks" entry is the demosaic trigger: it opens the pull-up menu of demosaic algorithms
- * (`onLooks`). The other two remain placeholders for now.
+ * Demosaic opens the pull-up algorithm picker (`onDemosaic`). Exposure and White Balance are
+ * placeholders for now — their labels are present so the layout matches the intended toolbar, but
+ * neither opens a picker yet. When they do, the develop call will let the user override the as-shot
+ * values; until then `StudioEngine.develop` uses the RAW's as-shot exposure (0 EV) and as-shot
+ * white balance (`RawImage.wb_coeffs`) for every render.
  */
 @Composable
 private fun StudioBottomBar(
-    onLooks: () -> Unit,
+    onDemosaic: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(modifier = modifier.fillMaxWidth()) {
@@ -307,11 +309,11 @@ private fun StudioBottomBar(
             horizontalArrangement = Arrangement.SpaceEvenly,
         ) {
             Text(
-                text = stringResource(id = R.string.studio_tools_looks),
-                modifier = Modifier.clickable(onClick = onLooks),
+                text = stringResource(id = R.string.studio_bottombar_demosaic),
+                modifier = Modifier.clickable(onClick = onDemosaic),
             )
-            Text(text = stringResource(id = R.string.studio_tools))
-            Text(text = stringResource(id = R.string.studio_export))
+            Text(text = stringResource(id = R.string.studio_bottombar_exposure))
+            Text(text = stringResource(id = R.string.studio_bottombar_whitebalance))
         }
     }
 }

@@ -298,8 +298,8 @@ class RawRoutingTest {
         hostContent { AppTheme { StudioScreen() } }
         composeRule.waitForIdle()
 
-        // The bottom-bar "Looks" action opens the demosaic pull-up menu.
-        val looks = context.getString(R.string.studio_tools_looks)
+        // The bottom-bar "Demosaic" action opens the demosaic pull-up menu.
+        val looks = context.getString(R.string.studio_bottombar_demosaic)
         composeRule.waitUntil(30_000) {
             composeRule.onAllNodesWithText(looks).fetchSemanticsNodes().isNotEmpty()
         }
