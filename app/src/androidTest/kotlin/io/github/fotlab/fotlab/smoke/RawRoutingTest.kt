@@ -16,6 +16,7 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -25,10 +26,14 @@ import io.github.fotlab.fotlab.feature.library.LibraryCore
 import io.github.fotlab.fotlab.feature.library.LibraryScreen
 import io.github.fotlab.fotlab.feature.studio.StudioEngine
 import io.github.fotlab.fotlab.feature.studio.StudioRenderResult
+import io.github.fotlab.fotlab.feature.studio.StudioScreen
 import io.github.fotlab.fotlab.ui.theme.AppTheme
+import io.github.fotlab.fotlab_rawler.DemosaicAlgorithm
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.filterNot
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.onEach
@@ -266,6 +271,140 @@ class RawRoutingTest {
             step("studio", "Coil branch confirmed: original ${model.javaClass.simpleName} handed to the renderer")
         }
     }
+
+    // ---------------------------------------------------------------- develop path
+
+    /**
+     * The demosaic develop path, driven through the REAL Studio UI the way a user triggers it:
+     * the journey lands the RAW in Studio as a grayscale raw-preview (call #2, `decode_to_png`), then
+     * the bottom-bar "Looks" action opens the demosaic pull-up menu and picking an algorithm invokes
+     * [StudioEngine.develop] → [io.github.fotlab.fotlab.media.RawDecoder.developToPng] →
+     * [io.github.fotlab.fotlab_rawler.RawlerFotlabBridge.developRawToPng] → rawler's `develop_to_png`
+     * (call #3). The engine must re-render a full-frame **linear** PNG that differs from the grayscale
+     * preview (proving demosaic actually ran, not a cached frame). This is the Kotlin user-flow
+     * coverage for the new bottom-bar menu end to end (`FOTLAB-STUDIO-000001` R4).
+     */
+    @Test
+    fun sonyArwDevelopsThroughDemosaicMenu() {
+        journey(sonyArw7r, expectRawler = true) // grayscale preview + rawler routing assertion
+
+        // Capture the grayscale preview the journey left on the engine.
+        val gray = StudioEngine.renderResult.value as? StudioRenderResult.Ready
+            ?: throw AssertionError("expected a grayscale Ready after the journey")
+        val grayBytes = toBytes(gray.model)
+        step("develop", "grayscale preview captured: ${grayBytes.size} bytes")
+
+        // The user is now looking at the Studio canvas; host the REAL StudioScreen.
+        hostContent { AppTheme { StudioScreen() } }
+        composeRule.waitForIdle()
+
+        // The bottom-bar "Looks" action opens the demosaic pull-up menu.
+        val looks = context.getString(R.string.studio_tools_looks)
+        composeRule.waitUntil(30_000) {
+            composeRule.onAllNodesWithText(looks).fetchSemanticsNodes().isNotEmpty()
+        }
+        step("ui", "bottom-bar '$looks' present")
+        composeRule.onNodeWithText(looks).performClick()
+        step("ui", "clicked '$looks'")
+
+        // The demosaic sheet offers the algorithms; pick PPG.
+        val ppg = context.getString(R.string.studio_demosaic_ppg)
+        composeRule.waitUntil(30_000) {
+            composeRule.onAllNodesWithText(ppg).fetchSemanticsNodes().isNotEmpty()
+        }
+        step("ui", "demosaic sheet shows '$ppg'")
+        composeRule.onNodeWithText(ppg).performClick()
+        step("ui", "picked '$ppg' — triggers StudioEngine.develop")
+
+        // The engine re-develops; wait for a fresh full-frame linear PNG.
+        val developed = runBlocking {
+            withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame(grayBytes) }
+        }
+        step("develop", "developed via UI menu: ${developed.outWidth}x${developed.outHeight} (${developed.bytes.size} bytes)")
+    }
+
+    /**
+     * Every demosaic algorithm the menu exposes must run the full develop pipeline (decode → black/white
+     * scaling → demosaic → crop → calibrate → LinearImage → PNG) without error and produce a full-frame
+     * PNG. Drives the engine directly (the same [StudioEngine.develop] the menu calls) so each Rust
+     * demosaic algorithm branch is exercised through the real native `develop_to_png` path — this is the
+     * Rust step coverage the new develop feature needs, on a 36 MP Sony ARW to keep the emulator budget
+     * sane.
+     */
+    @Test
+    fun developEachDemosaicAlgorithmProducesFullFrame() {
+        startClock()
+        val uri = indexAndFind(sonyArw7r)
+            ?: throw AssertionError("Sony ARW not on the SD card at /sdcard/Pictures/rawdb/${sonyArw7r.file}")
+        step("sdcard", "source=${sonyArw7r.file}")
+        runBlocking { LibraryCore.importUris(parentId = null, uris = listOf(uri)) }
+        val node = runBlocking { LibraryCore.getByUri(uri.toString()) }!!
+        StudioEngine.setCurrentNode(node.uriStorage)
+
+        val gray = runBlocking {
+            withTimeout(DECODE_TIMEOUT_MS) {
+                StudioEngine.renderResult
+                    .filterNot { it is StudioRenderResult.Idle || it is StudioRenderResult.Loading }
+                    .first()
+            }
+        }
+        assertTrue("grayscale preview must reach Ready", gray is StudioRenderResult.Ready)
+        val grayBytes = toBytes((gray as StudioRenderResult.Ready).model)
+        step("studio", "grayscale preview = ${grayBytes.size} bytes")
+
+        for (algo in listOf(
+            DemosaicAlgorithm.Default,
+            DemosaicAlgorithm.Ppg,
+            DemosaicAlgorithm.Bilinear4Channel,
+            DemosaicAlgorithm.XTransBilinear,
+        )) {
+            StudioEngine.develop(algo)
+            val developed = runBlocking {
+                withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame(grayBytes) }
+            }
+            step("develop", "$algo -> ${developed.outWidth}x${developed.outHeight} (${developed.bytes.size} bytes)")
+        }
+    }
+
+    /** Read a `ByteBuffer` model out of [StudioRenderResult.Ready] without disturbing the buffer. */
+    private fun toBytes(model: Any?): ByteArray {
+        val buf = model as java.nio.ByteBuffer
+        val dup = buf.asReadOnlyBuffer()
+        val arr = ByteArray(dup.remaining())
+        dup.get(arr)
+        return arr
+    }
+
+    /**
+     * Wait for the engine to finish a develop pass and return the decoded PNG dimensions. A develop always
+     * starts with a `Loading` transition, so we wait for that first — otherwise, for the 2nd+ algorithm,
+     * `first { Ready }` would immediately match the *previous* developed frame (whose bytes also differ
+     * from the grayscale). The fresh frame must differ from [grayBytes] (proving a new demosaic ran) and be
+     * a full frame (>= [FULL_FRAME_MIN_WIDTH]), not an embedded preview.
+     */
+    private suspend fun waitForDevelopedFrame(grayBytes: ByteArray): DevelopedFrame {
+        StudioEngine.renderResult.filter { it is StudioRenderResult.Loading }.first()
+        val ready = StudioEngine.renderResult
+            .filterNot { it is StudioRenderResult.Loading }
+            .filterIsInstance<StudioRenderResult.Ready>()
+            .first()
+        val bytes = toBytes(ready.model)
+        assertTrue(
+            "developed frame must differ from the grayscale preview (demosaic actually ran)",
+            !bytes.contentEquals(grayBytes),
+        )
+        val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+        assertTrue("developed output is not a decodable PNG", opts.outWidth > 0)
+        assertTrue(
+            "developed frame is ${opts.outWidth}x${opts.outHeight} — that is an embedded preview, not a " +
+                "demosaiced full frame",
+            opts.outWidth >= FULL_FRAME_MIN_WIDTH,
+        )
+        return DevelopedFrame(opts.outWidth, opts.outHeight, bytes)
+    }
+
+    private data class DevelopedFrame(val outWidth: Int, val outHeight: Int, val bytes: ByteArray)
 
     // ---------------------------------------------------------------- staging
 

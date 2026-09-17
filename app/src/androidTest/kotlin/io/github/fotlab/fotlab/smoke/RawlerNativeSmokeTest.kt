@@ -2,9 +2,13 @@ package io.github.fotlab.fotlab.smoke
 
 import android.graphics.Bitmap
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import io.github.fotlab.fotlab_rawler.DemosaicAlgorithm
+import io.github.fotlab.fotlab_rawler.DevelopParams
 import io.github.fotlab.fotlab_rawler.RawlerFotlabBridge
+import io.github.fotlab.fotlab_rawler.developToPng
 import io.github.fotlab.fotlab_rawler.identify
 import java.io.ByteArrayOutputStream
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.fail
 import org.junit.Test
@@ -74,6 +78,46 @@ class RawlerNativeSmokeTest {
     @Test
     fun decodeOfPngSurvives() {
         RawlerFotlabBridge.decodeRawToPng(pngBytes)
+    }
+
+    /** A develop request with the default CFA algorithm — used to probe the develop path. */
+    private val developParams: DevelopParams
+        get() = DevelopParams(demosaic_algorithm = DemosaicAlgorithm.Default, exposure_ev = 0.0f, wb = null)
+
+    /** Call #3 (develop): non-RAW input degrades to `null` instead of aborting the process. */
+    @Test
+    fun developOfNonRawBytesReturnsNull() {
+        assertNull(RawlerFotlabBridge.developRawToPng(notAnImage, developParams))
+    }
+
+    /** Develop call on PNG bytes: same contract as decode — decline (returns null), never abort. */
+    @Test
+    fun developOfPngSurvives() {
+        RawlerFotlabBridge.developRawToPng(pngBytes, developParams)
+    }
+
+    /**
+     * Direct, un-swallowed probe of the generated native `developToPng` (NOT the `runCatching`-wrapped
+     * [RawlerFotlabBridge.developRawToPng]). For unrecognized bytes rawler returns an *error*, which UniFFI
+     * surfaces as a catchable JVM exception — not a process abort. We assert that the failure mode is
+     * exactly that JVM exception (`DNGLAB-RAWLER-000002`): if the native side instead aborted
+     * (SIGSEGV/SIGABRT inside `librawler_fotlab.so`), the instrumentation would die and this test would
+     * fail by construction, with the tombstone captured in smoke_emulator.yaml's logcat. This guards the
+     * new develop path's panic-hardening end to end.
+     */
+    @Test
+    fun developDirectCallSurfacesJvmException() {
+        var threw: Throwable? = null
+        try {
+            developToPng(notAnImage, developParams)
+        } catch (t: Throwable) {
+            threw = t
+        }
+        assertNotNull(
+            "rawler develop on unrecognized bytes must surface a JVM exception (not abort the process): " +
+                "${threw?.javaClass}",
+            threw,
+        )
     }
 
     /**
