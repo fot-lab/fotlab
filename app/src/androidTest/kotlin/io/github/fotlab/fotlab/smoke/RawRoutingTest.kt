@@ -333,7 +333,6 @@ class RawRoutingTest {
      */
     @Test
     fun developEachDemosaicAlgorithmProducesFullFrame() {
-        startClock()
         val uri = indexAndFind(sonyArw7r)
             ?: throw AssertionError("Sony ARW not on the SD card at /sdcard/Pictures/rawdb/${sonyArw7r.file}")
         step("sdcard", "source=${sonyArw7r.file}")
