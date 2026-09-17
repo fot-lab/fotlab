@@ -1,5 +1,6 @@
 package io.github.fotlab.fotlab.media
 
+import io.github.fotlab.fotlab_rawler.DemosaicAlgorithm
 import java.io.InputStream
 
 /**
@@ -19,12 +20,24 @@ import java.io.InputStream
 interface RawDecoder {
 
     /**
-     * Decode the RAW identified as [format] (from the sniff step) to PNG-encoded bytes, or `null` if it
-     * cannot be decoded. [open] is a suspend provider so the bridge can stream bytes off the main thread
-     * / off a `ContentResolver`. [format] must come from the [Verdict] produced by [RawlerProbe], never
-     * be re-derived here.
+     * Decode the RAW identified as [format] (from the sniff step) to a **grayscale raw-preview**
+     * PNG, or `null` if it cannot be decoded. [open] is a suspend provider so the bridge can stream
+     * bytes off the main thread / off a `ContentResolver`. [format] must come from the [Verdict]
+     * produced by [RawlerProbe], never be re-derived here.
      */
     suspend fun decodeToPng(format: String, open: suspend () -> InputStream): ByteArray?
+
+    /**
+     * Develop the RAW identified as [format] with the chosen demosaic [algorithm] and return a
+     * **linear** PNG (no gamma), or `null` if it cannot be decoded. This re-runs the full develop
+     * pipeline and is what the Studio bottom-bar demosaic menu triggers once the user is already in
+     * the Studio interface.
+     */
+    suspend fun developToPng(
+        format: String,
+        algorithm: DemosaicAlgorithm,
+        open: suspend () -> InputStream,
+    ): ByteArray?
 }
 
 /**
@@ -34,4 +47,9 @@ interface RawDecoder {
  */
 object StubRawDecoder : RawDecoder {
     override suspend fun decodeToPng(format: String, open: suspend () -> InputStream): ByteArray? = null
+    override suspend fun developToPng(
+        format: String,
+        algorithm: DemosaicAlgorithm,
+        open: suspend () -> InputStream,
+    ): ByteArray? = null
 }

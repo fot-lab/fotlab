@@ -79,6 +79,13 @@
     <string name="studio_unsupported_title">Unsupported Format</string>
     <string name="studio_unsupported_format">Unsupported Format! 不支持的格式！</string>
 
+    <!-- Studio bottom-bar demosaic menu (the "Looks" action, replaced by a pull-up algorithm picker). -->
+    <string name="studio_demosaic_title">Demosaic</string>
+    <string name="studio_demosaic_default">Default (CFA auto)</string>
+    <string name="studio_demosaic_ppg">PPG</string>
+    <string name="studio_demosaic_bilinear4">Bilinear 4-channel</string>
+    <string name="studio_demosaic_xtrans">X-Trans Bilinear</string>
+
     <!-- Library viewer: the full-screen image/video dialog opened on a single tap. -->
     <string name="library_viewer_cd_close">Close viewer</string>
     <string name="library_viewer_cd_info">Show or hide details</string>

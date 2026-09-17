@@ -3,6 +3,7 @@ package io.github.fotlab.fotlab.feature.studio
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,6 +24,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Surface
@@ -32,6 +34,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.rememberDrawerState
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -51,6 +54,7 @@ import io.github.fotlab.fotlab.feature.library.LibraryCore
 import io.github.fotlab.fotlab.feature.studio.StudioRenderResult
 import io.github.fotlab.fotlab.ui.ZoomableAsyncImage
 import io.github.fotlab.fotlab.ui.rememberZoomState
+import io.github.fotlab.fotlab_rawler.DemosaicAlgorithm
 import kotlinx.coroutines.launch
 
 /**
@@ -96,6 +100,9 @@ fun StudioScreen() {
             }
         }
     }
+
+    var showDemosaicSheet by remember { mutableStateOf(false) }
+    val demosaicSheetState = rememberModalBottomSheetState()
 
     BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
 
@@ -150,7 +157,42 @@ fun StudioScreen() {
                 )
             }
 
-            StudioBottomBar()
+            StudioBottomBar(onLooks = { showDemosaicSheet = true })
+        }
+    }
+
+    // Demosaic pull-up menu: replacing the original "Looks" action. The first Studio render is a
+    // grayscale raw preview; picking an algorithm here triggers `StudioEngine.develop`, which re-runs
+    // the develop pipeline (demosaic + calibrate) and pushes the resulting linear PNG to the canvas.
+    if (showDemosaicSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showDemosaicSheet = false },
+            sheetState = demosaicSheetState,
+        ) {
+            Text(
+                text = stringResource(id = R.string.studio_demosaic_title),
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            )
+            val algorithms = listOf(
+                DemosaicAlgorithm.Default to stringResource(id = R.string.studio_demosaic_default),
+                DemosaicAlgorithm.Ppg to stringResource(id = R.string.studio_demosaic_ppg),
+                DemosaicAlgorithm.Bilinear4Channel to stringResource(id = R.string.studio_demosaic_bilinear4),
+                DemosaicAlgorithm.XTransBilinear to stringResource(id = R.string.studio_demosaic_xtrans),
+            )
+            for ((algo, label) in algorithms) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            showDemosaicSheet = false
+                            scope.launch { StudioEngine.develop(algo) }
+                        }
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                )
+            }
         }
     }
 }
@@ -248,9 +290,15 @@ private fun StudioDrawer(
 /**
  * Snapseed-style bottom action bar: Looks / Tools / Export. Editing itself is not built yet — these
  * are the home for those actions, kept here so the layout matches the reference app.
+ *
+ * The "Looks" entry is the demosaic trigger: it opens the pull-up menu of demosaic algorithms
+ * (`onLooks`). The other two remain placeholders for now.
  */
 @Composable
-private fun StudioBottomBar(modifier: Modifier = Modifier) {
+private fun StudioBottomBar(
+    onLooks: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     Surface(modifier = modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
@@ -258,7 +306,10 @@ private fun StudioBottomBar(modifier: Modifier = Modifier) {
                 .padding(vertical = 14.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
         ) {
-            Text(text = stringResource(id = R.string.studio_tools_looks))
+            Text(
+                text = stringResource(id = R.string.studio_tools_looks),
+                modifier = Modifier.clickable(onClick = onLooks),
+            )
             Text(text = stringResource(id = R.string.studio_tools))
             Text(text = stringResource(id = R.string.studio_export))
         }

@@ -12,6 +12,7 @@ import io.github.fotlab.fotlab.media.Route
 import io.github.fotlab.fotlab.media.SniffResult
 import io.github.fotlab.fotlab.media.StubRawDecoder
 import io.github.fotlab.fotlab.media.route
+import io.github.fotlab.fotlab_rawler.DemosaicAlgorithm
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -72,6 +73,12 @@ object StudioEngine {
     /** Media-layer user preferences; the sniff timeout is read from it per open (R8 / Q6). */
     private lateinit var mediaPreference: MediaPreference
 
+    /** The node currently on the canvas, retained so a develop re-render can re-open the source. */
+    private var currentUri: Uri? = null
+
+    /** The raw format label from the sniff step, retained for the develop call. */
+    private var currentFormat: String? = null
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /** Point the canvas at [uri] (the virtual node's `uri_storage`) and run the render pipeline. */
@@ -86,6 +93,7 @@ object StudioEngine {
             renderResultState.value = StudioRenderResult.Unsupported
             return
         }
+        currentUri = parsed
         renderResultState.value = StudioRenderResult.Loading
         scope.launch { renderResultState.value = runPipeline(appContext.contentResolver, parsed) }
     }
@@ -114,11 +122,17 @@ object StudioEngine {
                 // rawler path — TWO separate calls:
                 //   call #1 (identify) already happened above in FormatSniffer.sniff via RawlerProbe,
                 //   which produced `r.format` + `canDecode`. This is call #2 (decode): hand that format
-                //   to the native bridge so it decodes the already-identified RAW, then render the PNG.
+                //   to the native bridge so it decodes the already-identified RAW into a grayscale raw
+                //   preview, then render the PNG. `currentFormat` is retained for the later develop call.
                 val png = runCatching {
                     rawDecoder.decodeToPng(r.format) { resolver.openInputStream(uri) ?: error("cannot open source") }
                 }.getOrNull()
-                if (png != null) StudioRenderResult.Ready(ByteBuffer.wrap(png)) else StudioRenderResult.Unsupported
+                if (png != null) {
+                    currentFormat = r.format
+                    StudioRenderResult.Ready(ByteBuffer.wrap(png))
+                } else {
+                    StudioRenderResult.Unsupported
+                }
             }
             is Route.ToCoil -> StudioRenderResult.Ready(uri)
             is Route.Unsupported -> StudioRenderResult.Unsupported
@@ -134,6 +148,34 @@ object StudioEngine {
          * read, so the cost stays flat regardless of file size.
          */
         const val HEADER_BYTES = 1024 * 1024
+    }
+
+    /**
+     * Re-develop the current RAW with the demosaic [algorithm] the user picked from the Studio
+     * bottom-bar menu, and push the resulting **linear** PNG to the canvas. The first open renders a
+     * grayscale raw preview ([decodeToPng]); this upgrades it to a developed image once the user is
+     * already in Studio (`FOTLAB-STUDIO-000001` R4). It runs the full develop pipeline again (decode
+     * included) through the native bridge. No-op if nothing is open or the source is not a routed raw.
+     */
+    fun develop(algorithm: DemosaicAlgorithm) {
+        val uri = currentUri ?: return
+        val format = currentFormat ?: return
+        renderResultState.value = StudioRenderResult.Loading
+        scope.launch {
+            renderResultState.value = runDevelop(appContext.contentResolver, uri, format, algorithm)
+        }
+    }
+
+    private suspend fun runDevelop(
+        resolver: ContentResolver,
+        uri: Uri,
+        format: String,
+        algorithm: DemosaicAlgorithm,
+    ): StudioRenderResult {
+        val png = runCatching {
+            rawDecoder.developToPng(format, algorithm) { resolver.openInputStream(uri) ?: error("cannot open source") }
+        }.getOrNull()
+        return if (png != null) StudioRenderResult.Ready(ByteBuffer.wrap(png)) else StudioRenderResult.Unsupported
     }
 }
 

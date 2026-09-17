@@ -5,15 +5,19 @@
 //! as its original crate and keeps its own name (`FOTLAB-NATIVE-000001` R4 — upstream is
 //! read-only; we never edit or re-publish it).
 //!
-//! It exposes three UniFFI functions, matching the native calls of the raw render
+//! It exposes four UniFFI functions, matching the native calls of the raw render
 //! path (`FOTLAB-STUDIO-000001` R8):
-//!   * `identify`      — call #1: format identification only, never pixel decode.
-//!   * `decode_to_png` — call #2: decode the already-identified RAW to PNG bytes.
-//!     (PNG export is owned by `bound::rawpixel_to_png`; this function never runs the
-//!      develop pipeline.)
-//!   * `develop`       — render call: decode + demosaic + calibrate into a **linear**
+//!   * `identify`       — call #1: format identification only, never pixel decode.
+//!   * `decode_to_png`  — call #2: decode the already-identified RAW and encode a
+//!     **grayscale raw preview** PNG (no demosaic / calibrate) via `bound::rawpixel_to_png`.
+//!     This is what Studio shows on first open, before any demosaic choice.
+//!   * `develop`        — render call: decode + demosaic + calibrate into a **linear**
 //!     RGB image (`LinearImage`), with no sRGB/BT.709 gamma applied. The pixel→display
 //!     transform (gamma) is owned by the client (`FOTLAB-RAWLER-000003`).
+//!   * `develop_to_png` — same develop pipeline as `develop`, but the `LinearImage` is
+//!     encoded straight to PNG by `bound::linearimage_to_png` (still linear, no gamma).
+//!     This is what Studio renders after the user picks a demosaic algorithm from the
+//!     bottom-bar menu.
 //!
 //! # Pipeline split (`FOTLAB-IPIXEL-000001`)
 //!
@@ -57,6 +61,7 @@ mod develop;
 mod rawpixel;
 
 use decode::decode_to_rawimage;
+use develop::DevelopParams;
 
 /// Error type surfaced to Kotlin over UniFFI.
 ///
@@ -104,14 +109,16 @@ pub fn identify(raw: &[u8]) -> Option<String> {
     .unwrap_or(None)
 }
 
-/// Call #2 — decode the already-identified RAW to PNG-encoded bytes.
+/// Call #2 — decode the already-identified RAW to a **grayscale raw preview** PNG.
 ///
 /// Orchestrates the three stages of the canonical RAW intermediate spec
 /// (`FOTLAB-IPIXEL-000001`): decode → `RawImage`, project → `RawPixel`, encode →
-/// PNG. Made only after the route resolved to the raw path, which is why it takes
-/// the bytes directly instead of re-running identification. Any rawler panic is
-/// caught and reported as `RawlerFotlabError::Decode` so the FFI call always
-/// returns rather than aborts.
+/// PNG. The encode ([`bound::rawpixel_to_png`]) is a preview only — it applies no
+/// demosaic / white-balance / colour / gamma, so the result is the undeveloped
+/// sensor dump shown as luminance. Made only after the route resolved to the raw
+/// path, which is why it takes the bytes directly instead of re-running
+/// identification. Any rawler panic is caught and reported as
+/// `RawlerFotlabError::Decode` so the FFI call always returns rather than aborts.
 #[uniffi::export]
 pub fn decode_to_png(raw: &[u8]) -> Result<Vec<u8>, RawlerFotlabError> {
     if raw.is_empty() {
@@ -125,6 +132,32 @@ pub fn decode_to_png(raw: &[u8]) -> Result<Vec<u8>, RawlerFotlabError> {
     .unwrap_or_else(|_| {
         Err(RawlerFotlabError::Decode(
             "rawler panicked during decode".to_string(),
+        ))
+    })
+}
+
+/// Render call — develop the already-identified RAW and encode it straight to PNG.
+///
+/// Runs the full develop pipeline ([`develop`]: decode + black/white scaling +
+/// demosaic + crop + calibrate) into a **linear** RGB image, then hands it to
+/// [`bound::linearimage_to_png`], which writes it to PNG **without** applying the
+/// sRGB/BT.709 gamma — the client owns the display transform
+/// (`FOTLAB-RAWLER-000003`). This is the image Studio renders after the user picks
+/// a demosaic algorithm from the bottom-bar menu. Re-runs the whole pipeline
+/// (decode included) on every call, exactly like [`develop`]. Any rawler panic is
+/// caught and reported as `RawlerFotlabError::Decode`.
+#[uniffi::export]
+pub fn develop_to_png(raw: &[u8], params: DevelopParams) -> Result<Vec<u8>, RawlerFotlabError> {
+    if raw.is_empty() {
+        return Err(RawlerFotlabError::Decode("empty input".to_string()));
+    }
+    panic::catch_unwind(AssertUnwindSafe(|| {
+        let image = develop::develop(raw, params)?;
+        bound::linearimage_to_png(&image).map_err(RawlerFotlabError::Decode)
+    }))
+    .unwrap_or_else(|_| {
+        Err(RawlerFotlabError::Decode(
+            "rawler panicked during develop".to_string(),
         ))
     })
 }
