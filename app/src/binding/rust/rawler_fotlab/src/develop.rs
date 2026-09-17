@@ -20,6 +20,7 @@
 
 use std::panic::{self, AssertUnwindSafe};
 
+use rawler::rawimage::RawImageData;
 use rawler::RawImage;
 
 use crate::calibrate::calibrate;
@@ -61,9 +62,15 @@ pub fn develop(raw: &[u8], params: DevelopParams) -> Result<LinearImage, RawlerF
       .apply_scaling()
       .map_err(|e| RawlerFotlabError::Decode(e.to_string()))?;
 
+    // Move the scaled f32 pixels OUT of the RawImage before demosaic so the
+    // ~210 MB (50 MP) buffer is handed over zero-copy instead of duplicated;
+    // the now-empty image still carries every metadata field the later stages
+    // read (CFA/photometric, color matrix, wb, active/crop areas).
+    let pixels = take_scaled_pixels(&mut image)?;
+
     // Demosaic stage — its ROI is already active_area, exactly like rawler's
     // Demosaic + FujiRotate + CropActiveArea steps.
-    let intermediate = demosaic(&image, params.demosaic_algorithm)?;
+    let intermediate = demosaic(&image, pixels, params.demosaic_algorithm)?;
 
     let wb = params.wb.as_ref().map(|v| {
       let mut a = [1.0f32; 4];
@@ -78,10 +85,23 @@ pub fn develop(raw: &[u8], params: DevelopParams) -> Result<LinearImage, RawlerF
     // per-pixel/rect-selection operations, so order is numerically equivalent,
     // but keeping the identical order means the crop coordinates resolve
     // exactly the way upstream resolves them.
-    let linear = calibrate(&intermediate, &image, wb, params.exposure_ev)?;
+    let linear = calibrate(intermediate, &image, wb, params.exposure_ev)?;
     Ok(crop_default(&image, linear))
   }))
   .unwrap_or_else(|_| Err(RawlerFotlabError::Decode("rawler panicked during develop".to_string())))
+}
+
+/// Take ownership of the scaled f32 pixel buffer from [RawImage] without a
+/// copy. [RawImage::apply_scaling] always converts the data to
+/// [RawImageData::Float], so an integer buffer here means the scaling contract
+/// changed upstream and is reported instead of silently converting.
+fn take_scaled_pixels(image: &mut RawImage) -> Result<Vec<f32>, RawlerFotlabError> {
+  match std::mem::replace(&mut image.data, RawImageData::Float(Vec::new())) {
+    RawImageData::Float(v) => Ok(v),
+    RawImageData::Integer(_) => Err(RawlerFotlabError::Decode(
+      "scaled RawImage pixels are not f32 — apply_scaling contract changed".to_string(),
+    )),
+  }
 }
 
 /// Crop the developed image to the recommended area — rawler's `CropDefault`

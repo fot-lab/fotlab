@@ -88,8 +88,12 @@ jobs:
       #  * The test run adds -no-snapshot-save: it LOADS that snapshot but never
       #    overwrites it, so our APK can never contaminate the cached emulator. The
       #    two option sets differ by exactly that flag and nothing else.
-      EMULATOR_OPTIONS: '-no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none'
-      EMULATOR_OPTIONS_TEST: '-no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot-save'
+      #  * -memory 4096 is set in BOTH sets (so it matches the cached snapshot): the
+      #    develop pipeline on a 50 MP CR2 holds ~850 MB of native f32/RGBA buffers
+      #    at peak. The AVD default (~2 GB total, shared with the system) let
+      #    lowmemorykiller SIGKILL the app mid-develop; the host runners have 16 GB.
+      EMULATOR_OPTIONS: '-no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -memory 4096'
+      EMULATOR_OPTIONS_TEST: '-no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot-save -memory 4096'
     steps:
       - name: Check out
         uses: actions/checkout@v7

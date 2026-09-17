@@ -24,11 +24,17 @@ use crate::RawlerFotlabError;
 
 /// White balance multipliers (RGBE order); `None` means "use rawler's default
 /// from the file".
+///
+/// Takes OWNERSHIP of the intermediate: the colour mapping is per-pixel (each
+/// output channel only depends on the same pixel's input channels), so the
+/// 3-colour case is transformed IN PLACE and the buffer is zero-copy flattened
+/// into the [LinearImage]. Allocating a second ~630 MB f32 buffer on a 50 MP
+/// frame was the other half of the mid-develop OOM (low-memory-kill).
 pub(crate) fn calibrate(
-  intermediate: &Intermediate,
-  image: &RawImage,
-  wb: Option<[f32; 4]>,
-  ev: f32,
+    intermediate: Intermediate,
+    image: &RawImage,
+    wb: Option<[f32; 4]>,
+    ev: f32,
 ) -> Result<LinearImage, RawlerFotlabError> {
   // Resolve the D65 camera→XYZ matrix, falling back to identity and adapting
   // from another illuminant via Bradford when needed (rawler's logic).
@@ -84,7 +90,7 @@ pub(crate) fn calibrate(
   match intermediate {
     Intermediate::Monochrome(pix) => {
       // No per-channel colour mapping for monochrome; replicate the single
-      // channel across RGB and apply EV.
+      // channel across RGB and apply EV. (3x size expansion is unavoidable.)
       let mut rgb: Vec<f32> = Vec::with_capacity(pix.data.len() * 3);
       for &v in &pix.data {
         let v = v * ev_scale;
@@ -96,9 +102,11 @@ pub(crate) fn calibrate(
         rgb,
       })
     }
-    Intermediate::ThreeColor(pixels) => {
-      let mut out: Vec<f32> = Vec::with_capacity(pixels.data.len() * 3);
-      for px in pixels.pixels() {
+    Intermediate::ThreeColor(mut pixels) => {
+      // In-place: the 3x3 matrix maps each pixel from its own three channels,
+      // so compute the result into a local before overwriting the source pixel.
+      let (w, h) = (pixels.width, pixels.height);
+      for px in pixels.pixels_mut() {
         let r = px[0] * wb[0] * ev_scale;
         let g = px[1] * wb[1] * ev_scale;
         let b = px[2] * wb[2] * ev_scale;
@@ -107,16 +115,18 @@ pub(crate) fn calibrate(
           cam2rgb[1][0] * r + cam2rgb[1][1] * g + cam2rgb[1][2] * b,
           cam2rgb[2][0] * r + cam2rgb[2][1] * g + cam2rgb[2][2] * b,
         ];
-        let c = clip_euclidean_norm_avg(&srgb);
-        out.extend_from_slice(&c);
+        *px = clip_euclidean_norm_avg(&srgb);
       }
+      // Reinterpret the same allocation as flat RGB — no ~630 MB copy.
       Ok(LinearImage {
-        width: pixels.width as u32,
-        height: pixels.height as u32,
-        rgb: out,
+        width: w as u32,
+        height: h as u32,
+        rgb: flatten_rgb3(pixels.into_inner()),
       })
     }
     Intermediate::FourColor(pixels) => {
+      // 4-channel -> 3-channel shrinks the data; the new vec is 3/4 the size
+      // of the source and the source is dropped right after.
       let mut out: Vec<f32> = Vec::with_capacity(pixels.data.len() * 3);
       for px in pixels.pixels() {
         let ch0 = px[0] * wb[0] * ev_scale;
@@ -138,6 +148,19 @@ pub(crate) fn calibrate(
       })
     }
   }
+}
+
+/// Zero-copy reinterpretation of `Vec<[f32; 3]>` as `Vec<f32>`.
+///
+/// Sound: `[f32; 3]` has `align_of::<f32>()` and size exactly
+/// `3 * size_of::<f32>()` with no padding, so the backing allocation of an
+/// array vector is a contiguous run of `len * 3` f32s — same invariants
+/// `Vec::from_raw_parts` needs after repointing length/capacity in elements.
+fn flatten_rgb3(v: Vec<[f32; 3]>) -> Vec<f32> {
+  let mut v = std::mem::ManuallyDrop::new(v);
+  // SAFETY: ptr/len/cap stay within the original allocation; the element type
+  // change [f32;3] -> f32 preserves layout contiguity and alignment.
+  unsafe { Vec::from_raw_parts(v.as_mut_ptr() as *mut f32, v.len() * 3, v.capacity() * 3) }
 }
 
 /// Tiny helper replicating `rawler::imgop::matrix::transform_1d::<3,3>` — reshapes
