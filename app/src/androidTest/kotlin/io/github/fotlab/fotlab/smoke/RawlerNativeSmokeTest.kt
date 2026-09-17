@@ -82,7 +82,7 @@ class RawlerNativeSmokeTest {
 
     /** A develop request with the default CFA algorithm — used to probe the develop path. */
     private val developParams: DevelopParams
-        get() = DevelopParams(demosaic_algorithm = DemosaicAlgorithm.Default, exposure_ev = 0.0f, wb = null)
+        get() = DevelopParams(demosaicAlgorithm = DemosaicAlgorithm.DEFAULT, exposureEv = 0.0f, wb = null)
 
     /** Call #3 (develop): non-RAW input degrades to `null` instead of aborting the process. */
     @Test

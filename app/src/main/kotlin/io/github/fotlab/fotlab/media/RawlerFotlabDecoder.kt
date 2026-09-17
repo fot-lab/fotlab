@@ -30,7 +30,7 @@ class RawlerFotlabDecoder : RawDecoder {
         open: suspend () -> InputStream,
     ): ByteArray? {
         val bytes = runCatching { open().use { it.readBytes() } }.getOrNull() ?: return null
-        val params = DevelopParams(demosaic_algorithm = algorithm, exposure_ev = 0.0f, wb = null)
+        val params = DevelopParams(demosaicAlgorithm = algorithm, exposureEv = 0.0f, wb = null)
         return RawlerFotlabBridge.developRawToPng(bytes, params)
     }
 }

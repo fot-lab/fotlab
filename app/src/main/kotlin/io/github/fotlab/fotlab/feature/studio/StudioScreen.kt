@@ -175,10 +175,10 @@ fun StudioScreen() {
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
             )
             val algorithms = listOf(
-                DemosaicAlgorithm.Default to stringResource(id = R.string.studio_demosaic_default),
-                DemosaicAlgorithm.Ppg to stringResource(id = R.string.studio_demosaic_ppg),
-                DemosaicAlgorithm.Bilinear4Channel to stringResource(id = R.string.studio_demosaic_bilinear4),
-                DemosaicAlgorithm.XTransBilinear to stringResource(id = R.string.studio_demosaic_xtrans),
+                DemosaicAlgorithm.DEFAULT to stringResource(id = R.string.studio_demosaic_default),
+                DemosaicAlgorithm.PPG to stringResource(id = R.string.studio_demosaic_ppg),
+                DemosaicAlgorithm.BILINEAR4_CHANNEL to stringResource(id = R.string.studio_demosaic_bilinear4),
+                DemosaicAlgorithm.X_TRANS_BILINEAR to stringResource(id = R.string.studio_demosaic_xtrans),
             )
             for ((algo, label) in algorithms) {
                 Text(

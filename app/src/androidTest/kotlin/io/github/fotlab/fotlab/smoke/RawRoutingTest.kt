@@ -353,10 +353,10 @@ class RawRoutingTest {
         step("studio", "grayscale preview = ${grayBytes.size} bytes")
 
         for (algo in listOf(
-            DemosaicAlgorithm.Default,
-            DemosaicAlgorithm.Ppg,
-            DemosaicAlgorithm.Bilinear4Channel,
-            DemosaicAlgorithm.XTransBilinear,
+            DemosaicAlgorithm.DEFAULT,
+            DemosaicAlgorithm.PPG,
+            DemosaicAlgorithm.BILINEAR4_CHANNEL,
+            DemosaicAlgorithm.X_TRANS_BILINEAR,
         )) {
             StudioEngine.develop(algo)
             val developed = runBlocking {
