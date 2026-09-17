@@ -1,0 +1,134 @@
+# Canonical RAW intermediate representation — `RawPixel`
+
+- ID: FOTLAB-IPIXEL-000001
+- Status: Draft
+- Priority: P1
+- Created: 2026-09-17
+- Owner: —
+- Related: `DNGLAB-SURVEY-000002` (rawler `RawImage`/`RawImageData` contract), `DNGLAB-SURVEY-000003` (camera metadata propagation into encode), `DNGLAB-SURVEY-000004` (convert re-containerizes; LJPEG-92 is the serialization boundary, not the in-memory container), `DNGLAB-RAWDEV-000001` (develop pipeline), `RAWTRP-PIPELN-000001` (RawTherapee data model)
+
+> **Terminology note**: this IR was previously referred to as `RawNegative` in the `DNGLAB-SURVEY` studies. It is **fixed here as `RawPixel`** and that earlier name is now deprecated for first-party use. The in-memory IR (`RawPixel`) and the on-disk DNG are the same object in two states (memory vs disk); the same `RawPixel`, in its serialized (wire) form, is what crosses the FFI (see R8). The earlier name `RawFrame` for this wire form is deprecated and unified into `RawPixel`.
+
+## Background & Goal
+
+We hold a decoded-but-undeveloped RAW model in Kotlin and hand it across the FFI to a native layer (rawler/dnglab), and onward to external engines (dnglab, RawTherapee, darktable). To do that without per-call negotiation, the intermediate representation must be **fixed once** as a project-structure contract: every source tree and the FFI boundary reference the same shape, the same field ownership, and the same nesting rules.
+
+Goal:
+
+- G1 — Define one canonical IR, `RawPixel`, with an unambiguous split between the pixel buffer and its metadata.
+- G2 — Make `RawPixel` portable: it must survive crossing the FFI and being referenced from multiple first-party and external source trees without semantic drift.
+- G3 — Separate the three metadata concerns cleanly: what is DNG-standard (portable), what tracks dnglab upstream (round-trips with rawler), and what is FotLab-private (our extension).
+
+## Requirement
+
+### R1 — `RawPixel` is the canonical IR
+
+```
+RawPixel
+├── data : RawPixelData
+└── meta : RawPixelMeta
+    ├── isodng : TagsIsoDng     # DNG-ISO conformant, FLAT (no nested tree)
+    ├── dnglab  : TagsDngLab     # rawler/dnglab RawImage non-data tags, nested allowed
+    └── fotlab  : TagsFotLab     # FotLab-defined tags, nested allowed
+```
+
+- `RawPixel` is the in-memory, engine-neutral IR. It is **not** a file format and **not** a codec container.
+- It is the serialized form's source: a DNG (via rawler `DngWriter`) and the `RawPixel` crossing the FFI in wire form are both projections of `RawPixel`.
+
+### R2 — `RawPixelData` is the pixel buffer only
+
+- `RawPixelData` is **nearly pure pixel data**: it carries only the uncompressed sample buffer. It holds **no shape, no format, and no semantic metadata of any kind** — not width/height, not components-per-pixel, not photometric interpretation, not element type.
+- Fields:
+  - `buffer` — one contiguous block of **uncompressed** samples, in row-major order, exactly as the LJPEG-92 source data looks before DNG compression (per `DNGLAB-SURVEY-000004` §5: keep uncompressed in memory and across the FFI; LJPEG-92 is applied only at the DNG serialization boundary).
+- Every other property of the RAW — geometry (`ImageWidth`/`ImageLength`), component count (`SamplesPerPixel`), photometric interpretation, element byte width (`BitsPerSample`), crop/active area, orientation, CFA, black/white level, colour matrices, make/model, EXIF, and **all other DNG tags** — lives in `RawPixelMeta`'s three namespaces, never in `RawPixelData`. This is a hard separation: **`RawPixelData` is meaningless without `RawPixelMeta`.**
+- Because `RawPixelData` carries no shape, a reader MUST obtain geometry/format from the tags (see R2b); the buffer alone cannot be interpreted, and no FFI fast-path header carries shape either.
+
+### R2b — Reading geometry/format: conservative tag fallback
+
+- A reader MUST NOT assume shape is present in any single namespace, and MUST NOT default to a fixed shape. Geometry/format needed to interpret `RawPixelData` is resolved from the three namespaces in this order:
+  1. `isodng` — DNG-ISO shape tags preferred: `ImageWidth` (256), `ImageLength` (257), `SamplesPerPixel` (277), `PhotometricInterpretation` (262), `BitsPerSample` (258), plus DNG `PixelAspectRatio` (0xC617), `DefaultCropSize` (0xC61E), `ActiveArea` (0xC68D), `Orientation` (0x0112).
+  2. `fotlab` — FotLab-defined shape/format hints (e.g. a shape the engine previously recorded).
+  3. `dnglab` — rawler/dnglab upstream shape/format hints.
+- The first namespace in this order that yields a complete, consistent geometry wins. If none does, the RAW cannot be developed and the reader MUST error rather than guess.
+- `isodng` is first because it is the authoritative source when present (per R4 it is written whenever a `RawPixel` is emitted).
+
+### R3 — `RawPixelMeta` owns all interpretation metadata
+
+- `RawPixelMeta` is composed of exactly the three tag namespaces below. There is no other metadata location on `RawPixel`.
+- Develop-critical fields that rawler attaches to `RawImage` (CFA pattern, `BlackLevel`, `WhiteLevel`, `ColorMatrix1/2/3` + illuminants, `AsShotNeutral`/`AsShotWhiteXY`, `ActiveArea`, `DefaultCropOrigin`/`DefaultCropSize`, `Orientation`, `Make`/`Model`/`UniqueCameraModel`, EXIF) are **not** on `RawPixelData`; they are expressed as tags inside the namespaces of R4–R6. This holds for **every** DNG tag and every other property of the RAW, not only the develop-critical ones — nothing beyond the sample bytes belongs in `RawPixelData`.
+
+### R4 — `TagsIsoDng` follows the DNG-ISO standard, flat
+
+- `TagsIsoDng` holds every tag that has a defined meaning in the **DNG-ISO specification** (the Adobe DNG 1.x / ISO 12234-2 "DNG" tag set): CFA, black/white level, colour matrices and calibration illuminants, white balance, crop/active area, orientation, make/model, the full EXIF block, etc.
+- **Flat — no nested tree.** A `TagsIsoDng` entry is `tagId → value` where `tagId` is the numeric DNG tag identifier and `value` is typed per the DNG spec (SHORT/LONG/RATIONAL/ASCII/…, including lists/arrays of those types). Values may be lists, but a value is never a sub-tree.
+- New entries must be valid DNG-ISO tags; if a needed field has no DNG tag, it goes to R5 or R6, not here.
+- `TagsIsoDng` is the **portable subset**: it can be written 1:1 into a DNG IFD by rawler's `DngWriter` and is understood by every DNG consumer (Lightroom, darktable, RawTherapee).
+
+### R5 — `TagsDngLab` tracks dnglab/rawler upstream, nested allowed
+
+- `TagsDngLab` holds the non-pixel, non-DNG-ISO fields that rawler's `RawImage` / `RawMetadata` carries and that we want to preserve across the round-trip with dnglab: e.g. camera-DB hints (`camera.find_hint(...)`), decoder virtual tags (`WellKnownIFD::VirtualDngRawTags` / `VirtualDngRootTags`), Fuji-rotation markers, rawler-internal decode flags.
+- **Follows dnglab upstream** as the source of truth: when rawler adds or renames such a field, `TagsDngLab` tracks it. These tags are dnglab-specific and are **not** guaranteed to survive into a DNG consumed by third parties.
+- **Namespace is chosen by source of authority**: any tag whose origin and authority is the dnglab/rawler upstream belongs in `TagsDngLab`, even if a field with a similar name also exists in DNG-ISO. A field is placed in `TagsIsoDng` only when it is itself a DNG-ISO-standard tag (R4). The two namespaces are partitioned by *where the definition comes from*, not by superficial similarity.
+- **Nested trees are allowed** (unlike R4), because upstream structures are occasionally hierarchical (e.g. virtual IFD subtrees).
+
+### R6 — `TagsFotLab` is the FotLab-private namespace, nested allowed
+
+- `TagsFotLab` holds project-defined extensions with no external-standard meaning: provenance (source file path/digest, producing decoder id, decode timestamp), pipeline/state markers, engine-routing hints (which engine should develop this), and any UI/asset metadata.
+- **Nested trees are allowed**; FotLab owns the schema and may evolve it freely.
+- `TagsFotLab` is never required to develop or to emit a standard DNG; it is carried opaquely across the FFI and persisted at FotLab's discretion (e.g. a private IFD or XMP).
+
+### R7 — Nesting invariants
+
+- `TagsIsoDng` MUST remain flat (R4). `TagsDngLab` and `TagsFotLab` MAY nest.
+- An FFI reader that does not understand `TagsDngLab`/`TagsFotLab` MUST skip them without error; it MUST still be able to reconstruct a developable RAW from `RawPixelData` + `TagsIsoDng` alone.
+
+### R8 — FFI serialization of `RawPixel`
+
+- The serialized (wire) form of `RawPixel` that crosses the FFI carries the fields below. No separate transport type name is used; `DNGLAB-SURVEY-000004` §5.3 described this same wire form as `RawFrame`, now deprecated.
+- Encoding:
+  - `RawPixelData` → one contiguous block of uncompressed sample bytes (row-major). No shape/format header travels with the buffer; geometry and element type are recovered from the tag stream per R2b.
+  - `RawPixelMeta` → a tag stream: `TagsIsoDng` encoded as `(tagId:u16, type, value)` per DNG typing; `TagsDngLab`/`TagsFotLab` encoded as nested key→value (string path + typed value).
+- The `RawPixel` on-wire (serialized) layout is **frozen by this document**; changing it is a breaking change requiring a new version recorded in Change History.
+
+### R9 — Versioning and evolution
+
+- `TagsIsoDng` evolves only by adopting DNG-ISO tags (R4).
+- `TagsDngLab` evolves by tracking rawler/dnglab upstream (R5).
+- `TagsFotLab` evolves at FotLab's discretion (R6).
+- No version number is attached to a requirement (per STRUCT principle 6); evolution is tracked in Change History.
+
+## Constraints
+
+- C1 — `TagsIsoDng` content and typing MUST conform to the DNG-ISO specification; it is flat by definition.
+- C2 — `TagsDngLab` MUST follow dnglab/rawler upstream as the source of truth for field names and semantics, and **every dnglab/rawler-upstream tag MUST be placed in `TagsDngLab`** (never in `TagsIsoDng` or `TagsFotLab`).
+- C3 — `RawPixelData` stays uncompressed in memory and across the FFI; any compression (LJPEG-92, LZ4, Zstd) is applied only at a serialization boundary that produces a DNG or an IPC payload, never inside `RawPixel`.
+- C4 — `RawPixelData` carries only the sample buffer; it holds no shape, no format, and no metadata of any kind — all of that is in `RawPixelMeta` (R2/R3).
+- C5 — The `RawPixel` serialized wire layout (R8) is stable; this document is its contract.
+
+## Acceptance Criteria
+
+- AC1 — A `RawPixel` is representable in every first-party source tree and across the FFI using exactly the shape of R1 (one `data`, one `meta` with `isodng`/`dnglab`/`fotlab`).
+- AC2 — `RawPixelData` contains only the sample buffer; grepping its definition shows no `width`/`height`/`cpp`/`photometric`/`layout`/CFA/black/white/colour-matrix/Orientation/Make/Model field (R2).
+- AC3 — `TagsIsoDng` is encodable into a DNG IFD by rawler's `DngWriter` with no transformation beyond tag-ID lookup; a consumer reading `RawPixelData` + `TagsIsoDng` alone can develop a valid RAW.
+- AC4 — A reader ignoring `TagsDngLab` and `TagsFotLab` still produces a developable RAW (R7).
+- AC5 — `TagsIsoDng` has no nested-tree value in any conforming instance (R4/R7).
+- AC6 — The serialized `RawPixel` produced from a `RawPixel` round-trips back to an equivalent `RawPixel` (buffer + all three tag namespaces preserved).
+
+## Impacted Modules
+
+- `DNGLAB-SURVEY-000002` — the rawler `RawImage`/`RawImageData` contract; `RawPixelData` is the uncompressed projection of `RawImageData`, and `RawPixelMeta` redistributes `RawImage`'s semantic fields into the R4–R6 namespaces.
+- `DNGLAB-SURVEY-000004` — re-containerization and the FFI wire form; this item fixes `RawPixel` as the IR that crosses the FFI in its serialized form.
+- First-party native-integration layer — the FFI boundary that encodes/decodes the serialized `RawPixel` per R8.
+- Any Kotlin-side holder of the decoded RAW model — now typed as `RawPixel`.
+
+## Open Questions
+
+- Q1 — (Resolved) DNG-ISO (TIFF-based) mandates shape tags — `ImageWidth` (256), `ImageLength` (257), `BitsPerSample` (258), `PhotometricInterpretation` (262), `SamplesPerPixel` (277), plus DNG `PixelAspectRatio` (0xC617), `DefaultCropSize` (0xC61E), `ActiveArea` (0xC68D), `Orientation` (0x0112). Shape is therefore canonically a DNG-ISO concern and lives **only** in the tags (`TagsIsoDng`, written whenever a `RawPixel` is emitted per R4). `RawPixelData` holds **no** shape — it is a pure pixel buffer (R2); geometry/format is read back from the tags using the conservative fallback `isodng` → `fotlab` → `dnglab` (R2b). No further decision required.
+- Q2 — Exact `RawPixel` wire encoding (endianness, type-tag scheme for `TagsDngLab`/`TagsFotLab` nested values) is specified by the FFI item, not here; this document freezes the *logical* contract only. **TBD** link to the FFI detail item once written.
+- Q3 — When a dnglab upstream field has no stable name yet (e.g. a new virtual IFD), is it parked in `TagsDngLab` under a provisional key or held in `TagsFotLab` until upstream settles? **TBD.**
+
+## Change History
+
+- 2026-09-17 — Initial draft. Fixed `RawPixel` as the canonical decoded-but-undeveloped RAW intermediate, superseding the `RawNegative` name used in the `DNGLAB-SURVEY` studies. Defined `RawPixel = RawPixelData + RawPixelMeta`, with `RawPixelData` as the uncompressed pixel buffer plus shape only (no semantic tags) and `RawPixelMeta` split into three namespaces: `TagsIsoDng` (DNG-ISO conformant, flat), `TagsDngLab` (rawler/dnglab RawImage non-data tags, nested allowed, tracks upstream), `TagsFotLab` (FotLab-private, nested allowed). Recorded the FFI projection `RawPixel` → `RawFrame` as the frozen wire contract and the nesting/flatness invariants.
+- 2026-09-17 — Revision. (a) Deprecated the `RawFrame` name used in earlier discussion/survey docs; the FFI wire form is now simply the serialized `RawPixel` (R8, C5, AC6, Impacted Modules, terminology note updated). (b) Resolved Q1: DNG-ISO (TIFF-based) mandates shape tags (`ImageWidth` 256, `ImageLength` 257, `BitsPerSample` 258, `PhotometricInterpretation` 262, `SamplesPerPixel` 277, plus DNG `PixelAspectRatio` 0xC617, `DefaultCropSize` 0xC61E, `ActiveArea` 0xC68D, `Orientation` 0x0112), so authoritative shape lives in `TagsIsoDng` (R4); `RawPixelData` keeps a mirrored copy as a zero-copy FFI fast path (R2). (c) Strengthened `TagsDngLab` ownership: namespace is chosen by source of authority — any dnglab/rawler-upstream tag MUST live in `TagsDngLab` (R5, C2).
+- 2026-09-17 — Revision (d). Corrected the data/meta split: `RawPixelData` is now a **pure pixel buffer** — no shape, no format, no metadata (R2 rewritten; removed the `width`/`height`/`cpp`/`photometric`/`layout`/`datum` fields and the zero-copy shape mirror). All geometry/format and **every** DNG tag now live only in the three tag namespaces (R3 broadened, C4 tightened, AC2 updated). Reading geometry/format back uses a conservative fallback — `isodng` first, then `fotlab`, then `dnglab` (new R2b). The FFI wire carries the sample bytes only, with no shape header (R8 encoding updated). Q1's resolution and revision (b)'s "mirrored copy" statement are superseded.
