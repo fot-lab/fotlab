@@ -28,3 +28,7 @@
 	path = external/RapidRAW
 	url = ../RapidRAW.git
 	branch = main
+[submodule "external/RawAlchemyCpp"]
+	path = external/RawAlchemyCpp
+	url = ../RawAlchemyCpp.git
+	branch = main
