@@ -169,7 +169,7 @@ pub fn generate_transformed_preview(...) -> Result<(DynamicImage, f32, (f32, f32
 ## 与 FotLab 的关系 / 备注
 
 1. **Android 导入=复制** 是关键设计选择：用「导入即复制进 `.library`」规避了 scoped storage 下长期持有 `content://` 权限的复杂度。若 FotLab 也要在 Android 管理外部 RAW，可直接借鉴此模式。
-2. **非破坏性模型** 与 dnglab/RawTherapee 一致：源不变、调整存 metadata（RapidRAW 用私有 `.rrdata` JSON，而非 XMP/DNG 内嵌），渲染时重算 + 缓存。与我们 `FOTLAB-IPIXEL-000001`（`RawPixel` 中间表示 + 非破坏性）方向契合。
+2. **非破坏性模型** 与 dnglab/RawTherapee 一致：源不变、调整存 metadata（RapidRAW 用私有 `.rrdata` JSON，而非 XMP/DNG 内嵌），渲染时重算 + 缓存。与我们 `FOTLAB-FOTRAW-000001`（`FotRaw` 中间表示 + 非破坏性）方向契合。
 3. **元数据格式差异**：RapidRAW 用私有 `.rrdata`（JSON），而 dnglab/RAW 生态偏向 XMP/DNG。若要在 FotLab 与 RapidRAW 间互通编辑，需注意格式映射（RapidRAW 也支持 XMP 同步但默认关）。
 4. **缓存策略**：内存 hash 缓存 + 磁盘缩略图 hash 缓存是性能关键，Android 上 `.lut_cache` 也用 blake3(uri) 命名——可作为我们缓存键设计的参考。
 

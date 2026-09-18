@@ -1,9 +1,9 @@
-//! Stage 4 of the raw render path — encode a [`RawPixel`] (or developed [`LinearImage`]) to PNG bytes.
+//! Stage 4 of the raw render path — encode a [`FotRaw`] (or developed [`LinearImage`]) to PNG bytes.
 //!
 //! Two encoders live here, both producing an uncompressed RGBA8 PNG and **no** display transform
 //! (no sRGB/BT.709 gamma) — that is owned by the client (`FOTLAB-RAWLER-000003`):
 //!
-//! * [`rawpixel_to_png`] — the **grayscale raw preview**. The decoded samples are shifted down to
+//! * [`fotraw_to_png`] — the **grayscale raw preview**. The decoded samples are shifted down to
 //!   8-bit without a demosaic / white-balance / colour pass, so the undeveloped sensor dump is
 //!   shown as luminance: a CFA mosaic (`cpp == 1`) collapses to its single channel, a pre-coloured
 //!   buffer (`cpp >= 3`) collapses via Rec.709 luma. This is what Studio renders on first open,
@@ -12,8 +12,8 @@
 //!   develop pipeline (demosaic + calibrate) and writes it straight to PNG, still linear (no gamma).
 //!   This is what Studio renders after the user picks a demosaic algorithm.
 //!
-//! Per `rules/STRUCT/detail/FOTLAB-IPIXEL-000001.md` R2/R2b, the geometry needed to read the
-//! [`RawPixel`] buffer is **not** carried by [`RawPixelData`]; it is resolved from the tag
+//! Per `rules/STRUCT/detail/FOTLAB-FOTRAW-000001.md` R2/R2b, the geometry needed to read the
+//! [`FotRaw`] buffer is **not** carried by [`FotRawData`]; it is resolved from the tag
 //! namespaces via the conservative fallback `isodng` → `fotlab` → `dnglab` ([`read_shape`]). No
 //! default shape is assumed.
 
@@ -21,15 +21,15 @@ use image::codecs::png::PngEncoder;
 use image::{ExtendedColorType, ImageEncoder};
 
 use crate::develop::LinearImage;
-use crate::rawpixel::{read_shape, RawPixel, RawPixelBuffer};
+use crate::intermediate::{read_shape, FotRaw, FotRawBuffer};
 
-/// Encode a decoded [`RawPixel`] to PNG.
+/// Encode a decoded [`FotRaw`] to PNG.
 ///
 /// Returns `Err` when no tag namespace supplies a complete geometry or when the
 /// image is empty — the buffer alone cannot be interpreted (doc R2).
-pub(crate) fn rawpixel_to_png(pixel: &RawPixel) -> Result<Vec<u8>, String> {
+pub(crate) fn fotraw_to_png(pixel: &FotRaw) -> Result<Vec<u8>, String> {
     let shape = read_shape(pixel)
-        .ok_or_else(|| "RawPixel: no complete shape in any tag namespace (isodng/fotlab/dnglab)".to_string())?;
+        .ok_or_else(|| "FotRaw: no complete shape in any tag namespace (isodng/fotlab/dnglab)".to_string())?;
 
     let (w, h) = (shape.width, shape.height);
     if w == 0 || h == 0 {
@@ -42,7 +42,7 @@ pub(crate) fn rawpixel_to_png(pixel: &RawPixel) -> Result<Vec<u8>, String> {
     // shown as luminance. A CFA mosaic (`cpp == 1`) collapses to its single channel; a pre-coloured
     // buffer (`cpp >= 3`) collapses via Rec.709 luma.
     match &pixel.data.buffer {
-        RawPixelBuffer::Integer(data) => {
+        FotRawBuffer::Integer(data) => {
             for px in data.chunks(cpp) {
                 let gray = if cpp >= 3 {
                     luma8(shrink_u16(px[0]), shrink_u16(px[1]), shrink_u16(px[2]))
@@ -52,7 +52,7 @@ pub(crate) fn rawpixel_to_png(pixel: &RawPixel) -> Result<Vec<u8>, String> {
                 rgba.extend_from_slice(&[gray, gray, gray, 255]);
             }
         }
-        RawPixelBuffer::Float(data) => {
+        FotRawBuffer::Float(data) => {
             for px in data.chunks(cpp) {
                 let gray = if cpp >= 3 {
                     luma_f32(px[0], px[1], px[2])

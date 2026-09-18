@@ -1,18 +1,18 @@
-//! `RawPixel` — FotLab's canonical decoded-but-undeveloped RAW intermediate,
-//! and the `RawImage → RawPixel` projection.
+//! `FotRaw` — FotLab's canonical decoded-but-undeveloped RAW intermediate,
+//! and the `RawImage → FotRaw` projection.
 //!
-//! **Spec**: `rules/STRUCT/detail/FOTLAB-IPIXEL-000001.md` (canonical RAW
+//! **Spec**: `rules/STRUCT/detail/FOTLAB-FOTRAW-000001.md` (canonical RAW
 //! intermediate representation). That document's *Bindings* section points back
 //! at **this file**; the document is the contract and this file is the Rust
 //! implementation of it.
 //!
-//! Ownership rules enforced here (`FOTLAB-IPIXEL-000001` R2–R6):
+//! Ownership rules enforced here (`FOTLAB-FOTRAW-000001` R2–R6):
 //!
-//! * [`RawPixelData`] is a **pure pixel buffer** — no shape, no format, no
+//! * [`FotRawData`] is a **pure pixel buffer** — no shape, no format, no
 //!   metadata. It holds only the uncompressed, row-major sample buffer (the
 //!   LJPEG-92 *source* data, not a compressed container; `DNGLAB-SURVEY-000004`
 //!   §5).
-//! * [`RawPixelMeta`] is the single home for every tag, split into exactly three
+//! * [`FotRawMeta`] is the single home for every tag, split into exactly three
 //!   namespaces: `isodng` (DNG-ISO conformant, **flat**), `dnglab`
 //!   (rawler/dnglab-upstream extras, nested allowed), `fotlab` (FotLab-private,
 //!   nested allowed).
@@ -20,14 +20,14 @@
 //!   `isodng` → `fotlab` → `dnglab` ([`read_shape`], doc R2b) — **never** from
 //!   `data`, and never defaulted.
 //!
-//! [`rawimage_to_rawpixel`] is the projection: it captures the decoded samples
-//! into [`RawPixelData`] **without re-encoding** (no LJPEG, no pixel pass) and
+//! [`rawimage_to_fotraw`] is the projection: it captures the decoded samples
+//! into [`FotRawData`] **without re-encoding** (no LJPEG, no pixel pass) and
 //! re-expresses the rawler `RawImage` metadata as tags. Crucially, the DNG-ISO
 //! spine is **not hand-rolled**: we feed the `RawImage` (with its pixel buffer
 //! shrunk to a single sample) to rawler's own `DngWriter::raw_image` — the exact
 //! code path that `dnglab`'s `makedng` / rawler's `convert` use — and read the
 //! emitted raw sub-IFD back as a flat tag map
-//! (`external/dnglab/rawler/src/dng/writer.rs`). A `RawPixel` can therefore later
+//! (`external/dnglab/rawler/src/dng/writer.rs`). A `FotRaw` can therefore later
 //! be written back to a real DNG 1:1. rawler-only fields go to `dnglab`.
 //!
 //! **Zero-pixel-I/O trick**: rawler's `dng_put_raw_uncompressed` only ever
@@ -50,16 +50,16 @@ use rawler::{RawImage, RawImageData};
 use crate::RawlerFotlabError;
 
 // ---------------------------------------------------------------------------
-// The IR (FOTLAB-IPIXEL-000001 R1)
+// The IR (FOTLAB-FOTRAW-000001 R1)
 // ---------------------------------------------------------------------------
 
 /// The canonical IR: `data` (pure pixels) + `meta` (all tags).
 ///
-/// See `rules/STRUCT/detail/FOTLAB-IPIXEL-000001.md`.
+/// See `rules/STRUCT/detail/FOTLAB-FOTRAW-000001.md`.
 #[derive(Debug, Clone)]
-pub(crate) struct RawPixel {
-    pub data: RawPixelData,
-    pub meta: RawPixelMeta,
+pub(crate) struct FotRaw {
+    pub data: FotRawData,
+    pub meta: FotRawMeta,
 }
 
 /// Near-pure pixel buffer: **no shape, no format, no metadata** (doc R2).
@@ -67,23 +67,23 @@ pub(crate) struct RawPixel {
 /// Even for a zero-copy FFI hand-off the shape is *not* stored here; it is
 /// recovered from the tag namespaces ([`read_shape`]).
 #[derive(Debug, Clone)]
-pub(crate) struct RawPixelData {
+pub(crate) struct FotRawData {
     /// Uncompressed, row-major samples. Element width is described by the tags
     /// (`BitsPerSample`), not by the buffer wrapper.
-    pub buffer: RawPixelBuffer,
+    pub buffer: FotRawBuffer,
 }
 
 /// Uncompressed samples, row-major. `Integer` for the usual 16-bit raws,
 /// `Float` for linear-float raws.
 #[derive(Debug, Clone)]
-pub(crate) enum RawPixelBuffer {
+pub(crate) enum FotRawBuffer {
     Integer(Vec<u16>),
     Float(Vec<f32>),
 }
 
 /// All interpretation metadata (doc R3): exactly three namespaces, nothing else.
 #[derive(Debug, Clone)]
-pub(crate) struct RawPixelMeta {
+pub(crate) struct FotRawMeta {
     pub isodng: TagsIsoDng,
     pub dnglab: TagsDngLab,
     pub fotlab: TagsFotLab,
@@ -132,7 +132,7 @@ impl TagValue {
 }
 
 // ---------------------------------------------------------------------------
-// Shape, read from the tags (FOTLAB-IPIXEL-000001 R2b)
+// Shape, read from the tags (FOTLAB-FOTRAW-000001 R2b)
 // ---------------------------------------------------------------------------
 
 /// Geometry/format resolved from tags. This is *not* part of the IR; it is a
@@ -157,8 +157,8 @@ const DNGLAB_CPP: &str = "rawimage.cpp";
 ///
 /// Returns `None` when no namespace yields a complete geometry; callers MUST
 /// error rather than guess a default shape.
-pub(crate) fn read_shape(pixel: &RawPixel) -> Option<Shape> {
-    // 1. isodng — authoritative when present (written whenever a RawPixel is
+pub(crate) fn read_shape(pixel: &FotRaw) -> Option<Shape> {
+    // 1. isodng — authoritative when present (written whenever a FotRaw is
     //    emitted; doc R4).
     if let (Some(width), Some(height), Some(cpp)) = (
         iso_u32(&pixel.meta.isodng, TiffCommonTag::ImageWidth as u16),
@@ -211,16 +211,16 @@ fn map_u32(map: &BTreeMap<String, TagValue>, key: &str) -> Option<u32> {
 }
 
 // ---------------------------------------------------------------------------
-// Projection: rawler RawImage -> RawPixel
+// Projection: rawler RawImage -> FotRaw
 // ---------------------------------------------------------------------------
 
-/// Project a decoded rawler [`RawImage`] into the canonical [`RawPixel`] IR.
+/// Project a decoded rawler [`RawImage`] into the canonical [`FotRaw`] IR.
 ///
 /// Takes ownership of `image`. The pure pixel buffer is captured **first**
 /// (uncompressed, no LJPEG re-encode), then `image.data` is shrunk to a single
 /// sample so the DNG-ISO spine can be emitted by rawler's own `DngWriter`
 /// without streaming the full pixel buffer (see [`isodng_tags`]).
-pub(crate) fn rawimage_to_rawpixel(image: RawImage) -> Result<RawPixel, RawlerFotlabError> {
+pub(crate) fn rawimage_to_fotraw(image: RawImage) -> Result<FotRaw, RawlerFotlabError> {
     // Capture the pure pixel buffer before we shrink the source data.
     let buffer = pixel_buffer(&image.data);
 
@@ -234,9 +234,9 @@ pub(crate) fn rawimage_to_rawpixel(image: RawImage) -> Result<RawPixel, RawlerFo
         RawImageData::Float(_) => RawImageData::Float(vec![0.0f32]),
     };
 
-    Ok(RawPixel {
-        data: RawPixelData { buffer },
-        meta: RawPixelMeta {
+    Ok(FotRaw {
+        data: FotRawData { buffer },
+        meta: FotRawMeta {
             isodng: isodng_tags(&tag_src)?,
             dnglab: dnglab_tags(&tag_src),
             fotlab: fotlab_tags(),
@@ -244,10 +244,10 @@ pub(crate) fn rawimage_to_rawpixel(image: RawImage) -> Result<RawPixel, RawlerFo
     })
 }
 
-fn pixel_buffer(data: &RawImageData) -> RawPixelBuffer {
+fn pixel_buffer(data: &RawImageData) -> FotRawBuffer {
     match data {
-        RawImageData::Integer(v) => RawPixelBuffer::Integer(v.clone()),
-        RawImageData::Float(v) => RawPixelBuffer::Float(v.clone()),
+        RawImageData::Integer(v) => FotRawBuffer::Integer(v.clone()),
+        RawImageData::Float(v) => FotRawBuffer::Float(v.clone()),
     }
 }
 
@@ -255,7 +255,7 @@ fn pixel_buffer(data: &RawImageData) -> RawPixelBuffer {
 /// emission** — no hand-rolled tag mapping.
 ///
 /// `image.data` has already been shrunk to a single sample by the caller
-/// (`rawimage_to_rawpixel`), so rawler's `DngWriter::raw_image` streams ~0 bytes
+/// (`rawimage_to_fotraw`), so rawler's `DngWriter::raw_image` streams ~0 bytes
 /// of image data yet still emits every shape/format tag from the real fields.
 /// We then read the raw sub-IFD back and flatten it into `TagsIsoDng`.
 ///

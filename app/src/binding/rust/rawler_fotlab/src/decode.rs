@@ -2,10 +2,10 @@
 //! rawler's `RawImage`.
 //!
 //! This is the "rawImage" end of the split described in
-//! `rules/STRUCT/detail/FOTLAB-IPIXEL-000001.md`: it does exactly what the old
+//! `rules/STRUCT/detail/FOTLAB-FOTRAW-000001.md`: it does exactly what the old
 //! monolithic `decode_to_png` did up to the point where a decoded image exists,
 //! but stops there and hands the rawler `RawImage` to the next stage
-//! (`rawpixel::rawimage_to_rawpixel`).
+//! (`intermediate::rawimage_to_fotraw`).
 //!
 //! It deliberately does **not** encode anything and does **not** touch the FFI
 //! panic boundary: the caller (`crate::decode_to_png`) wraps the whole pipeline

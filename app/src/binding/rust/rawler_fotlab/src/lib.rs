@@ -9,7 +9,7 @@
 //! path (`FOTLAB-STUDIO-000001` R8):
 //!   * `identify`       — call #1: format identification only, never pixel decode.
 //!   * `decode_to_png`  — call #2: decode the already-identified RAW and encode a
-//!     **grayscale raw preview** PNG (no demosaic / calibrate) via `bound::rawpixel_to_png`.
+//!     **grayscale raw preview** PNG (no demosaic / calibrate) via `bound::fotraw_to_png`.
 //!     This is what Studio shows on first open, before any demosaic choice.
 //!   * `develop`        — render call: decode + demosaic + calibrate into a **linear**
 //!     RGB image (`LinearImage`), with no sRGB/BT.709 gamma applied. The pixel→display
@@ -19,19 +19,19 @@
 //!     This is what Studio renders after the user picks a demosaic algorithm from the
 //!     bottom-bar menu.
 //!
-//! # Pipeline split (`FOTLAB-IPIXEL-000001`)
+//! # Pipeline split (`FOTLAB-FOTRAW-000001`)
 //!
 //! `decode_to_png` used to be a single monolithic function. It is now a thin
 //! orchestrator over the three stages of the canonical RAW intermediate spec:
 //!
 //! 1. [`decode::decode_to_rawimage`] — decode the RAW into rawler's `RawImage`.
-//! 2. [`rawpixel::rawimage_to_rawpixel`] — project `RawImage` into our canonical
-//!    IR `RawPixel` (pure pixel buffer + three tag namespaces).
-//! 3. [`bound::rawpixel_to_png`] — bit-shift preview encode `RawPixel` → PNG.
+//! 2. [`intermediate::rawimage_to_fotraw`] — project `RawImage` into our canonical
+//!    IR `FotRaw` (pure pixel buffer + three tag namespaces).
+//! 3. [`bound::fotraw_to_png`] — bit-shift preview encode `FotRaw` → PNG.
 //!
-//! The `RawPixel` IR does **not** cross any FFI boundary yet; it is an in-Rust
-//! intermediate and only PNG bytes are returned to Kotlin. `rawpixel.rs` is the
-//! Rust implementation of `rules/STRUCT/detail/FOTLAB-IPIXEL-000001.md`.
+//! The `FotRaw` IR does **not** cross any FFI boundary yet; it is an in-Rust
+//! intermediate and only PNG bytes are returned to Kotlin. `intermediate.rs` is the
+//! Rust implementation of `rules/STRUCT/detail/FOTLAB-FOTRAW-000001.md`.
 //!
 //! # Crash hardening (FOTLAB-CRASH-000001)
 //!
@@ -58,7 +58,7 @@ mod calibrate;
 mod decode;
 mod demosaic;
 mod develop;
-mod rawpixel;
+mod intermediate;
 
 use decode::decode_to_rawimage;
 use develop::DevelopParams;
@@ -112,8 +112,8 @@ pub fn identify(raw: &[u8]) -> Option<String> {
 /// Call #2 — decode the already-identified RAW to a **grayscale raw preview** PNG.
 ///
 /// Orchestrates the three stages of the canonical RAW intermediate spec
-/// (`FOTLAB-IPIXEL-000001`): decode → `RawImage`, project → `RawPixel`, encode →
-/// PNG. The encode ([`bound::rawpixel_to_png`]) is a preview only — it applies no
+/// (`FOTLAB-FOTRAW-000001`): decode → `RawImage`, project → `FotRaw`, encode →
+/// PNG. The encode ([`bound::fotraw_to_png`]) is a preview only — it applies no
 /// demosaic / white-balance / colour / gamma, so the result is the undeveloped
 /// sensor dump shown as luminance. Made only after the route resolved to the raw
 /// path, which is why it takes the bytes directly instead of re-running
@@ -126,8 +126,8 @@ pub fn decode_to_png(raw: &[u8]) -> Result<Vec<u8>, RawlerFotlabError> {
     }
     panic::catch_unwind(AssertUnwindSafe(|| {
         let image = decode_to_rawimage(raw)?;
-        let pixel = rawpixel::rawimage_to_rawpixel(image)?;
-        bound::rawpixel_to_png(&pixel).map_err(RawlerFotlabError::Decode)
+        let pixel = intermediate::rawimage_to_fotraw(image)?;
+        bound::fotraw_to_png(&pixel).map_err(RawlerFotlabError::Decode)
     }))
     .unwrap_or_else(|_| {
         Err(RawlerFotlabError::Decode(
