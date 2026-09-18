@@ -131,7 +131,7 @@ object StudioEngine {
         return when (val r = route(verdicts)) {
             is Route.RawToRaster -> {
                 // rawler path — decode exactly ONCE into a resident `RawlerImageLoaded`, then develop it
-                // with all-default params so the as-shot rendered image is shown. Every later develop
+                // with as-shot params so the as-shot rendered image is shown. Every later develop
                 // (algorithm / exposure change) reuses the same object (no re-decode, no re-cross of the
                 // pixel buffer; FOTLAB-RAWLER-000004). `decode_to_png` (grayscale preview) is retained in
                 // the bridge/Rust but is no longer called here. `currentFormat` is kept for the stateless fallback.
@@ -141,10 +141,13 @@ object StudioEngine {
                 // A newer node was opened while we decoded: discard so we never clobber the new file's state.
                 if (loadNonce.get() != token) return StudioRenderResult.Unsupported
                 loadedImage = loaded
-                // Develop once with default params (DEFAULT algorithm, 0 EV, as-shot WB); later develops reuse this object.
+                // Develop once with as-shot params: pass `null` for both `exposureEv` and `wb` so the
+                // pipeline adopts the decoded as-shot values (rawler's `RawDevelop::default()`, which
+                // dnglab uses for its DNG thumbnail and applies no exposure step — FOTLAB-RAWLER-000004
+                // §as-shot). Later develops reuse this same object.
                 val png = RawlerFotlabBridge.developRawlerImage(
                     loaded,
-                    DevelopParams(demosaicAlgorithm = DemosaicAlgorithm.DEFAULT, exposureEv = 0.0f, wb = null),
+                    DevelopParams(demosaicAlgorithm = DemosaicAlgorithm.DEFAULT, exposureEv = null, wb = null),
                 ) ?: return StudioRenderResult.Unsupported
                 currentFormat = r.format
                 StudioRenderResult.Ready(ByteBuffer.wrap(png))

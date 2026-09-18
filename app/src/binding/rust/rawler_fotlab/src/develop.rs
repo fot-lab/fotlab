@@ -47,9 +47,15 @@ pub struct DevelopParams {
   /// Demosaic algorithm selection (defaults to rawler's CFA-appropriate choice).
   pub demosaic_algorithm: DemosaicAlgorithm,
   /// Exposure compensation in stops; applied as the linear multiplier
-  /// `2^exposure_ev` to the scaled mosaic *before* demosaic (single-channel).
-  pub exposure_ev: f32,
-  /// Optional white-balance multipliers (RGBE order). `None` → rawler's default.
+  /// `2^exposure_ev` (the linear `exp_scale`) to the scaled mosaic *before*
+  /// demosaic (single-channel). `None` = as-shot: no compensation, unity gain —
+  /// exactly mirroring rawler's `RawDevelop::default()` (the pipeline dnglab uses
+  /// to render its DNG thumbnail, which applies no exposure step at all;
+  /// `FOTLAB-RAWLER-000004` §as-shot).
+  #[uniffi(default = None)]
+  pub exposure_ev: Option<f32>,
+  /// Optional white-balance multipliers (RGBE order). `None` → rawler's as-shot
+  /// `wb_coeffs`.
   pub wb: Option<Vec<f32>>,
 }
 
@@ -89,13 +95,14 @@ pub(crate) fn develop_image(
   // read (CFA/photometric, color matrix, wb, active/crop areas).
   let mut pixels = take_scaled_pixels(&mut image)?;
 
-  // Apply exposure compensation as a linear gain `2^exposure_ev` to the
-  // *single-channel* scaled mosaic, BEFORE demosaic. This is one multiply per
-  // photosite (N) instead of per output channel (3N/4N) after demosaic, and is
-  // mathematically identical because demosaic is a linear interpolation and the
-  // gain is uniform across channels. Skipped entirely when ev == 0 (the
-  // as-shot default), so the common no-compensation path pays nothing.
-  let ev_scale = 2f32.powf(params.exposure_ev);
+  // Apply exposure compensation as a linear gain `2^exposure_ev` (the linear
+  // `exp_scale`) to the *single-channel* scaled mosaic, BEFORE demosaic. This is
+  // one multiply per photosite (N) instead of per output channel (3N/4N) after
+  // demosaic, and is mathematically identical because demosaic is linear and the
+  // gain is uniform across channels. `None` → unity gain (as-shot); `Some(0.0)`
+  // also collapses to unity, so the no-compensation path pays nothing — matching
+  // rawler's `RawDevelop::default()` (dnglab's DNG thumbnail pipeline).
+  let ev_scale = params.exposure_ev.map_or(1.0, |ev| 2f32.powf(ev));
   if ev_scale != 1.0 {
     for p in pixels.iter_mut() {
       *p *= ev_scale;

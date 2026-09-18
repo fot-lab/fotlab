@@ -84,4 +84,14 @@ impl RawlerImageLoaded {
             ))
         })
     }
+
+    /// As-shot white-balance multipliers (RGBE order) decoded from the file —
+    /// rawler's `RawImage.wb_coeffs`. Passing `wb = None` to [`Self::develop_to_png`]
+    /// reuses exactly these. rawler stores **no** separate as-shot exposure scale
+    /// (the as-shot exposure is the raw pixel data itself), so the as-shot exposure
+    /// is unity — i.e. `DevelopParams { exposure_ev: None, .. }`. Kotlin reads this
+    /// to surface the as-shot state (`FOTLAB-RAWLER-000004` §as-shot).
+    pub fn as_shot_wb(&self) -> Vec<f32> {
+        self.inner.wb_coeffs.to_vec()
+    }
 }
