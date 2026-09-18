@@ -7,6 +7,8 @@ import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculateCentroidSize
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Stable
@@ -21,6 +23,7 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
@@ -31,14 +34,19 @@ import kotlin.math.min
 
 /**
  * Shared zoom / pan state for one image, held by whichever screen shows it: [scale] (`1f` = fitted)
- * and [offset] (screen pixels), both observable so a plain `graphicsLayer` can render them.
+ * and [offset], both observable so a plain `graphicsLayer` can render them.
  *
  * The rendered transform is `screen = centre + (p - centre) * scale + offset`, which deliberately
- * keeps [offset] a *screen-space* translation: a one-finger drag then moves the image exactly as far
- * as the finger moved, and a pinch can pin the pixel under the fingers in place. [offset] is
- * re-clamped on every change to the room the scaled image actually has, so the image can neither be
- * thrown off the viewport nor drift; at `1f` the clamp collapses to zero, which is what makes the
- * view return to its fit without a separate "snap back below 1" branch.
+ * keeps [offset] a translation **in the same coordinate space the gesture is measured in** — the
+ * untransformed frame around the image. Because `graphicsLayer` applies its translation *after* the
+ * scale, one pixel of [offset] moves the painted image one pixel at **any** [scale]: a drag of N
+ * pixels moves the image N pixels whether it is fitted or zoomed to [maxScale].
+ *
+ * That 1:1 property holds only while the gesture is measured outside the layer this state renders
+ * with — see [ZoomableAsyncImage]. [offset] is re-clamped on every change to the room the scaled
+ * image actually has, so the image can neither be thrown off the viewport nor drift; at `1f` the
+ * clamp collapses to zero, which is what makes the view return to its fit without a separate
+ * "snap back below 1" branch.
  *
  * The state is a value holder only — the container size, the decoded image size and the pan limits
  * are fed in by [ZoomableAsyncImage] / the gesture modifier below.
@@ -99,8 +107,14 @@ class ZoomState internal constructor(
     /**
      * Applies one frame of a transform gesture: [zoomChange] is the relative scale change and
      * [panChange] the focal-point movement, both as measured by the official Compose gesture
-     * helpers. [focalPoint] is the screen position the zoom is anchored to, so the pixel under the
-     * fingers stays under them.
+     * helpers (`calculateZoom` / `calculatePan`). [focalPoint] is the position the zoom is anchored
+     * to, so the pixel under the fingers stays under them.
+     *
+     * [panChange] must be expressed in the same space as [offset] — the untransformed frame around
+     * the image, i.e. **screen pixels**. With [zoomChange] == 1f the anchor terms cancel and
+     * [offset] grows by exactly [panChange], which is the 1:1 drag contract. Measured inside the
+     * scaling layer instead, `calculatePan` reports `fingerDelta / scale` and the image crawls
+     * further behind the finger the more it is zoomed in.
      */
     internal fun transform(focalPoint: Offset, zoomChange: Float, panChange: Offset) {
         val target = (scale * zoomChange).coerceIn(minScale, maxScale)
@@ -162,6 +176,21 @@ fun rememberZoomState(minScale: Float = 1f, maxScale: Float = 6f): ZoomState =
  * scrolling parent (the viewer's pager): a one-finger drag at the fitted size is then left to that
  * parent — so it still switches items — and only a pinch or a drag while already zoomed moves the
  * image.
+ *
+ * **The gesture is measured on the frame, never inside the transform.** This composable is a
+ * two-level pair on purpose:
+ *
+ * - the outer [Box] is untransformed. It carries [Modifier.zoomable] (the pointer input) and
+ *   reports the container size, so every pointer position it reads is a plain screen pixel;
+ * - the inner [Image] is the only node that carries the `graphicsLayer` scale / translation.
+ *
+ * Reading the pointers on the very node the layer transforms — `graphicsLayer` followed by
+ * `pointerInput` in one chain — hands the detector positions already divided by [ZoomState.scale].
+ * `calculateZoom` is a *ratio* and survives that, which is why pinching still felt right, but
+ * `calculatePan` came back as `fingerDelta / scale`: at 4x a 100 px drag moved the image 25 px, and
+ * the touch slop had to be crossed in shrunken units too, so panning looked like it barely started.
+ * Keeping the two levels apart is what makes one pixel of finger travel move the image one pixel at
+ * any zoom.
  */
 @Composable
 fun ZoomableAsyncImage(
@@ -186,95 +215,127 @@ fun ZoomableAsyncImage(
             state.onImageSize(decoded)
         }
     }
-    Image(
-        painter = painter,
-        contentDescription = contentDescription,
-        contentScale = ContentScale.Fit,
+    Box(
         modifier = modifier
             .clipToBounds()
             .zoomable(state = state, keepParentDraggable = keepParentDraggable),
-    )
+    ) {
+        Image(
+            painter = painter,
+            contentDescription = contentDescription,
+            contentScale = ContentScale.Fit,
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    scaleX = state.scale
+                    scaleY = state.scale
+                    translationX = state.offset.x
+                    translationY = state.offset.y
+                },
+        )
+    }
 }
 
 /**
- * Ties [state] to the layout: reports the container size, renders the transform and detects the
- * gesture.
+ * Ties [state] to the frame: reports the container size and detects the gesture.
  *
- * The gesture is the official Compose transform detector (`detectTransformGestures`) with one
- * addition: the changes are only consumed once this image is actually the owner of the gesture.
- * The zoom / pan values themselves are the official public helpers — `calculateZoom`,
- * `calculatePan` and `calculateCentroid` — which ignore pointers that were not down on the previous
- * frame. That is what makes the transform stable when a finger lands or lifts mid-gesture, and it is
- * the failure the previous hand-written detector showed as high-frequency flicker.
+ * Must be applied to the **untransformed** node — see [ZoomableAsyncImage]. The measurement itself
+ * is the official Compose gesture toolbox: `awaitEachGesture`, `calculateZoom`, `calculatePan`,
+ * `calculateCentroid` and `viewConfiguration.touchSlop`. Those helpers ignore pointers that were not
+ * down on the previous frame, which is what keeps the transform stable when a finger lands or lifts
+ * mid-gesture.
+ *
+ * The reason this is a loop instead of the official `detectTransformGestures` is ownership: the
+ * gesture has to stay available to a scrolling parent (the viewer's pager) until this image actually
+ * takes it, and `detectTransformGestures` consumes unconditionally once it is past the slop.
  */
 private fun Modifier.zoomable(
     state: ZoomState,
     keepParentDraggable: Boolean,
 ): Modifier = this
     .onSizeChanged { state.onContainerSize(Size(it.width.toFloat(), it.height.toFloat())) }
-    .graphicsLayer {
-        scaleX = state.scale
-        scaleY = state.scale
-        translationX = state.offset.x
-        translationY = state.offset.y
-    }
     .pointerInput(state, keepParentDraggable) {
-        val touchSlop = viewConfiguration.touchSlop
-        awaitEachGesture {
-            awaitFirstDown(requireUnconsumed = false)
-            // An already zoomed image owns every gesture; a fitted one only owns multi-finger ones
-            // when the parent is allowed to keep the single-finger drags (see keepParentDraggable).
-            var transforms = state.isZoomed || !keepParentDraggable
-            var pastSlop = false
-            var cancelled = false
-            var zoom = 1f
-            var pan = Offset.Zero
-            try {
-                do {
-                    val event = awaitPointerEvent()
-                    cancelled = event.changes.any { it.isConsumed }
-                    if (!cancelled) {
-                        if (event.changes.count { it.pressed } >= 2) {
-                            transforms = true
-                            // A second finger means a pinch: tell a parent scroller to stand down
-                            // before the gesture even passes the slop threshold.
-                            state.beginTransform()
-                        }
-                        if (transforms) {
-                            val zoomChange = event.calculateZoom()
-                            val panChange = event.calculatePan()
-                            if (!pastSlop) {
-                                // Same touch-slop gate as the official detector: accumulate until
-                                // the gesture is unambiguous, so resting a finger never nudges the
-                                // image.
-                                zoom *= zoomChange
-                                pan += panChange
-                                val zoomMotion =
-                                    abs(1f - zoom) * event.calculateCentroidSize(useCurrent = false)
-                                if (zoomMotion > touchSlop || pan.getDistance() > touchSlop) {
-                                    pastSlop = true
-                                }
-                            }
-                            if (pastSlop) {
-                                state.transform(
-                                    focalPoint = event.calculateCentroid(useCurrent = true),
-                                    zoomChange = zoomChange,
-                                    panChange = panChange,
-                                )
-                                event.changes.forEach { change ->
-                                    // Consume only pointers that actually moved, as the official
-                                    // detector does.
-                                    if (change.position != change.previousPosition) change.consume()
-                                }
-                            }
-                        }
+        detectZoomAndPan(state, keepParentDraggable)
+    }
+
+/**
+ * One gesture, from first down to last up.
+ *
+ * Two rules keep the image honest:
+ *
+ * - **Nothing moves until the touch slop is crossed** (`viewConfiguration.touchSlop`, in the same
+ *   screen pixels the pan is measured in), so a finger resting on the glass, or a 1 px tremor, never
+ *   nudges the picture.
+ * - **A finger landing or lifting is a resync, not a movement.** The official centroid helpers
+ *   average over the pointers that are down, so the centroid jumps the moment that set changes while
+ *   the image itself has not moved at all. Feeding that jump through as a pan is what makes a zoomed
+ *   image appear to lurch sideways mid-pinch, so that one frame is skipped.
+ */
+private suspend fun PointerInputScope.detectZoomAndPan(
+    state: ZoomState,
+    keepParentDraggable: Boolean,
+) {
+    val touchSlop = viewConfiguration.touchSlop
+    awaitEachGesture {
+        awaitFirstDown(requireUnconsumed = false)
+        // An already zoomed image owns every gesture; a fitted one only owns multi-finger ones when
+        // the parent is allowed to keep the single-finger drags (see keepParentDraggable).
+        var owned = state.isZoomed || !keepParentDraggable
+        var pastSlop = false
+        var fingers = 0
+        var zoom = 1f
+        var pan = Offset.Zero
+        try {
+            do {
+                val event = awaitPointerEvent()
+                if (event.changes.any { it.isConsumed }) break
+
+                val pressed = event.changes.count { it.pressed }
+                if (pressed >= 2) {
+                    owned = true
+                    // A second finger means a pinch: tell a parent scroller to stand down before
+                    // the gesture even passes the slop threshold.
+                    state.beginTransform()
+                }
+                if (!owned || pressed != fingers) {
+                    fingers = pressed
+                    continue
+                }
+
+                val zoomChange = event.calculateZoom()
+                val panChange = event.calculatePan()
+                // A centroid over no comparable pointers is `Offset.Unspecified` (NaN); letting it
+                // through would poison the offset for the rest of the gesture.
+                if (!zoomChange.isFinite() || !panChange.isUsable()) continue
+
+                if (!pastSlop) {
+                    // Same touch-slop gate as the official detector: accumulate until the gesture
+                    // is unambiguous.
+                    zoom *= zoomChange
+                    pan += panChange
+                    val zoomMotion =
+                        abs(1f - zoom) * event.calculateCentroidSize(useCurrent = false)
+                    if (zoomMotion > touchSlop || pan.getDistance() > touchSlop) {
+                        pastSlop = true
                     }
-                } while (!cancelled && event.changes.any { it.pressed })
-            } finally {
-                state.endTransform()
-            }
+                }
+                if (pastSlop) {
+                    state.transform(
+                        focalPoint = event.calculateCentroid(useCurrent = true),
+                        zoomChange = zoomChange,
+                        panChange = panChange,
+                    )
+                    event.changes.forEach { change ->
+                        // Consume only pointers that actually moved, as the official detector does.
+                        if (change.position != change.previousPosition) change.consume()
+                    }
+                }
+            } while (event.changes.any { it.pressed })
+        } finally {
+            state.endTransform()
         }
     }
+}
 
 /** Zoom is treated as "fitted" below this, so float noise never keeps a parent scroller disabled. */
 private const val SCALE_EPSILON = 1.001f
@@ -282,3 +343,6 @@ private const val SCALE_EPSILON = 1.001f
 /** A size that has not been measured yet — zero, or the unspecified size, whose accessors throw. */
 private val Size.isUnmeasured: Boolean
     get() = this == Size.Unspecified || !(width > 0f && height > 0f)
+
+/** A pan the transform can use: `Offset.Unspecified` and any NaN component would corrupt [ZoomState.offset]. */
+private fun Offset.isUsable(): Boolean = x.isFinite() && y.isFinite()

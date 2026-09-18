@@ -333,6 +333,48 @@ class ZoomableGestureTest {
         assertTrue("pinch-in must clamp at fitted", fitted.scale >= MIN_SCALE - 0.001f)
     }
 
+    // -------------------------------------------------- 3b: pan is 1:1 at any zoom
+
+    /**
+     * The contract the viewer must keep: **one pixel of finger travel moves the image one pixel,
+     * whatever the zoom.**
+     *
+     * The regression this guards: the gesture used to be read on the very node the `graphicsLayer`
+     * scales, so `calculatePan` came back already divided by the scale — a 300 px drag at 6x moved
+     * the image 50 px, and the touch slop had to be crossed in the same shrunken units, which is why
+     * panning felt like it never started. `calculateZoom` is a ratio and hid the bug completely,
+     * which is why pinching always looked fine.
+     *
+     * The drag is injected in steps of 30 px, larger than the touch slop, so the slop gate eats
+     * nothing and the expected movement is the full -300 px; the bound is deliberately loose
+     * (-240) so only a genuine 1:1 failure (which would land around -50 here) can trip it.
+     */
+    @Test
+    fun dragMovesTheImageAsFarAsTheFinger() {
+        var state: ZoomState? = null
+        setContentWithZoomable { state = it }
+        val node = composeRule.onNodeWithContentDescription(CD)
+
+        // Zoom in first — the fault only shows while zoomed.
+        node.performTouchInput { spread(span0 = 100f, span1 = 600f) }
+        composeRule.waitForIdle()
+        val zoomed = state!!
+        step("pan1to1", "after pinch: scale=${zoomed.scale} offset=${zoomed.offset}")
+        assertTrue("the pinch must zoom in before panning", zoomed.scale > 1.5f)
+
+        val before = zoomed.offset
+        node.performTouchInput { dragX(dx = -300f) }
+        composeRule.waitForIdle()
+        val after = state!!.offset
+        val moved = after.x - before.x
+        step("pan1to1", "drag -300 px at scale ${zoomed.scale}: image moved $moved px")
+
+        assertTrue(
+            "a -300 px drag must move the image about -300 px at any zoom, moved $moved",
+            moved <= -240f,
+        )
+    }
+
     // -------------------------------------------------- 4: the real dialog journey
 
     /**
