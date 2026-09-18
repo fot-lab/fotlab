@@ -11,13 +11,15 @@
 //!   * `decode_to_png`  — call #2: decode the already-identified RAW and encode a
 //!     **grayscale raw preview** PNG (no demosaic / calibrate) via `bound::fotraw_to_png`.
 //!     This is what Studio shows on first open, before any demosaic choice.
-//!   * `develop`        — render call: decode + demosaic + calibrate into a **linear**
-//!     RGB image (`LinearImage`), with no sRGB/BT.709 gamma applied. The pixel→display
-//!     transform (gamma) is owned by the client (`FOTLAB-RAWLER-000003`).
-//!   * `develop_to_png` — same develop pipeline as `develop`, but the `LinearImage` is
-//!     encoded straight to PNG by `bound::linearimage_to_png` (still linear, no gamma).
-//!     This is what Studio renders after the user picks a demosaic algorithm from the
-//!     bottom-bar menu.
+//!   * `develop`        — *editing* branch: decode + demosaic + calibrate into a
+//!     **linear ProPhoto D50** RGB image (`LinearImage`), unclipped, for the
+//!     rawalchemy pipeline. Wide gamut; negatives and >1 survive
+//!     (`FOTLAB-RAWLER-000005`). No gamma — ProPhoto is a linear editing space.
+//!   * `develop_to_png` — *presentation* branch: same develop pipeline, but built in
+//!     sRGB D65 and then finished into a display-ready PNG by
+//!     `bound::linearimage_to_png`, which applies the sRGB transfer function (gamma)
+//!     and clips to [0,1]. This is what Studio renders after the user picks a
+//!     demosaic algorithm from the bottom-bar menu.
 //!
 //! # Pipeline split (`FOTLAB-FOTRAW-000001`)
 //!

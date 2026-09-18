@@ -1,16 +1,17 @@
 //! Stage 4 of the raw render path — encode a [`FotRaw`] (or developed [`LinearImage`]) to PNG bytes.
 //!
-//! Two encoders live here, both producing an uncompressed RGBA8 PNG and **no** display transform
-//! (no sRGB/BT.709 gamma) — that is owned by the client (`FOTLAB-RAWLER-000003`):
+//! Two encoders live here, both producing an uncompressed RGBA8 PNG:
 //!
 //! * [`fotraw_to_png`] — the **grayscale raw preview**. The decoded samples are shifted down to
 //!   8-bit without a demosaic / white-balance / colour pass, so the undeveloped sensor dump is
 //!   shown as luminance: a CFA mosaic (`cpp == 1`) collapses to its single channel, a pre-coloured
 //!   buffer (`cpp >= 3`) collapses via Rec.709 luma. This is what Studio renders on first open,
-//!   before any demosaic choice (`FOTLAB-STUDIO-000001` R4, `FOTLAB-NATIVE-000001`).
-//! * [`linearimage_to_png`] — the **developed** image. Takes the [`LinearImage`] produced by the
-//!   develop pipeline (demosaic + calibrate) and writes it straight to PNG, still linear (no gamma).
-//!   This is what Studio renders after the user picks a demosaic algorithm.
+//!   before any demosaic choice (`FOTLAB-STUDIO-000001` R4, `FOTLAB-NATIVE-000001`). No display
+//!   transform is applied — it is a raw dump.
+//! * [`linearimage_to_png`] — the **developed, display-ready** image. Takes the [`LinearImage`]
+//!   produced by the develop pipeline (demosaic + calibrate) and applies the sRGB transfer function
+//!   (gamma) + clip to [0,1] before writing PNG — a finished sRGB image for the UI
+//!   (`FOTLAB-RAWLER-000005`). This is what Studio renders after the user picks a demosaic algorithm.
 //!
 //! Per `rules/STRUCT/detail/FOTLAB-FOTRAW-000001.md` R2/R2b, the geometry needed to read the
 //! [`FotRaw`] buffer is **not** carried by [`FotRawData`]; it is resolved from the tag
@@ -19,6 +20,7 @@
 
 use image::codecs::png::PngEncoder;
 use image::{ExtendedColorType, ImageEncoder};
+use rawler::imgop::srgb::srgb_apply_gamma;
 
 use crate::develop::LinearImage;
 use crate::intermediate::{read_shape, FotRaw, FotRawBuffer};
@@ -81,9 +83,22 @@ fn shrink_f32(v: f32) -> u8 {
     (v.clamp(0.0, 1.0) * 255.0) as u8
 }
 
-/// Encode a developed [`LinearImage`] straight to an RGBA8 PNG — **no** gamma is applied; the
-/// values are written as-is (clamped to 0..1) so the client receives a true linear image
-/// (`FOTLAB-RAWLER-000003`). This is the output side of `rawler_fotlab::develop_to_png`.
+/// Encode one linear sRGB channel to an 8-bit sRGB byte: apply the sRGB transfer
+/// function then clip into [0,1]. Out-of-[0,1] (highlight/shadow excursions from
+/// the unclamped develop) are resolved here — the only clip in the UI path.
+fn encode_srgb(v: f32) -> u8 {
+    shrink_f32(srgb_apply_gamma(v))
+}
+
+/// Encode a developed [`LinearImage`] (expected in **linear sRGB D65**) to a
+/// finished, display-ready RGBA8 sRGB PNG.
+///
+/// This is the *presentation* half of the dual-fork
+/// (`rules/REVIEW/detail/FOTLAB-RAWLER-000005.md`): the linear values are run
+/// through the sRGB transfer function (`srgb_apply_gamma`) and then clipped to
+/// [0,1] — the only place clipping happens. The in-memory editing object
+/// (ProPhoto D50, unclamped) is never touched. This is the output side of
+/// `rawler_fotlab::develop_to_png`.
 pub(crate) fn linearimage_to_png(image: &LinearImage) -> Result<Vec<u8>, String> {
     let (w, h) = (image.width, image.height);
     if w == 0 || h == 0 {
@@ -102,7 +117,7 @@ pub(crate) fn linearimage_to_png(image: &LinearImage) -> Result<Vec<u8>, String>
 
     let mut rgba: Vec<u8> = Vec::with_capacity((w as usize) * (h as usize) * 4);
     for px in image.rgb.chunks_exact(3) {
-        rgba.extend_from_slice(&[shrink_f32(px[0]), shrink_f32(px[1]), shrink_f32(px[2]), 255]);
+        rgba.extend_from_slice(&[encode_srgb(px[0]), encode_srgb(px[1]), encode_srgb(px[2]), 255]);
     }
 
     let mut out: Vec<u8> = Vec::new();

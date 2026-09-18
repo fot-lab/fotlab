@@ -1,6 +1,12 @@
-//! Calibrate glue — white balance + colour-matrix (cam → sRGB) mapping that
-//! turns a debayered intermediate into a **linear** RGB image (no sRGB gamma /
-//! BT.709 applied yet — that is a display transform the client owns).
+//! Calibrate glue — white balance + colour-matrix mapping that turns a debayered
+//! intermediate into a **linear** image in the requested [`WorkingSpace`].
+//!
+//! Two spaces are supported (`rules/REVIEW/detail/FOTLAB-RAWLER-000005.md`):
+//!
+//! * [`WorkingSpace::SrgbD65`] — presentation. Finished to sRGB (gamma + gamut mapping)
+//!   at PNG encode time in `bound`, never here.
+//! * [`WorkingSpace::ProPhotoD50`] — editing, for the rawalchemy pipeline. Wide gamut and
+//!   **unclamped**: negatives and >1 survive into the returned buffer on purpose.
 //!
 //! This is the "calibrate" half of our hand-built develop pipeline
 //! (`FOTLAB-RAWLER-000003`). rawler's own `map_3ch_to_rgb` / `map_4ch_to_rgb`
@@ -16,13 +22,54 @@
 
 use rawler::imgop::develop::Intermediate;
 use rawler::imgop::matrix::{multiply, normalize, pseudo_inverse};
-use rawler::imgop::raw::clip_euclidean_norm_avg;
 use rawler::imgop::chromatic_adaption::adapt_bradford;
-use rawler::imgop::xyz::{Illuminant, SRGB_TO_XYZ_D65};
+use rawler::imgop::xyz::{Illuminant, SRGB_TO_XYZ_D65, XYZ_TO_PROFOTORGB_D50};
 use rawler::RawImage;
 
 use crate::develop::LinearImage;
 use crate::RawlerFotlabError;
+
+/// Which RGB primaries (and white point) the developed result lives in.
+///
+/// The two paths exist because they have opposite requirements
+/// (`rules/REVIEW/detail/FOTLAB-RAWLER-000005.md`):
+///
+/// * [`WorkingSpace::SrgbD65`] — the *presentation* path. Small gamut, but it is what a
+///   display can actually show, so this is the space the UI PNG is finished in (gamma and
+///   gamut mapping included, applied at PNG encode time — see `bound::linearimage_to_png`).
+/// * [`WorkingSpace::ProPhotoD50`] — the *editing* path handed to the rawalchemy pipeline.
+///   Wide gamut: colours outside sRGB survive here. It is deliberately **not** clipped —
+///   negative and >1 components are legitimate and only get resolved at final export.
+///   D50 matches rawalchemy and RawTherapee, so no chromatic-adaptation bridge is needed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkingSpace {
+    /// Linear sRGB, white point D65.
+    SrgbD65,
+    /// Linear ProPhoto RGB, white point D50.
+    ProPhotoD50,
+}
+
+impl WorkingSpace {
+    /// The illuminant the camera colour matrix must be adapted to for this space.
+    fn illuminant(self) -> Illuminant {
+        match self {
+            WorkingSpace::SrgbD65 => Illuminant::D65,
+            WorkingSpace::ProPhotoD50 => Illuminant::D50,
+        }
+    }
+
+    /// Forward matrix from this working space to XYZ, at this space's own white point.
+    ///
+    /// `sRGB → XYZ` is a published constant; rawler only ships `XYZ → ProPhoto`, so that
+    /// one is inverted here (`pseudo_inverse` on a 3×3 is negligible next to the per-pixel
+    /// loop).
+    fn to_xyz_matrix(self) -> [[f32; 3]; 3] {
+        match self {
+            WorkingSpace::SrgbD65 => SRGB_TO_XYZ_D65,
+            WorkingSpace::ProPhotoD50 => pseudo_inverse(XYZ_TO_PROFOTORGB_D50),
+        }
+    }
+}
 
 /// White balance multipliers (RGBE order); `None` means "use rawler's default
 /// from the file".
@@ -36,9 +83,12 @@ pub(crate) fn calibrate(
     intermediate: Intermediate,
     image: &RawImage,
     wb: Option<[f32; 4]>,
+    space: WorkingSpace,
 ) -> Result<LinearImage, RawlerFotlabError> {
-  // Resolve the D65 camera→XYZ matrix, falling back to identity and adapting
-  // from another illuminant via Bradford when needed (rawler's logic).
+  // Resolve the camera→XYZ matrix at the target white point, falling back to identity
+  // and adapting from another illuminant via Bradford when needed (rawler's logic).
+  // The target is D65 for the presentation path and D50 for the wide-gamut editing path.
+  let target_illu = space.illuminant();
   let mut xyz2cam: [[f32; 3]; 4] = [[0.0; 3]; 4];
   let (illu, matrix) = image
     .color_matrix_find_first([
@@ -52,23 +102,23 @@ pub(crate) fn calibrate(
       Illuminant::Daylight,
       Illuminant::Flash,
     ])
-    .unwrap_or_else(|| (Illuminant::D65, vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]));
-  let d65_matrix: Vec<f32> = if illu == Illuminant::D65 {
+    .unwrap_or_else(|| (target_illu, vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]));
+  let target_matrix: Vec<f32> = if illu == target_illu {
     matrix
   } else {
     match matrix.len() {
-      9 => adapt_bradford(&illu, &Illuminant::D65, &transform_1d_3x3(&matrix))
+      9 => adapt_bradford(&illu, &target_illu, &transform_1d_3x3(&matrix))
         .into_iter()
         .flatten()
         .collect(),
       _ => return Err(RawlerFotlabError::Decode("color matrix has unexpected size".to_string())),
     }
   };
-  assert_eq!(d65_matrix.len() % 3, 0);
-  let components = d65_matrix.len() / 3;
+  assert_eq!(target_matrix.len() % 3, 0);
+  let components = target_matrix.len() / 3;
   for i in 0..components {
     for j in 0..3 {
-      xyz2cam[i][j] = d65_matrix[i * 3 + j];
+      xyz2cam[i][j] = target_matrix[i * 3 + j];
     }
   }
 
@@ -84,7 +134,16 @@ pub(crate) fn calibrate(
     }
   };
 
-  let rgb2cam = normalize(multiply(&xyz2cam, &SRGB_TO_XYZ_D65));
+  // Anchor the camera matrix on the requested working space: sRGB→XYZ (D65) for the
+  // presentation path, ProPhoto→XYZ (D50) for the wide-gamut editing path.
+  //
+  // NOTE: no gamut clamping happens here any more. `clip_euclidean_norm_avg` used to run
+  // per-pixel right after this matrix, which forced every colour inside the sRGB cube and
+  // irreversibly destroyed anything outside it *before* the FFI. Clamping now happens only
+  // where a finished image is actually produced (`bound::linearimage_to_png`), so the
+  // wide-gamut result handed to rawalchemy keeps its negative and >1 components
+  // (`rules/REVIEW/detail/FOTLAB-RAWLER-000005.md`).
+  let rgb2cam = normalize(multiply(&xyz2cam, &space.to_xyz_matrix()));
   let cam2rgb = pseudo_inverse(rgb2cam);
 
   match intermediate {
@@ -110,12 +169,13 @@ pub(crate) fn calibrate(
         let r = px[0] * wb[0];
         let g = px[1] * wb[1];
         let b = px[2] * wb[2];
-        let srgb = [
+        let mapped = [
           cam2rgb[0][0] * r + cam2rgb[0][1] * g + cam2rgb[0][2] * b,
           cam2rgb[1][0] * r + cam2rgb[1][1] * g + cam2rgb[1][2] * b,
           cam2rgb[2][0] * r + cam2rgb[2][1] * g + cam2rgb[2][2] * b,
         ];
-        *px = clip_euclidean_norm_avg(&srgb);
+        // No clamp: the result stays in the working space, out-of-[0,1] included.
+        *px = mapped;
       }
       // Reinterpret the same allocation as flat RGB — no ~630 MB copy.
       Ok(LinearImage {
@@ -133,13 +193,13 @@ pub(crate) fn calibrate(
         let ch1 = px[1] * wb[1];
         let ch2 = px[2] * wb[2];
         let ch3 = px[3] * wb[3];
-        let srgb = [
+        let mapped = [
           cam2rgb[0][0] * ch0 + cam2rgb[0][1] * ch1 + cam2rgb[0][2] * ch2 + cam2rgb[0][3] * ch3,
           cam2rgb[1][0] * ch0 + cam2rgb[1][1] * ch1 + cam2rgb[1][2] * ch2 + cam2rgb[1][3] * ch3,
           cam2rgb[2][0] * ch0 + cam2rgb[2][1] * ch1 + cam2rgb[2][2] * ch2 + cam2rgb[2][3] * ch3,
         ];
-        let c = clip_euclidean_norm_avg(&srgb);
-        out.extend_from_slice(&c);
+        // No clamp — see the ThreeColor arm.
+        out.extend_from_slice(&mapped);
       }
       Ok(LinearImage {
         width: pixels.width as u32,

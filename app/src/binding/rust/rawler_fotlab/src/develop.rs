@@ -2,7 +2,8 @@
 //! entry point Kotlin calls.
 //!
 //! Pipeline (mirrors rawler's `RawDevelop::develop_intermediate` step ORDER,
-//! minus the final sRGB gamma so the output is a true **linear** image):
+//! minus the final sRGB gamma so `develop_image` always returns a **linear**
+//! image):
 //!
 //! 1. `decode`      — `rawler::decode` → rawler `RawImage`
 //! 2. rescale       — black/white-level scaling into 0..1 float (rawler)
@@ -10,11 +11,15 @@
 //!    mosaic, *before* demosaic (one mul per photosite instead of per output
 //!    channel; demosaic is linear so the result is identical)
 //! 4. `demosaic`    — selectable debayer + Fuji rotate + active-area crop (ROI)
-//! 5. `calibrate`   — white balance + cam→sRGB matrix (exposure already applied)
+//! 5. `calibrate`   — white balance + cam→working-space matrix (exposure already
+//!    applied); `WorkingSpace` selects sRGB D65 (presentation) or ProPhoto D50
+//!    (editing). **No clipping** — out-of-[0,1] is kept for the editing branch.
 //! 6. crop-default  — crop to the recommended area (rawler `CropDefault`)
 //!
-//! The result is a [`LinearImage`]: linear RGB float, **before** any sRGB/BT.709
-//! gamma. Kotlin owns the display transform.
+//! Dual fork (`rules/REVIEW/detail/FOTLAB-RAWLER-000005.md`): the linear result
+//! is finished into a display-ready sRGB PNG (gamma + clip) for the UI by
+//! `bound::linearimage_to_png`, or returned unclamped as ProPhoto D50 for the
+//! rawalchemy pipeline by `develop`. Kotlin owns only the UI PNG.
 //!
 //! Every parameter change from Kotlin re-runs the whole pipeline (decoding
 //! included) — acceptable for now; re-decoding is optimized later
@@ -26,7 +31,7 @@ use std::panic::{self, AssertUnwindSafe};
 use rawler::rawimage::RawImageData;
 use rawler::RawImage;
 
-use crate::calibrate::calibrate;
+use crate::calibrate::{calibrate, WorkingSpace};
 use crate::decode::decode_to_rawimage;
 use crate::demosaic::{demosaic, DemosaicAlgorithm};
 use crate::RawlerFotlabError;
@@ -60,9 +65,14 @@ pub struct DevelopParams {
 }
 
 /// FFI entry point: develop `raw` (already routed to the raw path) into a linear
-/// RGB image using `params`. Re-runs the full pipeline (decode included) on every
-/// call; the cached-decode path lives in [`crate::loaded::RawlerImageLoaded`]
-/// (`FOTLAB-RAWLER-000004`).
+/// **ProPhoto D50** RGB image (`LinearImage`) using `params` — the object handed
+/// to the rawalchemy pipeline. This is the *editing* branch of the dual-fork
+/// (`rules/REVIEW/detail/FOTLAB-RAWLER-000005.md`): wide gamut and **unclamped**,
+/// so negative and >1 components survive for downstream tone/exposure work. No
+/// gamma is applied — ProPhoto is a linear editing space.
+///
+/// Re-runs the full pipeline (decode included) on every call; the cached-decode
+/// path lives in [`crate::loaded::RawlerImageLoaded`] (`FOTLAB-RAWLER-000004`).
 #[uniffi::export]
 pub fn develop(raw: &[u8], params: DevelopParams) -> Result<LinearImage, RawlerFotlabError> {
   if raw.is_empty() {
@@ -70,20 +80,31 @@ pub fn develop(raw: &[u8], params: DevelopParams) -> Result<LinearImage, RawlerF
   }
   panic::catch_unwind(AssertUnwindSafe(|| {
     let image = decode_to_rawimage(raw)?;
-    develop_image(image, params)
+    develop_image(image, params, WorkingSpace::ProPhotoD50)
   }))
   .unwrap_or_else(|_| Err(RawlerFotlabError::Decode("rawler panicked during develop".to_string())))
 }
 
-/// Develop an already-decoded [`RawImage`] into a linear RGB image (no gamma).
+/// Develop an already-decoded [`RawImage`] into a linear RGB image in the
+/// requested [`WorkingSpace`] (no gamma).
 ///
-/// Shared by the stateless `develop` FFI entry point and
-/// `crate::loaded::RawlerImageLoaded::develop_to_png` (which reuses a cached
-/// decode). The pipeline mutates `image` in place — callers that must keep their
-/// `RawImage` must clone it first (`FOTLAB-RAWLER-000004` §clone).
+/// This is the shared core of the dual-fork (`rules/REVIEW/detail/FOTLAB-RAWLER-000005.md`):
+///
+/// * `WorkingSpace::SrgbD65` — the *presentation* branch. The result is later
+///   finished into a display-ready sRGB PNG (gamma + clip) by
+///   `bound::linearimage_to_png`; the rawalgebra object is never touched.
+/// * `WorkingSpace::ProPhotoD50` — the *editing* branch for the rawalchemy
+///   pipeline. Wide gamut and **unclamped**: the returned [`LinearImage`] keeps
+///   its negative and >1 components.
+///
+/// Shared by the stateless `develop` FFI entry point (ProPhoto) and
+/// `crate::loaded::RawlerImageLoaded::develop_to_png` (sRGB, which then encodes
+/// with gamma). The pipeline mutates `image` in place — callers that must keep
+/// their `RawImage` must clone it first (`FOTLAB-RAWLER-000004` §clone).
 pub(crate) fn develop_image(
   mut image: RawImage,
   params: DevelopParams,
+  space: WorkingSpace,
 ) -> Result<LinearImage, RawlerFotlabError> {
   image
     .apply_scaling()
@@ -126,7 +147,7 @@ pub(crate) fn develop_image(
   // per-pixel/rect-selection operations, so order is numerically equivalent,
   // but keeping the identical order means the crop coordinates resolve
   // exactly the way upstream resolves them.
-  let linear = calibrate(intermediate, &image, wb)?;
+  let linear = calibrate(intermediate, &image, wb, space)?;
   Ok(crop_default(&image, linear))
 }
 
