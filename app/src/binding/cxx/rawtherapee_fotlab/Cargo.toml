@@ -1,0 +1,26 @@
+[package]
+name = "rawtherapee_fotlab"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "FotLab binding over RawTherapee's C++ demosaic algorithms (external/RawTherapee)"
+# GPL v3 inherited from RawTherapee: linking librtengine (and this shim) into the
+# rawtherapee_fotlab binary makes the combined work a GPL v3 derivative. Keep this
+# in mind if the wider fotlab distribution has licensing constraints.
+
+# Mirror of rawler_fotlab: a standalone cdylib (consumed by Kotlin over cxx) that
+# lives OUTSIDE the RawTherapee build. RawTherapee is reached through the C++ shim
+# under cxx/ and linked as a *static* library produced by the Android/NDK build of
+# the submodule.
+[lib]
+name = "rawtherapee_fotlab"
+crate-type = ["cdylib", "staticlib"]
+path = "src/lib.rs"
+
+[dependencies]
+# cxx provides the safe Rust <-> C++ FFI bridge (the `rt_demosaic` call).
+cxx = "1"
+thiserror = "2.0"
+
+[build-dependencies]
+cxx = "1"
