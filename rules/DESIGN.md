@@ -104,6 +104,7 @@ The detail file name **must** equal its ID plus `.md`.
 | `COMPAT` | Compatibility | Android versions, vendor devices, ABI coverage |
 | `PRIVCY` | Privacy & Security | Permissions, data retention, third-party dependencies |
 | `RELEAS` | Release & Build | Signing, packaging, CI behaviour, distribution |
+| `PIPELN` | Pipeline & Data Flow | loader/develop/process split, in-memory IR flow (FotRaw/FotDev), external-engine develop path |
 
 ## Status & Priority
 
