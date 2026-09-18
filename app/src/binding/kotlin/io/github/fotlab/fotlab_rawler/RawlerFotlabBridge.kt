@@ -52,4 +52,12 @@ object RawlerFotlabBridge {
     /** Develop an already-loaded image into a linear PNG — no re-decode; null on failure. */
     fun developRawlerImage(loaded: RawlerImageLoaded, params: DevelopParams): ByteArray? =
         runCatching { loaded.developToPng(params) }.getOrNull()
+
+    /**
+     * Develop an already-loaded image into a finished sRGB PNG, overriding the white balance with the
+     * multipliers for a target color temperature ([kelvin] Kelvin) — no re-decode; null on failure.
+     * The Kelvin→multiplier projection happens natively; only the `f32` crosses the FFI.
+     */
+    fun developRawlerImageAtKelvin(loaded: RawlerImageLoaded, params: DevelopParams, kelvin: Float): ByteArray? =
+        runCatching { loaded.developToPngAtKelvin(params, kelvin) }.getOrNull()
 }

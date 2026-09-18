@@ -62,6 +62,7 @@ mod demosaic;
 mod develop;
 mod intermediate;
 mod loaded;
+mod wb;
 
 use develop::DevelopParams;
 

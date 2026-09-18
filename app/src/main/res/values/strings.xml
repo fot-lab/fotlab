@@ -72,17 +72,19 @@
     <string name="studio_cd_more_options">More options</string>
     <string name="studio_reset_view">Reset view</string>
     <string name="studio_open_prompt">Open a file from the toolbar to start editing</string>
-    <string name="studio_bottombar_demosaic">Demosaic</string>
-    <string name="studio_bottombar_exposure">Exposure</string>
-    <string name="studio_bottombar_whitebalance">White Balance</string>
+    <!-- Top-bar tool icons, shown in a row right of the drawer menu: demosaic / exposure / white balance. -->
+    <string name="studio_cd_demosaic">Demosaic algorithm</string>
+    <string name="studio_cd_exposure">Exposure</string>
+    <string name="studio_cd_whitebalance">White balance</string>
     <string name="studio_exposure_title">Exposure (EV)</string>
     <string name="studio_exposure_hint">Stops, e.g. -2.0 … 2.0</string>
+    <string name="studio_wb_title">As-shot: %1$s K</string>
+    <string name="studio_wb_hint">Color temperature (K), e.g. 5500</string>
     <string name="studio_decoding">Decoding…</string>
     <string name="studio_unsupported_title">Unsupported Format</string>
     <string name="studio_unsupported_format">Unsupported Format! 不支持的格式！</string>
 
-    <!-- Studio bottom-bar demosaic menu (the "Looks" action, replaced by a pull-up algorithm picker). -->
-    <string name="studio_demosaic_title">Demosaic</string>
+    <!-- Studio top-bar demosaic dropdown algorithm picker. -->
     <string name="studio_demosaic_default">Default (CFA auto)</string>
     <string name="studio_demosaic_ppg">PPG</string>
     <string name="studio_demosaic_bilinear4">Bilinear 4-channel</string>

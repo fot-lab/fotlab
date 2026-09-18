@@ -336,22 +336,22 @@ class RawRoutingTest {
         hostContent { AppTheme { StudioScreen() } }
         composeRule.waitForIdle()
 
-        // The bottom-bar "Demosaic" action opens the demosaic pull-up menu.
-        val demosaic = context.getString(R.string.studio_bottombar_demosaic)
+        // The top-bar gradient icon opens the demosaic algorithm dropdown.
+        val demosaic = context.getString(R.string.studio_cd_demosaic)
         composeRule.waitUntil(30_000) {
-            composeRule.onAllNodesWithText(demosaic).fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithContentDescription(demosaic).fetchSemanticsNodes().isNotEmpty()
         }
-        step("ui", "bottom-bar '$demosaic' present")
-        composeRule.onNodeWithText(demosaic).performClick()
-        step("ui", "clicked '$demosaic'")
+        step("ui", "top-bar demosaic icon present")
+        composeRule.onNodeWithContentDescription(demosaic).performClick()
+        step("ui", "clicked the demosaic icon")
 
-        // The demosaic sheet offers the algorithms; PPG is the Bayer choice for every camera in
+        // The dropdown offers the algorithms; PPG is the Bayer choice for every camera in
         // the corpus (Canon/Sony/Nikon/Panasonic sensors are Bayer RGB).
         val ppg = context.getString(R.string.studio_demosaic_ppg)
         composeRule.waitUntil(30_000) {
             composeRule.onAllNodesWithText(ppg).fetchSemanticsNodes().isNotEmpty()
         }
-        step("ui", "demosaic sheet shows '$ppg'")
+        step("ui", "demosaic dropdown shows '$ppg'")
         composeRule.onNodeWithText(ppg).performClick()
         step("ui", "picked '$ppg' — triggers StudioEngine.develop redevelop")
 

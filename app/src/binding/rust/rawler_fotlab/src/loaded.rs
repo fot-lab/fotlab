@@ -100,6 +100,44 @@ impl RawlerImageLoaded {
         self.inner.wb_coeffs.to_vec()
     }
 
+    /// Estimated as-shot color temperature (Kelvin) of the decoded white balance, projected from
+    /// the multipliers through the camera matrix (`wb::as_shot_color_temp_kelvin`). 0.0 means the
+    /// value is unavailable (no multipliers / degenerate matrix). Surfaced by the Studio white-balance
+    /// control as "As-shot: xxxx K" (`rules/REVIEW/detail/FOTLAB-RAWLER-000004.md` §as-shot).
+    pub fn as_shot_color_temp_kelvin(&self) -> f32 {
+        crate::wb::as_shot_color_temp_kelvin(&self.inner)
+    }
+
+    /// Develop the cached decode into a finished sRGB PNG, overriding the white balance with the
+    /// multipliers for a target color temperature ([`kelvin`] Kelvin), reusing the same cached
+    /// [`RawImage`]. `kelvin <= 0` leaves the white balance at as-shot. The Kelvin→multiplier
+    /// projection stays on the native side; only the `f32` crosses the FFI. Wrapped in `catch_unwind`
+    /// (`FOTLAB-CRASH-000001`).
+    pub fn develop_to_png_at_kelvin(
+        &self,
+        params: DevelopParams,
+        kelvin: f32,
+    ) -> Result<Vec<u8>, RawlerFotlabError> {
+        panic::catch_unwind(AssertUnwindSafe(|| {
+            let image = (*self.inner).clone();
+            let params = if kelvin > 0.0 {
+                DevelopParams {
+                    wb: Some(crate::wb::wb_from_color_temp(&image, kelvin)),
+                    ..params
+                }
+            } else {
+                params
+            };
+            let linear = develop_image(image, params, WorkingSpace::SrgbD65)?;
+            bound::rawlerimagedeveloped_to_png(&linear).map_err(RawlerFotlabError::Decode)
+        }))
+        .unwrap_or_else(|_| {
+            Err(RawlerFotlabError::Decode(
+                "rawler panicked during develop".to_string(),
+            ))
+        })
+    }
+
     /// Develop the cached decode into linear ProPhoto-D50 and hand it straight to
     /// the rawalchemy grading engine — a single Rust→cxx hop with no Kotlin buffer
     /// copy (`rules/REVIEW/detail/FOTLAB-RAWLER-000006`). Requires the `rawalchemy`

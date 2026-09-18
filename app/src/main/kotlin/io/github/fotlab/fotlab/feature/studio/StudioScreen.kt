@@ -3,8 +3,6 @@ package io.github.fotlab.fotlab.feature.studio
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -15,19 +13,20 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.AddPhotoAlternate
+import androidx.compose.material.icons.filled.Exposure
+import androidx.compose.material.icons.filled.Gradient
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.WbAuto
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
-import androidx.compose.material3.Surface
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -37,7 +36,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.rememberDrawerState
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -59,6 +57,7 @@ import io.github.fotlab.fotlab.ui.ZoomableAsyncImage
 import io.github.fotlab.fotlab.ui.rememberZoomState
 import io.github.fotlab.fotlab_rawler.DemosaicAlgorithm
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 /**
  * Studio screen (UI) — a Snapseed-style editor and the second independent screen, owned by the
@@ -67,8 +66,10 @@ import kotlinx.coroutines.launch
  * Like every screen it fills the whole region above the bottom navigation bar and splits it into two
  * sibling regions: its own top bar and the content region below it (`FOTLAB-UIXDES-000002` R3). The
  * top bar follows the shared skeleton — drawer toggle at the far left, overflow at the far right, and
- * a file-open action just left of the overflow (`FOTLAB-UIXDES-000002`). The module also owns its
- * drawer and its bottom action bar, none of which is shared with the shell.
+ * a file-open action just left of the overflow (`FOTLAB-UIXDES-000002`). The three develop tools sit
+ * as icon-only buttons right of the drawer menu — gradient (demosaic dropdown), exposure (stops
+ * input) and wb-auto (Kelvin input). The module also owns its drawer; nothing here is shared with the
+ * shell.
  *
  * The open action lands the picked file in the Library directory the user is currently viewing
  * (shared app state, never the Recycle view — `LibraryCore.currentDirectoryId`) and renders it on the
@@ -104,11 +105,11 @@ fun StudioScreen() {
         }
     }
 
-    var showDemosaicSheet by remember { mutableStateOf(false) }
-    val demosaicSheetState = rememberModalBottomSheetState()
-
     var showExposureDialog by remember { mutableStateOf(false) }
     var exposureInput by remember { mutableStateOf("") }
+
+    var showWhiteBalanceDialog by remember { mutableStateOf(false) }
+    var whiteBalanceInput by remember { mutableStateOf("") }
 
     BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
 
@@ -124,6 +125,17 @@ fun StudioScreen() {
                 onOpenDrawer = { scope.launch { drawerState.open() } },
                 onOpenFile = { importLauncher.launch(arrayOf("*/*")) },
                 onResetView = { zoomState.reset() },
+                onAlgorithmPicked = { algo -> StudioEngine.develop(algo) },
+                onExposure = {
+                    exposureInput = StudioEngine.currentExposureEv().toString()
+                    showExposureDialog = true
+                },
+                onWhiteBalance = {
+                    // Prefill the current override, else the as-shot estimate decoded from the RAW.
+                    val kelvin = StudioEngine.currentWhiteBalanceKelvin()
+                    whiteBalanceInput = if (kelvin > 0f) kelvin.roundToInt().toString() else ""
+                    showWhiteBalanceDialog = true
+                },
             )
 
             Box(
@@ -164,52 +176,10 @@ fun StudioScreen() {
                 )
             }
 
-            StudioBottomBar(
-                onDemosaic = { showDemosaicSheet = true },
-                onExposure = {
-                    exposureInput = StudioEngine.currentExposureEv().toString()
-                    showExposureDialog = true
-                },
-            )
         }
     }
 
-    // Demosaic pull-up menu: opened by the bottom-bar Demosaic action. The first Studio render is a
-    // grayscale raw preview; picking an algorithm here triggers `StudioEngine.develop`, which re-runs
-    // the develop pipeline (demosaic + calibrate) and pushes the resulting linear PNG to the canvas.
-    if (showDemosaicSheet) {
-        ModalBottomSheet(
-            onDismissRequest = { showDemosaicSheet = false },
-            sheetState = demosaicSheetState,
-        ) {
-            Text(
-                text = stringResource(id = R.string.studio_demosaic_title),
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-            )
-            val algorithms = listOf(
-                DemosaicAlgorithm.DEFAULT to stringResource(id = R.string.studio_demosaic_default),
-                DemosaicAlgorithm.PPG to stringResource(id = R.string.studio_demosaic_ppg),
-                DemosaicAlgorithm.BILINEAR4_CHANNEL to stringResource(id = R.string.studio_demosaic_bilinear4),
-                DemosaicAlgorithm.X_TRANS_BILINEAR to stringResource(id = R.string.studio_demosaic_xtrans),
-            )
-            for ((algo, label) in algorithms) {
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            showDemosaicSheet = false
-                            scope.launch { StudioEngine.develop(algo) }
-                        }
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
-                )
-            }
-        }
-    }
-
-    // Exposure input dialog: opened by the bottom-bar Exposure action. The entered stops value is
+    // Exposure input dialog: opened by the top-bar Exposure icon. The entered stops value is
     // written into the develop params and re-develops + re-renders the canvas (Rust applies 2^ev in
     // the linear domain before the cam->sRGB matrix).
     if (showExposureDialog) {
@@ -243,12 +213,52 @@ fun StudioScreen() {
             },
         )
     }
+
+    // White-balance input dialog: opened by the top-bar WbAuto icon. The title carries the as-shot
+    // CCT estimated from the decoded multipliers ("As-shot: xxxx K"; "–" when unavailable); the field
+    // lets the user enter any target Kelvin, which is projected to camera multipliers natively and
+    // re-develops the resident RAW via StudioEngine.setWhiteBalanceKelvin.
+    if (showWhiteBalanceDialog) {
+        val asShot = StudioEngine.asShotWhiteBalanceKelvin()
+        val asShotLabel = if (asShot > 0f) asShot.roundToInt().toString() else "–"
+        AlertDialog(
+            onDismissRequest = { showWhiteBalanceDialog = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    val kelvin = whiteBalanceInput.toFloatOrNull()
+                    if (kelvin != null && kelvin > 0f) {
+                        StudioEngine.setWhiteBalanceKelvin(kelvin)
+                        showWhiteBalanceDialog = false
+                    }
+                }) {
+                    Text(text = stringResource(id = R.string.common_action_ok))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showWhiteBalanceDialog = false }) {
+                    Text(text = stringResource(id = R.string.common_action_cancel))
+                }
+            },
+            title = { Text(text = stringResource(id = R.string.studio_wb_title, asShotLabel)) },
+            text = {
+                TextField(
+                    value = whiteBalanceInput,
+                    onValueChange = { whiteBalanceInput = it },
+                    singleLine = true,
+                    placeholder = { Text(text = stringResource(id = R.string.studio_wb_hint)) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                )
+            },
+        )
+    }
 }
 
 /**
- * The Studio top bar: the shared skeleton of `FOTLAB-UIXDES-000002` — drawer toggle at the far left,
- * overflow (three-dot) at the far right, and the file-open action just left of the overflow. The bar
- * renders no title text (`FOTLAB-UIXDES-000004` R6).
+ * The Studio top bar: the shared skeleton of `FOTLAB-UIXDES-000002` — drawer menu at the far left,
+ * immediately followed by the three icon-only develop tools (gradient → demosaic algorithm dropdown,
+ * exposure → stops input dialog, wb-auto → Kelvin input dialog); the file-open action and the
+ * overflow (three-dot) sit at the far right. The bar renders no title text
+ * (`FOTLAB-UIXDES-000004` R6).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -256,19 +266,66 @@ private fun StudioTopBar(
     onOpenDrawer: () -> Unit,
     onOpenFile: () -> Unit,
     onResetView: () -> Unit,
+    onAlgorithmPicked: (DemosaicAlgorithm) -> Unit,
+    onExposure: () -> Unit,
+    onWhiteBalance: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var overflowOpen by remember { mutableStateOf(false) }
+    var demosaicMenuOpen by remember { mutableStateOf(false) }
 
     TopAppBar(
         title = {},
         modifier = modifier,
         navigationIcon = {
-            IconButton(onClick = onOpenDrawer) {
-                Icon(
-                    imageVector = Icons.Filled.Menu,
-                    contentDescription = stringResource(id = R.string.studio_cd_drawer_open),
-                )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onOpenDrawer) {
+                    Icon(
+                        imageVector = Icons.Filled.Menu,
+                        contentDescription = stringResource(id = R.string.studio_cd_drawer_open),
+                    )
+                }
+                // Demosaic: the gradient icon anchors the algorithm dropdown.
+                Box {
+                    IconButton(onClick = { demosaicMenuOpen = true }) {
+                        Icon(
+                            imageVector = Icons.Filled.Gradient,
+                            contentDescription = stringResource(id = R.string.studio_cd_demosaic),
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = demosaicMenuOpen,
+                        onDismissRequest = { demosaicMenuOpen = false },
+                    ) {
+                        val algorithms = listOf(
+                            DemosaicAlgorithm.DEFAULT to R.string.studio_demosaic_default,
+                            DemosaicAlgorithm.PPG to R.string.studio_demosaic_ppg,
+                            DemosaicAlgorithm.BILINEAR4_CHANNEL to R.string.studio_demosaic_bilinear4,
+                            DemosaicAlgorithm.X_TRANS_BILINEAR to R.string.studio_demosaic_xtrans,
+                        )
+                        for ((algo, labelRes) in algorithms) {
+                            DropdownMenuItem(
+                                text = { Text(text = stringResource(id = labelRes)) },
+                                onClick = {
+                                    demosaicMenuOpen = false
+                                    onAlgorithmPicked(algo)
+                                },
+                            )
+                        }
+                    }
+                }
+                IconButton(onClick = onExposure) {
+                    Icon(
+                        imageVector = Icons.Filled.Exposure,
+                        contentDescription = stringResource(id = R.string.studio_cd_exposure),
+                    )
+                }
+                IconButton(onClick = onWhiteBalance) {
+                    Icon(
+                        imageVector = Icons.Filled.WbAuto,
+                        contentDescription = stringResource(id = R.string.studio_cd_whitebalance),
+                    )
+                }
             }
         },
         actions = {
@@ -332,38 +389,5 @@ private fun StudioDrawer(
             style = MaterialTheme.typography.titleMedium,
             modifier = Modifier.padding(16.dp),
         )
-    }
-}
-
-/**
- * Studio bottom action bar: Demosaic / Exposure / White Balance.
- *
- * Demosaic opens the pull-up algorithm picker (`onDemosaic`); Exposure opens the stops input dialog
- * (`onExposure`), whose confirmed value is written into [StudioEngine.setExposureEv] and re-develops
- * the canvas. White Balance remains a placeholder for now.
- */
-@Composable
-private fun StudioBottomBar(
-    onDemosaic: () -> Unit,
-    onExposure: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Surface(modifier = modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 14.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-        ) {
-            Text(
-                text = stringResource(id = R.string.studio_bottombar_demosaic),
-                modifier = Modifier.clickable(onClick = onDemosaic),
-            )
-            Text(
-                text = stringResource(id = R.string.studio_bottombar_exposure),
-                modifier = Modifier.clickable(onClick = onExposure),
-            )
-            Text(text = stringResource(id = R.string.studio_bottombar_whitebalance))
-        }
     }
 }

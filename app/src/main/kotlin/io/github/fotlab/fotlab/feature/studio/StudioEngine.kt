@@ -103,6 +103,7 @@ object StudioEngine {
             return
         }
         currentUri = parsed
+        currentWhiteBalanceKelvin = null
         renderResultState.value = StudioRenderResult.Loading
         scope.launch {
             val result = runPipeline(appContext.contentResolver, parsed, token)
@@ -175,6 +176,9 @@ object StudioEngine {
     /** The exposure compensation (in stops) retained for the next develop re-render. */
     private var currentExposureEv: Float = 0.0f
 
+    /** The white-balance color temperature (Kelvin) retained for the next develop re-render; null = as-shot. */
+    private var currentWhiteBalanceKelvin: Float? = null
+
     /**
      * The RAW decoded once and held resident as a UniFFI handle; null when no raw file is loaded.
      * Tied to [currentUri] — there is exactly one at a time (`FOTLAB-RAWLER-000004` §lifecycle).
@@ -191,11 +195,32 @@ object StudioEngine {
     /** The current exposure compensation in stops; the UI prefills the Exposure dialog from this. */
     fun currentExposureEv(): Float = currentExposureEv
 
+    /** The as-shot color temperature (Kelvin) decoded from the current RAW, or 0f when unavailable. */
+    fun asShotWhiteBalanceKelvin(): Float = loadedImage?.asShotColorTempKelvin() ?: 0f
+
+    /**
+     * The Kelvin the white-balance dialog prefills: the user override while one is set, otherwise
+     * the as-shot estimate (0f when no RAW is loaded or the estimate is unavailable).
+     */
+    fun currentWhiteBalanceKelvin(): Float = currentWhiteBalanceKelvin ?: asShotWhiteBalanceKelvin()
+
+    /**
+     * Re-develop the current RAW with a white-balance color temperature [kelvin] (Kelvin) entered
+     * from the Studio white-balance dialog, keeping the current demosaic algorithm and exposure. The
+     * Kelvin is projected to camera multipliers on the native side and written into the develop
+     * params; the canvas is re-rendered from the re-developed PNG.
+     */
+    fun setWhiteBalanceKelvin(kelvin: Float) {
+        currentWhiteBalanceKelvin = kelvin
+        reDevelop()
+    }
+
     /**
      * Re-develop the current RAW with the demosaic [algorithm] the user picked from the Studio
-     * bottom-bar menu, and push the resulting **linear** PNG to the canvas. It keeps the currently
-     * set exposure compensation, then re-runs the full develop pipeline (decode included) through the
-     * native bridge. No-op if nothing is open or the source is not a routed raw.
+     * top-bar gradient dropdown, and push the resulting **linear** PNG to the canvas. It keeps the
+     * currently set exposure compensation, then re-runs the full develop pipeline through the
+     * native bridge (the decode is reused from the resident handle). No-op if nothing is open or
+     * the source is not a routed raw.
      */
     fun develop(algorithm: DemosaicAlgorithm) {
         currentAlgorithm = algorithm
@@ -214,12 +239,12 @@ object StudioEngine {
     }
 
     /** Shared re-develop path: re-runs the develop pipeline with the retained algorithm + exposure. */
-    private fun reDevelop() {
+    private fun reDevelop(wbKelvin: Float? = currentWhiteBalanceKelvin) {
         val uri = currentUri ?: return
         val token = loadNonce.get()
         renderResultState.value = StudioRenderResult.Loading
         scope.launch {
-            val result = runDevelop(appContext.contentResolver, uri, token, currentAlgorithm, currentExposureEv)
+            val result = runDevelop(appContext.contentResolver, uri, token, currentAlgorithm, currentExposureEv, wbKelvin)
             if (loadNonce.get() == token) renderResultState.value = result
         }
     }
@@ -230,6 +255,7 @@ object StudioEngine {
         token: Long,
         algorithm: DemosaicAlgorithm,
         exposureEv: Float,
+        wbKelvin: Float? = null,
     ): StudioRenderResult {
         // If the file was switched while we were about to develop, bail — never develop a different
         // file's pixels (FOTLAB-RAWLER-000004 §lifecycle: exactly one handle per current file).
@@ -237,10 +263,18 @@ object StudioEngine {
         // Reuse the resident decoded image; fall back to a stateless re-decode only if it is absent.
         val loaded = loadedImage
         val png = if (loaded != null) {
-            RawlerFotlabBridge.developRawlerImage(
-                loaded,
-                DevelopParams(demosaicAlgorithm = algorithm, exposureEv = exposureEv, wb = null),
-            )
+            if (wbKelvin != null) {
+                RawlerFotlabBridge.developRawlerImageAtKelvin(
+                    loaded,
+                    DevelopParams(demosaicAlgorithm = algorithm, exposureEv = exposureEv, wb = null),
+                    wbKelvin,
+                )
+            } else {
+                RawlerFotlabBridge.developRawlerImage(
+                    loaded,
+                    DevelopParams(demosaicAlgorithm = algorithm, exposureEv = exposureEv, wb = null),
+                )
+            }
         } else {
             rawDecoder.developToPng(currentFormat ?: "", algorithm, exposureEv) {
                 resolver.openInputStream(uri) ?: error("cannot open source")
