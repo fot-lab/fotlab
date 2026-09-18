@@ -19,6 +19,8 @@
 | 色彩管理对不对 | **GPU 主管线正确**：`shader.wgsl:1718-1726` 在管线入口对 `is_raw==0`（非 RAW）先 `srgb_to_linear` 再进入线性色彩处理；对 RAW 直接用线性值。LUT（见 000005）仍消费线性输入，一致。 |
 | 默认「观感」差异 | 输出阶段（tonemap，1913-1924）：RAW 默认 `linear_to_srgb` + `BRIGHTNESS_GAMMA 1.1` + smoothstep 对比曲线（更「 punchy」）；非 RAW 仅纯 `linear_to_srgb`。所以同一张图导出成 JPG 再导入，观感不等于原 RAW。 |
 | 主要坑 | **完全忽略 ICC/色彩描述文件，强制按 sRGB 解读**；HDR/EXR 也在非 RAW 列表却按 sRGB 处理（潜在偏色）；8bit JPG 量化/条带；非 RAW 无 alpha（3 通道）。 |
+| JPG/PNG 的色彩空间（sRGB/AdobeRGB…）是否识别 | **不识别，硬编码 sRGB**。`image` crate `decode()` 不读 `iCCP`/APP2 ICC；唯一变换是写死的 sRGB 反 gamma（`apply_srgb_to_linear`，`image_processing.rs:1185`）；全库无 `lcms2`/ICC 库、无 AdobeRGB/ProPhoto/Display-P3 primaries 表；EXIF `ColorSpace` 仅作元数据、导出时强制写 `ColorSpace=1`。 |
+| 解码路径 / 格式嗅探机制 | **两层**：① raw vs 非 raw 大分支 = 纯扩展名（`is_raw_file`，`formats.rs:81`），不看 magic；② 实际解码器 = 内容嗅探（非 raw 走 `image` crate `with_guessed_format()` 读前导字节；raw 走 rawler 解析 TIFF/make-model；raw 失败回退扫描 TIFF IFD 取 JPEG 预览）。即「是否 raw」扩展名优先，「何种格式」内容优先。 |
 
 ## 1. 判定：`is_raw` 如何决定路线
 
@@ -177,6 +179,106 @@ JPG 8bit → `to_rgb32f` 仅 `/255`，渐变区易条带；非 RAW 加载为 `Im
 | LUT | 线性消费 | 线性消费（一致） |
 | 降噪默认 | AI（强度 50） | BM3D（强度 15） |
 
+## 9. 深度调研（一）：loader 是否识别 JPG/PNG 的色彩空间（sRGB / AdobeRGB / Display-P3 / ProPhoto）
+
+**结论：RapidRAW 的 loader 完全不识别/解析 JPG、PNG 的色彩空间，硬编码假定所有非 RAW 都是 sRGB 编码。**
+
+### 9.1 解码阶段：不读 ICC、只取样本值
+
+非 RAW 走 `load_image_with_orientation`（`image_loader.rs:353`），核心是 `image` crate 的 `decode()`：
+
+```353:396:external/RapidRAW/src-tauri/src/image_loader.rs
+pub fn load_image_with_orientation(...) -> Result<DynamicImage> {
+    let cursor = Cursor::new(bytes);
+    let mut reader = ImageReader::new(cursor.clone())
+        .with_guessed_format()
+        .context("Failed to guess image format")?;
+    reader.no_limits();
+    let image = reader.decode().context("Failed to decode image")?;   // image 库解码，不读 ICC
+    ... // 仅 apply_orientation（EXIF 方向）
+    Ok(DynamicImage::ImageRgb32F(oriented_image.to_rgb32f()))  // 仅取样本值，无 profile 转换
+}
+```
+
+`image` crate 的 `decode()` 不会读取 PNG 的 `iCCP` chunk、JPEG 的 APP2 ICC 段，也不会做色彩管理转换；它只产出「解码后的原始样本值」。`to_rgb32f()` 只是把样本值塞进 f32，**没有任何「这个文件是 AdobeRGB 吗？」的判断**。
+
+### 9.2 全库范围内也没有色彩空间识别
+
+- 在 `src-tauri` 全量搜索 `icc / ICC / color_profile / AdobeRGB / chromaticities / gAMA / cHRM / iCCP / APP2 / lcms` **全部无实际代码**；依赖中也未引入任何 CMM/ICC 库（如 `lcms2`）。
+- 整个代码只定义了两组 primaries：`PRIMARIES_SRGB` 与 `PRIMARIES_REC2020`，且**仅用于 AGX 色调映射的工作空间矩阵**（`image_processing.rs:1783-1788`），不是用来按文件实际色彩空间切换的；**没有任何 AdobeRGB / ProPhoto / Display-P3 / DCI-P3 的 primaries 表或白点表**。
+
+### 9.3 唯一施加的「色彩」变换：固定 sRGB EOTF 线性化
+
+非 RAW 进入管线后，唯一施加的传输函数变换是 `apply_srgb_to_linear`（`image_processing.rs:1185`）——一个**写死的 sRGB 反 gamma**：
+
+```1185:1198:external/RapidRAW/src-tauri/src/image_processing.rs
+pub fn apply_srgb_to_linear(mut image: DynamicImage) -> DynamicImage {
+    let to_linear = |x: f32| -> f32 {
+        let x = x.max(0.0);
+        if x <= 0.04045 { x / 12.92 }
+        else { ((x + 0.055) / 1.055).powf(2.4) }   // 固定 sRGB 转移函数
+    };
+    ...
+}
+```
+
+即：解码像素 → **当作 sRGB 编码** → 用 sRGB 反 gamma 转线性 →（非 RAW 默认 `basic` 或可选 AGX）→ 线性空间处理 → `apply_linear_to_srgb` 回编码。**不存在「源是 AdobeRGB → 用不同 EOTF/primaries」的分支**。
+
+### 9.4 EXIF `ColorSpace` 仅作元数据，不参与处理
+
+`exif_processing.rs:861-863` 读取 EXIF `ColorSpace` 标签，但**只作为元数据字符串存下来**，不参与任何色彩变换；导出时反而**无条件写入 `ColorSpace=1`（即 sRGB）**（`exif_processing.rs:1542`）。
+
+### 9.5 这意味着什么（对 FotLab 的启示）
+
+- 一张**实际为 AdobeRGB / Display-P3 / ProPhoto 编码的 JPG/PNG**，RapidRAW 会把它当 sRGB 解码 + 线性化——**不做 profile→工作空间转换，也不提示/报错**。
+- 因为 AdobeRGB 等色域比 sRGB 宽，超出 sRGB 三角形的颜色会被错误「夹」进 sRGB，表现为**过饱和、色相偏移**；无任何 gamut mapping / primaries 校正。
+- 唯一能影响「被当作什么色彩空间」的开关是后处理里的色调映射选择（AGX vs basic），而非对文件真实色彩空间的识别。
+- 这与 RAW 形成对比：RAW 有完整的 camconst / 白平衡 / 色彩矩阵，而非 RAW 在色彩管理上是「盲」的（详见 §7.1）。
+
+## 10. 深度调研（二）：loader 的解码路径与格式嗅探机制
+
+RapidRAW 的「格式判断」分两层：**raw / 非 raw 的大分支靠扩展名决定，真正的像素解码器靠内容嗅探（magic bytes）决定。**
+
+### 10.1 第一层：raw vs 非 raw 路由 —— 纯扩展名
+
+入口 `load_base_image_from_bytes` 先用 `is_raw_file(path)` 决定路线（见 §1 / `formats.rs:81`）。它只取 `extension()` 与 `RAW_EXTENSIONS` 做大小写不敏感比较，**不读任何 magic number**。
+
+库扫描用的 `is_supported_image_file`（`formats.rs:92-118`）同理：先比 `RAW_EXTENSIONS`，再比 `NON_RAW_EXTENSIONS`，并以「文件名以 `.` 开头则忽略」过滤隐藏文件。
+
+**后果**：分支选择完全信任扩展名。把 `foo.cr3` 改名 `foo.jpg` → 走非 raw；把 `foo.png` 改名 `foo.arw` → 走 raw（大概率失败或回退）。
+
+### 10.2 第二层：实际解码器选择 —— 内容嗅探（magic bytes）
+
+- **非 RAW 分支**：`load_image_with_orientation` 用 `image` crate，从内存 `Cursor` 构造 reader 后调用 `with_guessed_format()`（`image_loader.rs:367`）。因 reader 由**字节游标**构造、无路径可用，`with_guessed_format()` 只能靠**读前导字节签名**判定真实格式（PNG `‰PNG\r\n`、JPEG `0xFFD8`、GIF `GIF8`、BMP、TIFF `II*\0`/`MM\0*`、WebP `RIFF....WEBP` 等），再选对应解码器。即**非 RAW 真实格式由内容嗅探决定**。
+
+- **RAW 分支**：`is_raw_file` 通过后交给 `develop_raw_image`（`raw_processing.rs:15`）→ rawler `develop_internal`。这一步是**真正的内容识别**：rawler 解析 TIFF 容器头/magic（`II*\0`、`MM\0*`）、读 Make/Model 与 maker notes，再派发到具体机型 decoder（CR3/ARW/DNG/…）。所以虽然「是否 raw」靠扩展名，但「是哪种 raw、如何解」是内容驱动。
+
+### 10.3 RAW 解码失败时的回退链（同样是内容嗅探）
+
+若 rawler 报错或 panic，`image_loader.rs:132-172` 回退到嵌入预览：
+
+```144:153:external/RapidRAW/src-tauri/src/image_loader.rs
+if let Some(preview) = safe_embedded_preview_fallback(bytes, path_for_ext_check) {
+    ...
+    return Ok(linearize_embedded_preview(preview));  // 当作 sRGB 线性化
+}
+```
+
+`embedded_preview_fallback` → `largest_tiff_jpeg_preview`（`image_loader.rs:212`，**逐 IFD 扫描 TIFF 结构**找 JPEG 预览）或 `rawler::analyze::extract_preview_pixels`。回退路径也是**基于内容解析**，与扩展名无关。
+
+### 10.4 嗅探层次汇总
+
+| 阶段 | 判断依据 | 代码位置 |
+| --- | --- | --- |
+| raw / 非 raw 大分支 | **扩展名**（匹配 `RAW_EXTENSIONS`） | `formats.rs:81` `is_raw_file` |
+| 非 RAW 实际解码器 | **内容嗅探 magic bytes**（`image` crate `with_guessed_format`） | `image_loader.rs:367` |
+| RAW 实际解码器 | **内容嗅探**（rawler 解析 TIFF/magic/make-model） | `raw_processing.rs:22` `develop_internal` |
+| RAW 失败回退 | **内容嗅探**（扫描 TIFF IFD 取 JPEG 预览） | `image_loader.rs:212` `largest_tiff_jpeg_preview` |
+
+### 10.5 关键注意点
+
+RapidRAW **不会**通过嗅探内容来「发现这是 raw」——它先相信扩展名选中 raw 路径，再让 rawler 去内容识别；一个裸扩展名是 raw、实际是普通图片的文件也会先进 raw 路径再回退。即「文件本质是什么格式」的**初判是扩展名优先，而非 magic-byte 优先**。
+
 ## 关键文件索引
 
 | 主题 | 位置 |
@@ -194,6 +296,15 @@ JPG 8bit → `to_rgb32f` 仅 `/255`，渐变区易条带；非 RAW 加载为 `Im
 | 导出路径非 raw AGX 线性化 | `src-tauri/src/file_management.rs:1755-1767` |
 | HDR 合成非 raw 线性化 | `src-tauri/src/hdr_deghosting.rs:60-62` |
 | 前端 isRaw / 库过滤 / 降噪分支 | `src/hooks/useImageLoader.ts:86`、`src/components/ui/AppProperties.tsx:140-144`、`src/components/modals/DenoiseModal.tsx:264-265` |
+| 库扫描扩展名判定（raw/非 raw） | `src-tauri/src/formats.rs:92-118` `is_supported_image_file` |
+| 非 RAW 解码（只取样本值，不读 ICC） | `src-tauri/src/image_loader.rs:353-396` `load_image_with_orientation` |
+| 非 RAW 内容嗅探（magic bytes） | `src-tauri/src/image_loader.rs:367` `with_guessed_format` |
+| RAW 内容识别（rawler 解析 TIFF/make-model） | `src-tauri/src/raw_processing.rs:15-30` `develop_raw_image` → `develop_internal` |
+| RAW 失败回退（扫描 TIFF IFD 取 JPEG 预览） | `src-tauri/src/image_loader.rs:212` `largest_tiff_jpeg_preview`、`:305` `embedded_preview_fallback` |
+| 固定 sRGB 反 gamma（非 RAW 唯一色彩变换） | `src-tauri/src/image_processing.rs:1185-1198` `apply_srgb_to_linear` |
+| 仅有的两组 primaries（AGX 工作空间，非按文件切换） | `src-tauri/src/image_processing.rs:1783-1788` `PRIMARIES_SRGB` / `PRIMARIES_REC2020` |
+| EXIF `ColorSpace` 仅作元数据 | `src-tauri/src/exif_processing.rs:861-863` |
+| 导出强制写 `ColorSpace=1`（sRGB） | `src-tauri/src/exif_processing.rs:1542` |
 
 ## 与 FotLab 的关系 / 备注
 
