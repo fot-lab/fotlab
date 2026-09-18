@@ -1,4 +1,6 @@
-#include "rawalchemy_api.h"  // our own declaration; same-dir, via `.include("cpp")`
+// Our own declaration of `grade` — spelled relative to the crate root because that
+// is exactly how the cxx-generated shim includes it (see build.rs).
+#include "cpp/rawalchemy_api.h"
 
 #include "grading_fused.h"
 #include "color_data.h"

@@ -83,7 +83,7 @@ The shim constructs `GradingParams{}` (upstream defaults) and assigns a field on
 
 ### C++ shim (`cpp/rawalchemy_shim.cc`, as implemented)
 ```cpp
-#include "rawalchemy_api.h"       // our own declaration of `grade` (same dir)
+#include "cpp/rawalchemy_api.h"   // our own declaration of `grade`, crate-root relative
 #include "grading_fused.h"        // applyGradingFused, GradingParams
 #include "color_data.h"           // LOG_SPACES, LogSpaceInfo
 #include "lut_applier.h"          // loadCubeLUT, LUT3D
@@ -152,6 +152,7 @@ The bridge is the only place in the repo that uses cxx, and none of it had ever 
 1. **`Result` takes no second type parameter.** `fn grade(..) -> Result<Vec<f32>, String>` is rejected outright (`error[cxxbridge]: unsupported type`). It must be `Result<Vec<f32>>`: cxx catches whatever the C++ side throws and hands Rust `Err(cxx::Exception)`. The `String` in our own `grade` wrapper is a plain Rust signature, produced by `.map_err(|e| e.to_string())`.
 2. **A safe-to-call `extern "C++"` block must be written `unsafe extern "C++"`** — an item-level assertion that its functions really are safe to call from Rust.
 3. **There is no generated header to include.** cxx only emits `<crate>/<bridge path>.rs.h` from an `extern "Rust"` block or from shared structs; a bridge made purely of `extern "C++"` declarations gets none, so the declaration lives in `cpp/rawalchemy_api.h`, named by `include!("cpp/rawalchemy_api.h")`. cxx doesn't parse that header — it `#include`s it and static-asserts our signature against it, which is why the header, the bridge and the definition must stay in lockstep (types: `rust::Slice<const float>`, `rust::Str`, `uint32_t`/`int32_t`/`float`, `rust::Vec<float>`).
+4. **cxx emits that `include!` string verbatim** into the generated `lib.rs.cc` — it does *not* prepend the crate-name include prefix used for `#include "cratename/..."`. So the crate root itself must be on the include path (`build.rs` adds `CARGO_MANIFEST_DIR`), and the shim spells the header the same way so both translation units agree.
 
 Also note `Option<T>` is not available in cxx at all (it is on the "pending bindings" list), which is why every optional parameter is sentinel-encoded — see "Default ownership" above.
 
