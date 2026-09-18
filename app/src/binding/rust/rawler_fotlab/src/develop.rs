@@ -84,13 +84,18 @@ pub struct GradeParams {
   #[uniffi(default = None)]
   pub lut_path: Option<String>,
   /// Metering mode for automatic exposure (`computeAutoGain`), e.g. `"matrix"`.
-  /// `None` = skip automatic metering, leaving the unmetered base gain at unity.
+  /// `None` = skip automatic metering, leaving the metered base at unity.
   #[uniffi(default = None)]
   pub metering_mode: Option<String>,
-  /// Relative exposure in stops, applied as `2^ev_offset` on top of the metered
-  /// (or unity) gain. `0.0` = as-shot.
-  #[uniffi(default = 0.0)]
-  pub ev_offset: f32,
+  /// Upstream's raw `GradingParams::gain` **exposure multiplier** — a linear
+  /// factor, *not* an EV and **not** [`DevelopParams::exposure_ev`]. The develop
+  /// exposure is applied by rawler to the mosaic before demosaic and never
+  /// reaches the grading stage; this one scales the linear ProPhoto data the
+  /// grading loop receives, so the two are separate controls that must not be
+  /// wired to the same UI value. `None` = upstream default (unity) = don't touch
+  /// exposure. Metering, when enabled, is the base this multiplier scales.
+  #[uniffi(default = None)]
+  pub gain: Option<f32>,
   /// Target gray level for `computeAutoGain` (upstream default `0.18`).
   /// `None` = upstream default. Only meaningful with `metering_mode`.
   #[uniffi(default = None)]
@@ -120,7 +125,7 @@ impl From<&GradeParams> for rawalchemy_fotlab::GradeOverrides {
       log_space: p.log_space.clone(),
       lut_path: p.lut_path.clone(),
       metering_mode: p.metering_mode.clone(),
-      ev_offset: p.ev_offset,
+      gain: p.gain,
       target_gray: p.target_gray,
       enable_boost: p.enable_boost,
       saturation: p.saturation,

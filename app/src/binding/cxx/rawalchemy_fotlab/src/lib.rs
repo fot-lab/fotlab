@@ -31,9 +31,9 @@ mod ffi {
         ///
         /// "Unset" is encoded out of band, because cxx has no `Option<f32>`:
         /// `log_space` / `lut_path` / `metering_mode` empty = that stage is
-        /// skipped; `target_gray` / `saturation` / `contrast` / `pivot` = NaN
-        /// means "leave the upstream `GradingParams` default"; `enable_boost` is
-        /// a tri-state `-1` unset / `0` off / `1` on.
+        /// skipped; `gain` / `target_gray` / `saturation` / `contrast` / `pivot`
+        /// = NaN means "leave the upstream `GradingParams` default";
+        /// `enable_boost` is a tri-state `-1` unset / `0` off / `1` on.
         fn grade(
             data: &[f32],
             width: u32,
@@ -41,7 +41,7 @@ mod ffi {
             log_space: &str,
             lut_path: &str,
             metering_mode: &str,
-            ev_offset: f32,
+            gain: f32,
             target_gray: f32,
             enable_boost: i32,
             saturation: f32,
@@ -72,11 +72,16 @@ pub struct GradeOverrides {
     /// `.cube` 3D LUT path, applied to the log-encoded image. `None` = no LUT.
     pub lut_path: Option<String>,
     /// Metering mode for `computeAutoGain` (e.g. `"matrix"`). `None` = no
-    /// automatic metering; the unmetered base gain stays at unity.
+    /// automatic metering; the metered base stays at unity.
     pub metering_mode: Option<String>,
-    /// Relative exposure in stops, applied as `2^ev_offset` on top of the
-    /// metered (or unity) gain. `0.0` = as-shot.
-    pub ev_offset: f32,
+    /// Upstream's raw `GradingParams::gain` exposure multiplier — **not** an EV
+    /// and **not** the front end's develop exposure. `DevelopParams.exposure_ev`
+    /// is applied by rawler to the mosaic before demosaic and never reaches this
+    /// stage; this multiplier only scales the linear ProPhoto data handed to the
+    /// grading loop. `None` = upstream default (unity) = touch nothing.
+    /// Combined with metering as `metered_base * gain`, which is upstream's own
+    /// expression (`computeAutoGain(...) * 2^evOffset`) minus our EV wrapping.
+    pub gain: Option<f32>,
     /// Target gray for `computeAutoGain`. `None` = upstream default (`0.18`).
     /// Only meaningful together with `metering_mode`.
     pub target_gray: Option<f32>,
@@ -105,7 +110,7 @@ pub fn grade(
         overrides.log_space.as_deref().unwrap_or(""),
         overrides.lut_path.as_deref().unwrap_or(""),
         overrides.metering_mode.as_deref().unwrap_or(""),
-        overrides.ev_offset,
+        overrides.gain.unwrap_or(f32::NAN),
         overrides.target_gray.unwrap_or(f32::NAN),
         match overrides.enable_boost {
             None => BOOST_UNSET,

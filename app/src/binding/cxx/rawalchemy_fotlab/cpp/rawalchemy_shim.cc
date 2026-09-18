@@ -43,7 +43,7 @@ rust::Vec<float> grade(rust::Slice<const float> data,
                        rust::Str log_space,
                        rust::Str lut_path,
                        rust::Str metering_mode,
-                       float ev_offset,
+                       float gain,
                        float target_gray,
                        int32_t enable_boost,
                        float saturation,
@@ -84,18 +84,29 @@ rust::Vec<float> grade(rust::Slice<const float> data,
     p.lut = &lut;
   }
 
-  // --- stage 1: gain, in upstream's own shape: metering (optional) × 2^ev ---
-  // Upstream's file-decoding C API meters by default and multiplies by
-  // 2^evOffset; we only meter when asked, and the unmetered base stays at unity.
+  // --- stage 1: gain, in upstream's own shape: metered base × multiplier ---
+  // Upstream's file-decoding C API does `gp.gain = computeAutoGain(img, mode) *
+  // 2^evOffset` — a metered base times a plain multiplier. We expose exactly that
+  // shape, except the multiplier is upstream's raw `GradingParams.gain` value with
+  // no EV reinterpretation of our own, and the base is only metered when asked.
+  //
+  // This is NOT the front end's develop exposure. `DevelopParams.exposure_ev` is
+  // applied by rawler to the single-channel mosaic *before* demosaic and never
+  // reaches here; leaving both of these unset keeps the exposure exactly as
+  // developed (`FOTLAB-RAWLER-000006`).
   std::string mm(metering_mode.data(), metering_mode.size());
-  float base_gain = 1.0f;
-  if (!mm.empty()) {
-    if (!isMeteringModeSupported(mm)) {
-      throw std::runtime_error("grade: unsupported metering mode '" + mm + "'");
-    }
-    base_gain = computeAutoGain(buf, mm, is_unset(target_gray) ? 0.18f : target_gray);
+  const bool metered = !mm.empty();
+  if (metered && !isMeteringModeSupported(mm)) {
+    throw std::runtime_error("grade: unsupported metering mode '" + mm + "'");
   }
-  p.gain = base_gain * std::pow(2.0f, ev_offset);
+  // Unity stands in for whichever side the caller left out, so an unset multiplier
+  // never overrides anything and an unmetered `gain` is simply the multiplier.
+  if (metered || !is_unset(gain)) {
+    const float base_gain =
+        metered ? computeAutoGain(buf, mm, is_unset(target_gray) ? 0.18f : target_gray) : 1.0f;
+    p.gain = base_gain * (is_unset(gain) ? 1.0f : gain);
+  }
+  // Both unset: `p.gain` keeps the upstream default, i.e. exposure is not touched.
 
   // --- stage 2: saturation / contrast boost (optional overrides) ---
   if (enable_boost != kBoostUnset) {
