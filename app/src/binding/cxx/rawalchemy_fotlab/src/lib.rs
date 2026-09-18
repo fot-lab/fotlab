@@ -22,7 +22,18 @@
 
 #[cxx::bridge]
 mod ffi {
-    extern "C++" {
+    // `unsafe extern "C++"` (not a bare block): a block containing at least one
+    // safe-to-call signature must be written `unsafe extern`, as an item-level
+    // assertion that each one really is safe to call from Rust. Ours are: the
+    // shim validates the buffer length and reports every other failure by throwing.
+    unsafe extern "C++" {
+        // Names the header carrying the matching C++ declaration. cxx's generators
+        // do NOT read it — it gets #include'd and used in static assertions — and
+        // for a bridge made purely of extern "C++" declarations there is no
+        // generated `.rs.h` to include instead (cxx only emits one for an
+        // `extern "Rust"` block or for shared structs). Hence our own header.
+        include!("cpp/rawalchemy_api.h");
+
         /// Run the fused grading pipeline over a linear ProPhoto-D50 RGB buffer.
         ///
         /// `data` is row-major interleaved `width*height*3` float32 — the same
@@ -34,6 +45,10 @@ mod ffi {
         /// skipped; `gain` / `target_gray` / `saturation` / `contrast` / `pivot`
         /// = NaN means "leave the upstream `GradingParams` default";
         /// `enable_boost` is a tri-state `-1` unset / `0` off / `1` on.
+        ///
+        /// `Result` must be written WITHOUT a second type parameter in a bridge:
+        /// cxx turns a thrown C++ exception into `Err(cxx::Exception)` by itself,
+        /// so the error type is fixed and not ours to name.
         fn grade(
             data: &[f32],
             width: u32,
@@ -47,7 +62,7 @@ mod ffi {
             saturation: f32,
             contrast: f32,
             pivot: f32,
-        ) -> Result<Vec<f32>, String>;
+        ) -> Result<Vec<f32>>;
     }
 }
 
@@ -97,6 +112,12 @@ pub struct GradeOverrides {
 
 /// Rust wrapper around the cxx `grade` call: flattens [`GradeOverrides`] onto the
 /// sentinel-encoded bridge signature documented above.
+///
+/// The bridge hands back `Err(cxx::Exception)` for anything the C++ side throws
+/// (`std::runtime_error` on an unknown log space, an unreadable `.cube`, an
+/// unsupported metering mode, a bad buffer length). Its `Display` is the
+/// exception's `what()`, so it flattens to a plain `String` here and the caller
+/// never has to know which FFI mechanism produced the failure.
 pub fn grade(
     data: &[f32],
     width: u32,
@@ -121,4 +142,5 @@ pub fn grade(
         overrides.contrast.unwrap_or(f32::NAN),
         overrides.pivot.unwrap_or(f32::NAN),
     )
+    .map_err(|e| e.to_string())
 }

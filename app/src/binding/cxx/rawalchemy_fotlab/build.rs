@@ -100,6 +100,7 @@ fn main() {
     };
     println!("cargo:rustc-link-lib=dylib={cxx_stdlib}");
 
+    println!("cargo:rerun-if-changed=cpp/rawalchemy_api.h");
     println!("cargo:rerun-if-changed=cpp/rawalchemy_shim.cc");
     println!("cargo:rerun-if-changed=cpp/CMakeLists.txt");
     println!("cargo:rerun-if-changed=src/lib.rs");
