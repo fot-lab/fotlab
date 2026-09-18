@@ -5,7 +5,7 @@
 - Priority: P1
 - Created: 2026-09-18
 - Owner: —
-- Related: `rules/REVIEW/detail/FOTLAB-RAWLER-000003.md` (develop contract — the change below amends its `LinearImage` semantics), `rules/REVIEW/detail/DNGLAB-RAWLER-000005.md` (rawler's `Calibrate` is where D65 is set; `SRgb` is only gamma), `rules/REVIEW/detail/DNGLAB-RAWLER-000001.md`, `rules/REVIEW/detail/DNGLAB-RAWLER-000002.md`, `rules/DESIGN/detail/FOTLAB-STUDIO-000001.md`
+- Related: `rules/REVIEW/detail/FOTLAB-RAWLER-000003.md` (develop contract — the change below amends its `RawlerImageDeveloped` semantics), `rules/REVIEW/detail/DNGLAB-RAWLER-000005.md` (rawler's `Calibrate` is where D65 is set; `SRgb` is only gamma), `rules/REVIEW/detail/DNGLAB-RAWLER-000001.md`, `rules/REVIEW/detail/DNGLAB-RAWLER-000002.md`, `rules/DESIGN/detail/FOTLAB-STUDIO-000001.md`
 
 ## Background & Goal
 
@@ -33,7 +33,7 @@ let cam2rgb = pseudo_inverse(rgb2cam);
 ```
 
 The camera→XYZ matrix is anchored on `SRGB_TO_XYZ_D65`
-(`external/dnglab/rawler/src/imgop/xyz.rs:102`), so `LinearImage` is **linear sRGB with a D65
+(`external/dnglab/rawler/src/imgop/xyz.rs:102`), so `RawlerImageDeveloped` is **linear sRGB with a D65
 white point** — sRGB primaries, i.e. the small gamut. This mirrors rawler's own
 `ProcessingStep::Calibrate` (`DNGLAB-RAWLER-000005` §Finding 1): D65 is decided at *Calibrate*,
 and the later `SRgb` step only applies gamma. We replicated the math with rawler's public
@@ -77,7 +77,7 @@ for, and the damage is silent (no error, no warning — just colour that is no l
 
 ## Impact / Conflict
 
-- **Amends `FOTLAB-RAWLER-000003`.** That item defines `LinearImage` as "linear RGB, no gamma".
+- **Amends `FOTLAB-RAWLER-000003`.** That item defines `RawlerImageDeveloped` as "linear RGB, no gamma".
   After this change it becomes *linear, wide-gamut* (ProPhoto D50) and may legitimately contain
   negative and >1 components. Both items must be updated together; do not change one alone.
 - **Simplifies the rawalchemy bridge.** Joining dnglab output into rawalchemy's Log pipeline
@@ -136,7 +136,7 @@ conversion must happen *before* the clamp, which is exactly what changing the an
 **Preconditions / risks.**
 - Bit depth: ProPhoto demands high precision or shadows posterise badly. We are `f32` throughout,
   so this is satisfied.
-- Any code that assumes `LinearImage` values are within `[0,1]` must be found and fixed first
+- Any code that assumes `RawlerImageDeveloped` values are within `[0,1]` must be found and fixed first
   (audit histogram, masks, thumbnail/preview paths).
 - Verify on a saturated reference frame: a wide-gamut round-trip must preserve deep green/cyan
   where the current build shows it clipped.

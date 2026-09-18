@@ -26,7 +26,7 @@ use rawler::imgop::chromatic_adaption::adapt_bradford;
 use rawler::imgop::xyz::{Illuminant, SRGB_TO_XYZ_D65, XYZ_TO_PROFOTORGB_D50};
 use rawler::RawImage;
 
-use crate::develop::LinearImage;
+use crate::develop::RawlerImageDeveloped;
 use crate::RawlerFotlabError;
 
 /// Which RGB primaries (and white point) the developed result lives in.
@@ -36,7 +36,7 @@ use crate::RawlerFotlabError;
 ///
 /// * [`WorkingSpace::SrgbD65`] — the *presentation* path. Small gamut, but it is what a
 ///   display can actually show, so this is the space the UI PNG is finished in (gamma and
-///   gamut mapping included, applied at PNG encode time — see `bound::linearimage_to_png`).
+///   gamut mapping included, applied at PNG encode time — see `bound::rawlerimagedeveloped_to_png`).
 /// * [`WorkingSpace::ProPhotoD50`] — the *editing* path handed to the rawalchemy pipeline.
 ///   Wide gamut: colours outside sRGB survive here. It is deliberately **not** clipped —
 ///   negative and >1 components are legitimate and only get resolved at final export.
@@ -77,14 +77,14 @@ impl WorkingSpace {
 /// Takes OWNERSHIP of the intermediate: the colour mapping is per-pixel (each
 /// output channel only depends on the same pixel's input channels), so the
 /// 3-colour case is transformed IN PLACE and the buffer is zero-copy flattened
-/// into the [LinearImage]. Allocating a second ~630 MB f32 buffer on a 50 MP
+/// into the [RawlerImageDeveloped]. Allocating a second ~630 MB f32 buffer on a 50 MP
 /// frame was the other half of the mid-develop OOM (low-memory-kill).
 pub(crate) fn calibrate(
     intermediate: Intermediate,
     image: &RawImage,
     wb: Option<[f32; 4]>,
     space: WorkingSpace,
-) -> Result<LinearImage, RawlerFotlabError> {
+) -> Result<RawlerImageDeveloped, RawlerFotlabError> {
   // Resolve the camera→XYZ matrix at the target white point, falling back to identity
   // and adapting from another illuminant via Bradford when needed (rawler's logic).
   // The target is D65 for the presentation path and D50 for the wide-gamut editing path.
@@ -140,7 +140,7 @@ pub(crate) fn calibrate(
   // NOTE: no gamut clamping happens here any more. `clip_euclidean_norm_avg` used to run
   // per-pixel right after this matrix, which forced every colour inside the sRGB cube and
   // irreversibly destroyed anything outside it *before* the FFI. Clamping now happens only
-  // where a finished image is actually produced (`bound::linearimage_to_png`), so the
+  // where a finished image is actually produced (`bound::rawlerimagedeveloped_to_png`), so the
   // wide-gamut result handed to rawalchemy keeps its negative and >1 components
   // (`rules/REVIEW/detail/FOTLAB-RAWLER-000005.md`).
   let rgb2cam = normalize(multiply(&xyz2cam, &space.to_xyz_matrix()));
@@ -155,7 +155,7 @@ pub(crate) fn calibrate(
       for &v in &pix.data {
         rgb.extend_from_slice(&[v, v, v]);
       }
-      Ok(LinearImage {
+      Ok(RawlerImageDeveloped {
         width: pix.width as u32,
         height: pix.height as u32,
         rgb,
@@ -178,7 +178,7 @@ pub(crate) fn calibrate(
         *px = mapped;
       }
       // Reinterpret the same allocation as flat RGB — no ~630 MB copy.
-      Ok(LinearImage {
+      Ok(RawlerImageDeveloped {
         width: w as u32,
         height: h as u32,
         rgb: flatten_rgb3(pixels.into_inner()),
@@ -201,7 +201,7 @@ pub(crate) fn calibrate(
         // No clamp — see the ThreeColor arm.
         out.extend_from_slice(&mapped);
       }
-      Ok(LinearImage {
+      Ok(RawlerImageDeveloped {
         width: pixels.width as u32,
         height: pixels.height as u32,
         rgb: out,

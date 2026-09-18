@@ -18,7 +18,7 @@
 //!
 //! Dual fork (`rules/REVIEW/detail/FOTLAB-RAWLER-000005.md`): the linear result
 //! is finished into a display-ready sRGB PNG (gamma + clip) for the UI by
-//! `bound::linearimage_to_png`, or returned unclamped as ProPhoto D50 for the
+//! `bound::rawlerimagedeveloped_to_png`, or returned unclamped as ProPhoto D50 for the
 //! rawalchemy pipeline by `develop`. Kotlin owns only the UI PNG.
 //!
 //! Every parameter change from Kotlin re-runs the whole pipeline (decoding
@@ -40,7 +40,7 @@ use crate::RawlerFotlabError;
 ///
 /// `rgb` is row-major linear RGB float, length `width * height * 3`.
 #[derive(Debug, Clone, uniffi::Record)]
-pub struct LinearImage {
+pub struct RawlerImageDeveloped {
   pub width: u32,
   pub height: u32,
   pub rgb: Vec<f32>,
@@ -65,7 +65,7 @@ pub struct DevelopParams {
 }
 
 /// FFI entry point: develop `raw` (already routed to the raw path) into a linear
-/// **ProPhoto D50** RGB image (`LinearImage`) using `params` — the object handed
+/// **ProPhoto D50** RGB image (`RawlerImageDeveloped`) using `params` — the object handed
 /// to the rawalchemy pipeline. This is the *editing* branch of the dual-fork
 /// (`rules/REVIEW/detail/FOTLAB-RAWLER-000005.md`): wide gamut and **unclamped**,
 /// so negative and >1 components survive for downstream tone/exposure work. No
@@ -74,7 +74,7 @@ pub struct DevelopParams {
 /// Re-runs the full pipeline (decode included) on every call; the cached-decode
 /// path lives in [`crate::loaded::RawlerImageLoaded`] (`FOTLAB-RAWLER-000004`).
 #[uniffi::export]
-pub fn develop(raw: &[u8], params: DevelopParams) -> Result<LinearImage, RawlerFotlabError> {
+pub fn develop(raw: &[u8], params: DevelopParams) -> Result<RawlerImageDeveloped, RawlerFotlabError> {
   if raw.is_empty() {
     return Err(RawlerFotlabError::Decode("empty input".to_string()));
   }
@@ -92,9 +92,9 @@ pub fn develop(raw: &[u8], params: DevelopParams) -> Result<LinearImage, RawlerF
 ///
 /// * `WorkingSpace::SrgbD65` — the *presentation* branch. The result is later
 ///   finished into a display-ready sRGB PNG (gamma + clip) by
-///   `bound::linearimage_to_png`; the rawalgebra object is never touched.
+///   `bound::rawlerimagedeveloped_to_png`; the rawalgebra object is never touched.
 /// * `WorkingSpace::ProPhotoD50` — the *editing* branch for the rawalchemy
-///   pipeline. Wide gamut and **unclamped**: the returned [`LinearImage`] keeps
+///   pipeline. Wide gamut and **unclamped**: the returned [`RawlerImageDeveloped`] keeps
 ///   its negative and >1 components.
 ///
 /// Shared by the stateless `develop` FFI entry point (ProPhoto) and
@@ -105,7 +105,7 @@ pub(crate) fn develop_image(
   mut image: RawImage,
   params: DevelopParams,
   space: WorkingSpace,
-) -> Result<LinearImage, RawlerFotlabError> {
+) -> Result<RawlerImageDeveloped, RawlerFotlabError> {
   image
     .apply_scaling()
     .map_err(|e| RawlerFotlabError::Decode(e.to_string()))?;
@@ -171,7 +171,7 @@ fn take_scaled_pixels(image: &mut RawImage) -> Result<Vec<f32>, RawlerFotlabErro
 /// CRITICAL coordinate fix (the "every format develops to Unsupported" bug):
 /// `RawImage.crop_area` is in **full-sensor** coordinates, but the demosaic
 /// stage already cropped its ROI to `RawImage.active_area` — so the
-/// intermediate (and the flattened [`LinearImage`] calibrated from it) is in
+/// intermediate (and the flattened [`RawlerImageDeveloped`] calibrated from it) is in
 /// **active-area** coordinates. rawler re-bases the crop with
 /// `crop.adapt(active_area)` (`imgop/develop.rs`, CropDefault block) before
 /// applying it. The previous code skipped that re-basing and sliced the
@@ -181,7 +181,7 @@ fn take_scaled_pixels(image: &mut RawImage) -> Result<Vec<f32>, RawlerFotlabErro
 /// `catch_unwind` boundary turned the panic into a Decode error and the UI
 /// showed "Unsupported Format". When `active_area` is `None` the demosaic ROI
 /// was the full frame, so no re-basing happens — matching upstream.
-fn crop_default(image: &RawImage, mut linear: LinearImage) -> LinearImage {
+fn crop_default(image: &RawImage, mut linear: RawlerImageDeveloped) -> RawlerImageDeveloped {
   let Some(mut crop) = image.crop_area.or(image.active_area) else {
     return linear;
   };

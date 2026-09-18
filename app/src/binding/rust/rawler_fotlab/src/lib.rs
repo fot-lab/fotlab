@@ -12,12 +12,12 @@
 //!     **grayscale raw preview** PNG (no demosaic / calibrate) via `bound::fotraw_to_png`.
 //!     This is what Studio shows on first open, before any demosaic choice.
 //!   * `develop`        — *editing* branch: decode + demosaic + calibrate into a
-//!     **linear ProPhoto D50** RGB image (`LinearImage`), unclipped, for the
+//!     **linear ProPhoto D50** RGB image (`RawlerImageDeveloped`), unclipped, for the
 //!     rawalchemy pipeline. Wide gamut; negatives and >1 survive
 //!     (`FOTLAB-RAWLER-000005`). No gamma — ProPhoto is a linear editing space.
 //!   * `develop_to_png` — *presentation* branch: same develop pipeline, but built in
 //!     sRGB D65 and then finished into a display-ready PNG by
-//!     `bound::linearimage_to_png`, which applies the sRGB transfer function (gamma)
+//!     `bound::rawlerimagedeveloped_to_png`, which applies the sRGB transfer function (gamma)
 //!     and clips to [0,1]. This is what Studio renders after the user picks a
 //!     demosaic algorithm from the bottom-bar menu.
 //!

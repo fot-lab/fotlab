@@ -81,7 +81,7 @@ impl RawlerImageLoaded {
     /// Grayscale raw-preview PNG from the cached decode — no re-decode (replaces decode_to_png).
     pub fn preview_png(&self) -> Result<Vec<u8>, RawlerFotlabError> { /* clone inner, rawimage_to_fotraw, fotraw_to_png */ }
     /// Develop the cached decode into a linear PNG — no re-decode (replaces develop_to_png).
-    pub fn develop_to_png(&self, params: DevelopParams) -> Result<Vec<u8>, RawlerFotlabError> { /* clone inner, develop_image, linearimage_to_png */ }
+    pub fn develop_to_png(&self, params: DevelopParams) -> Result<Vec<u8>, RawlerFotlabError> { /* clone inner, develop_image, rawlerimagedeveloped_to_png */ }
 }
 
 // Stateless free functions now delegate to the object (single source of truth):

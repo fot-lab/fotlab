@@ -60,7 +60,7 @@
 //!
 //! *Output* (`LinearImage.rgb`): interleaved linear RGB, length `w*h*3,` **still in
 //! camera/CFA space — NOT white-balanced, no sRGB/BT.709 gamma.** That matches the
-//! `LinearImage` contract rawler_fotlab produces, so the downstream pipeline can
+//! `RawlerImageDeveloped` contract rawler_fotlab produces, so the downstream pipeline can
 //! apply white balance + the cam→ProPhoto(D50) matrix uniformly regardless of which
 //! demosaic backend produced the image (recall: rawalchemy's Log pipeline wants
 //! Linear ProPhoto D50 input; dnglab's `develop` outputs sRGB D65 — both are
@@ -147,7 +147,7 @@ pub struct CfaPattern {
 
 /// The product of the demosaic: linear RGB, **before** any white balance / gamma.
 ///
-/// Mirrors `rawler_fotlab::develop::LinearImage` so the downstream develop pipeline
+/// Mirrors `rawler_fotlab::develop::RawlerImageDeveloped` so the downstream develop pipeline
 /// can consume either backend identically.
 #[derive(Debug, Clone)]
 pub struct LinearImage {

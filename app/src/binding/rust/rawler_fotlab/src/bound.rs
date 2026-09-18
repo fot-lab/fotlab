@@ -1,4 +1,4 @@
-//! Stage 4 of the raw render path — encode a [`FotRaw`] (or developed [`LinearImage`]) to PNG bytes.
+//! Stage 4 of the raw render path — encode a [`FotRaw`] (or developed [`RawlerImageDeveloped`]) to PNG bytes.
 //!
 //! Two encoders live here, both producing an uncompressed RGBA8 PNG:
 //!
@@ -8,7 +8,7 @@
 //!   buffer (`cpp >= 3`) collapses via Rec.709 luma. This is what Studio renders on first open,
 //!   before any demosaic choice (`FOTLAB-STUDIO-000001` R4, `FOTLAB-NATIVE-000001`). No display
 //!   transform is applied — it is a raw dump.
-//! * [`linearimage_to_png`] — the **developed, display-ready** image. Takes the [`LinearImage`]
+//! * [`rawlerimagedeveloped_to_png`] — the **developed, display-ready** image. Takes the [`RawlerImageDeveloped`]
 //!   produced by the develop pipeline (demosaic + calibrate) and applies the sRGB transfer function
 //!   (gamma) + clip to [0,1] before writing PNG — a finished sRGB image for the UI
 //!   (`FOTLAB-RAWLER-000005`). This is what Studio renders after the user picks a demosaic algorithm.
@@ -22,7 +22,7 @@ use image::codecs::png::PngEncoder;
 use image::{ExtendedColorType, ImageEncoder};
 use rawler::imgop::srgb::srgb_apply_gamma;
 
-use crate::develop::LinearImage;
+use crate::develop::RawlerImageDeveloped;
 use crate::intermediate::{read_shape, FotRaw, FotRawBuffer};
 
 /// Encode a decoded [`FotRaw`] to PNG.
@@ -90,7 +90,7 @@ fn encode_srgb(v: f32) -> u8 {
     shrink_f32(srgb_apply_gamma(v))
 }
 
-/// Encode a developed [`LinearImage`] (expected in **linear sRGB D65**) to a
+/// Encode a developed [`RawlerImageDeveloped`] (expected in **linear sRGB D65**) to a
 /// finished, display-ready RGBA8 sRGB PNG.
 ///
 /// This is the *presentation* half of the dual-fork
@@ -99,7 +99,7 @@ fn encode_srgb(v: f32) -> u8 {
 /// [0,1] — the only place clipping happens. The in-memory editing object
 /// (ProPhoto D50, unclamped) is never touched. This is the output side of
 /// `rawler_fotlab::develop_to_png`.
-pub(crate) fn linearimage_to_png(image: &LinearImage) -> Result<Vec<u8>, String> {
+pub(crate) fn rawlerimagedeveloped_to_png(image: &RawlerImageDeveloped) -> Result<Vec<u8>, String> {
     let (w, h) = (image.width, image.height);
     if w == 0 || h == 0 {
         return Err("developed image has no pixels".to_string());

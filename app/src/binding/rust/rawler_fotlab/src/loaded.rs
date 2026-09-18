@@ -73,7 +73,7 @@ impl RawlerImageLoaded {
     /// Develop the cached decode into a **finished sRGB PNG** using `params` — no
     /// re-decode. This is the *presentation* branch of the dual-fork
     /// (`rules/REVIEW/detail/FOTLAB-RAWLER-000005.md`): the linear image is built
-    /// in sRGB D65, then `bound::linearimage_to_png` applies the sRGB transfer
+    /// in sRGB D65, then `bound::rawlerimagedeveloped_to_png` applies the sRGB transfer
     /// function (gamma) and clips to [0,1], yielding a display-ready PNG. Clones
     /// the cached `RawImage` first because the develop pipeline mutates it in
     /// place (`develop.rs`). Wrapped in `catch_unwind` (`FOTLAB-CRASH-000001`).
@@ -81,7 +81,7 @@ impl RawlerImageLoaded {
         panic::catch_unwind(AssertUnwindSafe(|| {
             let image = (*self.inner).clone();
             let linear = develop_image(image, params, WorkingSpace::SrgbD65)?;
-            bound::linearimage_to_png(&linear).map_err(RawlerFotlabError::Decode)
+            bound::rawlerimagedeveloped_to_png(&linear).map_err(RawlerFotlabError::Decode)
         }))
         .unwrap_or_else(|_| {
             Err(RawlerFotlabError::Decode(
