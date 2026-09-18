@@ -28,8 +28,8 @@
 
     <!-- ===== app (shell) ===== -->
     <string name="app_name">FotLab</string>
-    <string name="app_nav_library_label">Library</string>
-    <string name="app_nav_studio_label">Studio</string>
+    <string name="app_nav_library_label">图库</string>
+    <string name="app_nav_studio_label">显影</string>
 
     <!-- ===== feature: library ===== -->
     <string name="library_new_collection_name">New Folder</string>
@@ -75,6 +75,8 @@
     <string name="studio_bottombar_demosaic">Demosaic</string>
     <string name="studio_bottombar_exposure">Exposure</string>
     <string name="studio_bottombar_whitebalance">White Balance</string>
+    <string name="studio_exposure_title">Exposure (EV)</string>
+    <string name="studio_exposure_hint">Stops, e.g. -2.0 … 2.0</string>
     <string name="studio_decoding">Decoding…</string>
     <string name="studio_unsupported_title">Unsupported Format</string>
     <string name="studio_unsupported_format">Unsupported Format! 不支持的格式！</string>

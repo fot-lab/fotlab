@@ -28,14 +28,16 @@ interface RawDecoder {
     suspend fun decodeToPng(format: String, open: suspend () -> InputStream): ByteArray?
 
     /**
-     * Develop the RAW identified as [format] with the chosen demosaic [algorithm] and return a
-     * **linear** PNG (no gamma), or `null` if it cannot be decoded. This re-runs the full develop
-     * pipeline and is what the Studio bottom-bar demosaic menu triggers once the user is already in
-     * the Studio interface.
+     * Develop the RAW identified as [format] with the chosen demosaic [algorithm] and exposure
+     * compensation [exposureEv] (in stops; linear multiplier `2^exposureEv`) and return a **linear**
+     * PNG (no gamma), or `null` if it cannot be decoded. This re-runs the full develop pipeline and
+     * is what the Studio bottom-bar demosaic menu and Exposure dialog trigger once the user is
+     * already in the Studio interface.
      */
     suspend fun developToPng(
         format: String,
         algorithm: DemosaicAlgorithm,
+        exposureEv: Float = 0.0f,
         open: suspend () -> InputStream,
     ): ByteArray?
 }
@@ -50,6 +52,7 @@ object StubRawDecoder : RawDecoder {
     override suspend fun developToPng(
         format: String,
         algorithm: DemosaicAlgorithm,
+        exposureEv: Float,
         open: suspend () -> InputStream,
     ): ByteArray? = null
 }

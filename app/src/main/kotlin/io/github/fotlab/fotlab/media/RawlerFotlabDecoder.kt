@@ -14,11 +14,11 @@ import java.io.InputStream
  * call #1 — and the returned PNG is rendered by Coil. Without the .so, [decodeToPng] returns null and
  * the Studio pipeline falls through to Unsupported.
  *
- * [developToPng] is the same pattern routed through [RawlerFotlabBridge.developRawToPng]. Until the
- * Studio bottom bar exposes Exposure / White Balance pickers, every develop call uses the RAW's
- * **as-shot** values: `exposureEv = 0f` (no compensation — the sensor data as captured) and
- * `wb = null` (which the Rust side resolves to `RawImage.wb_coeffs`, the camera's as-shot white
- * balance). The demosaic algorithm is the only user-selectable parameter for now.
+ * [developToPng] is the same pattern routed through [RawlerFotlabBridge.developRawToPng]. The
+ * Studio bottom bar passes the user's chosen demosaic [algorithm] and exposure compensation
+ * [exposureEv] (in stops; `wb` stays `null` so the Rust side resolves to `RawImage.wb_coeffs`, the
+ * camera's as-shot white balance). `exposureEv` defaults to `0f` (no compensation) for callers that
+ * do not override it.
  */
 class RawlerFotlabDecoder : RawDecoder {
     override suspend fun decodeToPng(format: String, open: suspend () -> InputStream): ByteArray? {
@@ -29,11 +29,13 @@ class RawlerFotlabDecoder : RawDecoder {
     override suspend fun developToPng(
         format: String,
         algorithm: DemosaicAlgorithm,
+        exposureEv: Float = 0.0f,
         open: suspend () -> InputStream,
     ): ByteArray? {
         val bytes = runCatching { open().use { it.readBytes() } }.getOrNull() ?: return null
-        // As-shot exposure (0 EV = no compensation) + as-shot WB (null -> RawImage.wb_coeffs).
-        val params = DevelopParams(demosaicAlgorithm = algorithm, exposureEv = 0.0f, wb = null)
+        // exposureEv carries the user's exposure compensation (2^ev linear gain in the Rust
+        // calibrate step); wb = null keeps the camera's as-shot white balance.
+        val params = DevelopParams(demosaicAlgorithm = algorithm, exposureEv = exposureEv, wb = null)
         return RawlerFotlabBridge.developRawToPng(bytes, params)
     }
 }

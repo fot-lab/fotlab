@@ -6,9 +6,12 @@
 //!
 //! 1. `decode`      — `rawler::decode` → rawler `RawImage`
 //! 2. rescale       — black/white-level scaling into 0..1 float (rawler)
-//! 3. `demosaic`    — selectable debayer + Fuji rotate + active-area crop (ROI)
-//! 4. `calibrate`   — white balance + cam→sRGB matrix + exposure EV
-//! 5. crop-default  — crop to the recommended area (rawler `CropDefault`)
+//! 3. `exposure_ev` — linear gain `2^exposure_ev` on the **single-channel** scaled
+//!    mosaic, *before* demosaic (one mul per photosite instead of per output
+//!    channel; demosaic is linear so the result is identical)
+//! 4. `demosaic`    — selectable debayer + Fuji rotate + active-area crop (ROI)
+//! 5. `calibrate`   — white balance + cam→sRGB matrix (exposure already applied)
+//! 6. crop-default  — crop to the recommended area (rawler `CropDefault`)
 //!
 //! The result is a [`LinearImage`]: linear RGB float, **before** any sRGB/BT.709
 //! gamma. Kotlin owns the display transform.
@@ -43,7 +46,8 @@ pub struct LinearImage {
 pub struct DevelopParams {
   /// Demosaic algorithm selection (defaults to rawler's CFA-appropriate choice).
   pub demosaic_algorithm: DemosaicAlgorithm,
-  /// Exposure compensation in stops; linear multiplier `2^exposure_ev`.
+  /// Exposure compensation in stops; applied as the linear multiplier
+  /// `2^exposure_ev` to the scaled mosaic *before* demosaic (single-channel).
   pub exposure_ev: f32,
   /// Optional white-balance multipliers (RGBE order). `None` → rawler's default.
   pub wb: Option<Vec<f32>>,
@@ -66,7 +70,20 @@ pub fn develop(raw: &[u8], params: DevelopParams) -> Result<LinearImage, RawlerF
     // ~210 MB (50 MP) buffer is handed over zero-copy instead of duplicated;
     // the now-empty image still carries every metadata field the later stages
     // read (CFA/photometric, color matrix, wb, active/crop areas).
-    let pixels = take_scaled_pixels(&mut image)?;
+    let mut pixels = take_scaled_pixels(&mut image)?;
+
+    // Apply exposure compensation as a linear gain `2^exposure_ev` to the
+    // *single-channel* scaled mosaic, BEFORE demosaic. This is one multiply per
+    // photosite (N) instead of per output channel (3N/4N) after demosaic, and is
+    // mathematically identical because demosaic is a linear interpolation and the
+    // gain is uniform across channels. Skipped entirely when ev == 0 (the
+    // as-shot default), so the common no-compensation path pays nothing.
+    let ev_scale = 2f32.powf(params.exposure_ev);
+    if ev_scale != 1.0 {
+      for p in pixels.iter_mut() {
+        *p *= ev_scale;
+      }
+    }
 
     // Demosaic stage — its ROI is already active_area, exactly like rawler's
     // Demosaic + FujiRotate + CropActiveArea steps.
@@ -85,7 +102,7 @@ pub fn develop(raw: &[u8], params: DevelopParams) -> Result<LinearImage, RawlerF
     // per-pixel/rect-selection operations, so order is numerically equivalent,
     // but keeping the identical order means the crop coordinates resolve
     // exactly the way upstream resolves them.
-    let linear = calibrate(intermediate, &image, wb, params.exposure_ev)?;
+    let linear = calibrate(intermediate, &image, wb)?;
     Ok(crop_default(&image, linear))
   }))
   .unwrap_or_else(|_| Err(RawlerFotlabError::Decode("rawler panicked during develop".to_string())))

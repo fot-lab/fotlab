@@ -9,8 +9,10 @@
 //! `SRGB_TO_XYZ_D65`) and `clip_euclidean_norm_avg`. The colour matrix is always
 //! taken from rawler's resolved `RawImage.color_matrix` (D65-normalized via
 //! Bradford adaptation when only another illuminant is available), exactly as
-//! rawler does. Exposure compensation (`ev`) is applied as a linear multiplier
-//! `2^ev` on the resulting linear RGB.
+//! rawler does. Exposure compensation is **not** applied here — it is applied as
+//! the linear gain `2^exposure_ev` to the single-channel mosaic *before*
+//! demosaic in `develop`, since demosaic is linear and the gain is
+//! channel-uniform, so shifting it earlier is numerically identical.
 
 use rawler::imgop::develop::Intermediate;
 use rawler::imgop::matrix::{multiply, normalize, pseudo_inverse};
@@ -34,7 +36,6 @@ pub(crate) fn calibrate(
     intermediate: Intermediate,
     image: &RawImage,
     wb: Option<[f32; 4]>,
-    ev: f32,
 ) -> Result<LinearImage, RawlerFotlabError> {
   // Resolve the D65 camera→XYZ matrix, falling back to identity and adapting
   // from another illuminant via Bradford when needed (rawler's logic).
@@ -85,15 +86,14 @@ pub(crate) fn calibrate(
 
   let rgb2cam = normalize(multiply(&xyz2cam, &SRGB_TO_XYZ_D65));
   let cam2rgb = pseudo_inverse(rgb2cam);
-  let ev_scale = 2f32.powf(ev);
 
   match intermediate {
     Intermediate::Monochrome(pix) => {
       // No per-channel colour mapping for monochrome; replicate the single
-      // channel across RGB and apply EV. (3x size expansion is unavoidable.)
+      // channel across RGB. (3x size expansion is unavoidable.) Exposure EV is
+      // already baked into the source mosaic by `develop` before demosaic.
       let mut rgb: Vec<f32> = Vec::with_capacity(pix.data.len() * 3);
       for &v in &pix.data {
-        let v = v * ev_scale;
         rgb.extend_from_slice(&[v, v, v]);
       }
       Ok(LinearImage {
@@ -107,9 +107,9 @@ pub(crate) fn calibrate(
       // so compute the result into a local before overwriting the source pixel.
       let (w, h) = (pixels.width, pixels.height);
       for px in pixels.pixels_mut() {
-        let r = px[0] * wb[0] * ev_scale;
-        let g = px[1] * wb[1] * ev_scale;
-        let b = px[2] * wb[2] * ev_scale;
+        let r = px[0] * wb[0];
+        let g = px[1] * wb[1];
+        let b = px[2] * wb[2];
         let srgb = [
           cam2rgb[0][0] * r + cam2rgb[0][1] * g + cam2rgb[0][2] * b,
           cam2rgb[1][0] * r + cam2rgb[1][1] * g + cam2rgb[1][2] * b,
@@ -129,10 +129,10 @@ pub(crate) fn calibrate(
       // of the source and the source is dropped right after.
       let mut out: Vec<f32> = Vec::with_capacity(pixels.data.len() * 3);
       for px in pixels.pixels() {
-        let ch0 = px[0] * wb[0] * ev_scale;
-        let ch1 = px[1] * wb[1] * ev_scale;
-        let ch2 = px[2] * wb[2] * ev_scale;
-        let ch3 = px[3] * wb[3] * ev_scale;
+        let ch0 = px[0] * wb[0];
+        let ch1 = px[1] * wb[1];
+        let ch2 = px[2] * wb[2];
+        let ch3 = px[3] * wb[3];
         let srgb = [
           cam2rgb[0][0] * ch0 + cam2rgb[0][1] * ch1 + cam2rgb[0][2] * ch2 + cam2rgb[0][3] * ch3,
           cam2rgb[1][0] * ch0 + cam2rgb[1][1] * ch1 + cam2rgb[1][2] * ch2 + cam2rgb[1][3] * ch3,

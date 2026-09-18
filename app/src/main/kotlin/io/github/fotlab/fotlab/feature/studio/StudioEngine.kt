@@ -150,19 +150,44 @@ object StudioEngine {
         const val HEADER_BYTES = 1024 * 1024
     }
 
+    /** The demosaic algorithm retained for the next develop re-render (set when the user picks one). */
+    private var currentAlgorithm: DemosaicAlgorithm = DemosaicAlgorithm.DEFAULT
+
+    /** The exposure compensation (in stops) retained for the next develop re-render. */
+    private var currentExposureEv: Float = 0.0f
+
+    /** The current exposure compensation in stops; the UI prefills the Exposure dialog from this. */
+    fun currentExposureEv(): Float = currentExposureEv
+
     /**
      * Re-develop the current RAW with the demosaic [algorithm] the user picked from the Studio
-     * bottom-bar menu, and push the resulting **linear** PNG to the canvas. The first open renders a
-     * grayscale raw preview ([decodeToPng]); this upgrades it to a developed image once the user is
-     * already in Studio (`FOTLAB-STUDIO-000001` R4). It runs the full develop pipeline again (decode
-     * included) through the native bridge. No-op if nothing is open or the source is not a routed raw.
+     * bottom-bar menu, and push the resulting **linear** PNG to the canvas. It keeps the currently
+     * set exposure compensation, then re-runs the full develop pipeline (decode included) through the
+     * native bridge. No-op if nothing is open or the source is not a routed raw.
      */
     fun develop(algorithm: DemosaicAlgorithm) {
+        currentAlgorithm = algorithm
+        reDevelop()
+    }
+
+    /**
+     * Re-develop the current RAW with a new exposure compensation [ev] (in stops) entered from the
+     * Studio Exposure dialog, keeping the current demosaic algorithm. The value is written into
+     * [DevelopParams.exposureEv] so the native calibrate step applies the `2^ev` linear gain before
+     * the cam→sRGB matrix; the canvas is re-rendered from the re-developed PNG.
+     */
+    fun setExposureEv(ev: Float) {
+        currentExposureEv = ev
+        reDevelop()
+    }
+
+    /** Shared re-develop path: re-runs the develop pipeline with the retained algorithm + exposure. */
+    private fun reDevelop() {
         val uri = currentUri ?: return
         val format = currentFormat ?: return
         renderResultState.value = StudioRenderResult.Loading
         scope.launch {
-            renderResultState.value = runDevelop(appContext.contentResolver, uri, format, algorithm)
+            renderResultState.value = runDevelop(appContext.contentResolver, uri, format, currentAlgorithm, currentExposureEv)
         }
     }
 
@@ -171,9 +196,10 @@ object StudioEngine {
         uri: Uri,
         format: String,
         algorithm: DemosaicAlgorithm,
+        exposureEv: Float,
     ): StudioRenderResult {
         val png = runCatching {
-            rawDecoder.developToPng(format, algorithm) { resolver.openInputStream(uri) ?: error("cannot open source") }
+            rawDecoder.developToPng(format, algorithm, exposureEv) { resolver.openInputStream(uri) ?: error("cannot open source") }
         }.getOrNull()
         return if (png != null) StudioRenderResult.Ready(ByteBuffer.wrap(png)) else StudioRenderResult.Unsupported
     }

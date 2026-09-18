@@ -31,6 +31,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.rememberDrawerState
@@ -104,6 +107,9 @@ fun StudioScreen() {
     var showDemosaicSheet by remember { mutableStateOf(false) }
     val demosaicSheetState = rememberModalBottomSheetState()
 
+    var showExposureDialog by remember { mutableStateOf(false) }
+    var exposureInput by remember { mutableStateOf("") }
+
     BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
 
     ModalNavigationDrawer(
@@ -157,7 +163,13 @@ fun StudioScreen() {
                 )
             }
 
-            StudioBottomBar(onDemosaic = { showDemosaicSheet = true })
+            StudioBottomBar(
+                onDemosaic = { showDemosaicSheet = true },
+                onExposure = {
+                    exposureInput = StudioEngine.currentExposureEv().toString()
+                    showExposureDialog = true
+                },
+            )
         }
     }
 
@@ -194,6 +206,41 @@ fun StudioScreen() {
                 )
             }
         }
+    }
+
+    // Exposure input dialog: opened by the bottom-bar Exposure action. The entered stops value is
+    // written into the develop params and re-develops + re-renders the canvas (Rust applies 2^ev in
+    // the linear domain before the cam->sRGB matrix).
+    if (showExposureDialog) {
+        AlertDialog(
+            onDismissRequest = { showExposureDialog = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    val ev = exposureInput.toFloatOrNull()
+                    if (ev != null) {
+                        StudioEngine.setExposureEv(ev)
+                        showExposureDialog = false
+                    }
+                }) {
+                    Text(text = stringResource(id = R.string.common_action_ok))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showExposureDialog = false }) {
+                    Text(text = stringResource(id = R.string.common_action_cancel))
+                }
+            },
+            title = { Text(text = stringResource(id = R.string.studio_exposure_title)) },
+            text = {
+                TextField(
+                    value = exposureInput,
+                    onValueChange = { exposureInput = it },
+                    singleLine = true,
+                    placeholder = { Text(text = stringResource(id = R.string.studio_exposure_hint)) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                )
+            },
+        )
     }
 }
 
@@ -290,15 +337,14 @@ private fun StudioDrawer(
 /**
  * Studio bottom action bar: Demosaic / Exposure / White Balance.
  *
- * Demosaic opens the pull-up algorithm picker (`onDemosaic`). Exposure and White Balance are
- * placeholders for now — their labels are present so the layout matches the intended toolbar, but
- * neither opens a picker yet. When they do, the develop call will let the user override the as-shot
- * values; until then `StudioEngine.develop` uses the RAW's as-shot exposure (0 EV) and as-shot
- * white balance (`RawImage.wb_coeffs`) for every render.
+ * Demosaic opens the pull-up algorithm picker (`onDemosaic`); Exposure opens the stops input dialog
+ * (`onExposure`), whose confirmed value is written into [StudioEngine.setExposureEv] and re-develops
+ * the canvas. White Balance remains a placeholder for now.
  */
 @Composable
 private fun StudioBottomBar(
     onDemosaic: () -> Unit,
+    onExposure: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(modifier = modifier.fillMaxWidth()) {
@@ -312,7 +358,10 @@ private fun StudioBottomBar(
                 text = stringResource(id = R.string.studio_bottombar_demosaic),
                 modifier = Modifier.clickable(onClick = onDemosaic),
             )
-            Text(text = stringResource(id = R.string.studio_bottombar_exposure))
+            Text(
+                text = stringResource(id = R.string.studio_bottombar_exposure),
+                modifier = Modifier.clickable(onClick = onExposure),
+            )
             Text(text = stringResource(id = R.string.studio_bottombar_whitebalance))
         }
     }
