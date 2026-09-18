@@ -285,13 +285,15 @@ class RawRoutingTest {
     // ---------------------------------------------------------------- develop path
 
     // Every RAW corpus file must survive the COMPLETE user journey, develop included:
-    // import → grid tap → viewer → Open in Studio → grayscale preview → bottom-bar Demosaic
-    // sheet → pick PPG → re-rendered full-frame COLOR png. The develop step used to panic inside
-    // rawler's crop stage on every file whose crop area is offset in full-sensor coordinates
-    // (CR2's embedded sensor-area crop, DNG's DefaultCropOrigin) — the catch_unwind boundary
-    // turned that into "Unsupported Format" in the UI. Sony ILCE-7R alone has an uncropped
-    // active area, which is why develop previously appeared to pass when only it was tested.
-    // One @Test per sample keeps the failing brand visible in the CI report.
+    // import → grid tap → viewer → Open in Studio → the as-shot-developed COLOR canvas
+    // (the resident RawlerImageLoaded is developed once with DEFAULT on open) → bottom-bar
+    // Demosaic sheet → pick PPG → a successful redevelop that keeps a full-frame COLOR png.
+    // The develop stage used to panic inside rawler's crop stage on every file whose crop area
+    // is offset in full-sensor coordinates (CR2's embedded sensor-area crop, DNG's
+    // DefaultCropOrigin) — the catch_unwind boundary turned that into "Unsupported Format" in
+    // the UI. Sony ILCE-7R alone has an uncropped active area, which is why develop previously
+    // appeared to pass when only it was tested. One @Test per sample keeps the failing brand
+    // visible in the CI report.
     @Test
     fun canonCr2DevelopsThroughDemosaicMenu() = developThroughUserJourney(canonCr2)
 
@@ -308,24 +310,27 @@ class RawRoutingTest {
     fun panasonicDcS1rRw2DevelopsThroughDemosaicMenu() = developThroughUserJourney(panasonicRw2)
 
     /**
-     * The demosaic develop path, driven through the REAL Studio UI the way a user triggers it:
-     * the journey lands the RAW in Studio as a grayscale raw-preview (call #2, `decode_to_png`),
-     * then the bottom-bar "Demosaic" action opens the demosaic pull-up menu and picking an
-     * algorithm invokes [StudioEngine.develop] → [io.github.fotlab.fotlab.media.RawDecoder.developToPng]
-     * → [io.github.fotlab.fotlab_rawler.RawlerFotlabBridge.developRawToPng] → rawler's
-     * `develop_to_png` (call #3). The engine must re-render a full-frame **linear COLOR** PNG
-     * that differs from the grayscale preview (proving demosaic + calibrate actually ran, not a
-     * cached frame). This is the complete user-flow coverage for the bottom-bar menu end to end
-     * (`FOTLAB-STUDIO-000001` R4), run for every RAW in the corpus.
+     * The demosaic develop path, driven through the REAL Studio UI the way a user triggers it.
+     *
+     * Since the resident-image refactor (`FOTLAB-RAWLER-000004`), opening a RAW already develops
+     * it once with as-shot params and the CFA-default algorithm, so the first canvas frame must
+     * already be a full-frame **linear COLOR** PNG (no more grayscale preview). The user then
+     * opens the bottom-bar "Demosaic" sheet and picks PPG — on every Bayer camera in this corpus
+     * DEFAULT already resolves to PPG, so the redevelop deterministically reproduces the same
+     * image; the success criteria is therefore "a genuine redevelop ran (Loading → Ready via the
+     * native bridge) and the canvas stays a full-frame color PNG", NOT byte difference. Run for
+     * every RAW in the corpus (`FOTLAB-STUDIO-000001` R4).
      */
     private fun developThroughUserJourney(sample: Sample) {
-        journey(sample, expectRawler = true) // grayscale preview + rawler routing assertion
+        journey(sample, expectRawler = true) // routing + as-shot-developed Ready assertion
 
-        // Capture the grayscale preview the journey left on the engine.
-        val gray = StudioEngine.renderResult.value as? StudioRenderResult.Ready
-            ?: throw AssertionError("expected a grayscale Ready after the journey")
-        val grayBytes = toBytes(gray.model)
-        step("develop", "grayscale preview captured: ${grayBytes.size} bytes")
+        // The journey leaves the as-shot-developed (DEFAULT) frame on the engine: it must already
+        // be color, proving open-time develop works end to end.
+        val initial = StudioEngine.renderResult.value as? StudioRenderResult.Ready
+            ?: throw AssertionError("expected a developed Ready after the journey")
+        val initialBytes = toBytes(initial.model)
+        step("develop", "as-shot canvas frame captured: ${initialBytes.size} bytes")
+        assertDevelopedIsColor(initialBytes, "${sample.label} as-shot canvas")
 
         // The user is now looking at the Studio canvas; host the REAL StudioScreen.
         hostContent { AppTheme { StudioScreen() } }
@@ -348,30 +353,39 @@ class RawRoutingTest {
         }
         step("ui", "demosaic sheet shows '$ppg'")
         composeRule.onNodeWithText(ppg).performClick()
-        step("ui", "picked '$ppg' — triggers StudioEngine.develop")
+        step("ui", "picked '$ppg' — triggers StudioEngine.develop redevelop")
 
-        // The engine re-develops; wait for a fresh full-frame linear COLOR PNG.
+        // The engine re-develops the resident image; wait for the Ready full-frame COLOR PNG.
+        // Equal bytes are the correct outcome (PPG == the Bayer default); only Loading→Ready
+        // plus a valid color frame are required.
         val developed = runBlocking {
-            withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame(grayBytes) }
+            withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame() }
         }
+        val relation = if (developed.bytes.contentEquals(initialBytes)) "identical to as-shot (PPG is the Bayer default)" else "differs from as-shot"
         step(
             "develop",
-            "developed via UI menu: ${developed.outWidth}x${developed.outHeight} (${developed.bytes.size} bytes)",
+            "redeveloped via UI menu: ${developed.outWidth}x${developed.outHeight} (${developed.bytes.size} bytes), $relation",
         )
         assertDevelopedIsColor(developed.bytes, sample.label)
     }
 
     /**
-     * Every demosaic algorithm the menu exposes must run the full develop pipeline (decode → black/white
-     * scaling → demosaic → calibrate → crop-default → LinearImage → PNG) without error and produce a
-     * full-frame COLOR PNG. Drives the engine directly (the same [StudioEngine.develop] the menu calls)
-     * so each Rust demosaic algorithm branch is exercised through the real native `develop_to_png` path
-     * — this is the Rust step coverage the new develop feature needs, on a 36 MP Sony ARW to keep the
-     * emulator budget sane. The per-brand user journey is covered by
-     * [developThroughUserJourney] for every corpus sample.
+     * Every demosaic option the menu exposes must redevelop the resident RAW through the real native
+     * `develop_rawler_image` path without error and keep a full-frame COLOR PNG. On a Bayer sensor
+     * (this Sony ARW) the resolution contract is: DEFAULT and PPG both run PPG, while the incompatible
+     * picks (BILINEAR4_CHANNEL, X_TRANS_BILINEAR) fall back to PPG — so every option must produce a
+     * frame byte-identical to the as-shot DEFAULT frame. Deterministic equality is asserted on
+     * purpose: it pins both the CFA resolution and the fallback behavior, and still proves each menu
+     * option completes (no panic surfaced as Unsupported, no error frame).
+     *
+     * Finally, a parameter that MUST move pixels — exposure EV +1 stop via [StudioEngine.setExposureEv]
+     * — has to produce a different (still color, full-frame) PNG and EV 0 must reproduce the original,
+     * proving redevelop genuinely recomputes calibrate on the resident image rather than returning a
+     * cached frame. Engine-level (same entry points the bottom bar calls) on a 36 MP Sony ARW to keep
+     * the emulator budget sane; the per-brand UI journey is [developThroughUserJourney].
      */
     @Test
-    fun developEachDemosaicAlgorithmProducesFullFrame() {
+    fun everyDemosaicMenuOptionRedevelopsOnBayerAndExposureRecomputes() {
         val uri = indexAndFind(sonyArw7r)
             ?: throw AssertionError("Sony ARW not on the SD card at /sdcard/Pictures/rawdb/${sonyArw7r.file}")
         step("sdcard", "source=${sonyArw7r.file}")
@@ -379,16 +393,17 @@ class RawRoutingTest {
         val node = runBlocking { LibraryCore.getByUri(uri.toString()) }!!
         StudioEngine.setCurrentNode(node.uriStorage)
 
-        val gray = runBlocking {
+        val initial = runBlocking {
             withTimeout(DECODE_TIMEOUT_MS) {
                 StudioEngine.renderResult
                     .filterNot { it is StudioRenderResult.Idle || it is StudioRenderResult.Loading }
                     .first()
             }
         }
-        assertTrue("grayscale preview must reach Ready", gray is StudioRenderResult.Ready)
-        val grayBytes = toBytes((gray as StudioRenderResult.Ready).model)
-        step("studio", "grayscale preview = ${grayBytes.size} bytes")
+        assertTrue("as-shot develop must reach Ready", initial is StudioRenderResult.Ready)
+        val initialBytes = toBytes((initial as StudioRenderResult.Ready).model)
+        step("studio", "as-shot DEFAULT frame = ${initialBytes.size} bytes")
+        assertDevelopedIsColor(initialBytes, "Sony ILCE-7R as-shot DEFAULT")
 
         for (algo in listOf(
             DemosaicAlgorithm.DEFAULT,
@@ -398,11 +413,33 @@ class RawRoutingTest {
         )) {
             StudioEngine.develop(algo)
             val developed = runBlocking {
-                withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame(grayBytes) }
+                withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame() }
             }
             step("develop", "$algo -> ${developed.outWidth}x${developed.outHeight} (${developed.bytes.size} bytes)")
             assertDevelopedIsColor(developed.bytes, "Sony ILCE-7R $algo")
+            // Bayer: all four options resolve/fall back to PPG → deterministic identical output.
+            assertTrue(
+                "$algo on Bayer must resolve/fall back to PPG and reproduce the DEFAULT frame",
+                developed.bytes.contentEquals(initialBytes),
+            )
         }
+
+        // +1 EV doubles linear light before clipping; a meaningful share of (dark) pixels must move,
+        // so the PNG cannot stay identical — this is the "redevelop really recomputed" proof.
+        StudioEngine.setExposureEv(1f)
+        val brighter = runBlocking {
+            withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame(requireDifferentFrom = initialBytes) }
+        }
+        step("develop", "EV +1 -> ${brighter.outWidth}x${brighter.outHeight} (${brighter.bytes.size} bytes), differs")
+        assertDevelopedIsColor(brighter.bytes, "Sony ILCE-7R EV +1")
+
+        // EV 0 reproduces the as-shot frame. Restore because StudioEngine is a process-wide singleton.
+        StudioEngine.setExposureEv(0f)
+        val restored = runBlocking {
+            withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame(requireDifferentFrom = brighter.bytes) }
+        }
+        assertTrue("EV 0 must reproduce the as-shot frame", restored.bytes.contentEquals(initialBytes))
+        step("develop", "EV 0 restored the as-shot frame")
     }
 
     /**
@@ -457,22 +494,32 @@ class RawRoutingTest {
 
     /**
      * Wait for the engine to finish a develop pass and return the decoded PNG dimensions. A develop always
-     * starts with a `Loading` transition, so we wait for that first — otherwise, for the 2nd+ algorithm,
-     * `first { Ready }` would immediately match the *previous* developed frame (whose bytes also differ
-     * from the grayscale). The fresh frame must differ from [grayBytes] (proving a new demosaic ran) and be
-     * a full frame (>= [FULL_FRAME_MIN_WIDTH]), not an embedded preview.
+     * starts with a `Loading` transition, so we wait for that first — otherwise `first { Ready }` would
+     * immediately match the frame already on canvas. The `Loading` transition also proves the click really
+     * drove [StudioEngine.develop]/reDevelop through the native bridge (it is set before the coroutine
+     * launches), so identical output can still be a genuine redevelop.
+     *
+     * Byte equality is EXPECTED for some valid user choices: the canvas is opened already developed with
+     * the CFA-default algorithm (`DEFAULT`, which resolves to PPG on every Bayer camera here), and the
+     * incompatible menu picks (bilinear-4 / X-Trans on a Bayer sensor) fall back to that same PPG — so
+     * redeveloping with them deterministically reproduces the same PNG. Only callers that changed a
+     * parameter guaranteed to move pixels (e.g. exposure EV) set [requireDifferentFrom].
      */
-    private suspend fun waitForDevelopedFrame(grayBytes: ByteArray): DevelopedFrame {
+    private suspend fun waitForDevelopedFrame(
+        requireDifferentFrom: ByteArray? = null,
+    ): DevelopedFrame {
         StudioEngine.renderResult.filter { it is StudioRenderResult.Loading }.first()
         val ready = StudioEngine.renderResult
             .filterNot { it is StudioRenderResult.Loading }
             .filterIsInstance<StudioRenderResult.Ready>()
             .first()
         val bytes = toBytes(ready.model)
-        assertTrue(
-            "developed frame must differ from the grayscale preview (demosaic actually ran)",
-            !bytes.contentEquals(grayBytes),
-        )
+        if (requireDifferentFrom != null) {
+            assertTrue(
+                "developed frame must differ after the parameter change (redevelop actually recomputed)",
+                !bytes.contentEquals(requireDifferentFrom),
+            )
+        }
         val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
         assertTrue("developed output is not a decodable PNG", opts.outWidth > 0)
