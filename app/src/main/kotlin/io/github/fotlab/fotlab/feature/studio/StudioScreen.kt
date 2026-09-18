@@ -114,6 +114,7 @@ fun StudioScreen() {
 
     ModalNavigationDrawer(
         drawerState = drawerState,
+        gesturesEnabled = false,
         drawerContent = {
             StudioDrawer(onClose = { scope.launch { drawerState.close() } })
         },

@@ -112,9 +112,9 @@ private enum class LibraryViewMode { Library, RecycleBin }
  * slides over the top bar the way the platform does (`FOTLAB-UIXDES-000002` R3) and it can
  * never reach the bottom navigation region, which lies outside the module region. Its sheet
  * is the Material3 [DrawerSheet] at 80% of the module width, and it carries the close button
- * in its own top-left corner (`FOTLAB-UIXDES-000002` R6). The open/close is the M3 standard
- * motion — the sheet slides from the start edge while the scrim fades, both on the standard
- * easing — which [ModalNavigationDrawer] provides.
+ * in its own top-left corner (`FOTLAB-UIXDES-000002` R6). Edge-swipe gestures are disabled
+ * (`gesturesEnabled = false`): the drawer opens only via the top-bar menu icon and closes via
+ * its own X button (plus back / scrim tap); the standard M3 slide motion is kept for both.
  *
  * The top bar follows `FOTLAB-UIXDES-000002` (drawer icon left, overflow right) and fills
  * its leading cluster and two action slots as `FOTLAB-UIXDES-000004` prescribes: a
@@ -181,6 +181,7 @@ fun LibraryScreen(
 
     ModalNavigationDrawer(
         drawerState = drawerState,
+        gesturesEnabled = false,
         drawerContent = {
             LibraryDrawer(
                 viewMode = viewMode,
