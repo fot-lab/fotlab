@@ -90,6 +90,21 @@
     <string name="studio_demosaic_bilinear4">Bilinear 4-channel</string>
     <string name="studio_demosaic_xtrans">X-Trans Bilinear</string>
 
+    <!-- Studio grade bar (rawalchemy fork): Boost / LOG / LUT chips under the canvas. -->
+    <string name="studio_grade_none">none</string>
+    <string name="studio_grade_bar_boost">Boost: %1$s</string>
+    <string name="studio_grade_bar_log">LOG: %1$s</string>
+    <string name="studio_grade_bar_lut">LUT: %1$s</string>
+    <!-- Boost "on" item: upstream's default enhancement (saturation/contrast). -->
+    <string name="studio_grade_boost_on">Boost</string>
+    <!-- LUT dropdown items. -->
+    <string name="studio_grade_lut_pick">Choose file…</string>
+    <string name="studio_grade_lut_clear">None (remove LUT)</string>
+    <!-- Grade-fork error dialog (a non-.cube / corrupt LUT, or a grader failure). -->
+    <string name="studio_grade_error_title">Grading failed</string>
+    <string name="studio_grade_error_message">RawAlchemy could not apply these settings. Check the LUT file — it is normally a .cube 3D LUT.</string>
+    <string name="studio_grade_error_lut_copy">Could not read the picked file. Choose another LUT.</string>
+
     <!-- Library viewer: the full-screen image/video dialog opened on a single tap. -->
     <string name="library_viewer_cd_close">Close viewer</string>
     <string name="library_viewer_cd_info">Show or hide details</string>

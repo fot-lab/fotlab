@@ -60,4 +60,33 @@ object RawlerFotlabBridge {
      */
     fun developRawlerImageAtKelvin(loaded: RawlerImageLoaded, params: DevelopParams, kelvin: Float): ByteArray? =
         runCatching { loaded.developToPngAtKelvin(params, kelvin) }.getOrNull()
+
+    /**
+     * Develop an already-loaded image into linear ProPhoto-D50, hand it to the rawalchemy grading
+     * engine (Boost / LOG / LUT per [gradeParams]) and return the graded result encoded straight to
+     * PNG — direct 0..1→0..255 quantization, **no** transfer function, since the grade already
+     * encoded the image (`FOTLAB-RAWLER-000006` decision 4). The Studio grade bar calls this; null
+     * on failure (a bad LUT path makes the native grader error) or when the library is absent.
+     */
+    fun gradeRawlerImageToPng(
+        loaded: RawlerImageLoaded,
+        params: DevelopParams,
+        gradeParams: GradeParams,
+    ): ByteArray? = runCatching { loaded.developAndGradeToPng(params, gradeParams) }.getOrNull()
+
+    /** Kelvin variant of [gradeRawlerImageToPng] — the WB override carries into a grade re-render. */
+    fun gradeRawlerImageToPngAtKelvin(
+        loaded: RawlerImageLoaded,
+        params: DevelopParams,
+        kelvin: Float,
+        gradeParams: GradeParams,
+    ): ByteArray? = runCatching { loaded.developAndGradeToPngAtKelvin(params, kelvin, gradeParams) }.getOrNull()
+
+    /**
+     * Names of the log curves the native grading engine accepts (sorted natively), for the Studio
+     * LOG chooser. Empty when the library / the `rawalchemy` feature is absent — the chooser then
+     * only offers "none".
+     */
+    fun supportedGradeLogSpaces(): List<String> =
+        runCatching { supportedLogSpaces().toList() }.getOrDefault(emptyList())
 }

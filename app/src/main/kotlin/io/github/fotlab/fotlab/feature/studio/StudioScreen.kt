@@ -3,8 +3,10 @@ package io.github.fotlab.fotlab.feature.studio
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -28,9 +30,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.material3.TopAppBar
@@ -47,6 +51,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.collectAsState
 import coil3.request.ImageRequest
@@ -68,8 +73,9 @@ import kotlin.math.roundToInt
  * top bar follows the shared skeleton — drawer toggle at the far left, overflow at the far right, and
  * a file-open action just left of the overflow (`FOTLAB-UIXDES-000002`). The three develop tools sit
  * as icon-only buttons right of the drawer menu — gradient (demosaic dropdown), exposure (stops
- * input) and wb-auto (Kelvin input). The module also owns its drawer; nothing here is shared with the
- * shell.
+ * input) and wb-auto (Kelvin input). Under the canvas (RAW files only) sits the grade bar — the
+ * rawalchemy fork's Boost / LOG / LUT chips (`StudioGradeBar`). The module also owns its drawer;
+ * nothing here is shared with the shell.
  *
  * The open action lands the picked file in the Library directory the user is currently viewing
  * (shared app state, never the Recycle view — `LibraryCore.currentDirectoryId`) and renders it on the
@@ -84,6 +90,12 @@ fun StudioScreen() {
 
     val zoomState = rememberZoomState()
     val renderResult by StudioEngine.renderResult.collectAsState()
+    // Boost/LOG/LUT grade-fork state; the bottom bar exists only while a routed RAW is resident.
+    val gradeSelection by StudioEngine.gradeSelection.collectAsState()
+    val rawLoaded by StudioEngine.isRawLoaded.collectAsState()
+    val gradeError by StudioEngine.gradeError.collectAsState()
+    // The log curve names are static per native library; read once for the LOG menu.
+    val logSpaces = remember { StudioEngine.supportedLogSpaces() }
     var showUnsupported by remember { mutableStateOf(false) }
     LaunchedEffect(renderResult) {
         showUnsupported = renderResult is StudioRenderResult.Unsupported
@@ -110,6 +122,14 @@ fun StudioScreen() {
 
     var showWhiteBalanceDialog by remember { mutableStateOf(false) }
     var whiteBalanceInput by remember { mutableStateOf("") }
+
+    // LUT picker: deliberately `*/*` — the interaction is not format-restricted; rawalchemy decides
+    // whether the picked bytes are a usable .cube LUT (and an error dialog reports it if not).
+    val lutPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { picked ->
+        if (picked != null) StudioEngine.setGradeLut(picked)
+    }
 
     BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
 
@@ -161,6 +181,20 @@ fun StudioScreen() {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+            }
+
+            // Grade bar (Boost / LOG / LUT) — the rawalchemy fork, shown only for a resident RAW.
+            // The three chips start at "none"; selecting one re-grades the resident decode and the
+            // graded PNG replaces the canvas (FOTLAB-RAWLER-000006).
+            if (rawLoaded) {
+                StudioGradeBar(
+                    selection = gradeSelection,
+                    logSpaces = logSpaces,
+                    onBoost = StudioEngine::setGradeBoost,
+                    onLogSpace = StudioEngine::setGradeLogSpace,
+                    onPickLut = { lutPickerLauncher.launch(arrayOf("*/*")) },
+                    onClearLut = StudioEngine::clearGradeLut,
+                )
             }
 
             if (showUnsupported) {
@@ -249,6 +283,21 @@ fun StudioScreen() {
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 )
             },
+        )
+    }
+
+    // Grade-fork error (a picked file that is not a readable .cube LUT, or a grader failure):
+    // StudioEngine already fell back to the sRGB develop presentation, so this only explains why.
+    gradeError?.let { message ->
+        AlertDialog(
+            onDismissRequest = { StudioEngine.clearGradeError() },
+            confirmButton = {
+                TextButton(onClick = { StudioEngine.clearGradeError() }) {
+                    Text(text = stringResource(id = R.string.common_action_ok))
+                }
+            },
+            title = { Text(text = stringResource(id = R.string.studio_grade_error_title)) },
+            text = { Text(text = message) },
         )
     }
 }
@@ -389,5 +438,133 @@ private fun StudioDrawer(
             style = MaterialTheme.typography.titleMedium,
             modifier = Modifier.padding(16.dp),
         )
+    }
+}
+
+/**
+ * The Studio grade bar: the rawalchemy fork's three chips sitting directly under the canvas,
+ * above the shell's bottom navigation — `Boost: none`, `LOG: none`, `LUT: none` at the all-"none"
+ * initial state. Each chip is a text button anchoring its own dropdown:
+ *
+ *  * **Boost** — two-state: none (boost explicitly OFF) / Boost (upstream's default enhancement:
+ *    saturation 1.25 / contrast 1.10). Note the UI's "none" means off, NOT upstream's engine
+ *    default (which is on) — the engine maps it to `enableBoost = false`.
+ *  * **LOG** — none (skip gamut + log stages) plus every log curve rawalchemy accepts; the name
+ *    list is enumerated natively from upstream's `LOG_SPACES`, not mirrored here.
+ *  * **LUT** — "Choose file…" launches the unrestricted (`*/*`) SAF picker; the picked file is
+ *    copied to a native-readable cache path by [StudioEngine]. none removes it. The selected
+ *    file's name is shown on the chip.
+ *
+ * Any non-none selection re-renders the grade fork (resident RAW re-developed with the retained
+ * demosaic/exposure/WB, then graded); back to all-none returns the canvas to the sRGB develop fork.
+ */
+@Composable
+private fun StudioGradeBar(
+    selection: StudioEngine.GradeSelection,
+    logSpaces: List<String>,
+    onBoost: (Boolean) -> Unit,
+    onLogSpace: (String?) -> Unit,
+    onPickLut: () -> Unit,
+    onClearLut: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val none = stringResource(id = R.string.studio_grade_none)
+
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            GradeChip(
+                label = stringResource(
+                    id = R.string.studio_grade_bar_boost,
+                    if (selection.boost) stringResource(id = R.string.studio_grade_boost_on) else none,
+                ),
+            ) { dismiss ->
+                DropdownMenuItem(
+                    text = { Text(text = none) },
+                    onClick = { dismiss(); onBoost(false) },
+                )
+                DropdownMenuItem(
+                    text = { Text(text = stringResource(id = R.string.studio_grade_boost_on)) },
+                    onClick = { dismiss(); onBoost(true) },
+                )
+            }
+
+            GradeChip(
+                label = stringResource(
+                    id = R.string.studio_grade_bar_log,
+                    selection.logSpace ?: none,
+                ),
+            ) { dismiss ->
+                DropdownMenuItem(
+                    text = { Text(text = none) },
+                    onClick = { dismiss(); onLogSpace(null) },
+                )
+                for (name in logSpaces) {
+                    DropdownMenuItem(
+                        text = { Text(text = name) },
+                        onClick = { dismiss(); onLogSpace(name) },
+                    )
+                }
+            }
+
+            GradeChip(
+                label = stringResource(
+                    id = R.string.studio_grade_bar_lut,
+                    selection.lutName ?: none,
+                ),
+                // A picked LUT name can be long; take the remaining row width and ellipsize.
+                modifier = Modifier.weight(1f),
+            ) { dismiss ->
+                DropdownMenuItem(
+                    text = { Text(text = stringResource(id = R.string.studio_grade_lut_pick)) },
+                    onClick = { dismiss(); onPickLut() },
+                )
+                DropdownMenuItem(
+                    text = { Text(text = stringResource(id = R.string.studio_grade_lut_clear)) },
+                    onClick = { dismiss(); onClearLut() },
+                )
+            }
+        }
+    }
+}
+
+/**
+ * A compact text chip ("Label: value") anchoring a dropdown [menu]. The menu content receives a
+ * `dismiss` callback so every item can close the menu itself; the LUT chip passes a [modifier]
+ * (weight) so long file names shrink and ellipsize instead of pushing the other chips off-row.
+ */
+@Composable
+private fun GradeChip(
+    label: String,
+    modifier: Modifier = Modifier,
+    menu: @Composable ColumnScope.(dismiss: () -> Unit) -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+    Box(modifier = modifier) {
+        TextButton(
+            onClick = { open = true },
+            contentPadding = PaddingValues(horizontal = 8.dp),
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        DropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false },
+        ) {
+            menu { open = false }
+        }
     }
 }

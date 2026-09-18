@@ -165,4 +165,56 @@ impl RawlerImageLoaded {
             ))
         })
     }
+
+    /// Develop → grade → **PNG** in one resident-image call: the Studio grade
+    /// action (Boost / LOG / LUT change). Identical develop + grade as
+    /// [`Self::develop_and_grade`], but the graded float buffer is quantized
+    /// directly to an RGBA8 PNG by [`bound::graded_to_png`] — no transfer
+    /// function, because the grade's log OETF already encoded the pixels
+    /// (`FOTLAB-RAWLER-000006` decision 4: Kotlin consumes the graded output
+    /// as-is). Wrapped in `catch_unwind`; requires the `rawalchemy` feature.
+    #[cfg(feature = "rawalchemy")]
+    pub fn develop_and_grade_to_png(
+        &self,
+        params: DevelopParams,
+        grade_params: GradeParams,
+    ) -> Result<Vec<u8>, RawlerFotlabError> {
+        self.develop_and_grade_to_png_at_kelvin(params, 0.0, grade_params)
+    }
+
+    /// Kelvin variant of [`Self::develop_and_grade_to_png`]: the white balance is
+    /// overridden with the multipliers for [kelvin] Kelvin exactly as in
+    /// [`Self::develop_to_png_at_kelvin`]; `kelvin <= 0` leaves it as-shot. So a
+    /// grade re-render carries the same retained demosaic / exposure / WB state
+    /// the develop presentation branch uses.
+    #[cfg(feature = "rawalchemy")]
+    pub fn develop_and_grade_to_png_at_kelvin(
+        &self,
+        params: DevelopParams,
+        kelvin: f32,
+        grade_params: GradeParams,
+    ) -> Result<Vec<u8>, RawlerFotlabError> {
+        panic::catch_unwind(AssertUnwindSafe(|| {
+            let image = (*self.inner).clone();
+            let params = if kelvin > 0.0 {
+                DevelopParams {
+                    wb: Some(crate::wb::wb_from_color_temp(&image, kelvin)),
+                    ..params
+                }
+            } else {
+                params
+            };
+            let dev = develop_image(image, params, WorkingSpace::ProPhotoD50)?;
+            let overrides = rawalchemy_fotlab::GradeOverrides::from(&grade_params);
+            let graded = rawalchemy_fotlab::grade(&dev.rgb, dev.width, dev.height, &overrides)
+                .map_err(|e| RawlerFotlabError::Decode(format!("rawalchemy grade failed: {e}")))?;
+            bound::graded_to_png(dev.width, dev.height, &graded)
+                .map_err(RawlerFotlabError::Decode)
+        }))
+        .unwrap_or_else(|_| {
+            Err(RawlerFotlabError::Decode(
+                "rawler panicked during develop_and_grade_to_png".to_string(),
+            ))
+        })
+    }
 }

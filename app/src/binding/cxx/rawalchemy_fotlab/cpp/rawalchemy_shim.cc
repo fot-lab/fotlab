@@ -123,3 +123,16 @@ rust::Vec<float> grade(rust::Slice<const float> data,
   }
   return out;
 }
+
+// Enumerate upstream's LOG_SPACES keys verbatim. Order is whatever the
+// unordered_map yields; the Rust caller sorts for a stable UI menu. The map
+// itself is the single source of truth — a curve added upstream appears here
+// with no glue change.
+rust::Vec<rust::String> log_spaces() {
+  rust::Vec<rust::String> out;
+  out.reserve(LOG_SPACES.size());
+  for (const auto& entry : LOG_SPACES) {
+    out.push_back(rust::String(entry.first));
+  }
+  return out;
+}

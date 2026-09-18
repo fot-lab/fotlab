@@ -3,6 +3,8 @@ package io.github.fotlab.fotlab.feature.studio
 import android.content.ContentResolver
 import android.content.Context
 import android.net.Uri
+import android.provider.OpenableColumns
+import io.github.fotlab.fotlab.R
 import io.github.fotlab.fotlab.media.DEFAULT_SNIFF_TIMEOUT_MS
 import io.github.fotlab.fotlab.media.FormatSniffer
 import io.github.fotlab.fotlab.media.MediaPreference
@@ -14,6 +16,7 @@ import io.github.fotlab.fotlab.media.StubRawDecoder
 import io.github.fotlab.fotlab.media.route
 import io.github.fotlab.fotlab_rawler.DemosaicAlgorithm
 import io.github.fotlab.fotlab_rawler.DevelopParams
+import io.github.fotlab.fotlab_rawler.GradeParams
 import io.github.fotlab.fotlab_rawler.RawlerImageLoaded
 import io.github.fotlab.fotlab_rawler.RawlerFotlabBridge
 import kotlinx.coroutines.CoroutineScope
@@ -23,9 +26,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.io.File
 import java.io.InputStream
 import java.nio.ByteBuffer
+import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.jvm.Volatile
 
@@ -91,6 +97,11 @@ object StudioEngine {
         // Release any previously-held decoded RAW and invalidate in-flight work before switching
         // (FOTLAB-RAWLER-000004 §lifecycle: exactly one handle per loaded file, at most).
         loadedImage = null
+        // The Boost/LOG/LUT selection belongs to the previous file's grade fork — every new node
+        // starts at all-"none" (the regular sRGB develop presentation).
+        gradeSelectionState.value = GradeSelection()
+        gradeErrorState.value = null
+        rawLoadedState.value = false
         val token = loadNonce.incrementAndGet()
         currentNodeUriState.value = uri
         if (uri == null) {
@@ -152,6 +163,7 @@ object StudioEngine {
                     DevelopParams(demosaicAlgorithm = DemosaicAlgorithm.DEFAULT, exposureEv = null, wb = null),
                 ) ?: return StudioRenderResult.Unsupported
                 currentFormat = r.format
+                rawLoadedState.value = true
                 StudioRenderResult.Ready(ByteBuffer.wrap(png))
             }
             is Route.ToCoil -> StudioRenderResult.Ready(uri)
@@ -168,6 +180,12 @@ object StudioEngine {
          * read, so the cost stays flat regardless of file size.
          */
         const val HEADER_BYTES = 1024 * 1024
+
+        /**
+         * App-private cache subdirectory holding SAF-picked LUT files copied off their
+         * `content://` URIs so the native grader can open a real path.
+         */
+        const val LUT_CACHE_DIR = "grading-luts"
     }
 
     /** The demosaic algorithm retained for the next develop re-render (set when the user picks one). */
@@ -191,6 +209,194 @@ object StudioEngine {
      * it changes, so a stale result never paints a different file's canvas (`FOTLAB-RAWLER-000004` §lifecycle).
      */
     private val loadNonce = AtomicLong(0)
+
+    // ---- rawalchemy grade fork: the Boost / LOG / LUT bottom bar ----
+    //
+    // Two rendering forks share the same resident decode (FOTLAB-RAWLER-000006):
+    //  * develop fork — a demosaic / exposure / WB change re-renders the sRGB PNG (gamma-applied);
+    //  * grade fork   — a Boost / LOG / LUT change re-develops with the retained develop params,
+    //    hands the linear ProPhoto buffer to rawalchemy, and shows the graded PNG (direct
+    //    quantization, no extra transfer function).
+    // The grade bar only exists while a routed RAW is resident; all-"none" means the grade fork is
+    // inactive and the canvas keeps/returns to the develop presentation.
+
+    /** Current Boost/LOG/LUT selection; reset to all-"none" on every file switch. */
+    private val gradeSelectionState = MutableStateFlow(GradeSelection())
+    val gradeSelection: StateFlow<GradeSelection> = gradeSelectionState.asStateFlow()
+
+    /** True only while a routed RAW is resident — the grade bar is a RAW-only surface. */
+    private val rawLoadedState = MutableStateFlow(false)
+    val isRawLoaded: StateFlow<Boolean> = rawLoadedState.asStateFlow()
+
+    /** Last grade-fork failure message (typically an unreadable/unsupported LUT); null when clear. */
+    private val gradeErrorState = MutableStateFlow<String?>(null)
+    val gradeError: StateFlow<String?> = gradeErrorState.asStateFlow()
+
+    /** Dismiss the one-shot grade error dialog. */
+    fun clearGradeError() {
+        gradeErrorState.value = null
+    }
+
+    /**
+     * The three grade-bar selections. [boost] is the explicit enable flag — the UI's "none" chip
+     * means boost OFF (it is not upstream's engine default, which is on); [logSpace] null = no log
+     * curve (skip gamut + log stages); [lutPath] null = no LUT. [lutName] is only the picked
+     * file's display name for the chip.
+     */
+    data class GradeSelection(
+        val boost: Boolean = false,
+        val logSpace: String? = null,
+        val lutName: String? = null,
+        val lutPath: String? = null,
+    ) {
+        /** At least one grading stage switched on; all-"none" keeps the sRGB develop fork. */
+        val isActive: Boolean get() = boost || logSpace != null || lutPath != null
+    }
+
+    /** The log curves rawalchemy accepts — static per loaded .so, queried once and cached. */
+    @Volatile private var logSpacesCache: List<String>? = null
+    fun supportedLogSpaces(): List<String> =
+        logSpacesCache ?: RawlerFotlabBridge.supportedGradeLogSpaces().also { logSpacesCache = it }
+
+    /** Toggle the default enhancement (upstream saturation/contrast boost); false = the "none" chip. */
+    fun setGradeBoost(enabled: Boolean) {
+        gradeSelectionState.update { it.copy(boost = enabled) }
+        reGrade()
+    }
+
+    /** Pick a log curve by name (one of [supportedLogSpaces]); null = the "none" chip. */
+    fun setGradeLogSpace(name: String?) {
+        gradeSelectionState.update { it.copy(logSpace = name) }
+        reGrade()
+    }
+
+    /** Remove the picked LUT (the "none" item in the LUT menu). */
+    fun clearGradeLut() {
+        gradeSelectionState.update { it.copy(lutName = null, lutPath = null) }
+        reGrade()
+    }
+
+    /**
+     * Accept a SAF-picked LUT [uri] with no format restriction (per product spec the picker is
+     * `*/*`; rawalchemy validates the contents as a `.cube` 3D LUT). The native grader only reads
+     * real filesystem paths, never `content://` URIs, so the bytes are copied into an app-private
+     * cache file (content-addressed by SHA-256, display extension retained) and that path is what
+     * crosses the FFI. A copy failure is reported via [gradeError] without changing the selection;
+     * a bad LUT file surfaces when the native grade runs.
+     */
+    fun setGradeLut(uri: Uri) {
+        val token = loadNonce.get()
+        scope.launch {
+            val copied = runCatching { copyLutToCache(uri) }.getOrNull()
+            if (copied == null) {
+                gradeErrorState.value = appContext.getString(R.string.studio_grade_error_lut_copy)
+                return@launch
+            }
+            if (loadNonce.get() != token) return@launch
+            gradeSelectionState.update { it.copy(lutName = copied.first, lutPath = copied.second) }
+            reGrade()
+        }
+    }
+
+    /** Shared grade-fork render: re-develop (resident decode, retained algo/EV/WB) → grade → PNG. */
+    private fun reGrade() {
+        val selection = gradeSelectionState.value
+        if (!selection.isActive) {
+            // All three back to "none": nothing to grade — return the canvas to the sRGB develop
+            // presentation rather than showing a dark, linear, unencoded ProPhoto buffer.
+            reDevelop()
+            return
+        }
+        if (loadedImage == null) return
+        val token = loadNonce.get()
+        renderResultState.value = StudioRenderResult.Loading
+        scope.launch {
+            val png = runGrade(token, selection)
+            if (loadNonce.get() != token) return@launch
+            if (png != null) {
+                renderResultState.value = StudioRenderResult.Ready(ByteBuffer.wrap(png))
+            } else {
+                // The grader rejected the inputs (almost always a bad LUT): surface the reason once
+                // and keep the canvas usable by falling back to the sRGB develop presentation.
+                gradeErrorState.value = appContext.getString(R.string.studio_grade_error_message)
+                reDevelop()
+            }
+        }
+    }
+
+    private fun runGrade(token: Long, selection: GradeSelection): ByteArray? {
+        if (loadNonce.get() != token) return null
+        val loaded = loadedImage ?: return null
+        val params = DevelopParams(
+            demosaicAlgorithm = currentAlgorithm,
+            exposureEv = currentExposureEv,
+            wb = null,
+        )
+        // Only the three grade-bar controls are wired. Every other rawalchemy parameter stays null
+        // ("the engine decides") — this crate pins no upstream default of its own.
+        val grade = GradeParams(
+            logSpace = selection.logSpace,
+            lutPath = selection.lutPath,
+            meteringMode = null,
+            gain = null,
+            targetGray = null,
+            enableBoost = selection.boost,
+            saturation = null,
+            contrast = null,
+            pivot = null,
+        )
+        val kelvin = currentWhiteBalanceKelvin
+        return if (kelvin != null) {
+            RawlerFotlabBridge.gradeRawlerImageToPngAtKelvin(loaded, params, kelvin, grade)
+        } else {
+            RawlerFotlabBridge.gradeRawlerImageToPng(loaded, params, grade)
+        }
+    }
+
+    /**
+     * Copy the SAF document behind [uri] to `cacheDir/grading-luts/<sha-256><ext>` and return
+     * `(displayName, absolutePath)`. Content-addressed so re-picking the same file reuses the copy;
+     * the extension comes from the display name so a real `.cube` keeps its suffix, while an
+     * extensionless/arbitrary pick is still accepted (format validation is rawalchemy's job).
+     */
+    private fun copyLutToCache(uri: Uri): Pair<String, String> {
+        val resolver = appContext.contentResolver
+        val displayName = resolver
+            .query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { c -> if (c.moveToFirst() && !c.isNull(0)) c.getString(0) else null }
+            ?: "lut"
+        val dir = File(appContext.cacheDir, Constants.LUT_CACHE_DIR).apply { mkdirs() }
+        val digest = MessageDigest.getInstance("SHA-256")
+        val tmp = File.createTempFile("lut-", ".part", dir)
+        try {
+            (resolver.openInputStream(uri) ?: error("cannot open picked LUT")).use { input ->
+                tmp.outputStream().use { out ->
+                    val buf = ByteArray(64 * 1024)
+                    while (true) {
+                        val n = input.read(buf)
+                        if (n <= 0) break
+                        digest.update(buf, 0, n)
+                        out.write(buf, 0, n)
+                    }
+                }
+            }
+        } catch (t: Throwable) {
+            tmp.delete()
+            throw t
+        }
+        val ext = displayName.substringAfterLast('.', "")
+            .takeIf { it.isNotEmpty() }
+            ?.let { "." + it.take(8) }
+            .orEmpty()
+        val dest = File(dir, digest.digest().joinToString("") { "%02x".format(it) } + ext)
+        if (dest.exists()) {
+            tmp.delete()
+        } else if (!tmp.renameTo(dest)) {
+            tmp.copyTo(dest, overwrite = true)
+            tmp.delete()
+        }
+        return displayName to dest.absolutePath
+    }
 
     /** The current exposure compensation in stops; the UI prefills the Exposure dialog from this. */
     fun currentExposureEv(): Float = currentExposureEv

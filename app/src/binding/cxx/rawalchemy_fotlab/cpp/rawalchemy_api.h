@@ -46,3 +46,6 @@ rust::Vec<float> grade(rust::Slice<const float> data,
                        float saturation,
                        float contrast,
                        float pivot);
+
+/// Every key of upstream's `LOG_SPACES` map — the log curves the grader accepts.
+rust::Vec<rust::String> log_spaces();

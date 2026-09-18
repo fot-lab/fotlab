@@ -25,7 +25,13 @@
 //!     to the rawalchemy grading engine in the same call and the **graded** float
 //!     buffer comes back. Which stages run is chosen entirely by `GradeParams`, whose
 //!     optional fields deliberately expose upstream's full parameter surface
-//!     (`FOTLAB-RAWLER-000006`).
+//!     (`FOTLAB-RAWLER-000006`). The resident object additionally exposes
+//!     `develop_and_grade_to_png` / `..._at_kelvin`, which quantize the graded
+//!     buffer straight to a display PNG (no transfer function), and
+//!     `supported_log_spaces` lists the log curves the Studio LOG chooser offers.
+//!     Studio's grade bar drives the PNG variants; changing a develop parameter
+//!     (demosaic / exposure / WB) re-renders the sRGB fork above, changing a grade
+//!     parameter (Boost / LOG / LUT) re-renders the graded PNG fork.
 //!
 //! # Pipeline split (`FOTLAB-FOTRAW-000001`)
 //!
@@ -139,6 +145,19 @@ pub fn decode_to_png(raw: &[u8]) -> Result<Vec<u8>, RawlerFotlabError> {
 pub fn develop_to_png(raw: &[u8], params: DevelopParams) -> Result<Vec<u8>, RawlerFotlabError> {
     let loaded = loaded::decode_rawler_image(raw)?;
     loaded.develop_to_png(params)
+}
+
+/// Names of the log spaces the rawalchemy grading engine accepts (`"F-Log"`,
+/// `"S-Log3"`, `"Arri LogC4"`, …), sorted for a stable Studio LOG menu. The list
+/// is single-sourced from upstream's `LOG_SPACES` map — the glue only
+/// enumerates its keys (`FOTLAB-RAWLER-000006`). Gated on the `rawalchemy`
+/// feature (on by default); without the feature the export is not compiled.
+#[cfg(feature = "rawalchemy")]
+#[uniffi::export]
+pub fn supported_log_spaces() -> Vec<String> {
+    let mut spaces = rawalchemy_fotlab::log_spaces();
+    spaces.sort();
+    spaces
 }
 
 uniffi::setup_scaffolding!();

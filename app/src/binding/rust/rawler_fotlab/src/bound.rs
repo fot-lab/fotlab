@@ -12,6 +12,10 @@
 //!   produced by the develop pipeline (demosaic + calibrate) and applies the sRGB transfer function
 //!   (gamma) + clip to [0,1] before writing PNG — a finished sRGB image for the UI
 //!   (`FOTLAB-RAWLER-000005`). This is what Studio renders after the user picks a demosaic algorithm.
+//! * [`graded_to_png`] — the **rawalchemy result**. Takes the graded float buffer (log-encoded when a
+//!   log space was selected) and quantizes it directly (clamp + ×255), applying **no** transfer
+//!   function — the grade already encoded the image, and Kotlin consumes it as-is
+//!   (`FOTLAB-RAWLER-000006` decision 4). This is what Studio renders after a Boost/LOG/LUT change.
 //!
 //! Per `rules/STRUCT/detail/FOTLAB-FOTRAW-000001.md` R2/R2b, the geometry needed to read the
 //! [`FotRaw`] buffer is **not** carried by [`FotRawData`]; it is resolved from the tag
@@ -123,6 +127,51 @@ pub(crate) fn rawlerimagedeveloped_to_png(image: &RawlerImageDeveloped) -> Resul
     let mut out: Vec<u8> = Vec::new();
     PngEncoder::new(&mut out)
         .write_image(&rgba, w, h, ExtendedColorType::Rgba8)
+        .map_err(|e| e.to_string())?;
+    Ok(out)
+}
+
+/// Encode a graded float RGB buffer straight to an RGBA8 PNG by **direct
+/// clamp-to-[0,1] + ×255 quantization — no transfer function**.
+///
+/// This is the presentation of the rawalchemy output and is deliberately a
+/// third encoder next to [`fotraw_to_png`] / [`rawlerimagedeveloped_to_png`]:
+/// `applyGradingFused` already applied the chosen log OETF (and the ProPhoto→
+/// target-gamut matrix) when a log space was selected, so running the sRGB
+/// gamma here would double-encode. Per `FOTLAB-RAWLER-000006` decision 4 Kotlin
+/// consumes the graded result as-is; this is the "bit-shift to PNG" step. With
+/// no log space selected the buffer is linear and the same direct quantization
+/// applies — the caller (Studio) only reaches this encoder on an explicit grade
+/// action, while the develop presentation branch keeps
+/// [`rawlerimagedeveloped_to_png`] and its sRGB transfer function.
+pub(crate) fn graded_to_png(width: u32, height: u32, rgb: &[f32]) -> Result<Vec<u8>, String> {
+    if width == 0 || height == 0 {
+        return Err("graded image has no pixels".to_string());
+    }
+    let expected = (width as usize) * (height as usize) * 3;
+    if rgb.len() != expected {
+        return Err(format!(
+            "graded image buffer length {} != expected {} ({}x{}x3)",
+            rgb.len(),
+            expected,
+            width,
+            height
+        ));
+    }
+
+    let mut rgba: Vec<u8> = Vec::with_capacity((width as usize) * (height as usize) * 4);
+    for px in rgb.chunks_exact(3) {
+        rgba.extend_from_slice(&[
+            shrink_f32(px[0]),
+            shrink_f32(px[1]),
+            shrink_f32(px[2]),
+            255,
+        ]);
+    }
+
+    let mut out: Vec<u8> = Vec::new();
+    PngEncoder::new(&mut out)
+        .write_image(&rgba, width, height, ExtendedColorType::Rgba8)
         .map_err(|e| e.to_string())?;
     Ok(out)
 }

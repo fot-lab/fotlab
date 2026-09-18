@@ -63,6 +63,14 @@ mod ffi {
             contrast: f32,
             pivot: f32,
         ) -> Result<Vec<f32>>;
+
+        /// Names of every log space upstream's `LOG_SPACES` map accepts
+        /// (`"F-Log"`, `"S-Log3"`, `"Arri LogC4"`, …). The list is single-sourced
+        /// upstream: the Kotlin LOG chooser renders exactly these names, so a new
+        /// upstream curve needs no change on our side (`FOTLAB-RAWLER-000006`).
+        /// Iteration order of the upstream `unordered_map` is unspecified; callers
+        /// that need a stable order sort the result themselves.
+        fn log_spaces() -> Vec<String>;
     }
 }
 
@@ -143,4 +151,11 @@ pub fn grade(
         overrides.pivot.unwrap_or(f32::NAN),
     )
     .map_err(|e| e.to_string())
+}
+
+/// Names of the log spaces upstream accepts — a pass-through enumeration of the
+/// `LOG_SPACES` map keys. The order mirrors upstream's `unordered_map` and is
+/// intentionally not sorted here: the consuming crate sorts for UI stability.
+pub fn log_spaces() -> Vec<String> {
+    ffi::log_spaces()
 }
