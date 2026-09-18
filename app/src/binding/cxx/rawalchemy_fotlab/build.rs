@@ -46,7 +46,12 @@ fn main() {
     // grading static lib is built for the right ABI; otherwise cmake silently uses
     // the host compiler and the final cargo-ndk link fails with an arch mismatch.
     // `ANDROID_NDK_HOME` is exported by build_rust.yaml.
-    let mut cmake_cfg = cmake::Config::new("cpp").define("RAWALCHEMY_SRC", &rawalchemy_src);
+    // `Config::define` takes `&mut self` and returns `&mut Self`, so the Config has
+    // to own a binding of its own — chaining it off `cmake::Config::new()` makes the
+    // builder a temporary that dies at the end of the statement while the returned
+    // `&mut` is still live (E0716). Keep the two steps separate.
+    let mut cmake_cfg = cmake::Config::new("cpp");
+    cmake_cfg.define("RAWALCHEMY_SRC", &rawalchemy_src);
     if target.contains("android") {
         let ndk = env::var("ANDROID_NDK_HOME")
             .or_else(|_| env::var("ANDROID_NDK_ROOT"))
@@ -62,7 +67,7 @@ fn main() {
             other => panic!("rawalchemy_fotlab: unsupported Android target `{other}`"),
         };
         let min_api = env::var("MIN_API").unwrap_or_else(|_| "26".to_string());
-        cmake_cfg = cmake_cfg
+        cmake_cfg
             .define("CMAKE_TOOLCHAIN_FILE", toolchain)
             .define("ANDROID_ABI", abi)
             .define("ANDROID_PLATFORM", format!("android-{min_api}"));
