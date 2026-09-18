@@ -13,20 +13,26 @@ use std::path::Path;
 ///    `GradingParams` and calls the public `rawalchemy::applyGradingFused`.
 ///
 /// The RawAlchemyCpp submodule is never modified: every symbol we touch
-/// (`applyGradingFused`, `LOG_SPACES`, `loadCubeLUT`, `GradingParams`,
-/// `ImageBuffer`) is part of its public header API.
+/// (`applyGradingFused`, `LOG_SPACES`, `loadCubeLUT`, `computeAutoGain`,
+/// `GradingParams`, `ImageBuffer`) is part of its public header API.
 fn main() {
     // Locate external/RawAlchemyCpp. Allow an override via RAWALCHEMY_SRC; else
-    // walk up from this crate (app/src/binding/cxx/rawalchemy_fotlab) four levels
-    // to the repo root and join external/RawAlchemyCpp.
+    // anchor on the submodule's own header while walking up from this crate.
+    //
+    // Do NOT count `..` levels here: this crate already moved once (it lives under
+    // binding/cxx/, not as a sibling of rawler_fotlab) and a hard-coded count went
+    // stale silently — cmake then just failed deep inside with "cannot find source
+    // file". Testing for a file we know exists cannot rot the same way.
     let manifest = env!("CARGO_MANIFEST_DIR");
-    let repo_root = Path::new(manifest)
-        .ancestors()
-        .nth(4)
-        .expect("rawalchemy_fotlab: could not resolve repo root");
     let rawalchemy_src = env::var("RAWALCHEMY_SRC").unwrap_or_else(|_| {
-        repo_root
-            .join("external/RawAlchemyCpp")
+        Path::new(manifest)
+            .ancestors()
+            .map(|dir| dir.join("external/RawAlchemyCpp"))
+            .find(|cand| cand.join("include/grading_fused.h").is_file())
+            .expect(
+                "rawalchemy_fotlab: could not locate external/RawAlchemyCpp above \
+                 CARGO_MANIFEST_DIR — check the submodule is checked out, or set RAWALCHEMY_SRC",
+            )
             .to_string_lossy()
             .into_owned()
     });
@@ -68,16 +74,20 @@ fn main() {
         .include(format!("{rawalchemy_src}/include"))
         .include("cpp")
         .flag_if_supported("-std=c++17")
-        .flag_if_supported("-fopenmp")
         .file("cpp/rawalchemy_shim.cc")
         .compile("rawalchemy_fotlab");
 
     // Link the grading static lib and the C++ runtime into the final cdylib.
     println!("cargo:rustc-link-search=native={}/lib", dst.display());
     println!("cargo:rustc-link-lib=static=rawalchemy_grading");
-    // OpenMP runtime (the grading .cpp use `#pragma omp`) for the final link.
-    println!("cargo:rustc-link-arg=-fopenmp");
     // C++ stdlib: Android NDK links libc++ (`c++`); desktop targets use libstdc++.
+    //
+    // NOTE: `rustc-link-lib` propagates to the final artifact of a *dependent*
+    // crate; `rustc-link-arg` does not (cargo #9554). Since this crate is an rlib
+    // consumed by rawler_fotlab's cdylib, only link-lib can carry the runtime.
+    // There is no OpenMP link-lib here on purpose: `RA_USE_OPENMP` is never defined
+    // for this target, so no `#pragma omp` is compiled and no OMP runtime is needed
+    // (see cpp/CMakeLists.txt).
     let cxx_stdlib = if target.contains("android") {
         "c++"
     } else {

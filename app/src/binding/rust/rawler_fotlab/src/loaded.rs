@@ -15,7 +15,7 @@ use rawler::RawImage;
 
 use crate::bound;
 use crate::calibrate::WorkingSpace;
-use crate::develop::{develop_image, DevelopParams};
+use crate::develop::{develop_image, DevelopParams, GradeParams};
 use crate::intermediate;
 use crate::{decode::decode_to_rawimage, RawlerFotlabError};
 
@@ -141,29 +141,23 @@ impl RawlerImageLoaded {
     /// Develop the cached decode into linear ProPhoto-D50 and hand it straight to
     /// the rawalchemy grading engine — a single Rust→cxx hop with no Kotlin buffer
     /// copy (`rules/REVIEW/detail/FOTLAB-RAWLER-000006`). Requires the `rawalchemy`
-    /// feature. `log_space` names a registered log space (e.g. `"F-Log"`); `lut_path`
-    /// is an optional `.cube` path (`""` = none); `ev_offset` is a relative exposure
-    /// in stops (`2^ev_offset`).
+    /// feature.
+    ///
+    /// [`GradeParams`] decides which grading stages run; an all-`None` record runs
+    /// upstream's defaults untouched (`None` = "the engine decides" for every
+    /// field — no default is pinned on this side).
     #[cfg(feature = "rawalchemy")]
     pub fn develop_and_grade(
         &self,
         params: DevelopParams,
-        log_space: String,
-        lut_path: String,
-        ev_offset: f32,
+        grade_params: GradeParams,
     ) -> Result<Vec<f32>, RawlerFotlabError> {
         panic::catch_unwind(AssertUnwindSafe(|| {
             let image = (*self.inner).clone();
             let dev = develop_image(image, params, WorkingSpace::ProPhotoD50)?;
-            rawalchemy_fotlab::grade(
-                &dev.rgb,
-                dev.width,
-                dev.height,
-                &log_space,
-                &lut_path,
-                ev_offset,
-            )
-            .map_err(|e| RawlerFotlabError::Decode(format!("rawalchemy grade failed: {e}")))
+            let overrides = rawalchemy_fotlab::GradeOverrides::from(&grade_params);
+            rawalchemy_fotlab::grade(&dev.rgb, dev.width, dev.height, &overrides)
+                .map_err(|e| RawlerFotlabError::Decode(format!("rawalchemy grade failed: {e}")))
         }))
         .unwrap_or_else(|_| {
             Err(RawlerFotlabError::Decode(

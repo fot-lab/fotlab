@@ -64,6 +64,72 @@ pub struct DevelopParams {
   pub wb: Option<Vec<f32>>,
 }
 
+/// Grading parameters supplied by Kotlin for [`develop_and_grade`].
+///
+/// **Every field is optional, and `None` means "the engine decides"** — either
+/// "use upstream's own `rawalchemy::GradingParams` default" or "skip this stage".
+/// This Rust side performs **no defaulting of its own**: the values are handed to
+/// the glue as "unset" sentinels precisely so that upstream stays the single
+/// owner of every default it declares. If upstream changes one, we follow it
+/// without touching this crate (`rules/REVIEW/detail/FOTLAB-RAWLER-000006.md`).
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct GradeParams {
+  /// Log space name selecting the camera log curve and the ProPhoto→target
+  /// gamut matrix (e.g. `"F-Log"`, `"S-Log3"`, `"Arri LogC4"`), i.e. the
+  /// linear→log encode stage. `None` = skip **both** the gamut transform and the
+  /// log encoding (upstream: `logSpaceInfo == nullptr`).
+  #[uniffi(default = None)]
+  pub log_space: Option<String>,
+  /// Path to a `.cube` 3D LUT, applied to the log-encoded image. `None` = no LUT.
+  #[uniffi(default = None)]
+  pub lut_path: Option<String>,
+  /// Metering mode for automatic exposure (`computeAutoGain`), e.g. `"matrix"`.
+  /// `None` = skip automatic metering, leaving the unmetered base gain at unity.
+  #[uniffi(default = None)]
+  pub metering_mode: Option<String>,
+  /// Relative exposure in stops, applied as `2^ev_offset` on top of the metered
+  /// (or unity) gain. `0.0` = as-shot.
+  #[uniffi(default = 0.0)]
+  pub ev_offset: f32,
+  /// Target gray level for `computeAutoGain` (upstream default `0.18`).
+  /// `None` = upstream default. Only meaningful with `metering_mode`.
+  #[uniffi(default = None)]
+  pub target_gray: Option<f32>,
+  /// Saturation/contrast boost switch. `None` = upstream default.
+  #[uniffi(default = None)]
+  pub enable_boost: Option<bool>,
+  /// Saturation multiplier. `None` = upstream default.
+  #[uniffi(default = None)]
+  pub saturation: Option<f32>,
+  /// Contrast multiplier. `None` = upstream default.
+  #[uniffi(default = None)]
+  pub contrast: Option<f32>,
+  /// Contrast pivot point. `None` = upstream default.
+  #[uniffi(default = None)]
+  pub pivot: Option<f32>,
+}
+
+/// Lift the FFI record onto the glue's override struct.
+///
+/// A pure field-for-field mapping — including the `None`s, which stay `None` so
+/// the glue can tell "unset" from "explicitly set to the upstream default value".
+#[cfg(feature = "rawalchemy")]
+impl From<&GradeParams> for rawalchemy_fotlab::GradeOverrides {
+  fn from(p: &GradeParams) -> Self {
+    Self {
+      log_space: p.log_space.clone(),
+      lut_path: p.lut_path.clone(),
+      metering_mode: p.metering_mode.clone(),
+      ev_offset: p.ev_offset,
+      target_gray: p.target_gray,
+      enable_boost: p.enable_boost,
+      saturation: p.saturation,
+      contrast: p.contrast,
+      pivot: p.pivot,
+    }
+  }
+}
+
 /// FFI entry point: develop `raw` (already routed to the raw path) into a linear
 /// **ProPhoto D50** RGB image (`RawlerImageDeveloped`) using `params` — the object handed
 /// to the rawalchemy pipeline. This is the *editing* branch of the dual-fork
@@ -92,6 +158,11 @@ pub fn develop(raw: &[u8], params: DevelopParams) -> Result<RawlerImageDeveloped
 /// owns decode + develop, `rawalchemy_fotlab` owns the grade, and Kotlin only
 /// receives the final `Vec<f32>`.
 ///
+/// Which stages run is decided entirely by [`GradeParams`] — an all-`None`
+/// record means "run whatever upstream's defaults say" (gamut + log skipped,
+/// LUT skipped, no metering, upstream's boost defaults). Kotlin therefore reaches
+/// upstream's full parameter surface; this crate adds no policy of its own.
+///
 /// Requires the `rawalchemy` feature (which pulls in the `rawalchemy_fotlab` cxx
 /// crate + the grading static lib). Without it this entry point is not compiled.
 #[cfg(feature = "rawalchemy")]
@@ -99,23 +170,15 @@ pub fn develop(raw: &[u8], params: DevelopParams) -> Result<RawlerImageDeveloped
 pub fn develop_and_grade(
   raw: &[u8],
   params: DevelopParams,
-  log_space: String,
-  lut_path: String,
-  ev_offset: f32,
+  grade_params: GradeParams,
 ) -> Result<Vec<f32>, RawlerFotlabError> {
   if raw.is_empty() {
     return Err(RawlerFotlabError::Decode("empty input".to_string()));
   }
   let dev = develop(raw, params)?;
-  rawalchemy_fotlab::grade(
-    &dev.rgb,
-    dev.width,
-    dev.height,
-    &log_space,
-    &lut_path,
-    ev_offset,
-  )
-  .map_err(|e| RawlerFotlabError::Decode(format!("rawalchemy grade failed: {e}")))
+  let overrides = rawalchemy_fotlab::GradeOverrides::from(&grade_params);
+  rawalchemy_fotlab::grade(&dev.rgb, dev.width, dev.height, &overrides)
+    .map_err(|e| RawlerFotlabError::Decode(format!("rawalchemy grade failed: {e}")))
 }
 
 /// Develop an already-decoded [`RawImage`] into a linear RGB image in the

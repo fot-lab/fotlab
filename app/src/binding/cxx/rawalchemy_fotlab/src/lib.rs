@@ -1,15 +1,24 @@
 //! cxx bridge into the RawAlchemyCpp grading engine.
 //!
-//! `grade` takes the linear **ProPhoto D50** float buffer produced by
-//! `rawler_fotlab`'s editing branch and runs the fused grading pipeline
-//! (gain → saturation/contrast → gamut → log → optional LUT) via the upstream
-//! `rawalchemy::applyGradingFused`. The C++ side lives in `cpp/rawalchemy_shim.cc`.
+//! [`grade`] takes the linear **ProPhoto D50** float buffer produced by
+//! `rawler_fotlab`'s editing branch and runs the upstream fused grading pipeline
+//! (`rawalchemy::applyGradingFused`: gain → saturation/contrast → gamut → log →
+//! optional LUT). The C++ side lives in `cpp/rawalchemy_shim.cc`.
 //!
-//! This crate deliberately does NOT modify the RawAlchemyCpp submodule
-//! (`FOTLAB-RAWLER-000006`): it only calls the public grading API
-//! (`applyGradingFused`, `LOG_SPACES`, `loadCubeLUT`, `GradingParams`,
-//! `ImageBuffer`) and re-implements the small parameter assembly that the
-//! submodule's file-decoding C API keeps in an anonymous-namespace helper.
+//! # Thin pass-through, upstream owns the defaults
+//!
+//! The glue is deliberately NOT a policy layer. It constructs `GradingParams`
+//! with its own upstream defaults and overrides only the fields the caller
+//! actually set; every `Option::None` in [`GradeOverrides`] means "leave the
+//! upstream default" and every empty string means "skip that stage". Nothing here
+//! re-states a value upstream owns, so upstream default changes flow through
+//! (`rules/REVIEW/detail/FOTLAB-RAWLER-000006.md`).
+//!
+//! This crate deliberately does NOT modify the RawAlchemyCpp submodule: it only
+//! calls the public grading API (`applyGradingFused`, `LOG_SPACES`,
+//! `loadCubeLUT`, `computeAutoGain`, `GradingParams`, `ImageBuffer`) and
+//! re-implements the small parameter assembly that the submodule's
+//! file-decoding C API keeps in an anonymous-namespace helper.
 
 #[cxx::bridge]
 mod ffi {
@@ -18,30 +27,93 @@ mod ffi {
         ///
         /// `data` is row-major interleaved `width*height*3` float32 — the same
         /// layout as `rawler_fotlab::RawlerImageDeveloped.rgb`. Returns the graded
-        /// buffer in that same layout. `log_space` names a registered LogSpace
-        /// (e.g. `"F-Log"`, `"S-Log3"`); `lut_path` is an optional `.cube` path
-        /// (`""` = none); `ev_offset` is an additive exposure in stops applied as
-        /// `2^ev_offset` (rawler already applied as-shot exposure, so this is a
-        /// relative tweak).
+        /// buffer in that same layout.
+        ///
+        /// "Unset" is encoded out of band, because cxx has no `Option<f32>`:
+        /// `log_space` / `lut_path` / `metering_mode` empty = that stage is
+        /// skipped; `target_gray` / `saturation` / `contrast` / `pivot` = NaN
+        /// means "leave the upstream `GradingParams` default"; `enable_boost` is
+        /// a tri-state `-1` unset / `0` off / `1` on.
         fn grade(
             data: &[f32],
             width: u32,
             height: u32,
             log_space: &str,
             lut_path: &str,
+            metering_mode: &str,
             ev_offset: f32,
+            target_gray: f32,
+            enable_boost: i32,
+            saturation: f32,
+            contrast: f32,
+            pivot: f32,
         ) -> Result<Vec<f32>, String>;
     }
 }
 
-/// Rust wrapper around the cxx `grade` call. Mirrors the C++ contract.
+/// Sentinel for "the caller did not set `enable_boost`" — leave the upstream
+/// default. Mirrored by `kBoostUnset` in `cpp/rawalchemy_shim.cc`.
+pub const BOOST_UNSET: i32 = -1;
+/// Explicitly switch the saturation/contrast boost off.
+pub const BOOST_OFF: i32 = 0;
+/// Explicitly switch the saturation/contrast boost on.
+pub const BOOST_ON: i32 = 1;
+
+/// Optional overrides for upstream's `rawalchemy::GradingParams`.
+///
+/// **Every field defaults to `None`, i.e. "the engine decides".** The struct
+/// carries no default *values* — only the absence of an opinion, which is what
+/// keeps upstream the single owner of its own defaults.
+#[derive(Debug, Clone, Default)]
+pub struct GradeOverrides {
+    /// Log space name (e.g. `"F-Log"`, `"S-Log3"`). Also selects the
+    /// ProPhoto→target gamut matrix. `None` = skip gamut **and** log encode.
+    pub log_space: Option<String>,
+    /// `.cube` 3D LUT path, applied to the log-encoded image. `None` = no LUT.
+    pub lut_path: Option<String>,
+    /// Metering mode for `computeAutoGain` (e.g. `"matrix"`). `None` = no
+    /// automatic metering; the unmetered base gain stays at unity.
+    pub metering_mode: Option<String>,
+    /// Relative exposure in stops, applied as `2^ev_offset` on top of the
+    /// metered (or unity) gain. `0.0` = as-shot.
+    pub ev_offset: f32,
+    /// Target gray for `computeAutoGain`. `None` = upstream default (`0.18`).
+    /// Only meaningful together with `metering_mode`.
+    pub target_gray: Option<f32>,
+    /// Saturation/contrast boost switch. `None` = upstream default.
+    pub enable_boost: Option<bool>,
+    /// Saturation multiplier. `None` = upstream default.
+    pub saturation: Option<f32>,
+    /// Contrast multiplier. `None` = upstream default.
+    pub contrast: Option<f32>,
+    /// Contrast pivot point. `None` = upstream default.
+    pub pivot: Option<f32>,
+}
+
+/// Rust wrapper around the cxx `grade` call: flattens [`GradeOverrides`] onto the
+/// sentinel-encoded bridge signature documented above.
 pub fn grade(
     data: &[f32],
     width: u32,
     height: u32,
-    log_space: &str,
-    lut_path: &str,
-    ev_offset: f32,
+    overrides: &GradeOverrides,
 ) -> Result<Vec<f32>, String> {
-    ffi::grade(data, width, height, log_space, lut_path, ev_offset)
+    ffi::grade(
+        data,
+        width,
+        height,
+        overrides.log_space.as_deref().unwrap_or(""),
+        overrides.lut_path.as_deref().unwrap_or(""),
+        overrides.metering_mode.as_deref().unwrap_or(""),
+        overrides.ev_offset,
+        overrides.target_gray.unwrap_or(f32::NAN),
+        match overrides.enable_boost {
+            None => BOOST_UNSET,
+            Some(false) => BOOST_OFF,
+            Some(true) => BOOST_ON,
+        },
+        overrides.saturation.unwrap_or(f32::NAN),
+        overrides.contrast.unwrap_or(f32::NAN),
+        overrides.pivot.unwrap_or(f32::NAN),
+    )
 }

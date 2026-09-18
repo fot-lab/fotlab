@@ -20,6 +20,12 @@
 //!     `bound::rawlerimagedeveloped_to_png`, which applies the sRGB transfer function (gamma)
 //!     and clips to [0,1]. This is what Studio renders after the user picks a
 //!     demosaic algorithm from the bottom-bar menu.
+//!   * `develop_and_grade` — *grading* branch (behind the `rawalchemy` feature, on by
+//!     default): same develop as above, but the linear ProPhoto-D50 buffer is handed
+//!     to the rawalchemy grading engine in the same call and the **graded** float
+//!     buffer comes back. Which stages run is chosen entirely by `GradeParams`, whose
+//!     optional fields deliberately expose upstream's full parameter surface
+//!     (`FOTLAB-RAWLER-000006`).
 //!
 //! # Pipeline split (`FOTLAB-FOTRAW-000001`)
 //!

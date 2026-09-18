@@ -47,4 +47,6 @@ uniffi = "0.28"
 image = { version = "0.25", default-features = false, features = ["png"] }
 # Direct Rust→cxx handoff into the rawalchemy grading engine. Optional + feature-
 # gated so the default rawler build stays pure-Rust (see `rawalchemy` feature).
-rawalchemy_fotlab = { path = "../rawalchemy_fotlab", optional = true }
+# The crate lives under binding/cxx/ (the whole bridge is confined there), so the
+# path crosses from rust/ to cxx/ — this is NOT a sibling of rawler_fotlab.
+rawalchemy_fotlab = { path = "../../cxx/rawalchemy_fotlab", optional = true }

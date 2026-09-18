@@ -14,10 +14,20 @@ endif()
 
 set(RA_INC "${RAWALCHEMY_SRC}/include")
 
-# Grading-only subset. All four are STL-only (`#include <omp.h>` +
-# `half_buffer.h`, the latter header-only and aarch64-guarded), so they compile
-# cleanly in isolation without LibRaw / libtiff / turbojpeg / libexif / ONNX
-# (those belong to the decode + NN demosaic paths we deliberately skip).
+# Grading-only subset. All four are STL-only, so they compile cleanly in isolation
+# without LibRaw / libtiff / turbojpeg / libexif / ONNX (those belong to the decode
+# + NN demosaic paths we deliberately skip).
+#
+# OpenMP is deliberately NOT enabled. Upstream turns it on only as
+# `target_compile_definitions(raw_alchemy_core PUBLIC RA_USE_OPENMP)` *after* a
+# successful find_package(OpenMP) — it is not derived from `_OPENMP` anywhere. Since
+# every `#pragma omp` in these files sits inside `#ifdef RA_USE_OPENMP`, passing
+# `-fopenmp` without that definition would parallelise nothing while still making the
+# final link demand a libgomp/libomp runtime — which is exactly the kind of
+# cross-compile dependency we do not want under the NDK. So: no OpenMP here, and
+# `RA_USE_OPENMP` stays undefined, so these files build as plain single-threaded
+# loops. Enabling it later means defining RA_USE_OPENMP *and* proving the runtime
+# links for every Android ABI.
 add_library(rawalchemy_grading STATIC
   "${RAWALCHEMY_SRC}/src/grading_fused.cpp"
   "${RAWALCHEMY_SRC}/src/log_transform.cpp"
@@ -25,16 +35,6 @@ add_library(rawalchemy_grading STATIC
   "${RAWALCHEMY_SRC}/src/metering.cpp"
 )
 target_include_directories(rawalchemy_grading PUBLIC "${RA_INC}")
-
-# OpenMP: resolves libgomp on the host and libomp under the NDK toolchain. Fall
-# back to a bare -fopenmp if FindOpenMP cannot locate the runtime (older NDKs).
-find_package(OpenMP)
-if(OpenMP_CXX_FOUND)
-  target_link_libraries(rawalchemy_grading PRIVATE OpenMP::OpenMP_CXX)
-else()
-  target_compile_options(rawalchemy_grading PRIVATE -fopenmp)
-  target_link_options(rawalchemy_grading INTERFACE -fopenmp)
-endif()
 
 # No RA_BUILDING_SHARED defined -> RA_API expands to nothing (static-friendly).
 
