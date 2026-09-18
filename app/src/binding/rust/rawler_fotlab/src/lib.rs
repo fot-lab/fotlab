@@ -59,8 +59,8 @@ mod decode;
 mod demosaic;
 mod develop;
 mod intermediate;
+mod loaded;
 
-use decode::decode_to_rawimage;
 use develop::DevelopParams;
 
 /// Error type surfaced to Kotlin over UniFFI.
@@ -111,55 +111,25 @@ pub fn identify(raw: &[u8]) -> Option<String> {
 
 /// Call #2 — decode the already-identified RAW to a **grayscale raw preview** PNG.
 ///
-/// Orchestrates the three stages of the canonical RAW intermediate spec
-/// (`FOTLAB-FOTRAW-000001`): decode → `RawImage`, project → `FotRaw`, encode →
-/// PNG. The encode ([`bound::fotraw_to_png`]) is a preview only — it applies no
-/// demosaic / white-balance / colour / gamma, so the result is the undeveloped
-/// sensor dump shown as luminance. Made only after the route resolved to the raw
-/// path, which is why it takes the bytes directly instead of re-running
-/// identification. Any rawler panic is caught and reported as
-/// `RawlerFotlabError::Decode` so the FFI call always returns rather than aborts.
+/// Now delegates to [`loaded::RawlerImageLoaded`]: it decodes once and returns the
+/// resident object, then previews from the cached decode (`FOTLAB-RAWLER-000004`).
+/// The stateless free function keeps its signature so existing callers/tests are
+/// unaffected; the cached-decode path is what `StudioEngine` drives.
 #[uniffi::export]
 pub fn decode_to_png(raw: &[u8]) -> Result<Vec<u8>, RawlerFotlabError> {
-    if raw.is_empty() {
-        return Err(RawlerFotlabError::Decode("empty input".to_string()));
-    }
-    panic::catch_unwind(AssertUnwindSafe(|| {
-        let image = decode_to_rawimage(raw)?;
-        let pixel = intermediate::rawimage_to_fotraw(image)?;
-        bound::fotraw_to_png(&pixel).map_err(RawlerFotlabError::Decode)
-    }))
-    .unwrap_or_else(|_| {
-        Err(RawlerFotlabError::Decode(
-            "rawler panicked during decode".to_string(),
-        ))
-    })
+    let loaded = loaded::RawlerImageLoaded::decode_rawler_image(raw)?;
+    loaded.preview_png()
 }
 
 /// Render call — develop the already-identified RAW and encode it straight to PNG.
 ///
-/// Runs the full develop pipeline ([`develop`]: decode + black/white scaling +
-/// demosaic + crop + calibrate) into a **linear** RGB image, then hands it to
-/// [`bound::linearimage_to_png`], which writes it to PNG **without** applying the
-/// sRGB/BT.709 gamma — the client owns the display transform
-/// (`FOTLAB-RAWLER-000003`). This is the image Studio renders after the user picks
-/// a demosaic algorithm from the bottom-bar menu. Re-runs the whole pipeline
-/// (decode included) on every call, exactly like [`develop`]. Any rawler panic is
-/// caught and reported as `RawlerFotlabError::Decode`.
+/// Now delegates to [`loaded::RawlerImageLoaded`]: decodes once and develops from
+/// the cached decode (`FOTLAB-RAWLER-000004`). The stateless free function keeps
+/// its signature for existing callers; `StudioEngine` drives the cached path.
 #[uniffi::export]
 pub fn develop_to_png(raw: &[u8], params: DevelopParams) -> Result<Vec<u8>, RawlerFotlabError> {
-    if raw.is_empty() {
-        return Err(RawlerFotlabError::Decode("empty input".to_string()));
-    }
-    panic::catch_unwind(AssertUnwindSafe(|| {
-        let image = develop::develop(raw, params)?;
-        bound::linearimage_to_png(&image).map_err(RawlerFotlabError::Decode)
-    }))
-    .unwrap_or_else(|_| {
-        Err(RawlerFotlabError::Decode(
-            "rawler panicked during develop".to_string(),
-        ))
-    })
+    let loaded = loaded::RawlerImageLoaded::decode_rawler_image(raw)?;
+    loaded.develop_to_png(params)
 }
 
 uniffi::setup_scaffolding!();

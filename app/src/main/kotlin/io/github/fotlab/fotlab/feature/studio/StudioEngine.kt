@@ -13,6 +13,8 @@ import io.github.fotlab.fotlab.media.SniffResult
 import io.github.fotlab.fotlab.media.StubRawDecoder
 import io.github.fotlab.fotlab.media.route
 import io.github.fotlab.fotlab_rawler.DemosaicAlgorithm
+import io.github.fotlab.fotlab_rawler.DevelopParams
+import io.github.fotlab.fotlab_rawler.RawlerImageLoaded
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -23,6 +25,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.io.InputStream
 import java.nio.ByteBuffer
+import java.util.concurrent.atomic.AtomicLong
+import kotlin.jvm.Volatile
 
 /**
  * Lower layer of the Studio feature (`FOTLAB-STRUCT-000001`), analogous to `LibraryCore`.
@@ -83,6 +87,10 @@ object StudioEngine {
 
     /** Point the canvas at [uri] (the virtual node's `uri_storage`) and run the render pipeline. */
     fun setCurrentNode(uri: String?) {
+        // Release any previously-held decoded RAW and invalidate in-flight work before switching
+        // (FOTLAB-RAWLER-000004 §lifecycle: exactly one handle per loaded file, at most).
+        loadedImage = null
+        val token = loadNonce.incrementAndGet()
         currentNodeUriState.value = uri
         if (uri == null) {
             renderResultState.value = StudioRenderResult.Idle
@@ -95,10 +103,13 @@ object StudioEngine {
         }
         currentUri = parsed
         renderResultState.value = StudioRenderResult.Loading
-        scope.launch { renderResultState.value = runPipeline(appContext.contentResolver, parsed) }
+        scope.launch {
+            val result = runPipeline(appContext.contentResolver, parsed, token)
+            if (loadNonce.get() == token) renderResultState.value = result
+        }
     }
 
-    private suspend fun runPipeline(resolver: ContentResolver, uri: Uri): StudioRenderResult {
+    private suspend fun runPipeline(resolver: ContentResolver, uri: Uri, token: Long): StudioRenderResult {
         val header = runCatching { resolver.openInputStream(uri)?.use { it.readHeader(Constants.HEADER_BYTES) } }
             .getOrNull()
         if (header == null) return StudioRenderResult.Unsupported
@@ -119,20 +130,24 @@ object StudioEngine {
         // 2) Route, then execute (R8 / Q6, resolved).
         return when (val r = route(verdicts)) {
             is Route.RawToRaster -> {
-                // rawler path — TWO separate calls:
-                //   call #1 (identify) already happened above in FormatSniffer.sniff via RawlerProbe,
-                //   which produced `r.format` + `canDecode`. This is call #2 (decode): hand that format
-                //   to the native bridge so it decodes the already-identified RAW into a grayscale raw
-                //   preview, then render the PNG. `currentFormat` is retained for the later develop call.
-                val png = runCatching {
-                    rawDecoder.decodeToPng(r.format) { resolver.openInputStream(uri) ?: error("cannot open source") }
-                }.getOrNull()
-                if (png != null) {
-                    currentFormat = r.format
-                    StudioRenderResult.Ready(ByteBuffer.wrap(png))
-                } else {
-                    StudioRenderResult.Unsupported
-                }
+                // rawler path — decode exactly ONCE into a resident `RawlerImageLoaded`, then develop it
+                // with all-default params so the as-shot rendered image is shown. Every later develop
+                // (algorithm / exposure change) reuses the same object (no re-decode, no re-cross of the
+                // pixel buffer; FOTLAB-RAWLER-000004). `decode_to_png` (grayscale preview) is retained in
+                // the bridge/Rust but is no longer called here. `currentFormat` is kept for the stateless fallback.
+                val bytes = runCatching { resolver.openInputStream(uri)?.use { it.readBytes() } }
+                    .getOrNull() ?: return StudioRenderResult.Unsupported
+                val loaded = RawlerFotlabBridge.loadRawlerImage(bytes) ?: return StudioRenderResult.Unsupported
+                // A newer node was opened while we decoded: discard so we never clobber the new file's state.
+                if (loadNonce.get() != token) return StudioRenderResult.Unsupported
+                loadedImage = loaded
+                // Develop once with default params (DEFAULT algorithm, 0 EV, as-shot WB); later develops reuse this object.
+                val png = RawlerFotlabBridge.developRawlerImage(
+                    loaded,
+                    DevelopParams(demosaicAlgorithm = DemosaicAlgorithm.DEFAULT, exposureEv = 0.0f, wb = null),
+                ) ?: return StudioRenderResult.Unsupported
+                currentFormat = r.format
+                StudioRenderResult.Ready(ByteBuffer.wrap(png))
             }
             is Route.ToCoil -> StudioRenderResult.Ready(uri)
             is Route.Unsupported -> StudioRenderResult.Unsupported
@@ -155,6 +170,19 @@ object StudioEngine {
 
     /** The exposure compensation (in stops) retained for the next develop re-render. */
     private var currentExposureEv: Float = 0.0f
+
+    /**
+     * The RAW decoded once and held resident as a UniFFI handle; null when no raw file is loaded.
+     * Tied to [currentUri] — there is exactly one at a time (`FOTLAB-RAWLER-000004` §lifecycle).
+     * Releasing it (on file switch) drops the Kotlin reference and lets GC free the native decode.
+     */
+    @Volatile private var loadedImage: RawlerImageLoaded? = null
+
+    /**
+     * Monotonic token bumped on every [setCurrentNode]; in-flight develop/preview coroutines bail if
+     * it changes, so a stale result never paints a different file's canvas (`FOTLAB-RAWLER-000004` §lifecycle).
+     */
+    private val loadNonce = AtomicLong(0)
 
     /** The current exposure compensation in stops; the UI prefills the Exposure dialog from this. */
     fun currentExposureEv(): Float = currentExposureEv
@@ -184,23 +212,36 @@ object StudioEngine {
     /** Shared re-develop path: re-runs the develop pipeline with the retained algorithm + exposure. */
     private fun reDevelop() {
         val uri = currentUri ?: return
-        val format = currentFormat ?: return
+        val token = loadNonce.get()
         renderResultState.value = StudioRenderResult.Loading
         scope.launch {
-            renderResultState.value = runDevelop(appContext.contentResolver, uri, format, currentAlgorithm, currentExposureEv)
+            val result = runDevelop(appContext.contentResolver, uri, token, currentAlgorithm, currentExposureEv)
+            if (loadNonce.get() == token) renderResultState.value = result
         }
     }
 
     private suspend fun runDevelop(
         resolver: ContentResolver,
         uri: Uri,
-        format: String,
+        token: Long,
         algorithm: DemosaicAlgorithm,
         exposureEv: Float,
     ): StudioRenderResult {
-        val png = runCatching {
-            rawDecoder.developToPng(format, algorithm, exposureEv) { resolver.openInputStream(uri) ?: error("cannot open source") }
-        }.getOrNull()
+        // If the file was switched while we were about to develop, bail — never develop a different
+        // file's pixels (FOTLAB-RAWLER-000004 §lifecycle: exactly one handle per current file).
+        if (loadNonce.get() != token) return StudioRenderResult.Unsupported
+        // Reuse the resident decoded image; fall back to a stateless re-decode only if it is absent.
+        val loaded = loadedImage
+        val png = if (loaded != null) {
+            RawlerFotlabBridge.developRawlerImage(
+                loaded,
+                DevelopParams(demosaicAlgorithm = algorithm, exposureEv = exposureEv, wb = null),
+            )
+        } else {
+            rawDecoder.developToPng(currentFormat ?: "", algorithm, exposureEv) {
+                resolver.openInputStream(uri) ?: error("cannot open source")
+            }
+        }
         return if (png != null) StudioRenderResult.Ready(ByteBuffer.wrap(png)) else StudioRenderResult.Unsupported
     }
 }

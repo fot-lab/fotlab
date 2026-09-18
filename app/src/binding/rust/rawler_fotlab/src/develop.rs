@@ -54,58 +54,73 @@ pub struct DevelopParams {
 }
 
 /// FFI entry point: develop `raw` (already routed to the raw path) into a linear
-/// RGB image using `params`. Re-runs the full pipeline on every call.
+/// RGB image using `params`. Re-runs the full pipeline (decode included) on every
+/// call; the cached-decode path lives in [`crate::loaded::RawlerImageLoaded`]
+/// (`FOTLAB-RAWLER-000004`).
 #[uniffi::export]
 pub fn develop(raw: &[u8], params: DevelopParams) -> Result<LinearImage, RawlerFotlabError> {
   if raw.is_empty() {
     return Err(RawlerFotlabError::Decode("empty input".to_string()));
   }
   panic::catch_unwind(AssertUnwindSafe(|| {
-    let mut image = decode_to_rawimage(raw)?;
-    image
-      .apply_scaling()
-      .map_err(|e| RawlerFotlabError::Decode(e.to_string()))?;
-
-    // Move the scaled f32 pixels OUT of the RawImage before demosaic so the
-    // ~210 MB (50 MP) buffer is handed over zero-copy instead of duplicated;
-    // the now-empty image still carries every metadata field the later stages
-    // read (CFA/photometric, color matrix, wb, active/crop areas).
-    let mut pixels = take_scaled_pixels(&mut image)?;
-
-    // Apply exposure compensation as a linear gain `2^exposure_ev` to the
-    // *single-channel* scaled mosaic, BEFORE demosaic. This is one multiply per
-    // photosite (N) instead of per output channel (3N/4N) after demosaic, and is
-    // mathematically identical because demosaic is a linear interpolation and the
-    // gain is uniform across channels. Skipped entirely when ev == 0 (the
-    // as-shot default), so the common no-compensation path pays nothing.
-    let ev_scale = 2f32.powf(params.exposure_ev);
-    if ev_scale != 1.0 {
-      for p in pixels.iter_mut() {
-        *p *= ev_scale;
-      }
-    }
-
-    // Demosaic stage — its ROI is already active_area, exactly like rawler's
-    // Demosaic + FujiRotate + CropActiveArea steps.
-    let intermediate = demosaic(&image, pixels, params.demosaic_algorithm)?;
-
-    let wb = params.wb.as_ref().map(|v| {
-      let mut a = [1.0f32; 4];
-      for (i, x) in v.iter().take(4).enumerate() {
-        a[i] = *x;
-      }
-      a
-    });
-
-    // Calibrate first, then CropDefault — the same order as rawler's
-    // `RawDevelop::develop_intermediate` (Calibrate → CropDefault). Both are
-    // per-pixel/rect-selection operations, so order is numerically equivalent,
-    // but keeping the identical order means the crop coordinates resolve
-    // exactly the way upstream resolves them.
-    let linear = calibrate(intermediate, &image, wb)?;
-    Ok(crop_default(&image, linear))
+    let image = decode_to_rawimage(raw)?;
+    develop_image(image, params)
   }))
   .unwrap_or_else(|_| Err(RawlerFotlabError::Decode("rawler panicked during develop".to_string())))
+}
+
+/// Develop an already-decoded [`RawImage`] into a linear RGB image (no gamma).
+///
+/// Shared by the stateless `develop` FFI entry point and
+/// `crate::loaded::RawlerImageLoaded::develop_to_png` (which reuses a cached
+/// decode). The pipeline mutates `image` in place — callers that must keep their
+/// `RawImage` must clone it first (`FOTLAB-RAWLER-000004` §clone).
+pub(crate) fn develop_image(
+  mut image: RawImage,
+  params: DevelopParams,
+) -> Result<LinearImage, RawlerFotlabError> {
+  image
+    .apply_scaling()
+    .map_err(|e| RawlerFotlabError::Decode(e.to_string()))?;
+
+  // Move the scaled f32 pixels OUT of the RawImage before demosaic so the
+  // ~210 MB (50 MP) buffer is handed over zero-copy instead of duplicated;
+  // the now-empty image still carries every metadata field the later stages
+  // read (CFA/photometric, color matrix, wb, active/crop areas).
+  let mut pixels = take_scaled_pixels(&mut image)?;
+
+  // Apply exposure compensation as a linear gain `2^exposure_ev` to the
+  // *single-channel* scaled mosaic, BEFORE demosaic. This is one multiply per
+  // photosite (N) instead of per output channel (3N/4N) after demosaic, and is
+  // mathematically identical because demosaic is a linear interpolation and the
+  // gain is uniform across channels. Skipped entirely when ev == 0 (the
+  // as-shot default), so the common no-compensation path pays nothing.
+  let ev_scale = 2f32.powf(params.exposure_ev);
+  if ev_scale != 1.0 {
+    for p in pixels.iter_mut() {
+      *p *= ev_scale;
+    }
+  }
+
+  // Demosaic stage — its ROI is already active_area, exactly like rawler's
+  // Demosaic + FujiRotate + CropActiveArea steps.
+  let intermediate = demosaic(&image, pixels, params.demosaic_algorithm)?;
+
+  let wb = params.wb.as_ref().map(|v| {
+    let mut a = [1.0f32; 4];
+    for (i, x) in v.iter().take(4).enumerate() {
+      a[i] = *x;
+    }
+    a
+  });
+
+  // Calibrate first, then CropDefault — the same order as rawler's
+  // `RawDevelop::develop_intermediate` (Calibrate → CropDefault). Both are
+  // per-pixel/rect-selection operations, so order is numerically equivalent,
+  // but keeping the identical order means the crop coordinates resolve
+  // exactly the way upstream resolves them.
+  let linear = calibrate(intermediate, &image, wb)?;
+  Ok(crop_default(&image, linear))
 }
 
 /// Take ownership of the scaled f32 pixel buffer from [RawImage] without a

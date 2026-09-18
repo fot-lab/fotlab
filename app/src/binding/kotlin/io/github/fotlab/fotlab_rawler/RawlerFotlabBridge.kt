@@ -36,4 +36,20 @@ object RawlerFotlabBridge {
     /** Develop call: demosaic + calibrate into a linear PNG using [params], or null on failure / absent library. */
     fun developRawToPng(raw: ByteArray, params: DevelopParams): ByteArray? =
         runCatching { developToPng(raw, params) }.getOrNull()
+
+    /**
+     * Load (decode once) a RAW into a resident [RawlerImageLoaded] held by Kotlin as a UniFFI
+     * handle — the slow decode runs exactly once here. Returns null on failure / absent library.
+     * This object is the cache the preview/develop calls reuse (`FOTLAB-RAWLER-000004`).
+     */
+    fun loadRawlerImage(raw: ByteArray): RawlerImageLoaded? =
+        runCatching { decodeRawlerImage(raw) }.getOrNull()
+
+    /** Grayscale raw-preview PNG from an already-loaded image — no re-decode; null on failure. */
+    fun previewRawlerImage(loaded: RawlerImageLoaded): ByteArray? =
+        runCatching { loaded.previewPng() }.getOrNull()
+
+    /** Develop an already-loaded image into a linear PNG — no re-decode; null on failure. */
+    fun developRawlerImage(loaded: RawlerImageLoaded, params: DevelopParams): ByteArray? =
+        runCatching { loaded.developToPng(params) }.getOrNull()
 }
