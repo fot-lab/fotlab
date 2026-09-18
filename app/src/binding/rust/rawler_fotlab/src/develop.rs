@@ -85,6 +85,39 @@ pub fn develop(raw: &[u8], params: DevelopParams) -> Result<RawlerImageDeveloped
   .unwrap_or_else(|_| Err(RawlerFotlabError::Decode("rawler panicked during develop".to_string())))
 }
 
+/// Develop `raw` into linear ProPhoto-D50 and immediately hand the buffer to the
+/// rawalchemy grading engine, returning the graded float buffer (e.g. F-Gamut +
+/// F-Log). This is the single Rust→cxx hop that replaces the earlier
+/// Kotlin-mediated handoff (`rules/REVIEW/detail/FOTLAB-RAWLER-000006`): rawler
+/// owns decode + develop, `rawalchemy_fotlab` owns the grade, and Kotlin only
+/// receives the final `Vec<f32>`.
+///
+/// Requires the `rawalchemy` feature (which pulls in the `rawalchemy_fotlab` cxx
+/// crate + the grading static lib). Without it this entry point is not compiled.
+#[cfg(feature = "rawalchemy")]
+#[uniffi::export]
+pub fn develop_and_grade(
+  raw: &[u8],
+  params: DevelopParams,
+  log_space: String,
+  lut_path: String,
+  ev_offset: f32,
+) -> Result<Vec<f32>, RawlerFotlabError> {
+  if raw.is_empty() {
+    return Err(RawlerFotlabError::Decode("empty input".to_string()));
+  }
+  let dev = develop(raw, params)?;
+  rawalchemy_fotlab::grade(
+    &dev.rgb,
+    dev.width,
+    dev.height,
+    &log_space,
+    &lut_path,
+    ev_offset,
+  )
+  .map_err(|e| RawlerFotlabError::Decode(format!("rawalchemy grade failed: {e}")))
+}
+
 /// Develop an already-decoded [`RawImage`] into a linear RGB image in the
 /// requested [`WorkingSpace`] (no gamma).
 ///

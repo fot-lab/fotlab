@@ -23,6 +23,11 @@ path = "src/lib.rs"
 # Enables the `uniffi-bindgen` binary below. Kept out of the default build so the
 # shipped cdylib does not carry the bindgen CLI (clap) with it.
 cli = ["uniffi/cli"]
+# Wires the rawler develop pipeline straight into the rawalchemy grading engine
+# (`rawalchemy_fotlab` cxx bridge). OFF by default so the standard rawler CI build
+# needs neither a C++ toolchain nor the RawAlchemyCpp submodule. Turn it on for the
+# dev/Android build that actually links the grading static lib.
+rawalchemy = ["dep:rawalchemy_fotlab"]
 
 [[bin]]
 name = "uniffi-bindgen"
@@ -36,3 +41,6 @@ uniffi = "0.28"
 # PNG only: the binding emits PNG (R3 of FOTLAB-STUDIO-000001). Disabling default
 # features avoids pulling every image format the `image` crate can decode.
 image = { version = "0.25", default-features = false, features = ["png"] }
+# Direct Rust→cxx handoff into the rawalchemy grading engine. Optional + feature-
+# gated so the default rawler build stays pure-Rust (see `rawalchemy` feature).
+rawalchemy_fotlab = { path = "../rawalchemy_fotlab", optional = true }
