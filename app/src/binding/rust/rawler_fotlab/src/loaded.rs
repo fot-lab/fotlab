@@ -25,7 +25,7 @@ use crate::{decode::decode_to_rawimage, RawlerFotlabError};
 /// the generated Kotlin class holds that handle and its `finalize` drops the `Arc`
 /// (releasing the native memory) once Kotlin lets go of it — so releasing on a file
 /// switch is just dropping the Kotlin reference (`FOTLAB-RAWLER-000004` §lifecycle).
-#[uniffi::export]
+#[derive(uniffi::Object)]
 pub struct RawlerImageLoaded {
     inner: Arc<RawImage>,
 }

@@ -117,7 +117,7 @@ pub fn identify(raw: &[u8]) -> Option<String> {
 /// unaffected; the cached-decode path is what `StudioEngine` drives.
 #[uniffi::export]
 pub fn decode_to_png(raw: &[u8]) -> Result<Vec<u8>, RawlerFotlabError> {
-    let loaded = loaded::RawlerImageLoaded::decode_rawler_image(raw)?;
+    let loaded = loaded::decode_rawler_image(raw)?;
     loaded.preview_png()
 }
 
@@ -128,7 +128,7 @@ pub fn decode_to_png(raw: &[u8]) -> Result<Vec<u8>, RawlerFotlabError> {
 /// its signature for existing callers; `StudioEngine` drives the cached path.
 #[uniffi::export]
 pub fn develop_to_png(raw: &[u8], params: DevelopParams) -> Result<Vec<u8>, RawlerFotlabError> {
-    let loaded = loaded::RawlerImageLoaded::decode_rawler_image(raw)?;
+    let loaded = loaded::decode_rawler_image(raw)?;
     loaded.develop_to_png(params)
 }
 
