@@ -183,6 +183,16 @@ jobs:
 
       # `cargo ndk -o <dir>` writes <dir>/<abi>/librawler_fotlab.so directly in the
       # jniLibs layout Gradle expects, so no ABI->triple mapping is needed here.
+      # The rawalchemy grading build (rawalchemy_fotlab build.rs) drives cmake to
+      # compile the grading-only subset of RawAlchemyCpp, so the native job now needs
+      # a cmake binary on PATH. Install it only if missing (ubuntu-26.04 ships it).
+      - name: Install cmake (rawalchemy grading build needs it)
+        run: |
+          if ! command -v cmake >/dev/null 2>&1; then
+            sudo apt-get update && sudo apt-get install -y cmake
+          fi
+        shell: bash
+
       - name: Build librawler_fotlab.so for all ABIs
         run: |
           set -euo pipefail

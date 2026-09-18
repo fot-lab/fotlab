@@ -24,10 +24,14 @@ path = "src/lib.rs"
 # shipped cdylib does not carry the bindgen CLI (clap) with it.
 cli = ["uniffi/cli"]
 # Wires the rawler develop pipeline straight into the rawalchemy grading engine
-# (`rawalchemy_fotlab` cxx bridge). OFF by default so the standard rawler CI build
-# needs neither a C++ toolchain nor the RawAlchemyCpp submodule. Turn it on for the
-# dev/Android build that actually links the grading static lib.
+# (`rawalchemy_fotlab` cxx bridge). ON by default: the shipped `librawler_fotlab.so`
+# links the grading static lib, so the native build needs the C++ toolchain + the
+# RawAlchemyCpp submodule + (for Android) the NDK cmake toolchain — `rawalchemy_fotlab`
+# build.rs passes it through. Slim CI builds can opt out with `--no-default-features`.
 rawalchemy = ["dep:rawalchemy_fotlab"]
+
+# Default feature set for the shipped library.
+default = ["rawalchemy"]
 
 [[bin]]
 name = "uniffi-bindgen"

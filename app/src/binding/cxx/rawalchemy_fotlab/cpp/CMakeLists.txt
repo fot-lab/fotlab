@@ -25,8 +25,17 @@ add_library(rawalchemy_grading STATIC
   "${RAWALCHEMY_SRC}/src/metering.cpp"
 )
 target_include_directories(rawalchemy_grading PUBLIC "${RA_INC}")
-target_compile_options(rawalchemy_grading PRIVATE -fopenmp -Wall)
+
+# OpenMP: resolves libgomp on the host and libomp under the NDK toolchain. Fall
+# back to a bare -fopenmp if FindOpenMP cannot locate the runtime (older NDKs).
+find_package(OpenMP)
+if(OpenMP_CXX_FOUND)
+  target_link_libraries(rawalchemy_grading PRIVATE OpenMP::OpenMP_CXX)
+else()
+  target_compile_options(rawalchemy_grading PRIVATE -fopenmp)
+  target_link_options(rawalchemy_grading INTERFACE -fopenmp)
+endif()
+
 # No RA_BUILDING_SHARED defined -> RA_API expands to nothing (static-friendly).
-target_link_options(rawalchemy_grading INTERFACE -fopenmp)
 
 install(TARGETS rawalchemy_grading ARCHIVE DESTINATION lib)
