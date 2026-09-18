@@ -29,7 +29,7 @@ class RawlerFotlabDecoder : RawDecoder {
     override suspend fun developToPng(
         format: String,
         algorithm: DemosaicAlgorithm,
-        exposureEv: Float = 0.0f,
+        exposureEv: Float,
         open: suspend () -> InputStream,
     ): ByteArray? {
         val bytes = runCatching { open().use { it.readBytes() } }.getOrNull() ?: return null

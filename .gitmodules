@@ -24,3 +24,7 @@
 	path = external/rawdb
 	url = ../rawdb.git
 	branch = main
+[submodule "external/RapidRAW"]
+	path = external/RapidRAW
+	url = ../RapidRAW.git
+	branch = main
