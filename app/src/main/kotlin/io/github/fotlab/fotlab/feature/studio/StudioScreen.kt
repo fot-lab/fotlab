@@ -451,9 +451,9 @@ private fun StudioDrawer(
  *    default (which is on) — the engine maps it to `enableBoost = false`.
  *  * **LOG** — none (skip gamut + log stages) plus every log curve rawalchemy accepts; the name
  *    list is enumerated natively from upstream's `LOG_SPACES`, not mirrored here.
- *  * **LUT** — "Choose file…" launches the unrestricted (`*/*`) SAF picker; the picked file is
- *    copied to a native-readable cache path by [StudioEngine]. none removes it. The selected
- *    file's name is shown on the chip.
+ *  * **LUT** — "Choose file…" launches the unrestricted SAF picker (wildcard MIME filter, any
+ *    file type selectable); the picked file is copied to a native-readable cache path by
+ *    [StudioEngine]. none removes it. The selected file's name is shown on the chip.
  *
  * Any non-none selection re-renders the grade fork (resident RAW re-developed with the retained
  * demosaic/exposure/WB, then graded); back to all-none returns the canvas to the sRGB develop fork.

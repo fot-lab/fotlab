@@ -277,12 +277,13 @@ object StudioEngine {
     }
 
     /**
-     * Accept a SAF-picked LUT [uri] with no format restriction (per product spec the picker is
-     * `*/*`; rawalchemy validates the contents as a `.cube` 3D LUT). The native grader only reads
-     * real filesystem paths, never `content://` URIs, so the bytes are copied into an app-private
-     * cache file (content-addressed by SHA-256, display extension retained) and that path is what
-     * crosses the FFI. A copy failure is reported via [gradeError] without changing the selection;
-     * a bad LUT file surfaces when the native grade runs.
+     * Accept a SAF-picked LUT [uri] with no format restriction (the picker launches with the
+     * wildcard MIME filter — every file type is selectable; rawalchemy validates the contents as a
+     * `.cube` 3D LUT). The native grader only reads real filesystem paths, never `content://` URIs,
+     * so the bytes are copied into an app-private cache file (content-addressed by SHA-256, display
+     * extension retained) and that path is what crosses the FFI. A copy failure is reported via
+     * [gradeError] without changing the selection; a bad LUT file surfaces when the native grade
+     * runs.
      */
     fun setGradeLut(uri: Uri) {
         val token = loadNonce.get()
