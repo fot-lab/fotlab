@@ -123,6 +123,58 @@ fn main() {
     // defined for this target, so no `#pragma omp` is compiled and no OMP
     // runtime is needed (see cpp/CMakeLists.txt).
     if target.contains("android") {
+        // rustc resolves `static=` archives ITSELF before invoking the linker
+        // (unlike dylibs, which clang finds through its implicit sysroot), so
+        // the NDK STL directory must be added explicitly with -L. The static
+        // STL moved into the sysroot in NDK r27; keep the legacy
+        // sources/cxx-stl path as a fallback for older NDKs.
+        let ndk = env::var("ANDROID_NDK_HOME")
+            .or_else(|_| env::var("ANDROID_NDK_ROOT"))
+            .expect(
+                "rawalchemy_fotlab: ANDROID_NDK_HOME/ANDROID_NDK_ROOT must be set to build for Android",
+            );
+        let (llvm_triple, abi) = match target.as_str() {
+            "aarch64-linux-android" => ("aarch64-linux-android", "arm64-v8a"),
+            "armv7-linux-androideabi" => ("arm-linux-androideabi", "armeabi-v7a"),
+            "i686-linux-android" => ("i686-linux-android", "x86"),
+            "x86_64-linux-android" => ("x86_64-linux-android", "x86_64"),
+            other => panic!("rawalchemy_fotlab: unsupported Android target `{other}`"),
+        };
+        let host_tags = match (std::env::consts::OS, std::env::consts::ARCH) {
+            ("linux", "x86_64") => vec!["linux-x86_64"],
+            ("windows", "x86_64") => vec!["windows-x86_64"],
+            ("macos", "aarch64") => vec!["darwin-aarch64", "darwin-x86_64"],
+            ("macos", "x86_64") => vec!["darwin-x86_64"],
+            (os, arch) => panic!("rawalchemy_fotlab: unsupported build host {os}/{arch}"),
+        };
+        let mut stl_dirs: Vec<String> = Vec::new();
+        for host in &host_tags {
+            let sysroot_dir = Path::new(&ndk)
+                .join("toolchains/llvm/prebuilt")
+                .join(host)
+                .join("sysroot/usr/lib")
+                .join(llvm_triple);
+            if sysroot_dir.is_dir() {
+                stl_dirs.push(sysroot_dir.to_string_lossy().into_owned());
+            }
+            let legacy_dir = Path::new(&ndk)
+                .join("sources/cxx-stl/llvm-libc++/libs")
+                .join(abi);
+            if legacy_dir.is_dir() {
+                stl_dirs.push(legacy_dir.to_string_lossy().into_owned());
+            }
+        }
+        let found_stl = stl_dirs
+            .iter()
+            .any(|dir| Path::new(dir).join("libc++_static.a").is_file());
+        assert!(
+            found_stl,
+            "rawalchemy_fotlab: libc++_static.a not found under NDK {ndk} \
+             (checked {stl_dirs:?}); need NDK r23+ with the c++_static runtime"
+        );
+        for dir in &stl_dirs {
+            println!("cargo:rustc-link-search=native={dir}");
+        }
         println!("cargo:rustc-link-lib=static=c++_static");
         println!("cargo:rustc-link-lib=static=c++abi");
     } else {
