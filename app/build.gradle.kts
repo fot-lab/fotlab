@@ -167,6 +167,9 @@ dependencies {
     androidTestImplementation(libs.androidx.test.core)
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.runner)
+    // Intents.intending(): stub the system DocumentsUI answer of the grade bar's
+    // OpenDocument contract (the SAF picker lives outside the app process).
+    androidTestImplementation(libs.androidx.test.espresso.intents)
     // Compose UI tests (ZoomableGestureTest): the rule injects real multi-pointer events through
     // `performTouchInput`; `ui-test-manifest` supplies the empty activity the rule launches.
     // Both are BOM-managed, hence the platform() line on the androidTest configuration too.

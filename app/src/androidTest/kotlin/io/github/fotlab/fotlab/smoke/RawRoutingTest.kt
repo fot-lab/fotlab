@@ -1,8 +1,11 @@
 package io.github.fotlab.fotlab.smoke
 
 import android.Manifest
+import android.app.Activity
+import android.app.Instrumentation
 import android.content.ContentUris
 import android.content.ContentValues
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaScannerConnection
@@ -18,6 +21,10 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.test.espresso.intent.Intents
+import androidx.test.espresso.intent.Intents.intended
+import androidx.test.espresso.intent.Intents.intending
+import androidx.test.espresso.intent.matcher.IntentMatchers.hasAction
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.fotlab.fotlab.MainActivity
@@ -819,6 +826,106 @@ class RawRoutingTest {
         java.security.MessageDigest.getInstance("SHA-256").digest(bytes)
             .joinToString("") { "%02x".format(it) }
 
+    /**
+     * The USER's LUT journey at UI level: tap the grade bar's LUT chip → the "pick" menu item →
+     * the [androidx.activity.result.contract.ActivityResultContracts.OpenDocument] contract fires
+     * the system file picker → the picked `content://` uri flows through the real
+     * `rememberLauncherForActivityResult` callback into [StudioEngine.setGradeLut] → the canvas
+     * re-renders.
+     *
+     * The system DocumentsUI is an activity in ANOTHER process that a Compose test cannot drive
+     * for real; the standard instrumentation technique is espresso-intents: [Intents.intending]
+     * stubs the picker's response with a `content://` uri that points at the REAL downloaded cube
+     * (republished into MediaStore by [pushedLutAsContentUri]), and [Intents.intended] afterwards
+     * proves the app actually launched the picker intent. Everything app-side is production code:
+     * chip click, menu item, contract launch, result delivery, cache copy, native LUT apply.
+     *
+     * Assertions: the picker intent fired and was answered, pixels moved, no grade error, the
+     * selection carries the cube's display name, the chip relabels to the picked file, and the
+     * chip's "clear" item deterministically restores the as-shot develop frame.
+     */
+    @Test
+    fun lutChipOpensSystemPickerAndAppliesDownloadedCube() {
+        // Engine-level setup (same entry points the grid journey ends in; the grid/viewer detour
+        // is already covered by the other tests and each RAW develop costs emulator minutes).
+        val uri = indexAndFind(panasonicRw2)
+            ?: throw AssertionError("Panasonic RW2 not on the SD card at /sdcard/Pictures/rawdb/${panasonicRw2.file}")
+        runBlocking { LibraryCore.importUris(parentId = null, uris = listOf(uri)) }
+        val node = runBlocking { LibraryCore.getByUri(uri.toString()) }!!
+        StudioEngine.setCurrentNode(node.uriStorage)
+        val initial = runBlocking {
+            withTimeout(DECODE_TIMEOUT_MS) {
+                StudioEngine.renderResult
+                    .filterNot { it is StudioRenderResult.Idle || it is StudioRenderResult.Loading }
+                    .first()
+            }
+        }
+        assertTrue("as-shot develop must reach Ready", initial is StudioRenderResult.Ready)
+        val asShotBytes = toBytes((initial as StudioRenderResult.Ready).model)
+
+        // The REAL Studio grade bar, with a RAW resident so the LUT chip exists.
+        hostContent { AppTheme { StudioScreen() } }
+        val none = context.getString(R.string.studio_grade_none)
+        val lutChipNone = context.getString(R.string.studio_grade_bar_lut, none)
+        composeRule.waitUntil(30_000) {
+            composeRule.onAllNodesWithText(lutChipNone).fetchSemanticsNodes().isNotEmpty()
+        }
+        assertEquals(StudioEngine.GradeSelection(), StudioEngine.gradeSelection.value)
+
+        // Stub the system file picker to answer with the downloaded cube's content uri, then
+        // walk the real UI: chip -> "pick" item -> OpenDocument -> result delivery.
+        val lutUri = pushedLutAsContentUri()
+        Intents.init()
+        try {
+            intending(hasAction(Intent.ACTION_OPEN_DOCUMENT))
+                .respondWith(Instrumentation.ActivityResult(Activity.RESULT_OK, Intent().setData(lutUri)))
+
+            composeRule.onNodeWithText(lutChipNone).performClick()
+            val pick = context.getString(R.string.studio_grade_lut_pick)
+            composeRule.waitUntil(30_000) {
+                composeRule.onAllNodesWithText(pick).fetchSemanticsNodes().isNotEmpty()
+            }
+            composeRule.onNodeWithText(pick).performClick()
+            step("lut-ui", "tapped the LUT chip and the pick item — OpenDocument launched")
+
+            // The launcher really fired (and only our stub answered it — no real picker ran).
+            intended(hasAction(Intent.ACTION_OPEN_DOCUMENT))
+
+            // setGradeLut ran through the real callback: re-grade moves pixels, no error.
+            val graded = runBlocking {
+                withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame(requireDifferentFrom = asShotBytes) }
+            }
+            assertNull("LUT pick via the UI must not surface a grade error", StudioEngine.gradeError.value)
+            assertEquals(LUT_FIXTURE_NAME, StudioEngine.gradeSelection.value.lutName)
+            // MiddleEllipsis-style labels keep the trailing suffix; ".cube" is the part guaranteed
+            // to still be on the chip after the long cube name truncates.
+            composeRule.waitUntil(30_000) {
+                composeRule.onAllNodesWithText(".cube", substring = true).fetchSemanticsNodes().isNotEmpty()
+            }
+            step("lut-ui", "chip relabeled to the picked cube; graded ${graded.bytes.size} bytes")
+
+            // The chip's clear item returns the canvas to the as-shot develop frame.
+            composeRule.onAllNodesWithText(".cube", substring = true)[0].performClick()
+            val clear = context.getString(R.string.studio_grade_lut_clear)
+            composeRule.waitUntil(30_000) {
+                composeRule.onAllNodesWithText(clear).fetchSemanticsNodes().isNotEmpty()
+            }
+            composeRule.onNodeWithText(clear).performClick()
+            step("lut-ui", "tapped the clear item")
+            val restored = runBlocking {
+                withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame(requireDifferentFrom = graded.bytes) }
+            }
+            assertTrue(
+                "clearing the LUT via the chip must restore the as-shot develop frame",
+                restored.bytes.contentEquals(asShotBytes),
+            )
+            assertNull(StudioEngine.gradeSelection.value.lutPath)
+        } finally {
+            Intents.release()
+            StudioEngine.setCurrentNode(null)
+        }
+    }
+
     /** The grade bar is a RAW-only surface: the Coil/PNG route must keep it off-screen. */
     @Test
     fun gradeBarIsHiddenOnPngRoute() {
@@ -1070,9 +1177,15 @@ class RawRoutingTest {
          * The grade-LUT fixture, fetched from fot-lab/V-Log-Alchemy by `smoke_emulator.yaml`:
          * a 33-point creative cube that expects V-Log/V-Gamut input. [LUT_FIXTURE_REF] is the
          * submodule commit the SHA-256 was taken from (external/V-Log-Alchemy tracks main).
+         *
+         * The hash pins the repository BLOB (LF line endings). Do NOT re-derive it from a
+         * Windows working-tree copy of the submodule: git may check the cube out with CRLF
+         * (that wrong hash silently shipped once and the CI checksum guard caught it). Rebuild
+         * it with `git cat-file blob HEAD:<path> | sha256sum` or from the raw.githubusercontent
+         * download.
          */
         const val LUT_FIXTURE_NAME = "FLog2C_to_CLASSIC-Neg_VLog.cube"
-        const val LUT_FIXTURE_SHA256 = "793e3ed0e049f582f4d5046665a003dc4700d84007f84e63a0975784bb9afdd7"
+        const val LUT_FIXTURE_SHA256 = "3e2da957fc86cbe06d382ec68ae653df7a70d2de577d521c829b48d7c5a37d02"
         const val LUT_FIXTURE_REF = "e51ba9a23458ff5c316f630b860eb0201139d126"
     }
 }

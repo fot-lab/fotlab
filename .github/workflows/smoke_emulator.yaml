@@ -211,6 +211,9 @@ jobs:
       # external/V-Log-Alchemy submodule commit so an upstream rewrite fails the smoke loudly
       # instead of silently changing what the journey exercises. The cube is a 33-point creative
       # LUT that expects V-Log/V-Gamut INPUT (`#LUMIXPHOTOSTYLE VLOG`), matching our V-Log stage.
+      # NOTE on the hash: it pins the repository blob (LF). A Windows checkout of the submodule
+      # may hold a CRLF variant whose hash differs — derive the pin from
+      # `git cat-file blob`/raw.githubusercontent, never from a working-tree copy.
       - name: Download V-Log grade LUT cube
         run: |
           set -euo pipefail
@@ -219,7 +222,7 @@ jobs:
           curl -fL --retry 3 --retry-delay 5 \
             -o "lut-samples/FLog2C_to_CLASSIC-Neg_VLog.cube" \
             "$base/Luts/Fujifilm/FLog2C_to_CLASSIC-Neg_VLog.cube"
-          echo "793e3ed0e049f582f4d5046665a003dc4700d84007f84e63a0975784bb9afdd7  lut-samples/FLog2C_to_CLASSIC-Neg_VLog.cube" | sha256sum -c -
+          echo "3e2da957fc86cbe06d382ec68ae653df7a70d2de577d521c829b48d7c5a37d02  lut-samples/FLog2C_to_CLASSIC-Neg_VLog.cube" | sha256sum -c -
           ls -l lut-samples
         shell: bash
 
