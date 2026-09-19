@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.IosShare
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material.icons.filled.SelectAll
@@ -216,6 +217,15 @@ fun LibraryScreen(
                     // rename dialog with the current name prefilled.
                     val id = selectedIds.singleOrNull()
                     renameTarget = children.firstOrNull { it.fsNodeId == id }
+                },
+                // Same wiring as the viewer's "open in Studio": resolve the single selected node,
+                // hand its uri to the studio engine, and switch to Studio. Lets files the viewer
+                // cannot preview reach Studio's decoder in one tap from the bar.
+                onOpenInStudio = {
+                    val id = selectedIds.singleOrNull()
+                    children.firstOrNull { it.fsNodeId == id }?.uriStorage
+                        ?.let { StudioEngine.setCurrentNode(it) }
+                    onNavigateToStudio()
                 },
                 // Export shape is undecided (`FOTLAB-UIXDES-000004` Q6): the slot is
                 // present as required by R4, the behaviour is added when Q6 is settled.
@@ -476,6 +486,7 @@ private fun LibraryTopBar(
     onDelete: () -> Unit,
     onExitSelection: () -> Unit,
     onRename: () -> Unit,
+    onOpenInStudio: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var overflowOpen by remember { mutableStateOf(false) }
@@ -530,6 +541,16 @@ private fun LibraryTopBar(
                             Icon(
                                 imageVector = Icons.Filled.DriveFileRenameOutline,
                                 contentDescription = stringResource(id = R.string.library_cd_rename),
+                            )
+                        }
+                        // Open the single selected node in Studio straight from the bar. This is the
+                        // quick path for files the viewer cannot preview: it routes them into
+                        // Studio's decoder the same way the viewer's "open in Studio" does
+                        // (`FOTLAB-UIXDES`, selection bar).
+                        IconButton(onClick = onOpenInStudio) {
+                            Icon(
+                                imageVector = Icons.Filled.AddPhotoAlternate,
+                                contentDescription = stringResource(id = R.string.library_viewer_cd_open_in_studio),
                             )
                         }
                     } else {
