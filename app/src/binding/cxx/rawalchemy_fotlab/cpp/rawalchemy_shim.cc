@@ -130,8 +130,11 @@ rust::Vec<float> grade(rust::Slice<const float> data,
 // with no glue change.
 rust::Vec<rust::String> log_spaces() {
   rust::Vec<rust::String> out;
-  out.reserve(LOG_SPACES.size());
-  for (const auto& entry : LOG_SPACES) {
+  // `LOG_SPACES` lives in upstream's `rawalchemy` namespace (color_data.h); the
+  // `using namespace rawalchemy;` inside `grade` above does not extend here.
+  const auto& spaces = rawalchemy::LOG_SPACES;
+  out.reserve(spaces.size());
+  for (const auto& entry : spaces) {
     out.push_back(rust::String(entry.first));
   }
   return out;
