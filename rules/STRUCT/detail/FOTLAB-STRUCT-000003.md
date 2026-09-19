@@ -76,3 +76,8 @@ plus the companion rule that two components must not implement the same role und
   components under different names. Established in code by renaming `FotLabApplication` →
   `MainApplication` and removing the redundant `FotLabApp` / `FotLabBottomBar` (unused duplicates of
   `MainWindowFrame` / `MainNavigationBar`).
+- 2026-09-20 — Follow-through of the role-based naming rule: `MainNavigationBar` was renamed to
+  `MainWindowNavBar` (function-based, position-independent) when the nav bar moved to the top of
+  the window, and the per-screen bars became `LibraryScreenFunBar` / `StudioScreenFunBar` /
+  `RecycleScreenFunBar`. The body above is the 2026-09-08 record and keeps the names as they were
+  at that time; the surviving shell components today are `MainWindowFrame` / `MainWindowNavBar`.

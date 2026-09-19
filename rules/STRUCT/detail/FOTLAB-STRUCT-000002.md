@@ -48,7 +48,7 @@ The intended dependency direction is a directed acyclic graph (downward only):
 
 ```
 root (MainApplication, MainActivity)
-  ├─▶ ui            (shell: MainWindowFrame, MainNavigationBar, theme)
+  ├─▶ ui            (shell: MainWindowFrame, MainWindowNavBar, theme)
   │     └─▶ navigation                 (RootNavHost, TopLevelDestination)
   │           └─▶ navigation.<feature> (library: LibraryGraph, LibraryDestination)
   │                 └─▶ feature.<name> (LibraryScreen → LibraryCore → LibraryRepository → LibraryDatabase → entities/DAOs)
@@ -128,3 +128,8 @@ data  (shared converters, in-memory test rule) — depended on by features, depe
   (class, file and manifest `android:name`), and removed the redundant non-compliant duplicates
   `FotLabApp` and `FotLabBottomBar` (unused shells duplicating `MainWindowFrame` / `MainNavigationBar`).
   Updated the DAG and every `FotLabApplication` reference accordingly.
+- 2026-09-20 — DAG node renamed after the shell layout flip: the shell's persistent bar composable
+  is now `MainWindowNavBar` (file `MainWindowNavBar.kt`, formerly `MainNavigationBar.kt`); it is
+  pinned to the top of the window. Per-screen bars are module-private fun bars at the bottom and
+  remain inside `feature.<name>` packages, so they do not appear in this shell-level DAG. The
+  2026-09-08 entry above keeps the historical names verbatim.

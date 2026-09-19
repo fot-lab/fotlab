@@ -5,7 +5,7 @@
 - Priority: P0
 - Created: 2026-09-07
 - Owner: —
-- Related: `FOTLAB-UIXDES-000001` (shell/destination contract), `FOTLAB-UIXDES-000002` (per-destination top bar and drawer — the screen owns both), `FOTLAB-UIXDES-000003` (strings blocks), `FOTLAB-DATABS-000001` (persistence ownership), `FOTLAB-NATIVE-000001` (third-party source location), `FOTLAB-IMGMGR-000001` (the library module this layout hosts), `FOTLAB-DATABS-000002` (the library's fs_node schema, owned by the library's lower layer), `FOTLAB-STRUCT-000003` (naming — avoid product-specific tokens in code identifiers; no duplicate components)
+- Related: `FOTLAB-UIXDES-000001` (shell/destination contract), `FOTLAB-UIXDES-000002` (per-destination fun bar and drawer — the screen owns both), `FOTLAB-UIXDES-000003` (strings blocks), `FOTLAB-DATABS-000001` (persistence ownership), `FOTLAB-NATIVE-000001` (third-party source location), `FOTLAB-IMGMGR-000001` (the library module this layout hosts), `FOTLAB-DATABS-000002` (the library's fs_node schema, owned by the library's lower layer), `FOTLAB-STRUCT-000003` (naming — avoid product-specific tokens in code identifiers; no duplicate components)
 
 ## Background & Goal
 
@@ -32,9 +32,9 @@ Goals:
 - G4 — Record honestly what is lost: dependency isolation is no longer enforced by the build system,
   it is now a review convention (see C3).
 - G5 — Each independent screen is a `feature/<name>/` package containing both its UI
-  (`<Name>Screen.kt`, owning its top app bar and drawer) and its lower layer (`<Name>Core.kt`,
+  (`<Name>Screen.kt`, owning its fun bar and drawer) and its lower layer (`<Name>Core.kt`,
   repository/data access), so a screen and its backing logic stay in one place.
-- G6 — `ui/` is reserved for the shell (frame, bottom bar) and theme; it does not hold per-screen UI.
+- G6 — `ui/` is reserved for the shell (frame, nav bar) and theme; it does not hold per-screen UI.
 
 ## Requirement
 
@@ -59,7 +59,7 @@ app/src/main/
 │   ├── ui/                       ← shell composables and theme only
 │   │   ├── theme/                ← Material3 theme and shared primitives
 │   │   ├── MainWindowFrame.kt    ← shell: the two-region frame
-│   │   └── MainNavigationBar.kt  ← shell: the only persistent UI
+│   │   └── MainWindowNavBar.kt   ← shell: the only persistent UI (nav bar, pinned top)
 │   ├── navigation/               ← routes, destination set, graph assembly
 │   │   ├── TopLevelDestination.kt
 │   │   ├── RootNavHost.kt
@@ -68,14 +68,14 @@ app/src/main/
 │   │   └── (converters, migration helpers, in-memory test rule)
 │   └── feature/                  ← one package per independent screen
 │       └── library/
-│           ├── LibraryScreen.kt  ← UI: owns its TopAppBar + drawer (UIXDES-000001/000002)
+│           ├── LibraryScreen.kt  ← UI: owns its fun bar + drawer (UIXDES-000001/000002)
 │           └── LibraryCore.kt    ← lower layer: repository / data access for the library tree
 ```
 
 - The root package is `io.github.fotlab.fotlab`; the layer packages `ui`, `navigation`, `data` and
   `feature` are its direct children. `feature` is a sibling of `ui`, `navigation` and `data`.
-- `ui/` — the shell only: the frame, the persistent bottom bar, the theme, and shared primitives.
-  No per-screen UI lives here.
+- `ui/` — the shell only: the frame, the persistent nav bar (pinned to the top of the window), the
+  theme, and shared primitives. No per-screen UI lives here.
 - `navigation/` — the destination set (routes, labels, icons), the root `NavHost`, and one
   `navigation/<feature>/` package per destination holding its route constant and its
   `NavGraphBuilder.<feature>Graph()` entry point.
@@ -85,7 +85,7 @@ app/src/main/
 - `feature/` — one `feature/<name>/` package per independent screen. Each package contains the
   screen UI (`<Name>Screen.kt`) and its lower layer (`<Name>Core.kt`). Feature packages are named
   after the destination, lower case, one word where possible (`library`, `render`, `import`).
-- `LibraryScreen` is the library screen (UI); it owns its top app bar and drawer per
+- `LibraryScreen` is the library screen (UI); it owns its fun bar and drawer per
   `FOTLAB-UIXDES-000001` / `FOTLAB-UIXDES-000002`. `LibraryCore` is the library's lower layer and is
   the natural owner of the library's persistence — the `fs_node` schema of `FOTLAB-DATABS-000002`.
 
@@ -147,7 +147,7 @@ No Gradle file and no manifest is touched.
 - AC6 — Adding a destination following R4 requires no change to any `build.gradle.kts`, to
   `settings.gradle.kts`, or to `AndroidManifest.xml`.
 - AC7 — `res/values/strings.xml` is the only strings file in the project.
-- AC8 — A screen package (`feature/<name>/`) contains both `<Name>Screen` (UI, owning its top app bar
+- AC8 — A screen package (`feature/<name>/`) contains both `<Name>Screen` (UI, owning its fun bar
   and drawer) and `<Name>Core` (lower layer); the screen depends on the core and the core never
   depends on the screen.
 
@@ -195,3 +195,10 @@ No Gradle file and no manifest is touched.
   R2/R3/R4, constraints C2/C3, acceptance criteria (added AC8) and Impacted Modules, linked
   `FOTLAB-IMGMGR-000001` and `FOTLAB-DATABS-000002`, and replaced Q4 with the data-vs-feature-core
   split question plus a new Q5 on package size.
+- 2026-09-20 — Terminology and tree refreshed after the shell layout flip: the shell's only
+  persistent UI is now `ui/MainWindowNavBar.kt` (renamed from `MainNavigationBar.kt`; named by
+  function, not position) pinned to the TOP of the window, and each screen owns a module-private
+  fun bar pinned to the bottom (`LibraryScreenFunBar`, `StudioScreenFunBar`, `RecycleScreenFunBar`),
+  laid out by a nested module-level `Scaffold` (see `FOTLAB-UIXDES-000002` R3). Updated G5/G6, the
+  R2 package tree, R2 prose, AC8 and the Related line; ownership and dependency rules are
+  unchanged. Historical entries above retain the "top app bar" wording of their date.
