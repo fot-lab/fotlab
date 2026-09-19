@@ -45,8 +45,9 @@ its result would prove nothing.
 | `.github/workflows/build_gradle.yaml` | **Reusable workflow** (`on: workflow_call`) — Android dev env (via the composite action) + Gradle build + APK/log artifact upload. Places the `rawler_fotlab` native artifact before Gradle runs. |
 | `.github/workflows/build_rust.yaml` | **Reusable workflow** (`on: workflow_call`) — builds `librawler_fotlab.so` for the four ABIs with `cargo ndk` and generates the UniFFI Kotlin bindings with the crate's own `uniffi-bindgen` bin; uploads them as the `rawler_fotlab` artifact. |
 | `.github/workflows/release_github.yaml` | **Reusable workflow** (`on: workflow_call`) — download the APK artifact and publish a GitHub Release (pre-release on `-rc`). |
-| `.github/workflows/smoke_emulator.yaml` | **Reusable workflow** (`on: workflow_call`) — boot an AVD from the emulator cache and run the instrumented smoke tests (`connectedDebugAndroidTest`) against the debug build. Called on the **non**-release path only; it is the sibling of `release_github.yaml`. See [Emulator Smoke Test](#emulator-smoke-test). |
-| `.github/actions/locate_sdk/action.yml`, `.github/actions/install_jdk/action.yml`, `.github/actions/install_sdk/action.yml`, `.github/actions/install_ndk/action.yml` | **Composite actions** — the toolchain is split per component: `locate_sdk` (SDK root resolution), `install_jdk` (JDK), `install_sdk` (SDK), `install_ndk` (NDK). `install_sdk` / `install_ndk` are **preinstalled-first**: they probe the runner's existing `ANDROID_HOME` for the pinned components and only run the cache + `setup-android` / `sdkmanager --install` fallback when something is actually missing, ending with a fail-fast verification. Each runs in-job and is reused by `build_gradle.yaml` (JDK+SDK), `smoke_emulator.yaml` (JDK+SDK) and by future per-language native workflows (JDK+SDK+NDK), so no step is duplicated and NDK is pulled in only when needed. |
+| `.github/workflows/smoke_emulator.yaml` | **Reusable workflow** (`on: workflow_call`) — one `prep-emulator` job warms the AVD-snapshot and RAW-corpus caches, then **four parallel shard jobs** (`test_app_smoke` / `test_image_loader` / `test_image_develop` / `test_image_alchemy`) boot cached AVDs and each run one `-e class` slice of the instrumented suite (`connectedDebugAndroidTest -PsmokeTestFilter=…`) against the debug build. Called on the **non**-release path only; it is the sibling of `release_github.yaml`. See [Emulator Smoke Test](#emulator-smoke-test). |
+| `.github/actions/emulator_smoke_shard/action.yml` | **Composite action** — the entire body of one shard: toolchain/KVM, native artifact placement, warm emulator restore (+ cold AVD fallback, never saves), optional RAW corpus / LUT fixture staging, the filtered `connectedDebugAndroidTest` run, and per-shard log upload. Inputs: `shard`, `test-filter`, `need-raw`, `need-lut`, `test-timeout-minutes`, … — the workflow holds the shard membership, the action holds the mechanics. |
+| `.github/actions/locate_sdk/action.yml`, `.github/actions/install_jdk/action.yml`, `.github/actions/install_sdk/action.yml`, `.github/actions/install_ndk/action.yml` | **Composite actions** — the toolchain is split per component: `locate_sdk` (SDK root resolution), `install_jdk` (JDK), `install_sdk` (SDK), `install_ndk` (NDK). `install_sdk` / `install_ndk` are **preinstalled-first**: they probe the runner's existing `ANDROID_HOME` for the pinned components and only run the cache + `setup-android` / `sdkmanager --install` fallback when something is actually missing, ending with a fail-fast verification. Each runs in-job and is reused by `build_gradle.yaml` (JDK+SDK), `smoke_emulator.yaml` prep + shards (JDK+SDK) and by future per-language native workflows (JDK+SDK+NDK), so no step is duplicated and NDK is pulled in only when needed. |
 
 The orchestrator composes the build, smoke and release workflows; the shared
 toolchain steps live in the composite actions, so every pinned toolchain version
@@ -84,16 +85,28 @@ path, where no release is produced to verify.
 | KVM | **Required, and not granted by default.** `/dev/kvm` exists on the image but is owned by group `kvm`, which the runner user is not in, so the emulator starts with `-accel off` and its adb daemon never comes up (`ProbeKVM: This user doesn't have permissions to use KVM`). The job writes `/etc/udev/rules.d/99-kvm4all.rules` with `MODE="0666"` and reloads udev — the recipe published by the emulator-runner action. Group membership cannot be granted mid-job, because a new supplementary group only applies to a fresh login session. |
 | AVD | API `36`, system-image target `google_apis`, arch `x86_64` (an ABI present in `librawler_fotlab.so`) |
 | Emulator flags | `-no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none`, defined as job env values (not inputs, which could let a caller break the snapshot invariants). The test run adds `-no-snapshot-save`: it loads the cached snapshot but never overwrites it, so our APK cannot contaminate the cached emulator. |
-| Tests | `app/src/androidTest/kotlin` — the AGP-default instrumented source set (Google's recommended app layout); run via `connectedDebugAndroidTest`, which installs the debug APK plus its test APK |
-| Job timeout | 75 min (test step 60 min) — a wedged emulator fails rather than holding the runner. The step budget is sized for `RawRoutingTest`, which demosaics five 36..50 MP RAW files in software: minutes per sample, not seconds. |
+| Tests | `app/src/androidTest/kotlin` — the AGP-default instrumented source set (Google's recommended app layout); run via `connectedDebugAndroidTest`, which installs the debug APK plus its test APK. The 37 cases are partitioned into the four shards below, each passed as an AndroidJUnitRunner `-e class` list (`Class` / `Class#m1+m2`) through `-PsmokeTestFilter` (mapped in `app/build.gradle.kts`). The membership lists live in one place: each shard job's `TEST_FILTER` in `smoke_emulator.yaml` — when adding a `@Test`, add it to exactly one filter or it will not run in CI. |
+| Timeouts | `prep-emulator` 30 min; app 30 (step 20), loader 45 (step 35), develop/alchemy 75 (step 60) — the two heavy shards carry the old budget, the others fail fast. A wedged slice now fails only its own shard instead of holding the whole suite. |
 
-The emulator cache is written **after** the AVD has been created and **before**
-the first APK install, so the cached snapshot is a clean warm emulator that every
-later build reuses. That ordering is why the job uses the split
+**Shards (run in parallel after prep):**
+
+| Shard job | Cases | Fixtures |
+| --- | --- | --- |
+| `test_app_smoke` | `MainActivitySmokeTest`, `ZoomableGestureTest` (7) — boot, RESUMED, zoom/pan gestures | none |
+| `test_image_loader` | `PngEndToEndFlowTest` (3); `RawlerNativeSmokeTest` sniff/decode/.so-load/exception boundary (6); `RawRoutingTest` PNG control + five RAW brands open-through-rawler + grade-bar hidden on PNG (7) — 16 total | RAW corpus |
+| `test_image_develop` | `RawlerNativeSmokeTest` develop-entry boundary (3); five RAW brands through the demosaic menu + the every-algorithm/exposure redevelop proof (6) — 9 total, the heavy software-demosaic shard | RAW corpus |
+| `test_image_alchemy` | native log-space enumeration (1); engine boost/log redevelop, grade-bar UI journey, Panasonic V-Log + downloaded `.cube` LUT, SAF LUT-picker contract (4) — 5 total | RAW corpus + LUT cube |
+
+Both caches are written solely by `prep-emulator`, **after** the AVD has been
+created and **before** any APK install, so the cached snapshot is a clean warm
+emulator every shard restores. That ordering is why prep uses the split
 `actions/cache/restore` + `actions/cache/save` pair instead of `actions/cache`,
-whose save would run as a post-job step — after our APK had been installed. The
-entry also carries the SDK packages the AVD boots (see [CI cache layers](#ci-cache-layers-slow--fast-changing)),
-so a warm run downloads nothing from `dl.google.com` at all.
+whose save would run as a post-job step — after an APK had been installed.
+Centralising the writes also means the four parallel shards can never race to
+save the same key; a shard that hits an evicted cache builds the AVD locally
+(cold fallback) but does not persist it. The emulator entry also carries the SDK
+packages the AVD boots (see [CI cache layers](#ci-cache-layers-slow--fast-changing)),
+so a warm shard downloads nothing from `dl.google.com` at all.
 
 See the [Test Strategy](#test-strategy) for what the cases assert.
 
@@ -127,7 +140,7 @@ Everything else triggers, `external/**` included.
 | `rawler_fotlab` | `rust` job success — `jniLibs/<abi>/librawler_fotlab.so` + the generated UniFFI Kotlin bindings, consumed by the `apk` job | 7 days |
 | `build-gradle.log` | `apk` job | 7 days |
 | `build_log_gradle.log` | `build_gradle.yaml` gradle step runs (apk job) — gradle-only log, separate from the full log | 7 days |
-| `build-smoke.log` | `emulator-smoke` job **failure only** — the Gradle log plus the `connectedAndroidTest` reports/XML under `app/build/{reports,outputs}/androidTest-results` | 7 days |
+| `build-smoke-<shard>.log` (`app` / `loader` / `develop` / `alchemy`) | the corresponding smoke shard **failure only** — that shard's Gradle log + logcat/tombstones plus the `connectedAndroidTest` reports/XML under `app/build/{reports,outputs}/androidTest-results` | 7 days |
 
 ### Key Configuration
 
@@ -141,7 +154,7 @@ Everything else triggers, `external/**` included.
 | NDK | `28.2.13676358` — **preinstalled on the image** (among 27.3 / 28.2.13676358 / 29.0); `install_ndk` verifies and installs only when missing |
 | Emulator (smoke) | AVD API `36`, target `google_apis`, arch `x86_64`; managed by `reactivecircus/android-emulator-runner` and reused from the emulator cache (AVD + snapshot + the `system-images` / `emulator` / `build-tools` packages). Needs the [KVM udev rule](#emulator-smoke-test); the action additionally force-installs the latest `build-tools` (37.0.0). |
 | Gradle tasks — push/PR | `testDebugUnitTest` `assembleDebug` |
-| Gradle tasks — emulator smoke | `connectedDebugAndroidTest` |
+| Gradle tasks — emulator smoke | `connectedDebugAndroidTest -PsmokeTestFilter=<class list>` (one slice per shard; property absent locally = run everything) |
 | Gradle tasks — release | `assembleRelease` |
 | Release APK output | `app/build/outputs/apk/release/*.apk` |
 | Debug APK output | `app/build/outputs/apk/debug/*.apk` |
@@ -158,7 +171,7 @@ Everything else triggers, `external/**` included.
 
 `DNGLAB_SHA` is fed via rust-cache `env-vars` (tail of the key), **not** via `key` (which sits before the lockfile segment): on a submodule bump the progressive prefix restore still matches the previous run at the lockfile segment, so layer 5 stays warm and cargo re-fingerprints/rebuilds only rawler + the first-party crate. A mid-chain `key: dnglab-<sha>` would discard the dependency layer on every bump. Layers 5–6 live in one archive because rust-cache always caches `$CARGO_HOME` together with the workspace target; the layering is expressed through key-chain fallback, not separate archives.
 
-Layers 1–2 belong to the `emulator-smoke` job; layers 3–6 belong to the `rust` job. The Gradle dependency/output cache restored by `gradle/actions/setup-gradle` is a further, unlisted layer: `smoke_emulator.yaml` restores what the `apk` job wrote, so `connectedDebugAndroidTest` re-runs only the androidTest slice instead of recompiling the application. That layer is real, not theoretical: the `apk` job's log shows most tasks `FROM-CACHE` (resources, manifests, dexing) and `~/.gradle/caches/build-cache-1` inside the restored entry, because `setup-gradle` passes `--build-cache`.
+Layers 1–2 are written by the `prep-emulator` job and restored by every shard; layers 3–6 belong to the `rust` job. The Gradle dependency/output cache restored by `gradle/actions/setup-gradle` is a further, unlisted layer: each shard restores what the `apk` job wrote, so `connectedDebugAndroidTest` re-runs only the androidTest slice instead of recompiling the application. That layer is real, not theoretical: the `apk` job's log shows most tasks `FROM-CACHE` (resources, manifests, dexing) and `~/.gradle/caches/build-cache-1` inside the restored entry, because `setup-gradle` passes `--build-cache`.
 
 #### Downloads deliberately left uncached
 
@@ -230,9 +243,11 @@ Do **not** prune to fewer than one entry per family, and leave the deliberate sa
 - Instrumented smoke tests live in the AGP-default instrumented source set
   `app/src/androidTest/kotlin` (Google's recommended app layout — no extra
   `kotlin.srcDir` registration, unlike the hand-written binding facade) and run on
-  the emulator via `connectedDebugAndroidTest`, driven by the `emulator-smoke` job
-  on the non-release path. They answer "does the built application actually run?",
-  so they assert survival and wiring, not feature detail:
+  the emulator via `connectedDebugAndroidTest`, driven by the four parallel smoke
+  shards (`test_app_smoke` / `test_image_loader` / `test_image_develop` /
+  `test_image_alchemy`) on the non-release path. They answer "does the built
+  application actually run?", so they assert survival and wiring, not feature
+  detail:
   - `MainActivitySmokeTest` — `MainActivity` reaches `RESUMED`, exercising
     `MainApplication`, the Room/DataStore wiring and the JNA load of
     `librawler_fotlab.so`.

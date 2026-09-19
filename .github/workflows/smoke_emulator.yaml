@@ -1,30 +1,41 @@
-# Reusable workflow: smoke-tests the debug build on an Android emulator.
+# Reusable workflow: smoke-tests the debug build on Android emulators.
 #
 # Called by build.yaml as the sibling of release_github.yaml, and only for a
 # NON-release run: a release is verified by publishing the APK, not by booting an
-# emulator. `connectedDebugAndroidTest` installs the debug APK together with its
-# instrumented test APK and runs the cases in the AGP-default instrumented source
-# set `app/src/androidTest/kotlin` (Google's recommended app layout), so the tests
-# execute against the packaged application on a real Android runtime.
+# emulator.
 #
-# Two prerequisites the job cannot skip, both learned the hard way:
+# The instrumented suite is split into FOUR independent, parallel shard jobs so a
+# slow or wedged slice never blocks the other three, and the wall-clock budget is
+# the slowest shard instead of the whole suite:
+#
+#   test_app_smoke       MainActivity reaches RESUMED; zoom/pan gesture tests.
+#                        No RAW corpus, no LUT — the fastest signal that the app boots.
+#   test_image_loader    PNG end-to-end import/viewer/studio route; native
+#                        identify/decode boundary calls; the five RAW brands
+#                        opening in Studio through rawler (load + as-shot render).
+#   test_image_develop   native develop entry boundary; five RAW brands through
+#                        the demosaic menu + the full algorithm/exposure redevelop
+#                        proof. The HEAVY shard (36..50 MP software demosaics).
+#   test_image_alchemy   log/grade enumeration; boost+log and grade-bar journeys;
+#                        the Panasonic V-Log + downloaded .cube LUT journey and the
+#                        SAF LUT-picker contract. Needs the LUT fixture.
+#
+# Each shard passes an AndroidJUnitRunner `-e class` list to
+# connectedDebugAndroidTest via -PsmokeTestFilter (mapped in app/build.gradle.kts).
+# The membership of every @Test lives in one place: the TEST_FILTER env below.
+#
+# A fifth job, prep-emulator, warms the two big caches (the AVD+snapshot and the
+# ~250 MB RAW corpus) exactly once; all four shards `needs: prep-emulator` and
+# only ever RESTORE them. This keeps cache writes off the parallel jobs, so N
+# shards can never race saving the same cache key.
+#
+# Two prerequisites the jobs cannot skip, both learned the hard way:
 #   * KVM must be made accessible BEFORE the emulator starts. /dev/kvm exists on the
 #     image but belongs to group `kvm`, which the runner user is not in; without the
 #     udev rule below the emulator silently falls back to -accel off and its adb
 #     daemon never comes up.
 #   * the AVD and the emulator's SDK packages (system image, emulator, build-tools)
 #     must be cached TOGETHER — an AVD with no system image cannot boot.
-#
-# Emulator reuse (why the cache steps are ordered the way they are):
-#   1. restore the emulator cache (AVD + snapshot + the SDK packages it boots);
-#   2. on a miss, install those packages, create the AVD and generate its snapshot;
-#   3. SAVE the emulator cache — at this point the emulator exists but our APK has
-#      never been installed, so the cached snapshot carries no app state and stays
-#      valid for every later build;
-#   4. only now run the tests, which install the APK.
-# Steps 1/3 use `cache/restore` + `cache/save` rather than plain `actions/cache`
-# precisely because the save has to happen HERE — mid-job, before the APK is
-# installed — instead of in a post-job step.
 #
 # See rules/ACTION.md (Test Strategy, CI cache layers) and FOTLAB-CRASH-000001.
 
@@ -58,12 +69,12 @@ on:
         type: string
         default: x86_64
       log-artifact-name:
-        description: Name of the uploaded failure log artifact. Empty means no log artifact.
+        description: Base name of the uploaded per-shard failure log artifacts (a -<shard> suffix is appended). Empty means no log artifact.
         required: false
         type: string
         default: ''
       log-retention-days:
-        description: Retention of the failure log artifact, in days.
+        description: Retention of the failure log artifacts, in days.
         required: false
         type: number
         default: 7
@@ -72,28 +83,21 @@ permissions:
   contents: read
 
 jobs:
-  smoke:
-    name: Emulator Smoke Test
+  # Warms the emulator cache (AVD + quick-boot snapshot + the SDK packages it
+  # boots) and the RAW corpus cache exactly once. The snapshot is generated and
+  # SAVED before any APK is ever installed, so the cached emulator is pristine and
+  # stays valid for every shard and every later build. All four shards start only
+  # after this finishes, so their cache restores are warm and their saves are
+  # unnecessary (a shard that hits an evicted cache creates the AVD locally but
+  # never persists it — see the shard action's cold fallback).
+  prep-emulator:
+    name: Smoke prep (AVD + RAW corpus)
     runs-on: ubuntu-26.04
-    # A wedged emulator must fail the job, not hold the runner until the default
-    # 6-hour ceiling. 75 min: booting the AVD plus five 36..50 MP software demosaics.
-    timeout-minutes: 75
+    timeout-minutes: 30
     env:
       ANDROID_API: '36'
       ANDROID_BUILD_TOOLS: '36.0.0'
-      # Emulator flags. Deliberately job env values, not inputs — an input would let a
-      # caller break the snapshot invariants below:
-      #  * Cache-warming run passes nothing snapshot-related, so the emulator WRITES
-      #    the quick-boot snapshot on exit and the cache captures it.
-      #  * The test run adds -no-snapshot-save: it LOADS that snapshot but never
-      #    overwrites it, so our APK can never contaminate the cached emulator. The
-      #    two option sets differ by exactly that flag and nothing else.
-      #  * -memory 4096 is set in BOTH sets (so it matches the cached snapshot): the
-      #    develop pipeline on a 50 MP CR2 holds ~850 MB of native f32/RGBA buffers
-      #    at peak. The AVD default (~2 GB total, shared with the system) let
-      #    lowmemorykiller SIGKILL the app mid-develop; the host runners have 16 GB.
       EMULATOR_OPTIONS: '-no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -memory 4096'
-      EMULATOR_OPTIONS_TEST: '-no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot-save -memory 4096'
     steps:
       - name: Check out
         uses: actions/checkout@v7
@@ -114,14 +118,6 @@ jobs:
           api-level: ${{ env.ANDROID_API }}
           build-tools: ${{ env.ANDROID_BUILD_TOOLS }}
 
-      # Mandatory on Linux runners, and the reason the first smoke run failed:
-      # /dev/kvm exists on the image but is owned by group `kvm`, which the runner
-      # user is not in, so the emulator started with `-accel off` and its adb daemon
-      # never came up ("ProbeKVM: This user doesn't have permissions to use KVM").
-      # The udev rule widens the mode to 0666 — group membership can't be granted
-      # mid-job, because a new supplementary group only applies to a fresh login
-      # session, which agent processes are not. This is the recipe published by the
-      # emulator-runner action itself.
       - name: Enable KVM
         run: |
           set -euo pipefail
@@ -131,41 +127,44 @@ jobs:
           ls -l /dev/kvm
         shell: bash
 
-      # The Gradle build cache is written by the apk job and restored here, so
-      # connectedDebugAndroidTest re-runs only what the apk job could not hand over
-      # (the androidTest APK) instead of recompiling the application.
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v5
+      # -------- emulator cache (AVD + snapshot + its SDK packages, one key) --------
+      - name: Restore emulator cache
+        id: emulator-cache
+        uses: actions/cache/restore@v6
         with:
-          gradle-version: '8.14.5'
-          validate-wrappers: false
+          path: |
+            ~/.android/avd/*
+            ~/.android/adb*
+            ${{ env.ANDROID_HOME }}/system-images
+            ${{ env.ANDROID_HOME }}/emulator
+            ${{ env.ANDROID_HOME }}/build-tools
+          key: ${{ runner.os }}-emulator-${{ inputs.api-level }}-${{ inputs.target }}-${{ inputs.arch }}
 
-      # -------- native (rawler_fotlab) --------
-      # Same placement as build_gradle.yaml: the .so + generated Kotlin bindings go into
-      # the Gradle build directory, never under src/ (FOTLAB-STRUCT-000002 R1).
-      - name: Download native artifact (rawler_fotlab)
-        if: inputs.native-artifact-name != ''
-        uses: actions/download-artifact@v7
+      - name: Create AVD and generate a snapshot for caching
+        if: steps.emulator-cache.outputs.cache-hit != 'true'
+        uses: reactivecircus/android-emulator-runner@v2
         with:
-          name: ${{ inputs.native-artifact-name }}
-          path: native-artifacts
+          api-level: ${{ inputs.api-level }}
+          target: ${{ inputs.target }}
+          arch: ${{ inputs.arch }}
+          force-avd-creation: false
+          emulator-options: ${{ env.EMULATOR_OPTIONS }}
+          disable-animations: false
+          script: echo "Generated AVD snapshot for caching."
 
-      - name: Place native libs + Kotlin bindings
-        if: inputs.native-artifact-name != ''
-        run: |
-          set -euo pipefail
-          mkdir -p app/build/generated/jniLibs
-          cp -r native-artifacts/jniLibs/* app/build/generated/jniLibs/
-          mkdir -p app/build/generated/uniffi/main/kotlin
-          cp -r native-artifacts/kotlin/. app/build/generated/uniffi/main/kotlin/
-        shell: bash
+      - name: Save emulator cache
+        if: steps.emulator-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.android/avd/*
+            ~/.android/adb*
+            ${{ env.ANDROID_HOME }}/system-images
+            ${{ env.ANDROID_HOME }}/emulator
+            ${{ env.ANDROID_HOME }}/build-tools
+          key: ${{ runner.os }}-emulator-${{ inputs.api-level }}-${{ inputs.target }}-${{ inputs.arch }}
 
-      # -------- RAW corpus (fot-lab/rawdb) --------
-      # Real camera RAW files (Canon CR2, Sony ARW x2, Nikon NEF, Panasonic RW2 — 36..50 MP,
-      # ~250 MB) for RawRoutingTest, which proves the RAW path decodes a full frame through
-      # rawler instead of Coil pulling the embedded preview. They are immutable, so they are
-      # fetched once and cached; the emulator step pushes them into the app's external files
-      # dir, which the app reads with no storage permission at all.
+      # -------- RAW corpus (fot-lab/rawdb) — immutable, cached once --------
       - name: Restore RAW sample cache
         id: raw-samples-cache
         uses: actions/cache/restore@v6
@@ -204,154 +203,117 @@ jobs:
           path: raw-samples
           key: rawdb-samples-v1
 
-      # -------- Grade LUT fixture (fot-lab/V-Log-Alchemy) --------
-      # The one external file the studio grade bar takes beyond the built-in log curves: a .cube
-      # 3D LUT (on a device the user picks it through SAF; RawRoutingTest's full V-Log+LUT journey
-      # replays that content:// path). Only ~1 MB, so no cache — but the SHA-256 is pinned to the
-      # external/V-Log-Alchemy submodule commit so an upstream rewrite fails the smoke loudly
-      # instead of silently changing what the journey exercises. The cube is a 33-point creative
-      # LUT that expects V-Log/V-Gamut INPUT (`#LUMIXPHOTOSTYLE VLOG`), matching our V-Log stage.
-      # NOTE on the hash: it pins the repository blob (LF). A Windows checkout of the submodule
-      # may hold a CRLF variant whose hash differs — derive the pin from
-      # `git cat-file blob`/raw.githubusercontent, never from a working-tree copy.
-      - name: Download V-Log grade LUT cube
-        run: |
-          set -euo pipefail
-          mkdir -p lut-samples
-          base="https://github.com/fot-lab/V-Log-Alchemy/raw/refs/heads/main"
-          curl -fL --retry 3 --retry-delay 5 \
-            -o "lut-samples/FLog2C_to_CLASSIC-Neg_VLog.cube" \
-            "$base/Luts/Fujifilm/FLog2C_to_CLASSIC-Neg_VLog.cube"
-          echo "3e2da957fc86cbe06d382ec68ae653df7a70d2de577d521c829b48d7c5a37d02  lut-samples/FLog2C_to_CLASSIC-Neg_VLog.cube" | sha256sum -c -
-          ls -l lut-samples
-        shell: bash
-
-      # -------- emulator (AVD + emulator SDK cache) --------
-      # ONE entry on purpose. An AVD is useless without the system image it boots, so
-      # the AVD and the SDK packages the emulator-runner installs are cached under a
-      # single key; splitting them would allow the AVD to hit while the system image
-      # missed, leaving the emulator with nothing to boot.
-      # Cached paths and why each is there:
-      #  * ~/.android/avd + ~/.android/adb* — the AVD, its config and its snapshot.
-      #  * system-images + emulator         — what the action otherwise re-downloads
-      #    from dl.google.com on EVERY run (the API-36 google_apis x86_64 image plus
-      #    the emulator package, ~1.4 GB). Restoring them also short-circuits the
-      #    action's `sdkmanager --install`, because each package's own package.xml
-      #    metadata travels inside the cached directory.
-      #  * build-tools                      — present only because the action
-      #    force-installs the LATEST build-tools (37.0.0 as of writing) alongside the
-      #    pinned 36.0.0 install_sdk guarantees; without this that is another ~110 MB
-      #    on every run.
-      - name: Restore emulator cache
-        id: emulator-cache
-        uses: actions/cache/restore@v6
-        with:
-          path: |
-            ~/.android/avd/*
-            ~/.android/adb*
-            ${{ env.ANDROID_HOME }}/system-images
-            ${{ env.ANDROID_HOME }}/emulator
-            ${{ env.ANDROID_HOME }}/build-tools
-          key: ${{ runner.os }}-emulator-${{ inputs.api-level }}-${{ inputs.target }}-${{ inputs.arch }}
-
-      # Cold path only: install the SDK packages, build the AVD and let the emulator
-      # write its snapshot, which is what the following save captures.
-      - name: Create AVD and generate a snapshot for caching
-        if: steps.emulator-cache.outputs.cache-hit != 'true'
-        uses: reactivecircus/android-emulator-runner@v2
+  # -------- shard 1: app shell + gestures (7 tests, no corpus) --------
+  test-app-smoke:
+    name: Smoke / test_app_smoke
+    needs: [prep-emulator]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    env:
+      # Whole classes: app boot + the zoomable/gesture suite.
+      TEST_FILTER: >-
+        io.github.fotlab.fotlab.smoke.MainActivitySmokeTest,
+        io.github.fotlab.fotlab.smoke.ZoomableGestureTest
+    steps:
+      - name: Run app smoke shard
+        uses: ./.github/actions/emulator_smoke_shard
         with:
           api-level: ${{ inputs.api-level }}
           target: ${{ inputs.target }}
           arch: ${{ inputs.arch }}
-          # Reuse the AVD this action already created rather than recreating it.
-          force-avd-creation: false
-          emulator-options: ${{ env.EMULATOR_OPTIONS }}
-          disable-animations: false
-          script: echo "Generated AVD snapshot for caching."
+          native-artifact-name: ${{ inputs.native-artifact-name }}
+          shard: app
+          test-filter: ${{ env.TEST_FILTER }}
+          need-raw: 'false'
+          need-lut: 'false'
+          test-timeout-minutes: '20'
+          log-artifact-name: ${{ inputs.log-artifact-name }}
+          log-retention-days: ${{ inputs.log-retention-days }}
 
-      # Cold path only. Saved BEFORE any APK is installed, so the cached emulator is a
-      # clean one and is reused by every subsequent run.
-      - name: Save emulator cache
-        if: steps.emulator-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
-        with:
-          path: |
-            ~/.android/avd/*
-            ~/.android/adb*
-            ${{ env.ANDROID_HOME }}/system-images
-            ${{ env.ANDROID_HOME }}/emulator
-            ${{ env.ANDROID_HOME }}/build-tools
-          key: ${{ runner.os }}-emulator-${{ inputs.api-level }}-${{ inputs.target }}-${{ inputs.arch }}
-
-      # -------- instrumented smoke tests --------
-      # Installs the debug APK + its test APK on the emulator and runs
-      # app/src/androidTest/kotlin. This is the first point at which our app touches
-      # the emulator — see the ordering note at the top of this file.
-      - name: Run emulator smoke tests
-        # Raised from 20 to 75 min: RawRoutingTest demosaics five 36..50 MP RAW files in
-        # software on the emulator (minutes per sample, not seconds), plus the rest of the suite.
-        timeout-minutes: 75
-        uses: reactivecircus/android-emulator-runner@v2
+  # -------- shard 2: identify / decode / load + open routes (16 tests) --------
+  test-image-loader:
+    name: Smoke / test_image_loader
+    needs: [prep-emulator]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    env:
+      # PNG end-to-end; native sniff/decode boundary (incl. the .so load sanity and
+      # exception surfacing); the open route for the PNG control and all five RAW
+      # brands (load + as-shot render), plus the grade-bar hidden-on-PNG assertion.
+      TEST_FILTER: >-
+        io.github.fotlab.fotlab.smoke.PngEndToEndFlowTest,
+        io.github.fotlab.fotlab.smoke.RawlerNativeSmokeTest#nativeLibraryIsLoadableOnThisAbi+identifyRejectsNonRawBytes+identifyOnPngSurvives+decodeOfNonRawBytesReturnsNull+decodeOfPngSurvives+identifyCallSurfacesJvmExceptions,
+        io.github.fotlab.fotlab.smoke.RawRoutingTest#pngOpensInStudioThroughCoil+canonCr2OpensInStudioThroughRawler+sonyIlce7rArwOpensInStudioThroughRawler+sonyIlce7rm2ArwOpensInStudioThroughRawler+nikonD850NefOpensInStudioThroughRawler+panasonicDcS1rRw2OpensInStudioThroughRawler+gradeBarIsHiddenOnPngRoute
+    steps:
+      - name: Run image loader shard
+        uses: ./.github/actions/emulator_smoke_shard
         with:
           api-level: ${{ inputs.api-level }}
           target: ${{ inputs.target }}
           arch: ${{ inputs.arch }}
-          force-avd-creation: false
-          emulator-options: ${{ env.EMULATOR_OPTIONS_TEST }}
-          disable-animations: true
-          # Capture the native crash context: clear logcat, run the instrumented tests, then
-          # dump the full logcat (incl. the `crash` buffer) and list any tombstones. A rawler
-          # FFI call that aborts the process leaves a SIGSEGV/SIGABRT backtrace here — without
-          # this we are blind to WHY the cross-language call dies (`DNGLAB-RAWLER-000002`).
-          # NOTE: this `script` is executed by the runner via `/usr/bin/sh` (dash on
-          # the ubuntu image), NOT bash. Bash-only syntax such as `PIPESTATUS` or
-          # `set -o pipefail` fails there with "Bad substitution" and wrongly reds the
-          # job even when the tests passed. Use POSIX sh only.
-          script: |
-            # The corpus lands in the emulated SD card's Pictures directory — the same place a
-            # camera or a file manager drops photos — so the tests can pick it up the way the
-            # app picks up a real photo: indexed into MediaStore, then imported by uri.
-            # (Not /sdcard/Android/data/<pkg>: a directory created by `adb shell mkdir` is owned
-            # by `shell`, so the app cannot traverse it and the files are invisible to it.)
-            adb shell mkdir -p /sdcard/Pictures/rawdb
-            adb push raw-samples/. /sdcard/Pictures/rawdb/
-            adb shell ls -l /sdcard/Pictures/rawdb
+          native-artifact-name: ${{ inputs.native-artifact-name }}
+          shard: loader
+          test-filter: ${{ env.TEST_FILTER }}
+          need-raw: 'true'
+          need-lut: 'false'
+          test-timeout-minutes: '35'
+          log-artifact-name: ${{ inputs.log-artifact-name }}
+          log-retention-days: ${{ inputs.log-retention-days }}
 
-            # Stage the grade LUT cube into the app's INTERNAL files. Two constraints decide the
-            # route: shell-created dirs under /sdcard are not traversable by the app, and on
-            # API 36 an app-uid read of /data/local/tmp is blocked by SELinux. Installing first
-            # creates the package data dir (connectedDebugAndroidTest installs+tests in one go,
-            # too late for staging), after which `run-as` streams the bytes through stdin — the
-            # redirected file is created with the APP uid, so no shell ownership problem. The
-            # later connectedDebugAndroidTest reinstalls with -r, preserving app data.
-            gradle --no-daemon :app:installDebug
-            adb shell "run-as io.github.fotlab.fotlab sh -c 'mkdir -p files/lut-fixture && cat > files/lut-fixture/FLog2C_to_CLASSIC-Neg_VLog.cube'" \
-              < lut-samples/FLog2C_to_CLASSIC-Neg_VLog.cube
-            adb shell run-as io.github.fotlab.fotlab ls -l files/lut-fixture
-
-            adb logcat -c || true
-            gradle --no-daemon --stacktrace connectedDebugAndroidTest > smoke-log.txt 2>&1
-            STATUS=$?
-            # Surface the Gradle output in the Actions UI; it is also uploaded as an
-            # artifact on failure by the step below.
-            cat smoke-log.txt
-            adb logcat -d -b all > logcat.txt 2>&1 || true
-            adb shell ls -l /data/tombstones > tombstones.txt 2>&1 || true
-            exit $STATUS
-
-      # Reports, the Gradle log, and the captured native diagnostics are kept on failure
-      # (matching build_gradle.yaml). logcat.txt / tombstones.txt are what turn a silent
-      # "process died" into a readable SIGSEGV/SIGABRT backtrace for the rawler FFI path.
-      - name: Upload smoke logs
-        if: failure() && inputs.log-artifact-name != ''
-        uses: actions/upload-artifact@v7
+  # -------- shard 3: demosaic / develop (9 tests, the heavy shard) --------
+  test-image-develop:
+    name: Smoke / test_image_develop
+    needs: [prep-emulator]
+    runs-on: ubuntu-26.04
+    # 75 min: five 36..50 MP software demosaics (minutes per sample) — the budget
+    # the old single job carried, now paid by this shard alone.
+    timeout-minutes: 75
+    env:
+      # Native develop-entry boundary; one develop-through-menu journey per RAW
+      # brand; the every-menu-option + exposure recompute proof.
+      TEST_FILTER: >-
+        io.github.fotlab.fotlab.smoke.RawlerNativeSmokeTest#developOfNonRawBytesReturnsNull+developOfPngSurvives+developDirectCallSurfacesJvmException,
+        io.github.fotlab.fotlab.smoke.RawRoutingTest#canonCr2DevelopsThroughDemosaicMenu+sonyIlce7rArwDevelopsThroughDemosaicMenu+sonyIlce7rm2ArwDevelopsThroughDemosaicMenu+nikonD850NefDevelopsThroughDemosaicMenu+panasonicDcS1rRw2DevelopsThroughDemosaicMenu+everyDemosaicMenuOptionRedevelopsOnBayerAndExposureRecomputes
+    steps:
+      - name: Run image develop shard
+        uses: ./.github/actions/emulator_smoke_shard
         with:
-          name: ${{ inputs.log-artifact-name }}
-          path: |
-            smoke-log.txt
-            logcat.txt
-            tombstones.txt
-            app/build/reports/androidTests/connected
-            app/build/outputs/androidTest-results/connected
-          retention-days: ${{ inputs.log-retention-days }}
-          if-no-files-found: warn
+          api-level: ${{ inputs.api-level }}
+          target: ${{ inputs.target }}
+          arch: ${{ inputs.arch }}
+          native-artifact-name: ${{ inputs.native-artifact-name }}
+          shard: develop
+          test-filter: ${{ env.TEST_FILTER }}
+          need-raw: 'true'
+          need-lut: 'false'
+          test-timeout-minutes: '60'
+          log-artifact-name: ${{ inputs.log-artifact-name }}
+          log-retention-days: ${{ inputs.log-retention-days }}
+
+  # -------- shard 4: grading / alchemy + LUT (5 tests) --------
+  test-image-alchemy:
+    name: Smoke / test_image_alchemy
+    needs: [prep-emulator]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 75
+    env:
+      # Native log-space enumeration; engine boost/log redevelop; grade-bar UI;
+      # Panasonic V-Log + downloaded .cube LUT; the SAF LUT-picker contract.
+      TEST_FILTER: >-
+        io.github.fotlab.fotlab.smoke.RawlerNativeSmokeTest#gradeLogSpacesAreEnumeratedNatively,
+        io.github.fotlab.fotlab.smoke.RawRoutingTest#boostAndLogGradesReRenderThroughEngineAndNoneRestoresDevelop+gradeBarChipsDriveGradingThroughRealStudioUi+panasonicVLogAndDownloadedLutCubeBothTakeEffect+lutChipOpensSystemPickerAndAppliesDownloadedCube
+    steps:
+      - name: Run image alchemy shard
+        uses: ./.github/actions/emulator_smoke_shard
+        with:
+          api-level: ${{ inputs.api-level }}
+          target: ${{ inputs.target }}
+          arch: ${{ inputs.arch }}
+          native-artifact-name: ${{ inputs.native-artifact-name }}
+          shard: alchemy
+          test-filter: ${{ env.TEST_FILTER }}
+          need-raw: 'true'
+          need-lut: 'true'
+          test-timeout-minutes: '60'
+          log-artifact-name: ${{ inputs.log-artifact-name }}
+          log-retention-days: ${{ inputs.log-retention-days }}

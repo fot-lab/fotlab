@@ -42,6 +42,14 @@ android {
         versionCode = appVersionCode
         versionName = appVersionName
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // CI smoke sharding (.github/workflows/smoke_emulator.yaml): each parallel shard passes a
+        // comma-separated AndroidJUnitRunner `-e class` list (`Class` or `Class#method1+method2`)
+        // via -PsmokeTestFilter=..., which connectedDebugAndroidTest forwards to am instrument.
+        // Absent locally / in a full run, so every instrumented test still runs by default.
+        if (project.hasProperty("smokeTestFilter")) {
+            testInstrumentationRunnerArguments["class"] =
+                project.property("smokeTestFilter").toString()
+        }
     }
 
     signingConfigs {

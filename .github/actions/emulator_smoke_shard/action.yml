@@ -1,0 +1,237 @@
+# Composite action: run ONE parallel smoke shard on a booted emulator.
+#
+# smoke_emulator.yaml splits the instrumented suite into four independent shards
+# (test_app_smoke / test_image_loader / test_image_develop / test_image_alchemy),
+# each a separate job that invokes this action with its own AndroidJUnitRunner
+# `-e class` filter. The shared AVD + RAW corpus caches are warmed ONCE by the
+# workflow's prep job, so every shard restores them warm and only pays for its
+# own emulator boot and test slice.
+#
+# The action deliberately contains NO cache-save step: only the prep job writes
+# caches, so N parallel shards can never race to save the same key. On an
+# unexpected restore miss a shard still creates the AVD locally (cold fallback),
+# it simply does not persist it.
+
+name: Emulator smoke shard
+description: Boot the cached AVD and run one filtered slice of the instrumented smoke tests.
+
+inputs:
+  api-level:
+    description: API level of the AVD's system image.
+    required: false
+    default: '36'
+  target:
+    description: System-image flavour (google_apis, default, aosp_atd, ...).
+    required: false
+    default: google_apis
+  arch:
+    description: AVD architecture (must be an ABI present in librawler_fotlab.so).
+    required: false
+    default: x86_64
+  native-artifact-name:
+    description: Native artifact (librawler_fotlab.so + Kotlin bindings) to place; empty skips it.
+    required: false
+    default: ''
+  shard:
+    description: Shard id (app / loader / develop / alchemy) — used in the log artifact name.
+    required: true
+  test-filter:
+    description: Comma-separated AndroidJUnitRunner -e class list this shard runs.
+    required: true
+  need-raw:
+    description: Whether to restore and push the RAW corpus ('true'/'false').
+    required: false
+    default: 'false'
+  need-lut:
+    description: Whether to download and stage the grade LUT cube ('true'/'false').
+    required: false
+    default: 'false'
+  test-timeout-minutes:
+    description: Timeout for the instrumented-test step.
+    required: false
+    default: '45'
+  log-artifact-name:
+    description: Base name of the uploaded failure log artifact; empty means no upload.
+    required: false
+    default: ''
+  log-retention-days:
+    description: Retention of the failure log artifact, in days.
+    required: false
+    default: '7'
+
+runs:
+  using: composite
+  env:
+    ANDROID_API: '36'
+    ANDROID_BUILD_TOOLS: '36.0.0'
+    # Identical to smoke_emulator.yaml: the snapshot is always generated with
+    # -memory 4096, so every boot that loads it must request the same memory.
+    # The shard adds -no-snapshot-save (it must never overwrite the clean cached
+    # snapshot with app state).
+    EMULATOR_OPTIONS_TEST: '-no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot-save -memory 4096'
+  steps:
+    - name: Check out
+      uses: actions/checkout@v7
+
+    - name: Install JDK
+      uses: ./.github/actions/install_jdk
+      with:
+        java-version: '17'
+        distribution: temurin
+
+    - name: Locate Android SDK
+      uses: ./.github/actions/locate_sdk
+
+    - name: Install Android SDK
+      uses: ./.github/actions/install_sdk
+      with:
+        android-home: ${{ env.ANDROID_HOME }}
+        api-level: ${{ env.ANDROID_API }}
+        build-tools: ${{ env.ANDROID_BUILD_TOOLS }}
+
+    # Mandatory on Linux runners — see the long KVM note in smoke_emulator.yaml.
+    - name: Enable KVM
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+        sudo udevadm control --reload-rules
+        sudo udevadm trigger --name-match=kvm
+        ls -l /dev/kvm
+
+    - name: Set up Gradle
+      uses: gradle/actions/setup-gradle@v5
+      with:
+        gradle-version: '8.14.5'
+        validate-wrappers: false
+
+    # -------- native (rawler_fotlab) — same placement as build_gradle.yaml --------
+    - name: Download native artifact (rawler_fotlab)
+      if: inputs.native-artifact-name != ''
+      uses: actions/download-artifact@v7
+      with:
+        name: ${{ inputs.native-artifact-name }}
+        path: native-artifacts
+
+    - name: Place native libs + Kotlin bindings
+      if: inputs.native-artifact-name != ''
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p app/build/generated/jniLibs
+        cp -r native-artifacts/jniLibs/* app/build/generated/jniLibs/
+        mkdir -p app/build/generated/uniffi/main/kotlin
+        cp -r native-artifacts/kotlin/. app/build/generated/uniffi/main/kotlin/
+
+    # -------- RAW corpus (warmed by prep; shards only restore) --------
+    - name: Restore RAW sample cache
+      if: inputs.need-raw == 'true'
+      uses: actions/cache/restore@v6
+      with:
+        path: raw-samples
+        key: rawdb-samples-v1
+
+    # -------- Grade LUT fixture (small; alchemy shard only, no cache) --------
+    - name: Download V-Log grade LUT cube
+      if: inputs.need-lut == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p lut-samples
+        base="https://github.com/fot-lab/V-Log-Alchemy/raw/refs/heads/main"
+        curl -fL --retry 3 --retry-delay 5 \
+          -o "lut-samples/FLog2C_to_CLASSIC-Neg_VLog.cube" \
+          "$base/Luts/Fujifilm/FLog2C_to_CLASSIC-Neg_VLog.cube"
+        echo "3e2da957fc86cbe06d382ec68ae653df7a70d2de577d521c829b48d7c5a37d02  lut-samples/FLog2C_to_CLASSIC-Neg_VLog.cube" | sha256sum -c -
+        ls -l lut-samples
+
+    # -------- emulator (warm restore; cold fallback creates but does NOT save) --------
+    - name: Restore emulator cache
+      id: emulator-cache
+      uses: actions/cache/restore@v6
+      with:
+        path: |
+          ~/.android/avd/*
+          ~/.android/adb*
+          ${{ env.ANDROID_HOME }}/system-images
+          ${{ env.ANDROID_HOME }}/emulator
+          ${{ env.ANDROID_HOME }}/build-tools
+        key: ${{ runner.os }}-emulator-${{ inputs.api-level }}-${{ inputs.target }}-${{ inputs.arch }}
+
+    - name: Create AVD locally (cold fallback; not cached)
+      if: steps.emulator-cache.outputs.cache-hit != 'true'
+      uses: reactivecircus/android-emulator-runner@v2
+      with:
+        api-level: ${{ inputs.api-level }}
+        target: ${{ inputs.target }}
+        arch: ${{ inputs.arch }}
+        force-avd-creation: false
+        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -memory 4096
+        disable-animations: false
+        script: echo "Generated a local AVD snapshot (cache miss fallback)."
+
+    # -------- the filtered instrumented shard --------
+    - name: Run ${{ inputs.shard }} smoke shard
+      timeout-minutes: ${{ inputs.test-timeout-minutes }}
+      uses: reactivecircus/android-emulator-runner@v2
+      env:
+        SMOKE_TEST_FILTER: ${{ inputs.test-filter }}
+        NEED_RAW: ${{ inputs.need-raw }}
+        NEED_LUT: ${{ inputs.need-lut }}
+      with:
+        api-level: ${{ inputs.api-level }}
+        target: ${{ inputs.target }}
+        arch: ${{ inputs.arch }}
+        force-avd-creation: false
+        emulator-options: ${{ env.EMULATOR_OPTIONS_TEST }}
+        disable-animations: true
+        # POSIX sh only (the runner executes this with /usr/bin/sh = dash): no
+        # PIPESTATUS / pipefail. See smoke_emulator.yaml for the logcat/tombstone
+        # rationale (rawler FFI SIGSEGV/SIGABRT backtraces).
+        script: |
+          if [ "$NEED_RAW" = "true" ]; then
+            # The corpus lands in the emulated SD card's Pictures directory — the same
+            # place a camera/file manager drops photos — indexed into MediaStore and
+            # imported by uri exactly like a real photo.
+            adb shell mkdir -p /sdcard/Pictures/rawdb
+            adb push raw-samples/. /sdcard/Pictures/rawdb/
+            adb shell ls -l /sdcard/Pictures/rawdb
+          fi
+
+          if [ "$NEED_LUT" = "true" ]; then
+            # Install first so the package data dir exists, then stream the cube through
+            # run-as stdin (the file gets the APP uid; shell-created dirs under /sdcard
+            # are not app-traversable and /data/local/tmp is SELinux-blocked on API 36).
+            # connectedDebugAndroidTest later reinstalls with -r, preserving app data.
+            gradle --no-daemon :app:installDebug
+            adb shell "run-as io.github.fotlab.fotlab sh -c 'mkdir -p files/lut-fixture && cat > files/lut-fixture/FLog2C_to_CLASSIC-Neg_VLog.cube'" \
+              < lut-samples/FLog2C_to_CLASSIC-Neg_VLog.cube
+            adb shell run-as io.github.fotlab.fotlab ls -l files/lut-fixture
+          fi
+
+          adb logcat -c || true
+          # Strip every whitespace: the YAML filter is folded across several lines
+          # for readability, so it arrives space-separated; am instrument's -e class
+          # list splits on commas and would see " io.Bar" as an unknown class.
+          TEST_FILTER_COMPACT="$(printf '%s' "$SMOKE_TEST_FILTER" | tr -d '[:space:]')"
+          gradle --no-daemon --stacktrace connectedDebugAndroidTest "-PsmokeTestFilter=$TEST_FILTER_COMPACT" > smoke-log.txt 2>&1
+          STATUS=$?
+          cat smoke-log.txt
+          adb logcat -d -b all > logcat.txt 2>&1 || true
+          adb shell ls -l /data/tombstones > tombstones.txt 2>&1 || true
+          exit $STATUS
+
+    # Per-shard diagnostics: build-smoke-<shard>.log on the calling workflow.
+    - name: Upload ${{ inputs.shard }} smoke logs
+      if: failure() && inputs.log-artifact-name != ''
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ format('{0}-{1}', replace(inputs.log-artifact-name, '.log', ''), inputs.shard) }}
+        path: |
+          smoke-log.txt
+          logcat.txt
+          tombstones.txt
+          app/build/reports/androidTests/connected
+          app/build/outputs/androidTest-results/connected
+        retention-days: ${{ inputs.log-retention-days }}
+        if-no-files-found: warn

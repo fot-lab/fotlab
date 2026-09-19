@@ -114,9 +114,12 @@ jobs:
       version-name: ${{ needs.apk.outputs.version-name }}
 
   # Smoke stage — the release stage's sibling, and its exact complement: a normal
-  # run (push/PR, no v* tag, release flag false) boots a cached AVD and runs the
-  # instrumented smoke tests, while a release run skips it entirely and publishes
-  # instead. Both key off the same release flag computed in preflight.
+  # run (push/PR, no v* tag, release flag false) boots cached AVDs and runs the
+  # instrumented smoke tests split into four parallel shards
+  # (test_app_smoke / test_image_loader / test_image_develop /
+  # test_image_alchemy) behind one cache-warming prep job, while a release run
+  # skips it entirely and publishes instead. Both key off the same release flag
+  # computed in preflight.
   emulator-smoke:
     name: Emulator Smoke Test
     needs: [preflight, rust, apk]
