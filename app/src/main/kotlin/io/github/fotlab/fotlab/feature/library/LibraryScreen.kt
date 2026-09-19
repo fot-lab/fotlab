@@ -100,8 +100,12 @@ import java.util.Locale
 /** Drawer width: 80% of the module region (`FOTLAB-UIXDES-000002` R3). */
 private const val DrawerWidthFraction = 0.8f
 
-/** Height of the Library fun bar — the former M3 top app bar's 64.dp. */
-private val LibraryScreenFunBarHeight = 64.dp
+/**
+ * Height of the Library fun bar — the former M3 top app bar's 64.dp.
+ * `internal` because the Recycle Bin lives in a sibling file and reuses the exact height so its
+ * own fun bar (and the drawer's bottom-left close row) aligns in place.
+ */
+internal val LibraryScreenFunBarHeight = 64.dp
 
 /**
  * The two top-level views the drawer switches between. `Library` is the Source Library — the
