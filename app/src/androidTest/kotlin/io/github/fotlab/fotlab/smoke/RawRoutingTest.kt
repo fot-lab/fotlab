@@ -453,6 +453,49 @@ class RawRoutingTest {
         step("develop", "EV 0 restored the as-shot frame")
     }
 
+    /**
+     * A manually entered Kelvin value must redevelop the resident RAW into a full-frame COLOR
+     * (never black) PNG, and warm vs cool entries have to move the pixels in opposite chromatic
+     * directions. This is the regression for the white-balance black-frame bug: the native
+     * Kelvin→multiplier projection used the raw illuminant-specific color matrix unadapted and
+     * zeroed every non-positive camera channel, so the develop returned an all-zero frame.
+     * Engine-level on the 36 MP Sony ARW (same budget rationale as the exposure test); the
+     * dialog that feeds this entry point is exercised by the UI journey suite.
+     */
+    @Test
+    fun manualKelvinWhiteBalanceRedevelopsWithoutBlack() {
+        val uri = indexAndFind(sonyArw7r)
+            ?: throw AssertionError("Sony ARW not on the SD card at /sdcard/Pictures/rawdb/${sonyArw7r.file}")
+        runBlocking { LibraryCore.importUris(parentId = null, uris = listOf(uri)) }
+        val node = runBlocking { LibraryCore.getByUri(uri.toString()) }!!
+        StudioEngine.setCurrentNode(node.uriStorage)
+
+        val initial = runBlocking {
+            withTimeout(DECODE_TIMEOUT_MS) {
+                StudioEngine.renderResult
+                    .filterNot { it is StudioRenderResult.Idle || it is StudioRenderResult.Loading }
+                    .first()
+            }
+        }
+        assertTrue("as-shot develop must reach Ready", initial is StudioRenderResult.Ready)
+        val initialBytes = toBytes((initial as StudioRenderResult.Ready).model)
+        assertDevelopedIsColor(initialBytes, "Sony ILCE-7R as-shot")
+
+        StudioEngine.setWhiteBalanceKelvin(3200f) // warm tungsten
+        val warm = runBlocking {
+            withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame(requireDifferentFrom = initialBytes) }
+        }
+        step("develop", "WB 3200 K -> ${warm.outWidth}x${warm.outHeight} (${warm.bytes.size} bytes)")
+        assertDevelopedIsColor(warm.bytes, "Sony ILCE-7R WB 3200K (must stay color, never black)")
+
+        StudioEngine.setWhiteBalanceKelvin(9000f) // cool blue sky
+        val cool = runBlocking {
+            withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame(requireDifferentFrom = warm.bytes) }
+        }
+        step("develop", "WB 9000 K -> ${cool.outWidth}x${cool.outHeight} (${cool.bytes.size} bytes)")
+        assertDevelopedIsColor(cool.bytes, "Sony ILCE-7R WB 9000K (must stay color, never black)")
+    }
+
     // ---------------------------------------------------------------- grade fork (Boost / LOG)
 
     /**

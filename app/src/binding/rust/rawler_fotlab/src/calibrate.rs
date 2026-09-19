@@ -85,42 +85,10 @@ pub(crate) fn calibrate(
     wb: Option<[f32; 4]>,
     space: WorkingSpace,
 ) -> Result<RawlerImageDeveloped, RawlerFotlabError> {
-  // Resolve the camera→XYZ matrix at the target white point, falling back to identity
-  // and adapting from another illuminant via Bradford when needed (rawler's logic).
-  // The target is D65 for the presentation path and D50 for the wide-gamut editing path.
+  // Resolve the camera color matrix at the target white point (D65 presentation /
+  // D50 editing), Bradford-adapted from another illuminant (rawler's logic).
   let target_illu = space.illuminant();
-  let mut xyz2cam: [[f32; 3]; 4] = [[0.0; 3]; 4];
-  let (illu, matrix) = image
-    .color_matrix_find_first([
-      Illuminant::D65,
-      Illuminant::A,
-      Illuminant::B,
-      Illuminant::C,
-      Illuminant::D50,
-      Illuminant::D55,
-      Illuminant::D75,
-      Illuminant::Daylight,
-      Illuminant::Flash,
-    ])
-    .unwrap_or_else(|| (target_illu, vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]));
-  let target_matrix: Vec<f32> = if illu == target_illu {
-    matrix
-  } else {
-    match matrix.len() {
-      9 => adapt_bradford(&illu, &target_illu, &transform_1d_3x3(&matrix))
-        .into_iter()
-        .flatten()
-        .collect(),
-      _ => return Err(RawlerFotlabError::Decode("color matrix has unexpected size".to_string())),
-    }
-  };
-  assert_eq!(target_matrix.len() % 3, 0);
-  let components = target_matrix.len() / 3;
-  for i in 0..components {
-    for j in 0..3 {
-      xyz2cam[i][j] = target_matrix[i * 3 + j];
-    }
-  }
+  let xyz2cam = resolve_xyz_to_cam(image, target_illu)?;
 
   // White balance: explicit override, else rawler default (1.0 if NaN).
   let wb = match wb {
@@ -221,6 +189,52 @@ fn flatten_rgb3(v: Vec<[f32; 3]>) -> Vec<f32> {
   // SAFETY: ptr/len/cap stay within the original allocation; the element type
   // change [f32;3] -> f32 preserves layout contiguity and alignment.
   unsafe { Vec::from_raw_parts(v.as_mut_ptr() as *mut f32, v.len() * 3, v.capacity() * 3) }
+}
+
+/// Resolve the camera color matrix (XYZ→camera, `[[f32;3];4]`, RGBE rows) at the
+/// requested reference [illuminant]: rawler's preferred-matrix lookup, Bradford
+/// adapted from the stored illuminant when it differs, identity fallback. This is
+/// the matrix the calibrate render pairs its white-balance multipliers with, and
+/// the same resolution the white-balance Kelvin helpers use
+/// (`wb::as_shot_color_temp_kelvin`), so a custom multiplier is always computed
+/// against the exact matrix it will be rendered through.
+pub(crate) fn resolve_xyz_to_cam(
+    image: &RawImage,
+    illuminant: Illuminant,
+) -> Result<[[f32; 3]; 4], RawlerFotlabError> {
+    let mut xyz2cam: [[f32; 3]; 4] = [[0.0; 3]; 4];
+    let (illu, matrix) = image
+        .color_matrix_find_first([
+            Illuminant::D65,
+            Illuminant::A,
+            Illuminant::B,
+            Illuminant::C,
+            Illuminant::D50,
+            Illuminant::D55,
+            Illuminant::D75,
+            Illuminant::Daylight,
+            Illuminant::Flash,
+        ])
+        .unwrap_or_else(|| (illuminant, vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]));
+    let target_matrix: Vec<f32> = if illu == illuminant {
+        matrix
+    } else {
+        match matrix.len() {
+            9 => adapt_bradford(&illu, &illuminant, &transform_1d_3x3(&matrix))
+                .into_iter()
+                .flatten()
+                .collect(),
+            _ => return Err(RawlerFotlabError::Decode("color matrix has unexpected size".to_string())),
+        }
+    };
+    assert_eq!(target_matrix.len() % 3, 0);
+    let components = target_matrix.len() / 3;
+    for i in 0..components {
+        for j in 0..3 {
+            xyz2cam[i][j] = target_matrix[i * 3 + j];
+        }
+    }
+    Ok(xyz2cam)
 }
 
 /// Tiny helper replicating `rawler::imgop::matrix::transform_1d::<3,3>` — reshapes

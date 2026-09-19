@@ -260,7 +260,7 @@ jobs:
           log-artifact-name: ${{ inputs.log-artifact-name }}
           log-retention-days: ${{ inputs.log-retention-days }}
 
-  # -------- shard 3: demosaic / develop (9 tests, the heavy shard) --------
+  # -------- shard 3: demosaic / develop (10 tests, the heavy shard) --------
   test-image-develop:
     name: Smoke / test_image_develop
     needs: [prep-emulator]
@@ -273,7 +273,7 @@ jobs:
       # brand; the every-menu-option + exposure recompute proof.
       TEST_FILTER: >-
         io.github.fotlab.fotlab.smoke.RawlerNativeSmokeTest#developOfNonRawBytesReturnsNull+developOfPngSurvives+developDirectCallSurfacesJvmException,
-        io.github.fotlab.fotlab.smoke.RawRoutingTest#canonCr2DevelopsThroughDemosaicMenu+sonyIlce7rArwDevelopsThroughDemosaicMenu+sonyIlce7rm2ArwDevelopsThroughDemosaicMenu+nikonD850NefDevelopsThroughDemosaicMenu+panasonicDcS1rRw2DevelopsThroughDemosaicMenu+everyDemosaicMenuOptionRedevelopsOnBayerAndExposureRecomputes
+        io.github.fotlab.fotlab.smoke.RawRoutingTest#canonCr2DevelopsThroughDemosaicMenu+sonyIlce7rArwDevelopsThroughDemosaicMenu+sonyIlce7rm2ArwDevelopsThroughDemosaicMenu+nikonD850NefDevelopsThroughDemosaicMenu+panasonicDcS1rRw2DevelopsThroughDemosaicMenu+everyDemosaicMenuOptionRedevelopsOnBayerAndExposureRecomputes+manualKelvinWhiteBalanceRedevelopsWithoutBlack
     steps:
       - name: Run image develop shard
         uses: ./.github/actions/emulator_smoke_shard
