@@ -76,6 +76,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -532,11 +533,24 @@ private fun LibraryTopBar(
                             )
                         }
                     } else {
-                        Text(
-                            text = selectionSize.toString(),
-                            style = MaterialTheme.typography.titleLarge,
-                            modifier = Modifier.padding(horizontal = 16.dp),
-                        )
+                        // The count lives in the same 48.dp vertical slot as the icon buttons so it
+                        // shares their centre line; the box centres the glyph and the text drops
+                        // Android's default `includeFontPadding`. That padding reserves descender
+                        // space below the baseline, and digits have no descenders, so leaving it on
+                        // pushes the numerals above the bar's centre by about half a character —
+                        // which is exactly the offset being fixed here.
+                        Box(
+                            modifier = Modifier
+                                .height(48.dp)
+                                .padding(horizontal = 16.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = selectionSize.toString(),
+                                style = MaterialTheme.typography.titleLarge,
+                                platformStyle = PlatformTextStyle(includeFontPadding = false),
+                            )
+                        }
                     }
                 }
             }

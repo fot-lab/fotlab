@@ -37,8 +37,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.unit.dp
 import io.github.fotlab.fotlab.R
 import kotlinx.coroutines.launch
@@ -280,11 +282,21 @@ private fun RecycleTopBar(
                             contentDescription = stringResource(id = R.string.library_cd_clear_selection),
                         )
                     }
-                    Text(
-                        text = selectionSize.toString(),
-                        style = MaterialTheme.typography.titleLarge,
-                        modifier = Modifier.padding(horizontal = 16.dp),
-                    )
+                    // Same fix as LibraryScreen: the 48.dp box shares the icon buttons' centre
+                    // line and includeFontPadding is dropped so digits are not pushed above the
+                    // bar's centre by the reserved descender space.
+                    Box(
+                        modifier = Modifier
+                            .height(48.dp)
+                            .padding(horizontal = 16.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = selectionSize.toString(),
+                            style = MaterialTheme.typography.titleLarge,
+                            platformStyle = PlatformTextStyle(includeFontPadding = false),
+                        )
+                    }
                 }
             }
         },
