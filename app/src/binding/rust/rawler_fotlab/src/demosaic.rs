@@ -20,7 +20,7 @@ use rawler::imgop::develop::Intermediate;
 use rawler::imgop::sensor::bayer::{bilinear::Bilinear4Channel, ppg::PPGDemosaic};
 use rawler::imgop::sensor::xtrans::bilinear::XTransBilinearDemosaic;
 use rawler::imgop::sensor::{Demosaic as RawlerDemosaic, SensorType};
-use rawler::imgop::{Dim2, Rect};
+use rawler::imgop::Dim2;
 use rawler::pixarray::{Color2D, PixF32};
 use rawler::rawimage::{CFAConfig, RawImage, RawPhotometricInterpretation};
 

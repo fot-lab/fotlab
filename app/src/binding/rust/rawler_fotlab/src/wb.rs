@@ -209,7 +209,7 @@ fn neutral_to_multipliers(neutral: [f32; 4], channels: usize) -> Vec<f32> {
         .fold(f32::MIN, f32::max)
         .max(0.0);
     let floor = (strongest * 1e-3).max(1e-6);
-    let safe = std::array::from_fn(|i| {
+    let safe: [f32; 4] = std::array::from_fn(|i| {
         if i < channels {
             neutral[i].max(floor)
         } else {
