@@ -8,8 +8,10 @@ import io.github.fotlab.fotlab_rawler.RawlerFotlabBridge
 import io.github.fotlab.fotlab_rawler.developToPng
 import io.github.fotlab.fotlab_rawler.identify
 import java.io.ByteArrayOutputStream
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -94,6 +96,28 @@ class RawlerNativeSmokeTest {
     @Test
     fun developOfPngSurvives() {
         RawlerFotlabBridge.developRawToPng(pngBytes, developParams)
+    }
+
+    /**
+     * Call #4 (grade support list): the cxx shim enumerates rawalchemy's accepted log-curve names
+     * from inside the loaded .so — no RAW input required. Upstream's `LOG_SPACES` table ships 14
+     * curves (F-Log … D-Log), the Rust side sorts them, and the list is what fills the Studio LOG
+     * chooser. A broken cxx bridge / missing rawalchemy feature degrades to an empty list via
+     * `runCatching`, which this case fails loudly on; a native abort in the shim kills the
+     * instrumentation by construction.
+     */
+    @Test
+    fun gradeLogSpacesAreEnumeratedNatively() {
+        val spaces = RawlerFotlabBridge.supportedGradeLogSpaces()
+        assertNotNull(spaces)
+        assertEquals("upstream LOG_SPACES ships 14 curves: $spaces", 14, spaces.size)
+        assertEquals("the log-space list must be de-duplicated", spaces.distinct().size, spaces.size)
+        assertEquals("the log-space list must be sorted", spaces.sorted(), spaces)
+        // One representative per vendor family, so a table rebuild that silently drops a vendor is
+        // caught without pinning every name's spelling.
+        listOf("F-Log", "V-Log", "Canon Log 2", "S-Log3", "Arri LogC4", "D-Log").forEach { name ->
+            assertTrue("log-space list must contain $name: $spaces", name in spaces)
+        }
     }
 
     /**

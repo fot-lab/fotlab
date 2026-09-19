@@ -40,6 +40,9 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -440,6 +443,195 @@ class RawRoutingTest {
         }
         assertTrue("EV 0 must reproduce the as-shot frame", restored.bytes.contentEquals(initialBytes))
         step("develop", "EV 0 restored the as-shot frame")
+    }
+
+    // ---------------------------------------------------------------- grade fork (Boost / LOG)
+
+    /**
+     * The grade fork's engine-level user journey on a resident RAW (LUT excluded — it needs a
+     * SAF-picked file and is covered separately by design):
+     *
+     *  1. opening a RAW flips `isRawLoaded` true and leaves the Boost/LOG/LUT selection at the
+     *     all-"none" default (no grade error);
+     *  2. Boost ON re-renders through the native rawalchemy path (`develop_and_grade`) and MOVES
+     *     pixels vs the as-shot sRGB develop while keeping a full-frame color PNG;
+     *  3. picking a log curve (S-Log3) on top re-renders again and moves pixels (the log-encoded
+     *     frame is intentionally not color-checked — log encoding flattens chroma);
+     *  4. LOG back to "none" while Boost stays on deterministically reproduces the boost-only
+     *     frame;
+     *  5. Boost back to "none" returns the canvas to the develop fork, byte-identical to the
+     *     as-shot frame (all-"none" is a plain reDevelop, not a graded black/linear buffer);
+     *  6. switching the node away resets the grade selection, `isRawLoaded` and the error state.
+     *
+     * Every step also proves the new C++ grade path (log-space lookup, gamut matrix, log curve,
+     * fused grading) executes inside the process without a native abort.
+     */
+    @Test
+    fun boostAndLogGradesReRenderThroughEngineAndNoneRestoresDevelop() {
+        val uri = indexAndFind(sonyArw7r)
+            ?: throw AssertionError("Sony ARW not on the SD card at /sdcard/Pictures/rawdb/${sonyArw7r.file}")
+        runBlocking { LibraryCore.importUris(parentId = null, uris = listOf(uri)) }
+        val node = runBlocking { LibraryCore.getByUri(uri.toString()) }!!
+        StudioEngine.setCurrentNode(node.uriStorage)
+
+        val initial = runBlocking {
+            withTimeout(DECODE_TIMEOUT_MS) {
+                StudioEngine.renderResult
+                    .filterNot { it is StudioRenderResult.Idle || it is StudioRenderResult.Loading }
+                    .first()
+            }
+        }
+        assertTrue("as-shot develop must reach Ready", initial is StudioRenderResult.Ready)
+        val asShotBytes = toBytes((initial as StudioRenderResult.Ready).model)
+        assertDevelopedIsColor(asShotBytes, "Sony ILCE-7R as-shot DEFAULT")
+
+        runBlocking {
+            assertTrue("a routed RAW must mark isRawLoaded", StudioEngine.isRawLoaded.first())
+        }
+        assertEquals(
+            "grade selection starts at all-none on file open",
+            StudioEngine.GradeSelection(),
+            StudioEngine.gradeSelection.value,
+        )
+        assertNull(StudioEngine.gradeError.value)
+        val spaces = StudioEngine.supportedLogSpaces()
+        assertTrue("native log-space list must enumerate S-Log3, got $spaces", "S-Log3" in spaces)
+
+        // 2) Boost ON: contrast/saturation enhancement, pixels must move, color must survive.
+        StudioEngine.setGradeBoost(true)
+        val boosted = runBlocking {
+            withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame(requireDifferentFrom = asShotBytes) }
+        }
+        step("grade", "boost ON -> ${boosted.outWidth}x${boosted.outHeight} (${boosted.bytes.size} bytes), differs")
+        assertDevelopedIsColor(boosted.bytes, "Sony ILCE-7R boost ON")
+        assertTrue(StudioEngine.gradeSelection.value.boost)
+        assertNull("boost grade must not surface a grade error", StudioEngine.gradeError.value)
+
+        // 3) S-Log3 ON on top: gamut conversion + log encoding, pixels move again.
+        StudioEngine.setGradeLogSpace("S-Log3")
+        val logged = runBlocking {
+            withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame(requireDifferentFrom = boosted.bytes) }
+        }
+        step("grade", "S-Log3 -> ${logged.outWidth}x${logged.outHeight} (${logged.bytes.size} bytes), differs")
+        assertNull("log grade must not surface a grade error", StudioEngine.gradeError.value)
+        assertTrue(StudioEngine.gradeSelection.value.logSpace == "S-Log3")
+
+        // 4) LOG none, Boost still ON — deterministic reproduction of the boost-only frame.
+        StudioEngine.setGradeLogSpace(null)
+        val boostOnly = runBlocking {
+            withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame(requireDifferentFrom = logged.bytes) }
+        }
+        assertTrue(
+            "removing the log curve while boost stays on must reproduce the boost-only frame",
+            boostOnly.bytes.contentEquals(boosted.bytes),
+        )
+
+        // 5) Boost none — all-"none" returns the plain develop fork, byte-identical to as-shot.
+        StudioEngine.setGradeBoost(false)
+        val restored = runBlocking {
+            withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame(requireDifferentFrom = boostOnly.bytes) }
+        }
+        assertTrue(
+            "all-none grade selection must restore the as-shot develop frame",
+            restored.bytes.contentEquals(asShotBytes),
+        )
+
+        // 6) File switch resets every grade surface for the next file.
+        StudioEngine.setCurrentNode(null)
+        assertEquals(
+            "leaving the node must reset the grade selection",
+            StudioEngine.GradeSelection(),
+            StudioEngine.gradeSelection.value,
+        )
+        assertFalse("leaving the node must clear isRawLoaded", StudioEngine.isRawLoaded.value)
+        assertNull(StudioEngine.gradeError.value)
+    }
+
+    /**
+     * UI-level grade journey through the REAL [StudioScreen]: with a RAW resident the grade bar is
+     * rendered, the Boost chip dropdown drives [StudioEngine.setGradeBoost] end to end (ON moves
+     * pixels, the chip relabels, none restores the develop frame), and the LOG dropdown enumerates
+     * the natively-listed log curves. The LOG list is opened and dismissed via back without an
+     * item picked (so no extra full re-develop is spent); picking a log curve is covered
+     * engine-level by [boostAndLogGradesReRenderThroughEngineAndNoneRestoresDevelop]. LUT needs a
+     * picked file and is excluded.
+     */
+    @Test
+    fun gradeBarChipsDriveGradingThroughRealStudioUi() {
+        journey(sonyArw7r, expectRawler = true)
+        val initialBytes = toBytes((StudioEngine.renderResult.value as StudioRenderResult.Ready).model)
+
+        hostContent { AppTheme { StudioScreen() } }
+        val none = context.getString(R.string.studio_grade_none)
+        val boostChipNone = context.getString(R.string.studio_grade_bar_boost, none)
+        val logChipNone = context.getString(R.string.studio_grade_bar_log, none)
+        val lutChipNone = context.getString(R.string.studio_grade_bar_lut, none)
+        composeRule.waitUntil(30_000) {
+            composeRule.onAllNodesWithText(boostChipNone).fetchSemanticsNodes().isNotEmpty()
+        }
+        step("grade-ui", "boost chip rendered at all-none")
+        // All three chips compose the bar (LUT chip excluded only from interaction, not rendering).
+        assertTrue(
+            "LOG chip must be rendered for a RAW",
+            composeRule.onAllNodesWithText(logChipNone).fetchSemanticsNodes().isNotEmpty(),
+        )
+        assertTrue(
+            "LUT chip must be rendered for a RAW",
+            composeRule.onAllNodesWithText(lutChipNone).fetchSemanticsNodes().isNotEmpty(),
+        )
+
+        // Boost chip -> "Boost" item -> a genuine native re-grade that moves pixels.
+        composeRule.onNodeWithText(boostChipNone).performClick()
+        val boostOn = context.getString(R.string.studio_grade_boost_on)
+        composeRule.waitUntil(30_000) {
+            composeRule.onAllNodesWithText(boostOn).fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithText(boostOn).performClick()
+        step("grade-ui", "picked Boost ON from the chip dropdown")
+        val boosted = runBlocking {
+            withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame(requireDifferentFrom = initialBytes) }
+        }
+        assertDevelopedIsColor(boosted.bytes, "Sony ILCE-7R boost ON via UI")
+
+        // The chip relabels to the active value.
+        val boostChipActive = context.getString(R.string.studio_grade_bar_boost, boostOn)
+        composeRule.waitUntil(30_000) {
+            composeRule.onAllNodesWithText(boostChipActive).fetchSemanticsNodes().isNotEmpty()
+        }
+
+        // LOG dropdown enumerates the native log-space names, then back dismisses it (no re-grade).
+        composeRule.onNodeWithText(logChipNone).performClick()
+        composeRule.waitUntil(30_000) {
+            composeRule.onAllNodesWithText("S-Log3").fetchSemanticsNodes().isNotEmpty()
+        }
+        step("grade-ui", "LOG dropdown enumerates native spaces (S-Log3 present)")
+        composeRule.runOnUiThread { composeRule.activity.onBackPressedDispatcher.onBackPressed() }
+        composeRule.waitForIdle()
+
+        // Boost chip -> none -> the canvas returns to the as-shot develop frame.
+        composeRule.onNodeWithText(boostChipActive).performClick()
+        composeRule.onNodeWithText(none).performClick()
+        step("grade-ui", "picked none from the boost dropdown")
+        val restored = runBlocking {
+            withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame(requireDifferentFrom = boosted.bytes) }
+        }
+        assertTrue(
+            "boost none via the chip must restore the as-shot develop frame",
+            restored.bytes.contentEquals(initialBytes),
+        )
+    }
+
+    /** The grade bar is a RAW-only surface: the Coil/PNG route must keep it off-screen. */
+    @Test
+    fun gradeBarIsHiddenOnPngRoute() {
+        journey(pngControl(), expectRawler = false)
+        hostContent { AppTheme { StudioScreen() } }
+        composeRule.waitForIdle()
+        assertTrue(
+            "no grade-bar chip may exist for the PNG/Coil route",
+            composeRule.onAllNodesWithText("Boost:", substring = true).fetchSemanticsNodes().isEmpty(),
+        )
+        assertFalse("isRawLoaded must stay false for the PNG/Coil route", StudioEngine.isRawLoaded.value)
     }
 
     /**
