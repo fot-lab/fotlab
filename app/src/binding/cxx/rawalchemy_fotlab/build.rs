@@ -70,14 +70,12 @@ fn main() {
         cmake_cfg
             .define("CMAKE_TOOLCHAIN_FILE", toolchain)
             .define("ANDROID_ABI", abi)
-            // Static STL: the ONLY C++ on the device lives inside this one
-            // cdylib (see the link step below), so c++_static is the NDK's
-            // recommended choice. With c++_shared the final .so gets a
-            // DT_NEEDED on libc++_shared.so, which is NOT packaged by AGP
-            // (our jniLibs are produced by cargo-ndk, not externalNativeBuild)
-            // and the app dies at loadLibrary with
-            // `dlopen failed: library "libc++_shared.so" not found`.
-            .define("ANDROID_STL", "c++_static")
+            // Shared STL. The resulting cdylib has a DT_NEEDED on libc++_shared.so,
+            // which AGP does NOT add on its own for hand-produced jniLibs; the CI
+            // native job copies the NDK's per-ABI libc++_shared.so next to
+            // librawler_fotlab.so in the jniLibs artifact (build_rust.yaml), so
+            // the APK ships it. Keep this define in sync with that copy step.
+            .define("ANDROID_STL", "c++_shared")
             .define("ANDROID_PLATFORM", format!("android-{min_api}"));
     }
     let dst = cmake_cfg.build();
@@ -102,84 +100,30 @@ fn main() {
     println!("cargo:rustc-link-lib=static=rawalchemy_grading");
     // C++ stdlib.
     //
-    // Android: link the STL STATICALLY (`libc++_static.a` + `libc++abi.a`
-    // from the NDK sysroot). A `dylib=c++` link gives the cdylib a DT_NEEDED
-    // on libc++_shared.so, which AGP never packages for hand-produced
-    // jniLibs, so the emulator smoke (and every device) fails with
-    // `dlopen failed: library "libc++_shared.so" not found`. This app ships
-    // exactly one .so containing C++, so a single private copy of the static
-    // STL is safe per the NDK's one-STL-per-process rule. The cmake step
-    // above is configured with `-DANDROID_STL=c++_static` to match.
+    // Android: dynamic libc++ (`dylib=c++` -> DT_NEEDED on libc++_shared.so).
+    // We tried c++_static: rustc resolves `static=` archives itself (needs an
+    // explicit -L into the NDK sysroot), and on armv7 the resulting link line
+    // (rust's compiler_builtins versioned __aeabi_* symbols against LIBC_N,
+    // plus the -lc++_shared that cxx's link-cplusplus dependency injects by
+    // default) fails with `undefined version LIBC_N`. Dynamic links cleanly on
+    // every ABI; the only price is shipping libc++_shared.so, which the CI
+    // native job copies into the jniLibs artifact so AGP packages it.
     //
-    // Desktop targets keep the platform libstdc++ as a dylib.
+    // Desktop targets use the platform libstdc++ as a dylib.
     //
     // NOTE: `rustc-link-lib` propagates to the final artifact of a *dependent*
     // crate; `rustc-link-arg` does not (cargo #9554). Since this crate is an rlib
     // consumed by rawler_fotlab's cdylib, only link-lib can carry the runtime.
-    // rustc places native archives inside a linker group, so the mutual
-    // c++_static <-> c++abi references resolve regardless of order.
     //
     // There is no OpenMP link-lib here on purpose: `RA_USE_OPENMP` is never
     // defined for this target, so no `#pragma omp` is compiled and no OMP
     // runtime is needed (see cpp/CMakeLists.txt).
-    if target.contains("android") {
-        // rustc resolves `static=` archives ITSELF before invoking the linker
-        // (unlike dylibs, which clang finds through its implicit sysroot), so
-        // the NDK STL directory must be added explicitly with -L. The static
-        // STL moved into the sysroot in NDK r27; keep the legacy
-        // sources/cxx-stl path as a fallback for older NDKs.
-        let ndk = env::var("ANDROID_NDK_HOME")
-            .or_else(|_| env::var("ANDROID_NDK_ROOT"))
-            .expect(
-                "rawalchemy_fotlab: ANDROID_NDK_HOME/ANDROID_NDK_ROOT must be set to build for Android",
-            );
-        let (llvm_triple, abi) = match target.as_str() {
-            "aarch64-linux-android" => ("aarch64-linux-android", "arm64-v8a"),
-            "armv7-linux-androideabi" => ("arm-linux-androideabi", "armeabi-v7a"),
-            "i686-linux-android" => ("i686-linux-android", "x86"),
-            "x86_64-linux-android" => ("x86_64-linux-android", "x86_64"),
-            other => panic!("rawalchemy_fotlab: unsupported Android target `{other}`"),
-        };
-        let host_tags = match (std::env::consts::OS, std::env::consts::ARCH) {
-            ("linux", "x86_64") => vec!["linux-x86_64"],
-            ("windows", "x86_64") => vec!["windows-x86_64"],
-            ("macos", "aarch64") => vec!["darwin-aarch64", "darwin-x86_64"],
-            ("macos", "x86_64") => vec!["darwin-x86_64"],
-            (os, arch) => panic!("rawalchemy_fotlab: unsupported build host {os}/{arch}"),
-        };
-        let mut stl_dirs: Vec<String> = Vec::new();
-        for host in &host_tags {
-            let sysroot_dir = Path::new(&ndk)
-                .join("toolchains/llvm/prebuilt")
-                .join(host)
-                .join("sysroot/usr/lib")
-                .join(llvm_triple);
-            if sysroot_dir.is_dir() {
-                stl_dirs.push(sysroot_dir.to_string_lossy().into_owned());
-            }
-            let legacy_dir = Path::new(&ndk)
-                .join("sources/cxx-stl/llvm-libc++/libs")
-                .join(abi);
-            if legacy_dir.is_dir() {
-                stl_dirs.push(legacy_dir.to_string_lossy().into_owned());
-            }
-        }
-        let found_stl = stl_dirs
-            .iter()
-            .any(|dir| Path::new(dir).join("libc++_static.a").is_file());
-        assert!(
-            found_stl,
-            "rawalchemy_fotlab: libc++_static.a not found under NDK {ndk} \
-             (checked {stl_dirs:?}); need NDK r23+ with the c++_static runtime"
-        );
-        for dir in &stl_dirs {
-            println!("cargo:rustc-link-search=native={dir}");
-        }
-        println!("cargo:rustc-link-lib=static=c++_static");
-        println!("cargo:rustc-link-lib=static=c++abi");
+    let cxx_stdlib = if target.contains("android") {
+        "c++"
     } else {
-        println!("cargo:rustc-link-lib=dylib=stdc++");
-    }
+        "stdc++"
+    };
+    println!("cargo:rustc-link-lib=dylib={cxx_stdlib}");
 
     println!("cargo:rerun-if-changed=cpp/rawalchemy_api.h");
     println!("cargo:rerun-if-changed=cpp/rawalchemy_shim.cc");

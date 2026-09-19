@@ -205,6 +205,41 @@ jobs:
             build --release
         shell: bash
 
+      # librawler_fotlab.so carries a DT_NEEDED on libc++_shared.so (the cxx
+      # link-cplusplus default + rawalchemy_fotlab/build.rs dylib=c++; the cmake
+      # subset builds with -DANDROID_STL=c++_shared). AGP packages hand-produced
+      # jniLibs verbatim and never injects the STL itself (that only happens for
+      # externalNativeBuild projects), so without this step the app dies at
+      # loadLibrary with `dlopen failed: library "libc++_shared.so" not found`.
+      # Copy the NDK's per-ABI shared STL next to our .so; both downstream jobs
+      # (build_gradle / smoke_emulator) cp the whole jniLibs tree, so the APK and
+      # the smoke test pick it up automatically. NDK r27+ stores it in the
+      # sysroot; older NDKs under sources/cxx-stl — try both.
+      - name: Bundle libc++_shared.so into jniLibs
+        run: |
+          set -euo pipefail
+          OUT="$GITHUB_WORKSPACE/native-artifacts/jniLibs"
+          SYSROOT_LIB="$(echo "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/*/sysroot/usr/lib)"
+          declare -A TRIPLES=(
+            [arm64-v8a]=aarch64-linux-android
+            [armeabi-v7a]=arm-linux-androideabi
+            [x86]=i686-linux-android
+            [x86_64]=x86_64-linux-android
+          )
+          for abi in "${!TRIPLES[@]}"; do
+            src="$SYSROOT_LIB/${TRIPLES[$abi]}/libc++_shared.so"
+            if [ ! -f "$src" ]; then
+              src="$ANDROID_NDK_HOME/sources/cxx-stl/llvm-libc++/libs/$abi/libc++_shared.so"
+            fi
+            if [ ! -f "$src" ]; then
+              echo "::error::libc++_shared.so for $abi not found under $ANDROID_NDK_HOME"
+              exit 1
+            fi
+            cp "$src" "$OUT/$abi/libc++_shared.so"
+            echo "bundled $abi libc++_shared.so <- $src"
+          done
+        shell: bash
+
       # The generator is this crate's own `uniffi-bindgen` bin (`--features cli`), so its
       # version can never drift from the `uniffi` runtime linked into the .so. It reads
       # uniffi.toml (Kotlin `package_name`) from the crate directory via `cargo metadata`,
