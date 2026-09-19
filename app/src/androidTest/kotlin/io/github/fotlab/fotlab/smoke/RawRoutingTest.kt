@@ -44,6 +44,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -448,8 +449,9 @@ class RawRoutingTest {
     // ---------------------------------------------------------------- grade fork (Boost / LOG)
 
     /**
-     * The grade fork's engine-level user journey on a resident RAW (LUT excluded — it needs a
-     * SAF-picked file and is covered separately by design):
+     * The grade fork's engine-level user journey on a resident RAW (LUT, which needs a picked
+     * file, is covered end to end by
+     * [panasonicVLogAndDownloadedLutCubeBothTakeEffect]):
      *
      *  1. opening a RAW flips `isRawLoaded` true and leaves the Boost/LOG/LUT selection at the
      *     all-"none" default (no grade error);
@@ -550,11 +552,12 @@ class RawRoutingTest {
     /**
      * UI-level grade journey through the REAL [StudioScreen]: with a RAW resident the grade bar is
      * rendered, the Boost chip dropdown drives [StudioEngine.setGradeBoost] end to end (ON moves
-     * pixels, the chip relabels, none restores the develop frame), and the LOG dropdown enumerates
-     * the natively-listed log curves. The LOG list is opened and dismissed via back without an
-     * item picked (so no extra full re-develop is spent); picking a log curve is covered
-     * engine-level by [boostAndLogGradesReRenderThroughEngineAndNoneRestoresDevelop]. LUT needs a
-     * picked file and is excluded.
+     * pixels, the chip relabels) and the LOG dropdown enumerates the natively-listed log curves;
+     * picking S-Log3 from it drives a second real re-grade. Both chips are then returned to
+     * "none" and the canvas must reproduce the as-shot develop frame. The popup is dismissed by
+     * picking an item ON PURPOSE — system back can reach the hosted MainActivity once the popup
+     * settles and finish it. LUT needs a picked file and is covered end to end (engine level) by
+     * [panasonicVLogAndDownloadedLutCubeBothTakeEffect].
      */
     @Test
     fun gradeBarChipsDriveGradingThroughRealStudioUi() {
@@ -599,27 +602,222 @@ class RawRoutingTest {
             composeRule.onAllNodesWithText(boostChipActive).fetchSemanticsNodes().isNotEmpty()
         }
 
-        // LOG dropdown enumerates the native log-space names, then back dismisses it (no re-grade).
+        // LOG dropdown enumerates the native log-space names. Pick S-Log3 instead of dismissing
+        // with system back: the menu is a Popup, and once its state settles the back press is
+        // delivered to the hosted MainActivity and FINISHES it ("No compose hierarchies found"
+        // on every later node lookup). Picking the item closes the popup deterministically and
+        // additionally proves a log pick drives a real native re-grade through the UI.
         composeRule.onNodeWithText(logChipNone).performClick()
         composeRule.waitUntil(30_000) {
             composeRule.onAllNodesWithText("S-Log3").fetchSemanticsNodes().isNotEmpty()
         }
         step("grade-ui", "LOG dropdown enumerates native spaces (S-Log3 present)")
-        composeRule.runOnUiThread { composeRule.activity.onBackPressedDispatcher.onBackPressed() }
-        composeRule.waitForIdle()
+        composeRule.onNodeWithText("S-Log3").performClick()
+        val logged = runBlocking {
+            withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame(requireDifferentFrom = boosted.bytes) }
+        }
+        step("grade-ui", "picked S-Log3 — native re-grade moved ${logged.bytes.size} bytes")
 
-        // Boost chip -> none -> the canvas returns to the as-shot develop frame.
+        // Boost chip -> none while S-Log3 stays on: still a graded frame, differs from boost+log.
         composeRule.onNodeWithText(boostChipActive).performClick()
         composeRule.onNodeWithText(none).performClick()
         step("grade-ui", "picked none from the boost dropdown")
+        val logOnly = runBlocking {
+            withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame(requireDifferentFrom = logged.bytes) }
+        }
+
+        // LOG chip -> none: all-"none" returns the canvas to the as-shot develop frame.
+        val logChipActive = context.getString(R.string.studio_grade_bar_log, "S-Log3")
+        composeRule.waitUntil(30_000) {
+            composeRule.onAllNodesWithText(logChipActive).fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithText(logChipActive).performClick()
+        composeRule.onNodeWithText(none).performClick()
+        step("grade-ui", "picked none from the LOG dropdown")
         val restored = runBlocking {
-            withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame(requireDifferentFrom = boosted.bytes) }
+            withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame(requireDifferentFrom = logOnly.bytes) }
         }
         assertTrue(
-            "boost none via the chip must restore the as-shot develop frame",
+            "all-none via the chips must restore the as-shot develop frame",
             restored.bytes.contentEquals(initialBytes),
         )
     }
+
+    // ---------------------------------------------------------------- grade fork (LUT cube)
+
+    /**
+     * The grade fork's COMPLETE user journey with the one external input the grade bar takes:
+     * a real `.cube` 3D LUT file, on the Panasonic RAW (DC-S1R RW2), following the user request
+     * "import a Panasonic image, load it into Studio, pick the V-Log curve, pick the LUT cube
+     * downloaded from GitHub, and observe whether the log and the LUT actually take effect":
+     *
+     *  1. the corpus RW2 is imported and loaded into Studio exactly like
+     *     [panasonicDcS1rRw2OpensInStudioThroughRawler]; the canvas is the as-shot full-frame
+     *     color develop;
+     *  2. **V-Log** — [StudioEngine.setGradeLogSpace] re-renders through the native
+     *     gamut-matrix + V-Log curve path; the frame must change and no grade error may surface;
+     *  3. **LUT** — the cube (downloaded from fot-lab/V-Log-Alchemy by `smoke_emulator.yaml`,
+     *     SHA-256 pinned, staged into the app's files via `run-as`) is republished as a
+     *     `content://` uri — exactly the uri shape the system SAF picker returns — and handed to
+     *     [StudioEngine.setGradeLut]; the engine copies it into its content-addressed cache
+     *     (the copy is checksum-verified) and the native `loadCubeLUT` + tetrahedral apply runs
+     *     in-process; the frame must change again, carry chroma (the VLog-input cube bakes the
+     *     flat log image back to a display-referred CLASSIC Neg look), and no error may surface;
+     *  4. clearing the LUT deterministically reproduces the V-Log-only frame;
+     *  5. clearing the log returns the all-"none" develop fork, byte-identical to as-shot;
+     *  6. leaving the node resets the whole grade selection.
+     *
+     * The cube is `FLog2C_to_CLASSIC-Neg_VLog.cube` from the V-Log-Alchemy repo: per that
+     * repo's two-LUT workflow the `*_VLog.cube` files are LUT2-style creative cubes that expect
+     * V-Log/V-Gamut INPUT and output a display-referred look — the exact output space of our
+     * V-Log grade stage (`MAT_PROPHOTO_TO_V_GAMUT` + `LogCurve::V_Log` in rawalchemy's
+     * color_data.h). This is a "both stages take effect" journey, not a Panasonic color-science
+     * conformance check; its 33-point Resolve-generated header is parsed by the same
+     * loadCubeLUT path RawAlchemyCpp itself exercises in its own Test fixtures.
+     */
+    @Test
+    fun panasonicVLogAndDownloadedLutCubeBothTakeEffect() {
+        val uri = indexAndFind(panasonicRw2)
+            ?: throw AssertionError("Panasonic RW2 not on the SD card at /sdcard/Pictures/rawdb/${panasonicRw2.file}")
+        runBlocking { LibraryCore.importUris(parentId = null, uris = listOf(uri)) }
+        val node = runBlocking { LibraryCore.getByUri(uri.toString()) }!!
+        StudioEngine.setCurrentNode(node.uriStorage)
+
+        // ---- 1) as-shot full-frame color canvas ----
+        val initial = runBlocking {
+            withTimeout(DECODE_TIMEOUT_MS) {
+                StudioEngine.renderResult
+                    .filterNot { it is StudioRenderResult.Idle || it is StudioRenderResult.Loading }
+                    .first()
+            }
+        }
+        assertTrue("as-shot develop must reach Ready", initial is StudioRenderResult.Ready)
+        val asShotBytes = toBytes((initial as StudioRenderResult.Ready).model)
+        step("lut-e2e", "Panasonic as-shot frame = ${asShotBytes.size} bytes")
+        assertDevelopedIsColor(asShotBytes, "Panasonic DC-S1R as-shot DEFAULT")
+
+        runBlocking {
+            assertTrue("a routed RAW must mark isRawLoaded", StudioEngine.isRawLoaded.first())
+        }
+        assertEquals(StudioEngine.GradeSelection(), StudioEngine.gradeSelection.value)
+        assertNull(StudioEngine.gradeError.value)
+        val spaces = StudioEngine.supportedLogSpaces()
+        assertTrue("native log-space list must enumerate V-Log, got $spaces", "V-Log" in spaces)
+
+        // ---- 2) V-Log curve takes effect (flat log image, pixels move, no error) ----
+        StudioEngine.setGradeLogSpace("V-Log")
+        val vlogOnly = runBlocking {
+            withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame(requireDifferentFrom = asShotBytes) }
+        }
+        step("lut-e2e", "V-Log -> ${vlogOnly.outWidth}x${vlogOnly.outHeight}, differs from as-shot")
+        assertNull("V-Log grade must not surface a grade error", StudioEngine.gradeError.value)
+        assertEquals("V-Log", StudioEngine.gradeSelection.value.logSpace)
+
+        // ---- 3) the downloaded cube takes effect through the real SAF-shaped content uri ----
+        val lutUri = pushedLutAsContentUri()
+        StudioEngine.setGradeLut(lutUri)
+        val lutted = runBlocking {
+            withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame(requireDifferentFrom = vlogOnly.bytes) }
+        }
+
+        val selection = StudioEngine.gradeSelection.value
+        assertNull("LUT grade must not surface a grade error", StudioEngine.gradeError.value)
+        assertEquals("V-Log stays selected while the LUT is on", "V-Log", selection.logSpace)
+        assertEquals(LUT_FIXTURE_NAME, selection.lutName)
+        val lutPath = selection.lutPath
+            ?: throw AssertionError("grade selection must carry the cached cube path after setGradeLut")
+
+        // The engine copied the picked bytes verbatim into its content-addressed cache.
+        val cachedHash = sha256Hex(java.io.File(lutPath).readBytes())
+        assertEquals(
+            "the cached cube must be the exact downloaded artifact (content-addressed copy)",
+            LUT_FIXTURE_SHA256, cachedHash,
+        )
+        step("lut-e2e", "cube copied to cache: $lutPath sha256=$cachedHash")
+
+        // The VLog-input cube outputs a display-referred color image — the visible proof the LUT
+        // stage actually ran after the log stage, rather than leaving the flat log encoding.
+        assertDevelopedIsColor(lutted.bytes, "Panasonic V-Log + $LUT_FIXTURE_NAME")
+        step("lut-e2e", "V-Log + cube -> ${lutted.outWidth}x${lutted.outHeight}, color survived")
+
+        // ---- 4) clear LUT: deterministic return to the V-Log-only frame ----
+        StudioEngine.clearGradeLut()
+        val backToVLog = runBlocking {
+            withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame(requireDifferentFrom = lutted.bytes) }
+        }
+        assertTrue(
+            "removing the cube must reproduce the V-Log-only frame",
+            backToVLog.bytes.contentEquals(vlogOnly.bytes),
+        )
+
+        // ---- 5) clear LOG: all-none returns the as-shot develop frame ----
+        StudioEngine.setGradeLogSpace(null)
+        val restored = runBlocking {
+            withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame(requireDifferentFrom = backToVLog.bytes) }
+        }
+        assertTrue(
+            "all-none must restore the as-shot develop frame",
+            restored.bytes.contentEquals(asShotBytes),
+        )
+
+        // ---- 6) node switch resets the grade surfaces ----
+        StudioEngine.setCurrentNode(null)
+        assertEquals(StudioEngine.GradeSelection(), StudioEngine.gradeSelection.value)
+        assertFalse(StudioEngine.isRawLoaded.value)
+        assertNull(StudioEngine.gradeError.value)
+    }
+
+    /**
+     * The LUT fixture staged by `smoke_emulator.yaml`: the workflow downloads the cube from
+     * fot-lab/V-Log-Alchemy, verifies its SHA-256, then — because shell-created directories on
+     * the emulated SD card are not traversable by the app and SELinux blocks app reads of
+     * `/data/local/tmp` — streams it into the app's internal files with
+     * `adb shell run-as <pkg> cat > files/lut-fixture/...`.
+     *
+     * Here the bytes are republished through `MediaStore.Downloads`, which hands back the same
+     * `content://` uri shape the system file picker's SAF callback delivers — so
+     * [StudioEngine.setGradeLut] runs the exact production path (resolver DISPLAY_NAME query,
+     * stream copy into the content-addressed cache) rather than a test-only file uri.
+     */
+    private fun pushedLutAsContentUri(): Uri {
+        val src = java.io.File(context.filesDir, "lut-fixture/$LUT_FIXTURE_NAME")
+        if (!src.isFile) {
+            throw AssertionError(
+                "LUT fixture missing at ${src.absolutePath} — the smoke workflow's " +
+                    "installDebug + run-as staging step must place it before the tests run",
+            )
+        }
+        val bytes = src.readBytes()
+        val hash = sha256Hex(bytes)
+        assertEquals(
+            "staged cube must match the SHA-256 pinned from fot-lab/V-Log-Alchemy@$LUT_FIXTURE_REF",
+            LUT_FIXTURE_SHA256, hash,
+        )
+        step("lut-fixture", "staged cube ${bytes.size} bytes sha256=$hash")
+
+        assumeTrue(
+            "MediaStore.Downloads requires API 29 (the smoke AVD is 36)",
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q,
+        )
+        val values = ContentValues().apply {
+            put(MediaStore.Downloads.DISPLAY_NAME, LUT_FIXTURE_NAME)
+            put(MediaStore.Downloads.MIME_TYPE, "application/octet-stream")
+            put(MediaStore.Downloads.RELATIVE_PATH, "Download/FotLabE2E")
+            put(MediaStore.Downloads.IS_PENDING, 1)
+        }
+        val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+            ?: throw AssertionError("MediaStore.Downloads insert returned null")
+        context.contentResolver.openOutputStream(uri)!!.use { it.write(bytes) }
+        values.clear()
+        values.put(MediaStore.Downloads.IS_PENDING, 0)
+        context.contentResolver.update(uri, values, null, null)
+        step("lut-fixture", "republished the cube as a content uri: $uri")
+        return uri
+    }
+
+    private fun sha256Hex(bytes: ByteArray): String =
+        java.security.MessageDigest.getInstance("SHA-256").digest(bytes)
+            .joinToString("") { "%02x".format(it) }
 
     /** The grade bar is a RAW-only surface: the Coil/PNG route must keep it off-screen. */
     @Test
@@ -867,5 +1065,14 @@ class RawRoutingTest {
 
         /** At least 1/50 (2 %) of sampled pixels must be colored for the frame to count as demosaiced. */
         const val COLOR_COLORED_MIN_FRACTION = 50
+
+        /**
+         * The grade-LUT fixture, fetched from fot-lab/V-Log-Alchemy by `smoke_emulator.yaml`:
+         * a 33-point creative cube that expects V-Log/V-Gamut input. [LUT_FIXTURE_REF] is the
+         * submodule commit the SHA-256 was taken from (external/V-Log-Alchemy tracks main).
+         */
+        const val LUT_FIXTURE_NAME = "FLog2C_to_CLASSIC-Neg_VLog.cube"
+        const val LUT_FIXTURE_SHA256 = "793e3ed0e049f582f4d5046665a003dc4700d84007f84e63a0975784bb9afdd7"
+        const val LUT_FIXTURE_REF = "e51ba9a23458ff5c316f630b860eb0201139d126"
     }
 }

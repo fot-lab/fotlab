@@ -204,6 +204,25 @@ jobs:
           path: raw-samples
           key: rawdb-samples-v1
 
+      # -------- Grade LUT fixture (fot-lab/V-Log-Alchemy) --------
+      # The one external file the studio grade bar takes beyond the built-in log curves: a .cube
+      # 3D LUT (on a device the user picks it through SAF; RawRoutingTest's full V-Log+LUT journey
+      # replays that content:// path). Only ~1 MB, so no cache — but the SHA-256 is pinned to the
+      # external/V-Log-Alchemy submodule commit so an upstream rewrite fails the smoke loudly
+      # instead of silently changing what the journey exercises. The cube is a 33-point creative
+      # LUT that expects V-Log/V-Gamut INPUT (`#LUMIXPHOTOSTYLE VLOG`), matching our V-Log stage.
+      - name: Download V-Log grade LUT cube
+        run: |
+          set -euo pipefail
+          mkdir -p lut-samples
+          base="https://github.com/fot-lab/V-Log-Alchemy/raw/refs/heads/main"
+          curl -fL --retry 3 --retry-delay 5 \
+            -o "lut-samples/FLog2C_to_CLASSIC-Neg_VLog.cube" \
+            "$base/Luts/Fujifilm/FLog2C_to_CLASSIC-Neg_VLog.cube"
+          echo "793e3ed0e049f582f4d5046665a003dc4700d84007f84e63a0975784bb9afdd7  lut-samples/FLog2C_to_CLASSIC-Neg_VLog.cube" | sha256sum -c -
+          ls -l lut-samples
+        shell: bash
+
       # -------- emulator (AVD + emulator SDK cache) --------
       # ONE entry on purpose. An AVD is useless without the system image it boots, so
       # the AVD and the SDK packages the emulator-runner installs are cached under a
@@ -294,6 +313,19 @@ jobs:
             adb shell mkdir -p /sdcard/Pictures/rawdb
             adb push raw-samples/. /sdcard/Pictures/rawdb/
             adb shell ls -l /sdcard/Pictures/rawdb
+
+            # Stage the grade LUT cube into the app's INTERNAL files. Two constraints decide the
+            # route: shell-created dirs under /sdcard are not traversable by the app, and on
+            # API 36 an app-uid read of /data/local/tmp is blocked by SELinux. Installing first
+            # creates the package data dir (connectedDebugAndroidTest installs+tests in one go,
+            # too late for staging), after which `run-as` streams the bytes through stdin — the
+            # redirected file is created with the APP uid, so no shell ownership problem. The
+            # later connectedDebugAndroidTest reinstalls with -r, preserving app data.
+            gradle --no-daemon :app:installDebug
+            adb shell "run-as io.github.fotlab.fotlab sh -c 'mkdir -p files/lut-fixture && cat > files/lut-fixture/FLog2C_to_CLASSIC-Neg_VLog.cube'" \
+              < lut-samples/FLog2C_to_CLASSIC-Neg_VLog.cube
+            adb shell run-as io.github.fotlab.fotlab ls -l files/lut-fixture
+
             adb logcat -c || true
             gradle --no-daemon --stacktrace connectedDebugAndroidTest > smoke-log.txt 2>&1
             STATUS=$?
