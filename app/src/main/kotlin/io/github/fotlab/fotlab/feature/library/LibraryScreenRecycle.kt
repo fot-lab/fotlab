@@ -294,8 +294,11 @@ private fun RecycleTopBar(
                     ) {
                         Text(
                             text = selectionSize.toString(),
-                            style = MaterialTheme.typography.titleLarge,
-                            platformStyle = PlatformTextStyle(includeFontPadding = false),
+                            // platformStyle used to be a Text() parameter; current Compose
+                            // carries it on TextStyle instead.
+                            style = MaterialTheme.typography.titleLarge.copy(
+                                platformStyle = PlatformTextStyle(includeFontPadding = false),
+                            ),
                         )
                     }
                 }
