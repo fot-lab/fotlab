@@ -70,6 +70,14 @@ fn main() {
         cmake_cfg
             .define("CMAKE_TOOLCHAIN_FILE", toolchain)
             .define("ANDROID_ABI", abi)
+            // Static STL: the ONLY C++ on the device lives inside this one
+            // cdylib (see the link step below), so c++_static is the NDK's
+            // recommended choice. With c++_shared the final .so gets a
+            // DT_NEEDED on libc++_shared.so, which is NOT packaged by AGP
+            // (our jniLibs are produced by cargo-ndk, not externalNativeBuild)
+            // and the app dies at loadLibrary with
+            // `dlopen failed: library "libc++_shared.so" not found`.
+            .define("ANDROID_STL", "c++_static")
             .define("ANDROID_PLATFORM", format!("android-{min_api}"));
     }
     let dst = cmake_cfg.build();
@@ -92,20 +100,34 @@ fn main() {
     // Link the grading static lib and the C++ runtime into the final cdylib.
     println!("cargo:rustc-link-search=native={}/lib", dst.display());
     println!("cargo:rustc-link-lib=static=rawalchemy_grading");
-    // C++ stdlib: Android NDK links libc++ (`c++`); desktop targets use libstdc++.
+    // C++ stdlib.
+    //
+    // Android: link the STL STATICALLY (`libc++_static.a` + `libc++abi.a`
+    // from the NDK sysroot). A `dylib=c++` link gives the cdylib a DT_NEEDED
+    // on libc++_shared.so, which AGP never packages for hand-produced
+    // jniLibs, so the emulator smoke (and every device) fails with
+    // `dlopen failed: library "libc++_shared.so" not found`. This app ships
+    // exactly one .so containing C++, so a single private copy of the static
+    // STL is safe per the NDK's one-STL-per-process rule. The cmake step
+    // above is configured with `-DANDROID_STL=c++_static` to match.
+    //
+    // Desktop targets keep the platform libstdc++ as a dylib.
     //
     // NOTE: `rustc-link-lib` propagates to the final artifact of a *dependent*
     // crate; `rustc-link-arg` does not (cargo #9554). Since this crate is an rlib
     // consumed by rawler_fotlab's cdylib, only link-lib can carry the runtime.
-    // There is no OpenMP link-lib here on purpose: `RA_USE_OPENMP` is never defined
-    // for this target, so no `#pragma omp` is compiled and no OMP runtime is needed
-    // (see cpp/CMakeLists.txt).
-    let cxx_stdlib = if target.contains("android") {
-        "c++"
+    // rustc places native archives inside a linker group, so the mutual
+    // c++_static <-> c++abi references resolve regardless of order.
+    //
+    // There is no OpenMP link-lib here on purpose: `RA_USE_OPENMP` is never
+    // defined for this target, so no `#pragma omp` is compiled and no OMP
+    // runtime is needed (see cpp/CMakeLists.txt).
+    if target.contains("android") {
+        println!("cargo:rustc-link-lib=static=c++_static");
+        println!("cargo:rustc-link-lib=static=c++abi");
     } else {
-        "stdc++"
-    };
-    println!("cargo:rustc-link-lib=dylib={cxx_stdlib}");
+        println!("cargo:rustc-link-lib=dylib=stdc++");
+    }
 
     println!("cargo:rerun-if-changed=cpp/rawalchemy_api.h");
     println!("cargo:rerun-if-changed=cpp/rawalchemy_shim.cc");
