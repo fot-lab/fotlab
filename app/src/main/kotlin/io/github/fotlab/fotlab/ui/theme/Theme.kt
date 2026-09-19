@@ -15,7 +15,7 @@ import androidx.compose.ui.platform.LocalContext
 /**
  * Theme and shared primitives.
  *
- * This package ships **no** top app bar and **no** drawer component — every
+ * This package ships **no** fun bar and **no** drawer component — every
  * feature package builds its own (`FOTLAB-UIXDES-000002` C1).
  */
 

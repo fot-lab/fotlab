@@ -50,7 +50,7 @@ object LibraryCore {
     /**
      * Whether the library is in the selection action mode. Unlike the bare selection set, this
      * is an explicit UI mode: it is switched on by a long-press ([enterSelectionMode]) and switched
-     * off only by the top bar's close button ([exitSelectionMode]). Therefore the mode survives the
+     * off only by the fun bar's close button ([exitSelectionMode]). Therefore the mode survives the
      * selection being emptied — deselecting everything (or "deselect all") keeps the mode active so
      * the user can keep picking; leaving it is a deliberate X press, not the count reaching zero.
      * Process-scoped like [selection], never persisted and never restored (`FOTLAB-UIXDES-000004` R3).
@@ -167,7 +167,7 @@ object LibraryCore {
 
     /**
      * Rename a node by id (display name only). Driven by the single-selection edit action in
-     * the top bar (`FOTLAB-UIXDES-000004`); the physical file is never touched.
+     * the fun bar (`FOTLAB-UIXDES-000004`); the physical file is never touched.
      */
     suspend fun renameNode(id: Long, name: String) = repo().renameNode(id, name)
 

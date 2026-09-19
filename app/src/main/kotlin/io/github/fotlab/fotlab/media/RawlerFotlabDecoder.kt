@@ -15,7 +15,7 @@ import java.io.InputStream
  * the Studio pipeline falls through to Unsupported.
  *
  * [developToPng] is the same pattern routed through [RawlerFotlabBridge.developRawToPng]. The
- * Studio bottom bar passes the user's chosen demosaic [algorithm] and exposure compensation
+ * Studio fun bar passes the user's chosen demosaic [algorithm] and exposure compensation
  * [exposureEv] (in stops; `wb` stays `null` so the Rust side resolves to `RawImage.wb_coeffs`, the
  * camera's as-shot white balance). `exposureEv` defaults to `0f` (no compensation) for callers that
  * do not override it.

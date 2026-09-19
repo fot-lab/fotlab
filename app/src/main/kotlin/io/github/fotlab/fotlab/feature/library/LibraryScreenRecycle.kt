@@ -2,12 +2,16 @@ package io.github.fotlab.fotlab.feature.library
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteForever
@@ -23,13 +27,13 @@ import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -66,9 +70,9 @@ import java.util.Locale
  *
  * The screen owns its own two-level navigation ([RecycleLocation]) and its own **isolated** selection
  * (never touching [LibraryCore]'s live-library selection, keeping the two views apart —
- * `FOTLAB-UIXDES-000004`). It renders its own top bar ([RecycleTopBar]) whose action icons differ
- * from the library's: nothing when idle, `restore from bin` + `delete forever` when selecting; the
- * trailing overflow keeps the shared select-all / invert / deselect trio.
+ * `FOTLAB-UIXDES-000004`). It renders its own fun bar ([RecycleScreenFunBar]) whose action icons
+ * differ from the library's: nothing when idle, `restore from bin` + `delete forever` when
+ * selecting; the trailing overflow keeps the shared select-all / invert / deselect trio.
  */
 
 /** Key under which a batch's root nodes are grouped (no in-batch parent). */
@@ -135,32 +139,46 @@ fun LibraryRecycleScreen(
     // With the mode on, back exits the selection first (the X close does the same).
     BackHandler(enabled = selectionActive) { exitSelection() }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        RecycleTopBar(
-            selectionActive = selectionActive,
-            selectionSize = selectedIds.size,
-            candidateIds = candidateIds,
-            onOpenDrawer = onOpenDrawer,
-            onCycleLayout = onCycleLayout,
-            onRefresh = onRefresh,
-            onExitSelection = { exitSelection() },
-            onRestore = {
-                scope.launch { LibraryCore.restoreFromBin(selectedIds.toList()) }
-                exitSelection()
-            },
-            onDeleteForever = { deleteForeverConfirm = true },
-            onSelectAll = {
-                selectedIds = candidateIds.toSet()
-                selectionActive = true
-            },
-            onInvert = {
-                selectedIds = candidateIds.filterNot { it in selectedIds }.toSet()
-                selectionActive = true
-            },
-            onDeselectAll = { selectedIds = emptySet() },
-        )
-
-        Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
+    // The bin's own module Scaffold nested in the shell's root Scaffold
+    // (FOTLAB-UIXDES-000002 R3, conditions a–c). While the bin is active the outer library
+    // Scaffold shows no bar and zeroes its content insets, so this layer alone measures to the
+    // screen's bottom edge and consumes the navigation-bar inset; it still lives inside the
+    // library's drawer content subtree, so the drawer covers this fun bar too.
+    Scaffold(
+        contentWindowInsets = WindowInsets.navigationBars,
+        bottomBar = {
+            // The bin's own fun bar, menu at the bottom-left.
+            RecycleScreenFunBar(
+                selectionActive = selectionActive,
+                selectionSize = selectedIds.size,
+                candidateIds = candidateIds,
+                onOpenDrawer = onOpenDrawer,
+                onCycleLayout = onCycleLayout,
+                onRefresh = onRefresh,
+                onExitSelection = { exitSelection() },
+                onRestore = {
+                    scope.launch { LibraryCore.restoreFromBin(selectedIds.toList()) }
+                    exitSelection()
+                },
+                onDeleteForever = { deleteForeverConfirm = true },
+                onSelectAll = {
+                    selectedIds = candidateIds.toSet()
+                    selectionActive = true
+                },
+                onInvert = {
+                    selectedIds = candidateIds.filterNot { it in selectedIds }.toSet()
+                    selectionActive = true
+                },
+                onDeselectAll = { selectedIds = emptySet() },
+            )
+        },
+    ) { innerPadding ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .consumeWindowInsets(innerPadding),
+        ) {
             when (val loc = location) {
                 RecycleLocation.Root -> RecycleRoot(
                     selectedIds = selectedIds,
@@ -224,16 +242,18 @@ fun LibraryRecycleScreen(
 }
 
 /**
- * Top bar for the recycle bin (`FOTLAB-UIXDES-000004`).
+ * Fun bar for the recycle bin (`FOTLAB-UIXDES-000004`), currently pinned to the screen's
+ * bottom edge.
  *
  * - Idle: no action icons (the trailing overflow still offers select-all / invert / deselect);
- *   the leading cluster is drawer + layout + sync, exactly like the library.
+ *   the leading cluster is drawer + layout + sync, exactly like the library, with the menu at
+ *   the bottom-left.
  * - Selecting: `restore from bin` + `delete forever`; the leading cluster becomes the Close
  *   (exit the mode) and the selection count, mirroring the library's selection action mode.
+ * - The overflow anchors at the bottom edge and its menu opens upward (drop-up).
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun RecycleTopBar(
+private fun RecycleScreenFunBar(
     selectionActive: Boolean,
     selectionSize: Int,
     candidateIds: List<Long>,
@@ -250,10 +270,17 @@ private fun RecycleTopBar(
 ) {
     var overflowOpen by remember { mutableStateOf(false) }
 
-    TopAppBar(
-        title = {},
-        modifier = modifier,
-        navigationIcon = {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .windowInsetsPadding(WindowInsets.navigationBars)
+                .height(LibraryScreenFunBarHeight),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             if (!selectionActive) {
                 Row {
                     IconButton(onClick = onOpenDrawer) {
@@ -283,7 +310,7 @@ private fun RecycleTopBar(
                             contentDescription = stringResource(id = R.string.library_cd_clear_selection),
                         )
                     }
-                    // Same fix as LibraryScreen: the 48.dp box shares the icon buttons' centre
+                    // Same fix as the library bar: the 48.dp box shares the icon buttons' centre
                     // line and includeFontPadding is dropped so digits are not pushed above the
                     // bar's centre by the reserved descender space.
                     Box(
@@ -303,8 +330,9 @@ private fun RecycleTopBar(
                     }
                 }
             }
-        },
-        actions = {
+
+            Spacer(modifier = Modifier.weight(1f))
+
             // Selecting swaps the slot to the bin actions; idle shows nothing here (the overflow
             // trio is always available on the right).
             if (selectionActive) {
@@ -359,8 +387,8 @@ private fun RecycleTopBar(
                     )
                 }
             }
-        },
-    )
+        }
+    }
 }
 
 /** Bin root: one virtual folder per delete batch, named by its shared timestamp. */

@@ -210,7 +210,7 @@ object StudioEngine {
      */
     private val loadNonce = AtomicLong(0)
 
-    // ---- rawalchemy grade fork: the Boost / LOG / LUT bottom bar ----
+    // ---- rawalchemy grade fork: the Boost / LOG / LUT grade bar ----
     //
     // Two rendering forks share the same resident decode (FOTLAB-RAWLER-000006):
     //  * develop fork — a demosaic / exposure / WB change re-renders the sRGB PNG (gamma-applied);

@@ -5,7 +5,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
- * The selection that drives the library top bar (`FOTLAB-UIXDES-000004` R2/R3).
+ * The selection that drives the library fun bar (`FOTLAB-UIXDES-000004` R2/R3).
  *
  * **Process-scoped**: the single instance is owned by [LibraryCore] and lives exactly
  * as long as the process. It is never persisted and never written to saved instance
@@ -15,14 +15,14 @@ import kotlinx.coroutines.flow.asStateFlow
  * It holds **node identities** (`fs_node_id`), never node copies, so a node whose
  * properties change while selected stays the same selection (C7).
  *
- * The full name is deliberate: another feature may drive its own top bar from its own
+ * The full name is deliberate: another feature may drive its own fun bar from its own
  * selection list, and a short generic name would collide (R2).
  */
 class ListSelectionOfLibrary internal constructor() {
 
     private val mutableIds = MutableStateFlow<Set<Long>>(emptySet())
 
-    /** Currently selected node ids. The UI observes this to render the top bar. */
+    /** Currently selected node ids. The UI observes this to render the fun bar. */
     val selected: StateFlow<Set<Long>> = mutableIds.asStateFlow()
 
     val size: Int get() = mutableIds.value.size

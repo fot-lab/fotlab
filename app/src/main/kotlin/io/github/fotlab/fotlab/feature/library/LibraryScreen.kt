@@ -10,15 +10,19 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.clickable
@@ -59,9 +63,10 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -95,6 +100,9 @@ import java.util.Locale
 /** Drawer width: 80% of the module region (`FOTLAB-UIXDES-000002` R3). */
 private const val DrawerWidthFraction = 0.8f
 
+/** Height of the Library fun bar — the former M3 top app bar's 64.dp. */
+private val LibraryScreenFunBarHeight = 64.dp
+
 /**
  * The two top-level views the drawer switches between. `Library` is the Source Library — the
  * whole library feature built so far. `RecycleBin` shows removed nodes, whose content is not
@@ -106,24 +114,30 @@ private enum class LibraryViewMode { Library, RecycleBin }
  * Library screen (UI) — the first independent screen, owned by the `feature/library`
  * package alongside its lower layer [LibraryCore] (`FOTLAB-STRUCT-000001`).
  *
- * The screen fills the whole region above the bottom navigation bar and splits it into two
- * sibling regions: the top bar, and the content region below it. Everything else the screen
- * adds belongs to one of them — the screen itself never stacks a second `Scaffold` on top of
- * the shell's.
+ * The screen fills the whole region below the shell's nav bar and splits it into two sibling
+ * regions: the content region, and its own fun bar below it. Everything else the screen adds
+ * belongs to one of them. The two regions are laid out by a module-level Material3 `Scaffold`
+ * nested inside the shell's root `Scaffold` (content + `bottomBar` slot), permitted by
+ * `FOTLAB-UIXDES-000002` R3 under its conditions (a)–(c): the drawer wraps the Scaffold, the
+ * navigation-bar inset is consumed exactly once, and the bar stays module-owned. In Recycle Bin
+ * mode the bin renders its own nested Scaffold and fun bar, so this outer one shows no bar and
+ * zeroes its content insets for the bin to own them.
  *
  * The drawer is the native Material3 [ModalNavigationDrawer] wrapped around both regions: it
- * slides over the top bar the way the platform does (`FOTLAB-UIXDES-000002` R3) and it can
- * never reach the bottom navigation region, which lies outside the module region. Its sheet
- * is the Material3 [DrawerSheet] at 80% of the module width, and it carries the close button
- * in its own top-left corner (`FOTLAB-UIXDES-000002` R6). Edge-swipe gestures are disabled
- * (`gesturesEnabled = false`): the drawer opens only via the top-bar menu icon and closes via
- * its own X button (plus back / scrim tap); the standard M3 slide motion is kept for both.
+ * slides over the content and the screen's fun bar, and it can never reach the shell's nav
+ * bar region, which lies outside the module region. Its sheet is the Material3 [DrawerSheet]
+ * at 80% of the module width, and it carries the close button in its own bottom-left corner,
+ * at the exact spot the fun bar's menu icon occupies while closed (`FOTLAB-UIXDES-000002` R6).
+ * Edge-swipe gestures are disabled (`gesturesEnabled = false`): the drawer opens only via the
+ * fun bar's menu icon and closes via its own X button (plus back / scrim tap); the standard M3
+ * slide motion is kept for both.
  *
- * The top bar follows `FOTLAB-UIXDES-000002` (drawer icon left, overflow right) and fills
- * its leading cluster and two action slots as `FOTLAB-UIXDES-000004` prescribes: a
- * layout-toggle icon (grid / 田字) and a refresh icon sit right of the drawer icon and cycle
- * / reconcile the content; import + new collection show when nothing is selected, export +
- * delete when something is.
+ * The fun bar follows `FOTLAB-UIXDES-000002` (drawer icon at the far left, overflow at the far
+ * right) and fills its leading cluster and two action slots as `FOTLAB-UIXDES-000004`
+ * prescribes: a layout-toggle icon (grid / 田字) and a refresh icon sit right of the drawer
+ * icon and cycle / reconcile the content; import + new collection show when nothing is selected,
+ * export + delete when something is. The overflow menu anchors at the fun bar and therefore
+ * opens upward (drop-up) while the bar sits at the screen's bottom edge.
  *
  * The selection itself lives in [LibraryCore.selection] — a process-scoped object. This
  * screen only reads it with plain `remember`; it is never saved with `rememberSaveable`
@@ -193,59 +207,76 @@ fun LibraryScreen(
             )
         },
     ) {
-        // Two sibling regions: the top bar, and the content region below it.
-        Column(modifier = Modifier.fillMaxSize()) {
-            if (viewMode == LibraryViewMode.Library) {
-                LibraryTopBar(
-                selectionModeActive = selectionModeActive,
-                selectionSize = selectedIds.size,
-                candidateIds = children.mapNotNull { it.fsNodeId },
-                onCycleLayout = { scope.launch { LibraryCore.cycleLayoutMode() } },
-                onRefresh = { scope.launch { LibraryCore.refresh() } },
-                onOpenDrawer = { scope.launch { drawerState.open() } },
-                onImport = { importLauncher.launch(arrayOf("*/*")) },
-                onCreateCollection = {
-                    scope.launch {
-                        LibraryCore.createCollection(
-                            parentId = currentDirectory?.fsNodeId,
-                            name = newCollectionName,
-                        )
-                    }
-                },
-                onExitSelection = { LibraryCore.exitSelectionMode() },
-                onRename = {
-                    // Exactly one node is selected (the edit icon only shows then): open its
-                    // rename dialog with the current name prefilled.
-                    val id = selectedIds.singleOrNull()
-                    renameTarget = children.firstOrNull { it.fsNodeId == id }
-                },
-                // Same wiring as the viewer's "open in Studio": resolve the single selected node,
-                // hand its uri to the studio engine, and switch to Studio. Lets files the viewer
-                // cannot preview reach Studio's decoder in one tap from the bar.
-                onOpenInStudio = {
-                    val id = selectedIds.singleOrNull()
-                    children.firstOrNull { it.fsNodeId == id }?.uriStorage
-                        ?.let { StudioEngine.setCurrentNode(it) }
-                    onNavigateToStudio()
-                },
-                // Export shape is undecided (`FOTLAB-UIXDES-000004` Q6): the slot is
-                // present as required by R4, the behaviour is added when Q6 is settled.
-                onExport = { /* TODO: export, pending Q6 */ },
-                onDelete = {
-                    scope.launch {
-                        // Gate: only nodes directly under the directory on screen may be deleted
-                        // from here; recursion into subfolders is not re-checked (`FOTLAB-UIXDES-000004`).
-                        if (LibraryCore.selectionDirectlyUnder(currentDirectory?.fsNodeId)) {
-                            deleteConfirmation = true
-                        } else {
-                            deleteInvalid = true
-                        }
-                    }
-                },
-            )
-            }
-
-            Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
+        // Module-level Scaffold nested inside the shell's root Scaffold (allowed by
+        // FOTLAB-UIXDES-000002 R3, conditions a–c): it lives inside the drawer content subtree
+        // so the drawer covers the fun bar; the bar stays module-owned and non-persistent.
+        // It consumes only the navigation-bar inset the shell does not (the shell zeroed its own
+        // contentWindowInsets). In Recycle Bin mode the bin renders its own nested Scaffold and
+        // fun bar, so here we show no bar and zero the insets — the bin's Scaffold must be the
+        // single layer that measures to the screen's bottom edge and consumes that inset.
+        val isLibraryView = viewMode == LibraryViewMode.Library
+        Scaffold(
+            contentWindowInsets = if (isLibraryView) WindowInsets.navigationBars else WindowInsets(0, 0, 0, 0),
+            bottomBar = {
+                if (isLibraryView) {
+                    LibraryScreenFunBar(
+                        selectionModeActive = selectionModeActive,
+                        selectionSize = selectedIds.size,
+                        candidateIds = children.mapNotNull { it.fsNodeId },
+                        onCycleLayout = { scope.launch { LibraryCore.cycleLayoutMode() } },
+                        onRefresh = { scope.launch { LibraryCore.refresh() } },
+                        onOpenDrawer = { scope.launch { drawerState.open() } },
+                        onImport = { importLauncher.launch(arrayOf("*/*")) },
+                        onCreateCollection = {
+                            scope.launch {
+                                LibraryCore.createCollection(
+                                    parentId = currentDirectory?.fsNodeId,
+                                    name = newCollectionName,
+                                )
+                            }
+                        },
+                        onExitSelection = { LibraryCore.exitSelectionMode() },
+                        onRename = {
+                            // Exactly one node is selected (the edit icon only shows then): open its
+                            // rename dialog with the current name prefilled.
+                            val id = selectedIds.singleOrNull()
+                            renameTarget = children.firstOrNull { it.fsNodeId == id }
+                        },
+                        // Same wiring as the viewer's "open in Studio": resolve the single selected node,
+                        // hand its uri to the studio engine, and switch to Studio. Lets files the viewer
+                        // cannot preview reach Studio's decoder in one tap from the bar.
+                        onOpenInStudio = {
+                            val id = selectedIds.singleOrNull()
+                            children.firstOrNull { it.fsNodeId == id }?.uriStorage
+                                ?.let { StudioEngine.setCurrentNode(it) }
+                            onNavigateToStudio()
+                        },
+                        // Export shape is undecided (`FOTLAB-UIXDES-000004` Q6): the slot is
+                        // present as required by R4, the behaviour is added when Q6 is settled.
+                        onExport = { /* TODO: export, pending Q6 */ },
+                        onDelete = {
+                            scope.launch {
+                                // Gate: only nodes directly under the directory on screen may be deleted
+                                // from here; recursion into subfolders is not re-checked (`FOTLAB-UIXDES-000004`).
+                                if (LibraryCore.selectionDirectlyUnder(currentDirectory?.fsNodeId)) {
+                                    deleteConfirmation = true
+                                } else {
+                                    deleteInvalid = true
+                                }
+                            }
+                        },
+                    )
+                }
+            },
+        ) { innerPadding ->
+            // Two sibling regions, laid out by the Scaffold: content above, the fun bar in its
+            // bottomBar slot. The viewer overlays the content region.
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .consumeWindowInsets(innerPadding),
+            ) {
                 when (viewMode) {
                     LibraryViewMode.Library -> {
                         NodeList(
@@ -302,22 +333,22 @@ fun LibraryScreen(
                         )
                     }
                 }
-            }
 
-            // Full-screen image / video viewer, opened by tapping a media tile.
-            if (viewerItems != null) {
-                LibraryViewerDialog(
-                    items = viewerItems!!,
-                    startIndex = viewerStart,
-                    onDismiss = { viewerItems = null },
-                    onOpenInStudio = { node ->
-                        // Equivalent to: close the dialog, switch to Studio (nav bar), and open the
-                        // tapped image there (`FOTLAB-UIXDES`, viewer layout).
-                        node.uriStorage?.let { StudioEngine.setCurrentNode(it) }
-                        onNavigateToStudio()
-                        viewerItems = null
-                    },
-                )
+                // Full-screen image / video viewer, opened by tapping a media tile.
+                if (viewerItems != null) {
+                    LibraryViewerDialog(
+                        items = viewerItems!!,
+                        startIndex = viewerStart,
+                        onDismiss = { viewerItems = null },
+                        onOpenInStudio = { node ->
+                            // Equivalent to: close the dialog, switch to Studio (nav bar), and open the
+                            // tapped image there (`FOTLAB-UIXDES`, viewer layout).
+                            node.uriStorage?.let { StudioEngine.setCurrentNode(it) }
+                            onNavigateToStudio()
+                            viewerItems = null
+                        },
+                    )
+                }
             }
         }
     }
@@ -381,10 +412,11 @@ fun LibraryScreen(
  * slides. The slide and the scrim fade follow the M3 standard motion (standard easing,
  * `FastOutSlowInEasing`), which [ModalNavigationDrawer] provides out of the box.
  *
- * The close button sits in the sheet's own top-left corner, at the position the top bar's
+ * The close button sits in the sheet's own bottom-left corner, at the position the fun bar's
  * three-line icon occupies while the drawer is closed: the affordance the user pressed is
- * replaced in place by its counterpart (`FOTLAB-UIXDES-000002` R6). The padding matches the
- * top bar's leading slot so the two icons land on exactly the same spot.
+ * replaced in place by its counterpart (`FOTLAB-UIXDES-000002` R6). The close row shares the
+ * fun bar's 64.dp height and the same navigation-bar inset, so the two icons land on exactly
+ * the same spot.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -399,18 +431,7 @@ private fun LibraryDrawer(
             .fillMaxHeight()
             .fillMaxWidth(DrawerWidthFraction),
     ) {
-        // Row 1: the close affordance that replaces the drawer icon while closed (R6).
-        IconButton(
-            onClick = onClose,
-            modifier = Modifier.padding(start = 4.dp, top = 8.dp),
-        ) {
-            Icon(
-                imageVector = Icons.Filled.Close,
-                contentDescription = stringResource(id = R.string.common_drawer_close),
-            )
-        }
-
-        // Row 2: Recycle Bin — shows removed nodes (content not built yet, left empty).
+        // Row 1: Recycle Bin — shows removed nodes (content not built yet, left empty).
         DrawerNavItem(
             icon = Icons.Filled.Delete,
             label = stringResource(id = R.string.library_recycle_bin),
@@ -421,7 +442,7 @@ private fun LibraryDrawer(
                 onClose()
             },
         )
-        // Row 3: Library (Source Library) — the library feature built so far.
+        // Row 2: Library (Source Library) — the library feature built so far.
         DrawerNavItem(
             icon = Icons.Filled.Source,
             label = stringResource(id = R.string.library_library),
@@ -432,6 +453,26 @@ private fun LibraryDrawer(
                 onClose()
             },
         )
+
+        // Push the close affordance to the bottom-left, level with the fun bar's menu icon.
+        Spacer(modifier = Modifier.weight(1f))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .windowInsetsPadding(WindowInsets.navigationBars)
+                .height(LibraryScreenFunBarHeight),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(
+                onClick = onClose,
+                modifier = Modifier.padding(start = 4.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Close,
+                    contentDescription = stringResource(id = R.string.common_drawer_close),
+                )
+            }
+        }
     }
 }
 
@@ -472,9 +513,8 @@ private fun DrawerNavItem(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun LibraryTopBar(
+private fun LibraryScreenFunBar(
     selectionModeActive: Boolean,
     selectionSize: Int,
     candidateIds: List<Long>,
@@ -493,13 +533,20 @@ private fun LibraryTopBar(
     var overflowOpen by remember { mutableStateOf(false) }
     val selection = LibraryCore.selection
 
-    TopAppBar(
-        // The title slot stays an empty composable — Material3 makes `title` a required
-        // parameter, so it cannot simply be dropped. The bar never renders text: the directory
-        // name is not surfaced here, and while selecting the count lives in the leading cluster.
-        title = {},
-        modifier = modifier,
-        navigationIcon = {
+    // The Library fun bar, currently pinned to the screen's bottom edge. The button order is
+    // unchanged: leading cluster (menu first → bottom-left), a flexible gap, then the actions
+    // and the overflow at the far right. Anchored at the bottom edge, every dropdown opens upward.
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .windowInsetsPadding(WindowInsets.navigationBars)
+                .height(LibraryScreenFunBarHeight),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             // Leading cluster swaps on the selection action mode (`FOTLAB-UIXDES-000004`): with
             // the mode off it is drawer + grid + sync; once the mode is on the drawer becomes a
             // Close (exit the mode) and the grid slot becomes a rename pencil (single) or the bare
@@ -579,8 +626,9 @@ private fun LibraryTopBar(
                     }
                 }
             }
-        },
-        actions = {
+
+            Spacer(modifier = Modifier.weight(1f))
+
             // Slot A then slot B, then the overflow icon (`FOTLAB-UIXDES-000004` R1). The slots
             // swap on the selection action mode, not on the count: import + new collection when
             // the mode is off, export + delete when it is on.
@@ -659,8 +707,8 @@ private fun LibraryTopBar(
                     )
                 }
             }
-        },
-    )
+        }
+    }
 }
 
 private val nodeDateformat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())

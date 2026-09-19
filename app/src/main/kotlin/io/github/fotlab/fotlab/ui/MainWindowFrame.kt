@@ -1,5 +1,6 @@
 package io.github.fotlab.fotlab.ui
 
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -15,13 +16,19 @@ import io.github.fotlab.fotlab.navigation.TopLevelDestination
  *
  * ```
  * ┌───────────────────────────┐
- * │ content region            │ ← owned by the active module
+ * │ nav bar region            │ ← the only persistent UI ([MainWindowNavBar])
  * ├───────────────────────────┤
- * │ bottom navigation region  │ ← the only persistent UI
+ * │ content region            │ ← owned by the active module (its fun bar included)
  * └───────────────────────────┘
  * ```
  *
- * See `FOTLAB-UIXDES-000001` R2: nothing else is persistent at app level.
+ * See `FOTLAB-UIXDES-000001` R2: nothing else is persistent at app level. The Scaffold slot is
+ * called `topBar` (Material3 API), but what it hosts is identified by function — the nav bar;
+ * it is not named after its position anywhere in our code.
+ *
+ * `contentWindowInsets` is zeroed so the scaffold only pads the content for the nav bar: each
+ * screen owns its own fun bar and consumes the system navigation-bar inset there, otherwise the
+ * same inset would be padded twice.
  */
 @Composable
 fun MainWindowFrame() {
@@ -29,8 +36,12 @@ fun MainWindowFrame() {
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
-        bottomBar = {
-            MainNavigationBar(
+        // Scaffold API slot name; the hosted element is the nav bar (position-independent).
+        // The screens own the bottom inset on their own fun bars; the scaffold must not also
+        // add it as content padding.
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        topBar = {
+            MainWindowNavBar(
                 destinations = TopLevelDestination.entries,
                 currentRoute = { navController.currentDestination?.route },
                 onDestinationSelected = { destination ->

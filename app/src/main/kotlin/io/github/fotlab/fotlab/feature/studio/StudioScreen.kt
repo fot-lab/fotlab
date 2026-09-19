@@ -8,10 +8,16 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.AddPhotoAlternate
@@ -30,6 +36,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -37,7 +44,6 @@ import androidx.compose.material3.TextField
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
@@ -68,14 +74,19 @@ import kotlin.math.roundToInt
  * Studio screen (UI) — a Snapseed-style editor and the second independent screen, owned by the
  * `feature/studio` package alongside its lower layer [StudioEngine] (`FOTLAB-STRUCT-000001`).
  *
- * Like every screen it fills the whole region above the bottom navigation bar and splits it into two
- * sibling regions: its own top bar and the content region below it (`FOTLAB-UIXDES-000002` R3). The
- * top bar follows the shared skeleton — drawer toggle at the far left, overflow at the far right, and
- * a file-open action just left of the overflow (`FOTLAB-UIXDES-000002`). The three develop tools sit
- * as icon-only buttons right of the drawer menu — gradient (demosaic dropdown), exposure (stops
- * input) and wb-auto (Kelvin input). Under the canvas (RAW files only) sits the grade bar — the
- * rawalchemy fork's Boost / LOG / LUT chips (`StudioGradeBar`). The module also owns its drawer;
- * nothing here is shared with the shell.
+ * Like every screen it fills the whole region below the shell's nav bar and splits
+ * into sibling regions: the canvas, the grade bar, and the fun bar. The regions are laid out
+ * by a module-level Material3 `Scaffold` nested inside the shell's root `Scaffold` (canvas +
+ * grade bar as content, fun bar in the `bottomBar` slot) — permitted by `FOTLAB-UIXDES-000002`
+ * R3 under conditions (a)–(c): the drawer wraps the Scaffold, the navigation-bar inset is
+ * consumed exactly once, and the bar stays module-owned. The fun bar follows the shared
+ * skeleton — drawer menu at the far left (bottom-left), overflow at the far right, and a
+ * file-open action just left of the overflow (`FOTLAB-UIXDES-000002`). The three develop tools
+ * sit as icon-only buttons right of the drawer menu — gradient (demosaic dropdown), exposure
+ * (stops input) and wb-auto (Kelvin input); the dropdowns anchor at the fun bar and therefore
+ * open upward. Directly above the fun bar (RAW files only) sits the grade bar — the rawalchemy
+ * fork's Boost / LOG / LUT chips (`StudioGradeBar`), its content unchanged by the layout move.
+ * The module also owns its drawer; nothing here is shared with the shell.
  *
  * The open action lands the picked file in the Library directory the user is currently viewing
  * (shared app state, never the Recycle view — `LibraryCore.currentDirectoryId`) and renders it on the
@@ -90,7 +101,7 @@ fun StudioScreen() {
 
     val zoomState = rememberZoomState()
     val renderResult by StudioEngine.renderResult.collectAsState()
-    // Boost/LOG/LUT grade-fork state; the bottom bar exists only while a routed RAW is resident.
+    // Boost/LOG/LUT grade-fork state; the grade bar exists only while a routed RAW is resident.
     val gradeSelection by StudioEngine.gradeSelection.collectAsState()
     val rawLoaded by StudioEngine.isRawLoaded.collectAsState()
     val gradeError by StudioEngine.gradeError.collectAsState()
@@ -140,77 +151,92 @@ fun StudioScreen() {
             StudioDrawer(onClose = { scope.launch { drawerState.close() } })
         },
     ) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            StudioTopBar(
-                onOpenDrawer = { scope.launch { drawerState.open() } },
-                onOpenFile = { importLauncher.launch(arrayOf("*/*")) },
-                onResetView = { zoomState.reset() },
-                onAlgorithmPicked = { algo -> StudioEngine.develop(algo) },
-                onExposure = {
-                    exposureInput = StudioEngine.currentExposureEv().toString()
-                    showExposureDialog = true
-                },
-                onWhiteBalance = {
-                    // Prefill the current override, else the as-shot estimate decoded from the RAW.
-                    val kelvin = StudioEngine.currentWhiteBalanceKelvin()
-                    whiteBalanceInput = if (kelvin > 0f) kelvin.roundToInt().toString() else ""
-                    showWhiteBalanceDialog = true
-                },
-            )
-
-            Box(
-                modifier = Modifier.fillMaxWidth().weight(1f),
-                contentAlignment = Alignment.Center,
+        // Module-level Scaffold nested inside the shell's root Scaffold (allowed by
+        // FOTLAB-UIXDES-000002 R3, conditions a–c): it lives inside the drawer content subtree
+        // so the drawer covers the fun bar; it consumes only the navigation-bar inset the shell
+        // does not (the shell zeroed its own contentWindowInsets); the bar stays module-owned.
+        Scaffold(
+            contentWindowInsets = WindowInsets.navigationBars,
+            bottomBar = {
+                // The screen's own fun bar, menu at the bottom-left.
+                StudioScreenFunBar(
+                    onOpenDrawer = { scope.launch { drawerState.open() } },
+                    onOpenFile = { importLauncher.launch(arrayOf("*/*")) },
+                    onResetView = { zoomState.reset() },
+                    onAlgorithmPicked = { algo -> StudioEngine.develop(algo) },
+                    onExposure = {
+                        exposureInput = StudioEngine.currentExposureEv().toString()
+                        showExposureDialog = true
+                    },
+                    onWhiteBalance = {
+                        // Prefill the current override, else the as-shot estimate decoded from the RAW.
+                        val kelvin = StudioEngine.currentWhiteBalanceKelvin()
+                        whiteBalanceInput = if (kelvin > 0f) kelvin.roundToInt().toString() else ""
+                        showWhiteBalanceDialog = true
+                    },
+                )
+            },
+        ) { innerPadding ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .consumeWindowInsets(innerPadding),
             ) {
-                when (val result = renderResult) {
-                    is StudioRenderResult.Ready -> ZoomableAsyncImage(
-                        // rawler path -> decoded PNG ByteBuffer; Coil path -> original Uri.
-                        model = ImageRequest.Builder(context).data(result.model).build(),
-                        contentDescription = null,
-                        state = zoomState,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                    is StudioRenderResult.Loading -> Text(
-                        text = stringResource(id = R.string.studio_decoding),
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    else -> Text(
-                        text = stringResource(id = R.string.studio_open_prompt),
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                Box(
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    when (val result = renderResult) {
+                        is StudioRenderResult.Ready -> ZoomableAsyncImage(
+                            // rawler path -> decoded PNG ByteBuffer; Coil path -> original Uri.
+                            model = ImageRequest.Builder(context).data(result.model).build(),
+                            contentDescription = null,
+                            state = zoomState,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                        is StudioRenderResult.Loading -> Text(
+                            text = stringResource(id = R.string.studio_decoding),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        else -> Text(
+                            text = stringResource(id = R.string.studio_open_prompt),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+
+                // Grade bar (Boost / LOG / LUT) — the rawalchemy fork, shown only for a resident RAW.
+                // The three chips start at "none"; selecting one re-grades the resident decode and the
+                // graded PNG replaces the canvas (FOTLAB-RAWLER-000006). It sits directly above the
+                // screen's fun bar; its content is unchanged by the layout move.
+                if (rawLoaded) {
+                    StudioGradeBar(
+                        selection = gradeSelection,
+                        logSpaces = logSpaces,
+                        onBoost = StudioEngine::setGradeBoost,
+                        onLogSpace = StudioEngine::setGradeLogSpace,
+                        onPickLut = { lutPickerLauncher.launch(arrayOf("*/*")) },
+                        onClearLut = StudioEngine::clearGradeLut,
                     )
                 }
             }
-
-            // Grade bar (Boost / LOG / LUT) — the rawalchemy fork, shown only for a resident RAW.
-            // The three chips start at "none"; selecting one re-grades the resident decode and the
-            // graded PNG replaces the canvas (FOTLAB-RAWLER-000006).
-            if (rawLoaded) {
-                StudioGradeBar(
-                    selection = gradeSelection,
-                    logSpaces = logSpaces,
-                    onBoost = StudioEngine::setGradeBoost,
-                    onLogSpace = StudioEngine::setGradeLogSpace,
-                    onPickLut = { lutPickerLauncher.launch(arrayOf("*/*")) },
-                    onClearLut = StudioEngine::clearGradeLut,
-                )
-            }
-
-            if (showUnsupported) {
-                AlertDialog(
-                    onDismissRequest = { showUnsupported = false },
-                    confirmButton = {
-                        TextButton(onClick = { showUnsupported = false }) {
-                            Text(text = stringResource(id = R.string.common_action_ok))
-                        }
-                    },
-                    title = { Text(text = stringResource(id = R.string.studio_unsupported_title)) },
-                    text = { Text(text = stringResource(id = R.string.studio_unsupported_format)) },
-                )
-            }
-
         }
+    }
+
+    if (showUnsupported) {
+        AlertDialog(
+            onDismissRequest = { showUnsupported = false },
+            confirmButton = {
+                TextButton(onClick = { showUnsupported = false }) {
+                    Text(text = stringResource(id = R.string.common_action_ok))
+                }
+            },
+            title = { Text(text = stringResource(id = R.string.studio_unsupported_title)) },
+            text = { Text(text = stringResource(id = R.string.studio_unsupported_format)) },
+        )
     }
 
     // Exposure input dialog: opened by the top-bar Exposure icon. The entered stops value is
@@ -302,16 +328,20 @@ fun StudioScreen() {
     }
 }
 
+/** Height of the Studio fun bar — the former M3 top app bar's 64.dp. */
+private val StudioScreenFunBarHeight = 64.dp
+
 /**
- * The Studio top bar: the shared skeleton of `FOTLAB-UIXDES-000002` — drawer menu at the far left,
- * immediately followed by the three icon-only develop tools (gradient → demosaic algorithm dropdown,
- * exposure → stops input dialog, wb-auto → Kelvin input dialog); the file-open action and the
+ * The Studio fun bar: the shared skeleton of `FOTLAB-UIXDES-000002`, currently pinned to the
+ * screen's bottom edge — drawer menu at the far left (bottom-left), immediately followed by the
+ * three icon-only develop tools (gradient → demosaic algorithm dropdown, exposure → stops input
+ * dialog, wb-auto → Kelvin input dialog); a flexible gap; the file-open action and the
  * overflow (three-dot) sit at the far right. The bar renders no title text
- * (`FOTLAB-UIXDES-000004` R6).
+ * (`FOTLAB-UIXDES-000004` R6). Anchored at the bottom edge, every dropdown opens upward
+ * (drop-up).
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun StudioTopBar(
+private fun StudioScreenFunBar(
     onOpenDrawer: () -> Unit,
     onOpenFile: () -> Unit,
     onResetView: () -> Unit,
@@ -323,10 +353,17 @@ private fun StudioTopBar(
     var overflowOpen by remember { mutableStateOf(false) }
     var demosaicMenuOpen by remember { mutableStateOf(false) }
 
-    TopAppBar(
-        title = {},
-        modifier = modifier,
-        navigationIcon = {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .windowInsetsPadding(WindowInsets.navigationBars)
+                .height(StudioScreenFunBarHeight),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onOpenDrawer) {
                     Icon(
@@ -334,7 +371,7 @@ private fun StudioTopBar(
                         contentDescription = stringResource(id = R.string.studio_cd_drawer_open),
                     )
                 }
-                // Demosaic: the gradient icon anchors the algorithm dropdown.
+                // Demosaic: the gradient icon anchors the algorithm dropdown (opens upward here).
                 Box {
                     IconButton(onClick = { demosaicMenuOpen = true }) {
                         Icon(
@@ -376,8 +413,9 @@ private fun StudioTopBar(
                     )
                 }
             }
-        },
-        actions = {
+
+            Spacer(modifier = Modifier.weight(1f))
+
             IconButton(onClick = onOpenFile) {
                 Icon(
                     imageVector = Icons.Filled.AddPhotoAlternate,
@@ -405,14 +443,15 @@ private fun StudioTopBar(
                     )
                 }
             }
-        },
-    )
+        }
+    }
 }
 
 /**
  * The Studio drawer sheet: the Material3 [ModalDrawerSheet] at 80% of the module width
- * (`FOTLAB-UIXDES-000002` R3). The close button sits in the sheet's own top-left corner, aligned with
- * the top bar's three-line icon, so opening the drawer replaces that icon in place (R6).
+ * (`FOTLAB-UIXDES-000002` R3). The close button sits in the sheet's own bottom-left corner,
+ * level with the fun bar's menu icon, so opening the drawer replaces that icon in place
+ * (R6); the close row shares the fun bar's 64.dp height and the navigation-bar inset.
  *
  * TODO: drawer content — tool categories / recent edits. Module-private per `FOTLAB-UIXDES-000002` R5.
  */
@@ -427,23 +466,37 @@ private fun StudioDrawer(
             .fillMaxHeight()
             .fillMaxWidth(0.8f),
     ) {
-        IconButton(onClick = onClose, modifier = Modifier.padding(start = 4.dp, top = 8.dp)) {
-            Icon(
-                imageVector = Icons.Filled.Close,
-                contentDescription = stringResource(id = R.string.common_drawer_close),
-            )
-        }
         Text(
             text = stringResource(id = R.string.app_nav_studio_label),
             style = MaterialTheme.typography.titleMedium,
             modifier = Modifier.padding(16.dp),
         )
+
+        // Push the close affordance to the bottom-left, level with the fun bar's menu icon.
+        Spacer(modifier = Modifier.weight(1f))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .windowInsetsPadding(WindowInsets.navigationBars)
+                .height(StudioScreenFunBarHeight),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(
+                onClick = onClose,
+                modifier = Modifier.padding(start = 4.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Close,
+                    contentDescription = stringResource(id = R.string.common_drawer_close),
+                )
+            }
+        }
     }
 }
 
 /**
  * The Studio grade bar: the rawalchemy fork's three chips sitting directly under the canvas,
- * above the shell's bottom navigation — `Boost: none`, `LOG: none`, `LUT: none` at the all-"none"
+ * above Studio's own fun bar — `Boost: none`, `LOG: none`, `LUT: none` at the all-"none"
  * initial state. Each chip is a text button anchoring its own dropdown:
  *
  *  * **Boost** — two-state: none (boost explicitly OFF) / Boost (upstream's default enhancement:
