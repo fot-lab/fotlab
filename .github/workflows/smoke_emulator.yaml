@@ -215,6 +215,12 @@ jobs:
         io.github.fotlab.fotlab.smoke.MainActivitySmokeTest,
         io.github.fotlab.fotlab.smoke.ZoomableGestureTest
     steps:
+      # Must check out BEFORE invoking the local composite action: the runner reads
+      # .github/actions/emulator_smoke_shard/action.yml from disk at expansion time,
+      # so a checkout that only happens INSIDE the action is one step too late.
+      - name: Check out
+        uses: actions/checkout@v7
+
       - name: Run app smoke shard
         uses: ./.github/actions/emulator_smoke_shard
         with:
@@ -245,6 +251,10 @@ jobs:
         io.github.fotlab.fotlab.smoke.RawlerNativeSmokeTest#nativeLibraryIsLoadableOnThisAbi+identifyRejectsNonRawBytes+identifyOnPngSurvives+decodeOfNonRawBytesReturnsNull+decodeOfPngSurvives+identifyCallSurfacesJvmExceptions,
         io.github.fotlab.fotlab.smoke.RawRoutingTest#pngOpensInStudioThroughCoil+canonCr2OpensInStudioThroughRawler+sonyIlce7rArwOpensInStudioThroughRawler+sonyIlce7rm2ArwOpensInStudioThroughRawler+nikonD850NefOpensInStudioThroughRawler+panasonicDcS1rRw2OpensInStudioThroughRawler+gradeBarIsHiddenOnPngRoute
     steps:
+      # Checkout must precede the local action — see the test-app-smoke shard above.
+      - name: Check out
+        uses: actions/checkout@v7
+
       - name: Run image loader shard
         uses: ./.github/actions/emulator_smoke_shard
         with:
@@ -275,6 +285,10 @@ jobs:
         io.github.fotlab.fotlab.smoke.RawlerNativeSmokeTest#developOfNonRawBytesReturnsNull+developOfPngSurvives+developDirectCallSurfacesJvmException,
         io.github.fotlab.fotlab.smoke.RawRoutingTest#canonCr2DevelopsThroughDemosaicMenu+sonyIlce7rArwDevelopsThroughDemosaicMenu+sonyIlce7rm2ArwDevelopsThroughDemosaicMenu+nikonD850NefDevelopsThroughDemosaicMenu+panasonicDcS1rRw2DevelopsThroughDemosaicMenu+everyDemosaicMenuOptionRedevelopsOnBayerAndExposureRecomputes+manualKelvinWhiteBalanceRedevelopsWithoutBlack
     steps:
+      # Checkout must precede the local action — see the test-app-smoke shard above.
+      - name: Check out
+        uses: actions/checkout@v7
+
       - name: Run image develop shard
         uses: ./.github/actions/emulator_smoke_shard
         with:
@@ -303,6 +317,10 @@ jobs:
         io.github.fotlab.fotlab.smoke.RawlerNativeSmokeTest#gradeLogSpacesAreEnumeratedNatively,
         io.github.fotlab.fotlab.smoke.RawRoutingTest#boostAndLogGradesReRenderThroughEngineAndNoneRestoresDevelop+gradeBarChipsDriveGradingThroughRealStudioUi+panasonicVLogAndDownloadedLutCubeBothTakeEffect+lutChipOpensSystemPickerAndAppliesDownloadedCube
     steps:
+      # Checkout must precede the local action — see the test-app-smoke shard above.
+      - name: Check out
+        uses: actions/checkout@v7
+
       - name: Run image alchemy shard
         uses: ./.github/actions/emulator_smoke_shard
         with:
