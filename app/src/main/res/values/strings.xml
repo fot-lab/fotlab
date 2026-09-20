@@ -82,6 +82,13 @@
     <string name="studio_cd_boost">Boost</string>
     <string name="studio_cd_log">Log curve</string>
     <string name="studio_cd_lut">LUT</string>
+    <!-- Visible labels rendered under each operation-bar icon (short, fits a 56dp slot). -->
+    <string name="studio_label_demosaic">Demosaic</string>
+    <string name="studio_label_exposure">Exposure</string>
+    <string name="studio_label_whitebalance">WB</string>
+    <string name="studio_label_boost">Boost</string>
+    <string name="studio_label_log">LOG</string>
+    <string name="studio_label_lut">LUT</string>
     <string name="studio_exposure_title">Exposure (EV)</string>
     <string name="studio_exposure_hint">Stops, e.g. -2.0 … 2.0</string>
     <string name="studio_wb_title">As-shot: %1$s K</string>

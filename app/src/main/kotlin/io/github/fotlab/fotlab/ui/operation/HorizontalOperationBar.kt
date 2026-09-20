@@ -22,6 +22,7 @@ import androidx.compose.foundation.gestures.snapping.SnapPosition
 import androidx.compose.foundation.gestures.snapping.snapFlingBehavior
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -37,6 +38,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -45,6 +47,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
@@ -55,11 +58,14 @@ import kotlinx.coroutines.launch
  * layout stay decoupled: reordering the buttons means reordering the list.
  *
  * @param id stable identifier, used as the [LazyRow] key.
+ * @param label optional short caption drawn beneath the icon (no label when null). Kept to one
+ *   line and ellipsised so a long caption never breaks the fixed-width slot.
  * @param content the button composable; receives the slot [Modifier] (a fixed-width box) and may
  *   render anything (an [IconButton], a chip, a dropdown anchor, ...).
  */
 data class OperationalButton(
     val id: String,
+    val label: String? = null,
     val content: @Composable (Modifier) -> Unit,
 )
 
@@ -138,7 +144,7 @@ fun HorizontalOperationBar(
     items: List<OperationalButton>,
     modifier: Modifier = Modifier,
     slotWidth: Dp = 56.dp,
-    height: Dp = 56.dp,
+    height: Dp = 72.dp,
     containerColor: Color = MaterialTheme.colorScheme.surfaceContainer,
     contentColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
     leading: @Composable (() -> Unit)? = null,
@@ -187,13 +193,28 @@ fun HorizontalOperationBar(
                 horizontalArrangement = Arrangement.Start,
             ) {
                 items(items, key = { it.id }) { button ->
-                    Box(
+                    Column(
                         modifier = Modifier
                             .width(slotWidth)
                             .height(height),
-                        contentAlignment = Alignment.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        button.content(Modifier)
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth(),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            button.content(Modifier)
+                        }
+                        if (button.label != null) {
+                            Text(
+                                text = button.label,
+                                style = MaterialTheme.typography.labelSmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                     }
                 }
             }

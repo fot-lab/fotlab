@@ -701,9 +701,18 @@ private fun StudioOperationBarDevelopFilm(
     HorizontalOperationBar(
         modifier = modifier,
         items = listOf(
-            OperationalButton("demosaic") { DemosaicButton(onAlgorithmPicked) },
-            OperationalButton("exposure") { ExposureButton(onExposure) },
-            OperationalButton("wb") { WhiteBalanceButton(onWhiteBalance) },
+            OperationalButton(
+                id = "demosaic",
+                label = stringResource(id = R.string.studio_label_demosaic),
+            ) { DemosaicButton(onAlgorithmPicked) },
+            OperationalButton(
+                id = "exposure",
+                label = stringResource(id = R.string.studio_label_exposure),
+            ) { ExposureButton(onExposure) },
+            OperationalButton(
+                id = "wb",
+                label = stringResource(id = R.string.studio_label_whitebalance),
+            ) { WhiteBalanceButton(onWhiteBalance) },
         ),
     )
 }
@@ -718,7 +727,10 @@ private fun StudioOperationBarTuneImage(
     HorizontalOperationBar(
         modifier = modifier,
         items = listOf(
-            OperationalButton("boost") { BoostButton(boost = boost, onBoost = onBoost) },
+            OperationalButton(
+                id = "boost",
+                label = stringResource(id = R.string.studio_label_boost),
+            ) { BoostButton(boost = boost, onBoost = onBoost) },
         ),
     )
 }
@@ -737,10 +749,16 @@ private fun StudioOperationBarStyleFilter(
     HorizontalOperationBar(
         modifier = modifier,
         items = listOf(
-            OperationalButton("log") {
+            OperationalButton(
+                id = "log",
+                label = stringResource(id = R.string.studio_label_log),
+            ) {
                 LogButton(logSpace = logSpace, logSpaces = logSpaces, onLogSpace = onLogSpace)
             },
-            OperationalButton("lut") {
+            OperationalButton(
+                id = "lut",
+                label = stringResource(id = R.string.studio_label_lut),
+            ) {
                 LutButton(lutName = lutName, onPick = onPickLut, onClear = onClearLut)
             },
         ),
