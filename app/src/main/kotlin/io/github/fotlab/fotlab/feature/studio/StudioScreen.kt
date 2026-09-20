@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.MovieFilter
 import androidx.compose.material.icons.filled.PhotoFilter
 import androidx.compose.material.icons.filled.Theaters
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.WbAuto
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -67,7 +68,6 @@ import io.github.fotlab.fotlab.feature.studio.StudioRenderResult
 import io.github.fotlab.fotlab.ui.ZoomableAsyncImage
 import io.github.fotlab.fotlab.ui.icons.CustomMaterialStyleIcons
 import io.github.fotlab.fotlab.ui.icons.MovieEdit
-import io.github.fotlab.fotlab.ui.icons.WhiteBalanceLiteral
 import io.github.fotlab.fotlab.ui.operation.HorizontalOperationBar
 import io.github.fotlab.fotlab.ui.operation.OperationalButton
 import io.github.fotlab.fotlab.ui.rememberZoomState
@@ -568,7 +568,7 @@ private fun WhiteBalanceButton(
 ) {
     IconButton(onClick = onClick, modifier = modifier) {
         Icon(
-            imageVector = CustomMaterialStyleIcons.Filled.WhiteBalanceLiteral,
+            imageVector = Icons.Filled.WbAuto,
             contentDescription = stringResource(id = R.string.studio_cd_whitebalance),
         )
     }

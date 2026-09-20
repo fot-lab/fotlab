@@ -10,6 +10,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
 import io.github.fotlab.fotlab.navigation.TopLevelDestination
 
 /**
@@ -31,6 +32,11 @@ fun MainWindowNavBar(
 
     NavigationBar(
         modifier = modifier.windowInsetsPadding(WindowInsets.statusBars),
+        // NavigationBar hardcodes heightIn(min = 80.dp) in its internal Row — a library default
+        // we cannot remove via parameters, so it stays. Its default windowInsets, however,
+        // reserve the bottom system-nav inset, which exists for bottom placement; for this
+        // top-pinned bar that is pure dead space, so zero it out.
+        windowInsets = WindowInsets(0.dp),
     ) {
         destinations.forEach { destination ->
             NavigationBarItem(

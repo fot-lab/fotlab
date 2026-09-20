@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.LazyListState
@@ -143,7 +144,7 @@ fun HorizontalOperationBar(
     items: List<OperationalButton>,
     modifier: Modifier = Modifier,
     slotWidth: Dp = 56.dp,
-    height: Dp = 72.dp,
+    height: Dp = 64.dp,
     containerColor: Color = MaterialTheme.colorScheme.surfaceContainer,
     contentColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
     leading: @Composable (() -> Unit)? = null,
@@ -212,6 +213,12 @@ fun HorizontalOperationBar(
                                 style = MaterialTheme.typography.labelSmall,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
+                                // IconButton-type content is a fixed 48dp touch target (24dp
+                                // glyph centred => 12dp dead padding below the glyph), which
+                                // would leave the label hanging. Nudge it up so the glyph-to-
+                                // label gap is ~8dp, matching NavigationBarItem's spec. Offset
+                                // is draw-time only: item height stays exactly [height].
+                                modifier = Modifier.offset(y = (-4).dp),
                             )
                         }
                     }
