@@ -1,5 +1,8 @@
 package io.github.fotlab.fotlab.feature.studio
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -21,6 +24,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.Exposure
 import androidx.compose.material.icons.filled.Gradient
+import androidx.compose.material.icons.filled.IosShare
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
@@ -73,7 +77,13 @@ import io.github.fotlab.fotlab.ui.operation.HorizontalOperationBar
 import io.github.fotlab.fotlab.ui.operation.OperationalButton
 import io.github.fotlab.fotlab.ui.rememberZoomState
 import io.github.fotlab.fotlab_rawler.DemosaicAlgorithm
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import java.io.ByteArrayOutputStream
+import java.nio.ByteBuffer
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlin.math.roundToInt
 
 /**
@@ -154,6 +164,41 @@ fun StudioScreen() {
         if (picked != null) StudioEngine.setGradeLut(picked)
     }
 
+    // Share-as-PNG: while an image is resident on the canvas the fun bar's open-file slot becomes
+    // a share action. CreateDocument hands the user the system file manager to choose the save
+    // location and name (prefilled with the tap-time timestamp); the callback re-reads the canvas
+    // state and writes the bytes as PNG — RAW output is already an engine-produced PNG, the Coil
+    // path decodes the source and re-encodes.
+    val shareLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("image/png"),
+    ) { target ->
+        if (target != null) {
+            val current = renderResult
+            scope.launch(Dispatchers.IO) {
+                runCatching {
+                    val bytes = when (val result = current) {
+                        is StudioRenderResult.Ready -> when (val model = result.model) {
+                            is ByteBuffer -> model.array()
+                            is Uri -> context.contentResolver.openInputStream(model)?.use { input ->
+                                BitmapFactory.decodeStream(input)?.let { bmp ->
+                                    ByteArrayOutputStream().use { out ->
+                                        bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
+                                        out.toByteArray()
+                                    }
+                                }
+                            }
+                            else -> null
+                        }
+                        else -> null
+                    }
+                    if (bytes != null) {
+                        context.contentResolver.openOutputStream(target)?.use { it.write(bytes) }
+                    }
+                }
+            }
+        }
+    }
+
     BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
 
     ModalNavigationDrawer(
@@ -174,6 +219,12 @@ fun StudioScreen() {
                 StudioScreenFunBar(
                     onOpenDrawer = { scope.launch { drawerState.open() } },
                     onOpenFile = { importLauncher.launch(arrayOf("*/*")) },
+                    onShareFile = {
+                        // Prefill the system file manager with the tap-time timestamp.
+                        val stamp = SimpleDateFormat("yyyy-MM-dd-HH-mm-ss", Locale.US).format(Date())
+                        shareLauncher.launch("$stamp.png")
+                    },
+                    showShare = renderResult is StudioRenderResult.Ready,
                     onResetView = { zoomState.reset() },
                     onDevelopFilm = { activeBar = activeBar.toggle(StudioOpBar.DevelopFilm) },
                     onTuneImage = { activeBar = activeBar.toggle(StudioOpBar.TuneImage) },
@@ -380,6 +431,8 @@ private val StudioScreenFunBarHeight = 64.dp
 private fun StudioScreenFunBar(
     onOpenDrawer: () -> Unit,
     onOpenFile: () -> Unit,
+    onShareFile: () -> Unit,
+    showShare: Boolean,
     onResetView: () -> Unit,
     onDevelopFilm: () -> Unit,
     onTuneImage: () -> Unit,
@@ -428,11 +481,21 @@ private fun StudioScreenFunBar(
 
             Spacer(modifier = Modifier.weight(1f))
 
-            IconButton(onClick = onOpenFile) {
-                Icon(
-                    imageVector = Icons.Filled.AddPhotoAlternate,
-                    contentDescription = stringResource(id = R.string.studio_cd_open_file),
-                )
+            if (showShare) {
+                // An image is resident: the open-file slot becomes share-as-PNG.
+                IconButton(onClick = onShareFile) {
+                    Icon(
+                        imageVector = Icons.Filled.IosShare,
+                        contentDescription = stringResource(id = R.string.studio_cd_share),
+                    )
+                }
+            } else {
+                IconButton(onClick = onOpenFile) {
+                    Icon(
+                        imageVector = Icons.Filled.AddPhotoAlternate,
+                        contentDescription = stringResource(id = R.string.studio_cd_open_file),
+                    )
+                }
             }
             Box {
                 IconButton(onClick = { overflowOpen = true }) {

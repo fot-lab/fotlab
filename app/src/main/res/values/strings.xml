@@ -71,6 +71,7 @@
     <!-- ===== feature: studio ===== -->
     <string name="studio_cd_drawer_open">Open navigation drawer</string>
     <string name="studio_cd_open_file">Open file</string>
+    <string name="studio_cd_share">Share</string>
     <string name="studio_cd_more_options">More options</string>
     <string name="studio_reset_view">Reset view</string>
     <string name="studio_open_prompt">Open a file from the toolbar to start editing</string>

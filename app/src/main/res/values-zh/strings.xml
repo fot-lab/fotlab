@@ -68,6 +68,7 @@
     <!-- ===== feature: studio ===== -->
     <string name="studio_cd_drawer_open">打开导航抽屉</string>
     <string name="studio_cd_open_file">打开文件</string>
+    <string name="studio_cd_share">分享</string>
     <string name="studio_cd_more_options">更多选项</string>
     <string name="studio_reset_view">重置视图</string>
     <string name="studio_open_prompt">从工具栏打开文件开始编辑</string>
