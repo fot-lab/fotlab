@@ -63,7 +63,19 @@ class LibraryRepository(private val database: LibraryDatabase) {
     /** Add an edge (child under parent); use `parentId = null` for a root node. */
     suspend fun link(childId: Long, parentId: Long?) {
         database.withTransaction {
-            database.nodeRelationDao().insert(FsNodeRelation(childId, parentId))
+            val dao = database.nodeRelationDao()
+            if (parentId == null) {
+                // A re-imported (revived) node keeps its old, soft-deleted root edge: revive it
+                // first, otherwise the NOT EXISTS guard below sees the dead row and skips insert,
+                // leaving the live node an orphan the grid never lists.
+                dao.reviveRootLink(childId)
+                // Root edges need the NOT EXISTS guard: SQLite's UNIQUE index treats
+                // NULLs as distinct, so a plain IGNORE insert cannot deduplicate them.
+                dao.insertRootLinkIfAbsent(childId)
+            } else {
+                dao.reviveRelation(childId, parentId)
+                dao.insert(FsNodeRelation(childId, parentId))
+            }
         }
     }
 
@@ -108,6 +120,12 @@ class LibraryRepository(private val database: LibraryDatabase) {
 
     suspend fun getByUri(uri: String): FsNodeObject? =
         database.nodeObjectDao().getByUri(uri)
+
+    suspend fun getByUriAnyStatus(uri: String): FsNodeObject? =
+        database.nodeObjectDao().getByUriAnyStatus(uri)
+
+    suspend fun revive(id: Long, nameDisplay: String, typeMime: String) =
+        database.nodeObjectDao().revive(id, nameDisplay, typeMime)
 
     /** Rename a node by id (display name only); reused by the single-selection rename action. */
     suspend fun renameNode(id: Long, name: String) =

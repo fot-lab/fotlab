@@ -28,8 +28,8 @@
 
     <!-- ===== app (shell) ===== -->
     <string name="app_name">FotLab</string>
-    <string name="app_nav_library_label">Library</string>
-    <string name="app_nav_studio_label">Studio</string>
+    <string name="app_nav_library_label">图库</string>
+    <string name="app_nav_studio_label">显影</string>
 
     <!-- ===== feature: library ===== -->
     <string name="library_new_collection_name">New Folder</string>
@@ -72,19 +72,48 @@
     <string name="studio_cd_more_options">More options</string>
     <string name="studio_reset_view">Reset view</string>
     <string name="studio_open_prompt">Open a file from the toolbar to start editing</string>
-    <string name="studio_tools_looks">Looks</string>
-    <string name="studio_tools">Tools</string>
-    <string name="studio_export">Export</string>
+    <!-- DevelopFilm operation-bar icons (demosaic / exposure / white balance). -->
+    <string name="studio_cd_demosaic">Demosaic algorithm</string>
+    <string name="studio_cd_exposure">Exposure</string>
+    <string name="studio_cd_whitebalance">White balance</string>
+    <string name="studio_cd_develop_film">Develop film tools</string>
+    <string name="studio_cd_tune_image">Tune image</string>
+    <string name="studio_cd_style_filter">Style filter</string>
+    <string name="studio_cd_boost">Boost</string>
+    <string name="studio_cd_log">Log curve</string>
+    <string name="studio_cd_lut">LUT</string>
+    <!-- Visible labels rendered under each operation-bar icon (short, fits a 56dp slot). -->
+    <string name="studio_label_demosaic">Demosaic</string>
+    <string name="studio_label_exposure">Exposure</string>
+    <string name="studio_label_whitebalance">WB</string>
+    <string name="studio_label_boost">Boost</string>
+    <string name="studio_label_log">LOG</string>
+    <string name="studio_label_lut">LUT</string>
+    <string name="studio_exposure_title">Exposure (EV)</string>
+    <string name="studio_exposure_hint">Stops, e.g. -2.0 … 2.0</string>
+    <string name="studio_wb_title">As-shot: %1$s K</string>
+    <string name="studio_wb_hint">Color temperature (K), e.g. 5500</string>
     <string name="studio_decoding">Decoding…</string>
     <string name="studio_unsupported_title">Unsupported Format</string>
     <string name="studio_unsupported_format">Unsupported Format! 不支持的格式！</string>
 
-    <!-- Studio bottom-bar demosaic menu (the "Looks" action, replaced by a pull-up algorithm picker). -->
-    <string name="studio_demosaic_title">Demosaic</string>
+    <!-- Studio top-bar demosaic dropdown algorithm picker. -->
     <string name="studio_demosaic_default">Default (CFA auto)</string>
     <string name="studio_demosaic_ppg">PPG</string>
     <string name="studio_demosaic_bilinear4">Bilinear 4-channel</string>
     <string name="studio_demosaic_xtrans">X-Trans Bilinear</string>
+
+    <!-- Studio grade fork (rawalchemy): Boost / LOG / LUT, hosted in the StyleFilter/Tune operation bars. -->
+    <string name="studio_grade_none">none</string>
+    <!-- Boost "on" item: upstream's default enhancement (saturation/contrast). -->
+    <string name="studio_grade_boost_on">Boost</string>
+    <!-- LUT dropdown items. -->
+    <string name="studio_grade_lut_pick">Choose file…</string>
+    <string name="studio_grade_lut_clear">None (remove LUT)</string>
+    <!-- Grade-fork error dialog (a non-.cube / corrupt LUT, or a grader failure). -->
+    <string name="studio_grade_error_title">Grading failed</string>
+    <string name="studio_grade_error_message">RawAlchemy could not apply these settings. Check the LUT file — it is normally a .cube 3D LUT.</string>
+    <string name="studio_grade_error_lut_copy">Could not read the picked file. Choose another LUT.</string>
 
     <!-- Library viewer: the full-screen image/video dialog opened on a single tap. -->
     <string name="library_viewer_cd_close">Close viewer</string>

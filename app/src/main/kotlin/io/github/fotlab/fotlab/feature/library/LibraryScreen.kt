@@ -32,7 +32,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.DriveFileRename
+import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Source
@@ -526,7 +526,7 @@ private fun LibraryScreenFunBar(
     onRefresh: () -> Unit,
     onOpenDrawer: () -> Unit,
     onImport: () -> Unit,
-                                imageVector = Icons.Filled.DriveFileRename,
+    onCreateCollection: () -> Unit,
     onExport: () -> Unit,
     onDelete: () -> Unit,
     onExitSelection: () -> Unit,

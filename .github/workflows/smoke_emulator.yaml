@@ -212,7 +212,8 @@ jobs:
     env:
       # Whole classes: app boot + the zoomable/gesture suite.
       TEST_FILTER: >-
-        io.github.fotlab.fotlab.smoke.MainActivitySmokeTest
+        io.github.fotlab.fotlab.smoke.MainActivitySmokeTest,
+        io.github.fotlab.fotlab.smoke.ZoomableGestureTest
     steps:
       # Must check out BEFORE invoking the local composite action: the runner reads
       # .github/actions/emulator_smoke_shard/action.yml from disk at expansion time,
@@ -246,8 +247,9 @@ jobs:
       # exception surfacing); the open route for the PNG control and all five RAW
       # brands (load + as-shot render), plus the grade-bar hidden-on-PNG assertion.
       TEST_FILTER: >-
+        io.github.fotlab.fotlab.smoke.PngEndToEndFlowTest,
         io.github.fotlab.fotlab.smoke.RawlerNativeSmokeTest#nativeLibraryIsLoadableOnThisAbi+identifyRejectsNonRawBytes+identifyOnPngSurvives+decodeOfNonRawBytesReturnsNull+decodeOfPngSurvives+identifyCallSurfacesJvmExceptions,
-        io.github.fotlab.fotlab.smoke.RawRoutingTest#pngOpensInStudioThroughCoil+canonCr2OpensInStudioThroughRawler+sonyIlce7rArwOpensInStudioThroughRawler+sonyIlce7rm2ArwOpensInStudioThroughRawler+nikonD850NefOpensInStudioThroughRawler+panasonicDcS1rRw2OpensInStudioThroughRawler
+        io.github.fotlab.fotlab.smoke.RawRoutingTest#pngOpensInStudioThroughCoil+canonCr2OpensInStudioThroughRawler+sonyIlce7rArwOpensInStudioThroughRawler+sonyIlce7rm2ArwOpensInStudioThroughRawler+nikonD850NefOpensInStudioThroughRawler+panasonicDcS1rRw2OpensInStudioThroughRawler+gradeBarIsHiddenOnPngRoute
     steps:
       # Checkout must precede the local action — see the test-app-smoke shard above.
       - name: Check out
@@ -281,7 +283,7 @@ jobs:
       # brand; the every-menu-option + exposure recompute proof.
       TEST_FILTER: >-
         io.github.fotlab.fotlab.smoke.RawlerNativeSmokeTest#developOfNonRawBytesReturnsNull+developOfPngSurvives+developDirectCallSurfacesJvmException,
-        io.github.fotlab.fotlab.smoke.RawRoutingTest#sonyArwDevelopsThroughDemosaicMenu+developEachDemosaicAlgorithmProducesFullFrame
+        io.github.fotlab.fotlab.smoke.RawRoutingTest#canonCr2DevelopsThroughDemosaicMenu+sonyIlce7rArwDevelopsThroughDemosaicMenu+sonyIlce7rm2ArwDevelopsThroughDemosaicMenu+nikonD850NefDevelopsThroughDemosaicMenu+panasonicDcS1rRw2DevelopsThroughDemosaicMenu+everyDemosaicMenuOptionRedevelopsOnBayerAndExposureRecomputes+manualKelvinWhiteBalanceRedevelopsWithoutBlack
     steps:
       # Checkout must precede the local action — see the test-app-smoke shard above.
       - name: Check out
@@ -302,7 +304,34 @@ jobs:
           log-artifact-name: ${{ inputs.log-artifact-name }}
           log-retention-days: ${{ inputs.log-retention-days }}
 
-  # -------- shard 4 (grading / alchemy + LUT) removed: its test methods were
-  #          deleted from the suite during the studio rework, so there is no
-  #          coverage left to run here. Re-add a job if those tests return.
+  # -------- shard 4: grading / alchemy + LUT (5 tests) --------
+  test-image-alchemy:
+    name: Smoke / test_image_alchemy
+    needs: [prep-emulator]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 75
+    env:
+      # Native log-space enumeration; engine boost/log redevelop; grade-bar UI;
+      # Panasonic V-Log + downloaded .cube LUT; the SAF LUT-picker contract.
+      TEST_FILTER: >-
+        io.github.fotlab.fotlab.smoke.RawlerNativeSmokeTest#gradeLogSpacesAreEnumeratedNatively,
+        io.github.fotlab.fotlab.smoke.RawRoutingTest#boostAndLogGradesReRenderThroughEngineAndNoneRestoresDevelop+gradeBarChipsDriveGradingThroughRealStudioUi+panasonicVLogAndDownloadedLutCubeBothTakeEffect+lutChipOpensSystemPickerAndAppliesDownloadedCube
+    steps:
+      # Checkout must precede the local action — see the test-app-smoke shard above.
+      - name: Check out
+        uses: actions/checkout@v7
 
+      - name: Run image alchemy shard
+        uses: ./.github/actions/emulator_smoke_shard
+        with:
+          api-level: ${{ inputs.api-level }}
+          target: ${{ inputs.target }}
+          arch: ${{ inputs.arch }}
+          native-artifact-name: ${{ inputs.native-artifact-name }}
+          shard: alchemy
+          test-filter: ${{ env.TEST_FILTER }}
+          need-raw: 'true'
+          need-lut: 'true'
+          test-timeout-minutes: '60'
+          log-artifact-name: ${{ inputs.log-artifact-name }}
+          log-retention-days: ${{ inputs.log-retention-days }}

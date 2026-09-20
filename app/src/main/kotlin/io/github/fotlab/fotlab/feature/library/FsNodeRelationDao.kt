@@ -19,6 +19,44 @@ interface FsNodeRelationDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(relation: FsNodeRelation)
 
+    /**
+     * Clear the soft-delete stamp on an existing dead edge between this child/parent pair, so a
+     * re-imported node is reattached where it used to live. Without this the dead row's primary
+     * key makes the IGNORE [insert] a no-op and the revived node stays an orphan (its live node
+     * row JOINs no live edge, so the grid/directory never lists it).
+     */
+    @Query(
+        "UPDATE fs_node_relation SET time_deleted = NULL " +
+            "WHERE fs_node_id_child = :childId AND fs_node_id_parent = :parentId " +
+            "AND time_deleted IS NOT NULL",
+    )
+    suspend fun reviveRelation(childId: Long, parentId: Long)
+
+    /** Root-edge variant of [reviveRelation]: `= NULL` never matches, so the NULL parent needs `IS NULL`. */
+    @Query(
+        "UPDATE fs_node_relation SET time_deleted = NULL " +
+            "WHERE fs_node_id_child = :childId AND fs_node_id_parent IS NULL " +
+            "AND time_deleted IS NOT NULL",
+    )
+    suspend fun reviveRootLink(childId: Long)
+
+    /**
+     * Insert a root edge (`NULL` parent) only when the child has no live root edge yet.
+     * The UNIQUE index cannot deduplicate `(child, NULL)` rows because SQLite treats
+     * `NULL`s as distinct, so a plain `OnConflictStrategy.IGNORE` insert would let a
+     * re-imported root file be listed twice by [rootChildren] (verified by the
+     * `pngImportAndVirtualMapping` instrumented test). This guard makes the root link
+     * idempotent (`FOTLAB-DATABS-000002` R3).
+     */
+    @Query(
+        "INSERT INTO fs_node_relation (fs_node_id_child, fs_node_id_parent, time_deleted) " +
+            "SELECT :childId, NULL, NULL " +
+            "WHERE NOT EXISTS (" +
+            "SELECT 1 FROM fs_node_relation WHERE fs_node_id_child = :childId " +
+            "AND fs_node_id_parent IS NULL)",
+    )
+    suspend fun insertRootLinkIfAbsent(childId: Long)
+
     @Update
     suspend fun update(relation: FsNodeRelation)
 
