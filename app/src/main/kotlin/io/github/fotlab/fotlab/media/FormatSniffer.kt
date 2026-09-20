@@ -1,9 +1,7 @@
 package io.github.fotlab.fotlab.media
 
 import android.graphics.BitmapFactory
-import io.github.fotlab.fotlab_rawler.RawlerFotlabBridge
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.InternalCoroutinesApi
+import io.github.fotlab.fotlab.binding.dnglab.rawler_fotlab.RawlerFotlabBridge
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeout
@@ -22,9 +20,7 @@ import java.util.concurrent.Executors
  *
  * Flow: parallel Coil-side + rawler-side sniffers, bounded by a timeout (default
  * [DEFAULT_SNIFF_TIMEOUT_MS], a user preference — see [MediaPreference]); timeout =>
- * [SniffResult.Timeout] (hard error, never a silent fallback). A sniffer that *throws* is a
- * different case from a timeout: that backend alone degrades to an empty [Verdict] (unrecognized),
- * so a broken rawler/JNA bridge can never stop the Coil side from opening JPEG/PNG and vice versa.
+ * [SniffResult.Timeout] (hard error, never a silent fallback).
  *
  * **A timeout must not depend on the sniffers cooperating.** Neither the platform
  * `BitmapFactory` call nor the native rawler call can be cancelled — `Thread.interrupt()`
@@ -47,14 +43,10 @@ object FormatSniffer {
         val rawler = SniffThreads.submit { RawlerProbe.sniff(header) }
         return try {
             withTimeout(timeoutMillis) {
-                // A sniffer that throws (JVM-side) only knocks ITSELF out: it degrades to an empty
-                // Verdict (unrecognized) so the other backend still routes the file, instead of one
-                // broken backend making every format unopenable. CancellationException (the timeout
-                // above) is rethrown so the hard-timeout contract below is preserved.
                 SniffResult.Ok(
                     verdicts = mapOf(
-                        Sniffer.COIL to coil.awaitOrElse { Verdict() },
-                        Sniffer.RAWLER to rawler.awaitOrElse { Verdict() },
+                        Sniffer.COIL to coil.await(),
+                        Sniffer.RAWLER to rawler.await(),
                     ),
                 )
             }
@@ -105,7 +97,6 @@ private object SniffThreads {
  * `tryResume`/`completeResume` are used instead of `resume` so a result that arrives *after*
  * cancellation is silently dropped instead of throwing inside the completion callback.
  */
-@OptIn(InternalCoroutinesApi::class) // tryResume/completeResume: drop late results after cancellation
 private suspend fun <T> CompletableFuture<T>.await(): T = suspendCancellableCoroutine { cont ->
     whenComplete { value, error ->
         val token = if (error != null) cont.tryResumeWithException(error) else cont.tryResume(value)
@@ -113,21 +104,6 @@ private suspend fun <T> CompletableFuture<T>.await(): T = suspendCancellableCoro
     }
     cont.invokeOnCancellation { cancel(true) }
 }
-
-/**
- * Awaits this sniffer future, turning any backend failure into [fallback] ("unrecognized") so one
- * sniffer cannot take the whole [FormatSniffer.sniff] — and therefore every image — down.
- * [kotlinx.coroutines.CancellationException] is rethrown: the timeout is a hard error handled by
- * the `withTimeout`/`TimeoutCancellationException` boundary in [FormatSniffer.sniff].
- */
-private suspend inline fun <T> CompletableFuture<T>.awaitOrElse(fallback: () -> T): T =
-    try {
-        await()
-    } catch (c: CancellationException) {
-        throw c
-    } catch (_: Throwable) {
-        fallback()
-    }
 
 /** Identifies a registered sniffer. The dictionary is keyed by these; add values to extend. */
 enum class Sniffer { COIL, RAWLER }
@@ -234,9 +210,7 @@ sealed interface Route {
     /** Coil can decode the original source. */
     data class ToCoil(override val verdicts: SniffDict, val format: String) : Route
     /** Neither sniffer can decode. */
-    data object Unsupported : Route {
-        override val verdicts: SniffDict = emptyMap()
-    }
+    data object Unsupported : Route
 }
 
 /** Pure routing function: classify the sniff dictionary into a [Route] (R8 / Q6). */

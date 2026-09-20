@@ -85,7 +85,7 @@ path, where no release is produced to verify.
 | KVM | **Required, and not granted by default.** `/dev/kvm` exists on the image but is owned by group `kvm`, which the runner user is not in, so the emulator starts with `-accel off` and its adb daemon never comes up (`ProbeKVM: This user doesn't have permissions to use KVM`). The job writes `/etc/udev/rules.d/99-kvm4all.rules` with `MODE="0666"` and reloads udev — the recipe published by the emulator-runner action. Group membership cannot be granted mid-job, because a new supplementary group only applies to a fresh login session. |
 | AVD | API `36`, system-image target `google_apis`, arch `x86_64` (an ABI present in `librawler_fotlab.so`) |
 | Emulator flags | `-no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none`, defined as job env values (not inputs, which could let a caller break the snapshot invariants). The test run adds `-no-snapshot-save`: it loads the cached snapshot but never overwrites it, so our APK cannot contaminate the cached emulator. |
-| Tests | `app/src/androidTest/kotlin` — the AGP-default instrumented source set (Google's recommended app layout); run via `connectedDebugAndroidTest`, which installs the debug APK plus its test APK. The 38 cases are partitioned into the four shards below, each passed as an AndroidJUnitRunner `-e class` list (`Class` / `Class#m1+m2`) through `-PsmokeTestFilter` (mapped in `app/build.gradle.kts`). The membership lists live in one place: each shard job's `TEST_FILTER` in `smoke_emulator.yaml` — when adding a `@Test`, add it to exactly one filter or it will not run in CI. |
+| Job timeout | 45 min (test step 20 min) — a wedged emulator fails rather than holding the runner |
 | Timeouts | `prep-emulator` 30 min; app 30 (step 20), loader 45 (step 35), develop/alchemy 75 (step 60) — the two heavy shards carry the old budget, the others fail fast. A wedged slice now fails only its own shard instead of holding the whole suite. |
 | Local-action contract | Two non-obvious requirements, both learned the hard way. (1) Every shard job runs `actions/checkout` **before** `uses: ./.github/actions/emulator_smoke_shard` — the runner reads the composite action's `action.yml` from disk while expanding the step, so a checkout that only happens *inside* the action is one step too late (`Can't find action.yml … did you forget to run actions/checkout?`). (2) A composite action accepts `env` per **step**, not under `runs:` — a `runs.env` map makes the runner reject the whole block (`Unexpected value 'steps'` / `no steps provided`), so the action's `ANDROID_API` / `ANDROID_BUILD_TOOLS` / `EMULATOR_OPTIONS_TEST` constants live on their consuming steps. |
 
@@ -148,17 +148,16 @@ Everything else triggers, `external/**` included.
 | Item | Value |
 | --- | --- |
 | Runner | `ubuntu-26.04` |
-| JDK | 17 (Temurin) |
-| Android SDK home | Runner-provided `ANDROID_HOME` (`/usr/local/lib/android/sdk` on the hosted image); workflows assert it is set and never redirect it to a private `$HOME` tree |
+1. **Emulator (AVD + the SDK packages it boots)** — one entry covering `~/.android/avd`, `~/.android/adb*`, `$ANDROID_HOME/system-images`, `$ANDROID_HOME/emulator` and `$ANDROID_HOME/build-tools`, owned by `smoke_emulator.yaml` and keyed by API level + system-image target + arch. It changes only when the AVD definition does, so it is the slowest-changing layer of all. It is written **after** the AVD exists and **before** our APK is installed, so the snapshot stays app-free and reusable (`actions/cache/restore` + `actions/cache/save`, not `actions/cache`).
 | Android SDK | `platforms;android-36`, `build-tools;36.0.0` — **preinstalled on the image** (with cmdline-tools, platform-tools, licenses accepted); `install_sdk` verifies and installs only what a future image is missing |
-| `compileSdk` / `targetSdk` | `36` / `36` (set in every module's `build.gradle.kts`) |
-| NDK | `28.2.13676358` — **preinstalled on the image** (among 27.3 / 28.2.13676358 / 29.0); `install_ndk` verifies and installs only when missing |
-| Emulator (smoke) | AVD API `36`, target `google_apis`, arch `x86_64`; managed by `reactivecircus/android-emulator-runner` and reused from the emulator cache (AVD + snapshot + the `system-images` / `emulator` / `build-tools` packages). Needs the [KVM udev rule](#emulator-smoke-test); the action additionally force-installs the latest `build-tools` (37.0.0). |
-| Gradle tasks — push/PR | `testDebugUnitTest` `assembleDebug` |
+2. **NDK** — preinstalled at `$ANDROID_HOME/ndk/<ver>` on the image; the `install_ndk` fallback `actions/cache` is keyed by NDK version alone (`Linux-ndk-<ver>`). Our code and Rust rebuilds never invalidate it.
+3. **Rust toolchain** — `~/.rustup` (host `rustc`/`cargo` plus the four Android target std libraries), owned by `build_rust.yaml`. `rust-cache` never covered this, so `dtolnay/rust-toolchain` re-fetched `info: downloading 4 components` (~250 MB) on **every** run. It changes only when the `stable` channel moves (every ~6 weeks), hence its place near the top. The restore is by **prefix** and the save is keyed by the toolchain actually installed (`<os>-rustup-<rustc version>`), because a constant key cannot work: `actions/cache` never re-saves an entry it restored, so a fixed key would freeze the archive at the release current on creation day and re-download the difference forever. Each Rust release therefore mints one new entry; the previous one is dead weight and falls to the quota-hygiene pass. See [the layer's comment](.github/workflows/build_rust.yaml) for the full reasoning.
+4. **Rust dependencies** — `$CARGO_HOME/registry`, `/git`, `/bin` (crates.io sources, git deps, the `cargo-ndk` binary) inside `Swatinem/rust-cache`; the key segment is the lockfile/manifest hash.
+5. **Rust build products** — the crate's `target/` (four Android ABIs + host bindgen) in the same rust-cache archive; the volatile key tail is `NDK_VERSION MIN_API DNGLAB_SHA`.
 | Gradle tasks — emulator smoke | `connectedDebugAndroidTest -PsmokeTestFilter=<class list>` (one slice per shard; property absent locally = run everything) |
-| Gradle tasks — release | `assembleRelease` |
+`DNGLAB_SHA` is fed via rust-cache `env-vars` (tail of the key), **not** via `key` (which sits before the lockfile segment): on a submodule bump the progressive prefix restore still matches the previous run at the lockfile segment, so layer 4 stays warm and cargo re-fingerprints/rebuilds only rawler + the first-party crate. A mid-chain `key: dnglab-<sha>` would discard the dependency layer on every bump. Layers 4–5 live in one archive because rust-cache always caches `$CARGO_HOME` together with the workspace target; the layering is expressed through key-chain fallback, not separate archives.
 | Release APK output | `app/build/outputs/apk/release/*.apk` |
-| Debug APK output | `app/build/outputs/apk/debug/*.apk` |
+Layer 1 belongs to the `emulator-smoke` job; layers 2–5 belong to the `rust` job. The Gradle dependency/output cache restored by `gradle/actions/setup-gradle` is a further, unlisted layer: `smoke_emulator.yaml` restores what the `apk` job wrote, so `connectedDebugAndroidTest` re-runs only the androidTest slice instead of recompiling the application. That layer is real, not theoretical: the `apk` job's log shows most tasks `FROM-CACHE` (resources, manifests, dexing) and `~/.gradle/caches/build-cache-1` inside the restored entry, because `setup-gradle` passes `--build-cache`.
 
 #### CI cache layers (slow → fast changing)
 
@@ -243,15 +242,6 @@ Do **not** prune to fewer than one entry per family, and leave the deliberate sa
   in-memory database (`FOTLAB-DATABS-000001` R8), no device needed.
 - Instrumented smoke tests live in the AGP-default instrumented source set
   `app/src/androidTest/kotlin` (Google's recommended app layout — no extra
-  `kotlin.srcDir` registration, unlike the hand-written binding facade) and run on
-  the emulator via `connectedDebugAndroidTest`, driven by the four parallel smoke
-  shards (`test_app_smoke` / `test_image_loader` / `test_image_develop` /
-  `test_image_alchemy`) on the non-release path. They answer "does the built
-  application actually run?", so they assert survival and wiring, not feature
-  detail:
-  - `MainActivitySmokeTest` — `MainActivity` reaches `RESUMED`, exercising
-    `MainApplication`, the Room/DataStore wiring and the JNA load of
-    `librawler_fotlab.so`.
   - `RawlerNativeSmokeTest` — the native bridge survives the two call shapes that
     used to abort the process: a PNG and arbitrary non-image bytes, through both
     `identifyFormat` and `decodeRawToPng`. A process-level abort (native panic,
@@ -281,7 +271,7 @@ Do **not** prune to fewer than one entry per family, and leave the deliberate sa
    JDK, Rust or Perl for building.
 3. **Do not weaken CI to make a failure disappear** — no relaxing trigger
    filters, no disabling tasks, no `continue-on-error`.
-4. **No secrets in the repository** — keystores, passwords and signing configs
+3. If CI failed, download `build-gradle.log` (and `build_log_gradle.log` for the gradle portion) into the gitignored `log/` directory (see `.gitignore`) and read the compile errors — never commit the logs. A `success` run needs no log download.
    come from CI secrets only.
 
 ### Allowed
@@ -316,13 +306,11 @@ Do **not** prune to fewer than one entry per family, and leave the deliberate sa
 Specified as an encoded rule: [`rules/ACTION/detail/GITHUB-ACTION-000001.md`](rules/ACTION/detail/GITHUB-ACTION-000001.md).
 When the user explicitly asks to view remote CI results, the agent calls the `gh` CLI; its
 location (environment-dependent) and the useful `gh run` commands are documented there.
-
-### Release Procedure
-
-Split across the two rule files, on purpose:
-
-1. **Version content** ([`rules/VERSION.md`](rules/VERSION.md)): update `VERSION_NAME` and
-   `VERSION_CODE` — only when the user asks.
+- Q2 — **RESOLVED.** R8 minification and resource shrinking are enabled for release
+  (`isMinifyEnabled` / `isShrinkResources` in `app/build.gradle.kts`). The keep rules JNA and the
+  UniFFI bindings need live in `app/proguard-rules.pro` — R8 must not rename the generated JNA
+  interface methods, whose names ARE the native symbol names. Only release builds are minified, so a
+  debug-only CI run does not exercise this configuration; a release build should be smoke-tested.
 2. Commit and push.
 3. Create the `v{VERSION_NAME}` tag and push it (mandatory, per VERSION.md).
 4. **Pipeline** (this file): CI runs APK → GitHub Release automatically.
@@ -371,9 +359,6 @@ Split across the two rule files, on purpose:
 | 2026-09-08 | GitHub Release now honours the `-rc` suffix: a `VERSION_NAME` ending in `-rc` is published with `--prerelease` (and an existing release is edited to match), a formal version is published as a normal release. |
 | 2026-09-09 | Added "Viewing Remote CI Results (gh CLI)": when the user explicitly asks to view remote CI results, the agent calls the `gh` CLI; documents its environment-dependent location (e.g. `C:\Program Files\GitHub CLI\gh.exe` on Windows, or locate via `where gh` / `Get-Command` / common install dirs) plus useful `gh run` commands. |
 | 2026-09-09 | Per AGENTS.md three-layer layout: extracted the GH CLI rule into the encoded detail file `rules/ACTION/detail/GITHUB-ACTION-000001.md`, created `rules/ACTION/index.md` as the Layer 2 master table, and replaced the inline section in `rules/ACTION.md` with a brief reference. `rules/ACTION.md` is now Layer 1 only. |
-| 2026-09-09 | CI logs must be downloaded into the gitignored `log/` directory (`.gitignore`) and never committed; documented in the Verification Loop and in `rules/ACTION/detail/GITHUB-ACTION-000001.md`. |
-| 2026-09-09 | Added a separate `build_log_gradle.log` artifact from the gradle step (in addition to the full `build-log.txt` log), so tooling can fetch the gradle portion independently; 7-day retention. Documented in the Artifacts table. |
-| 2026-09-09 | Verification Loop now states a `success` run needs no log download; only `failure` runs warrant fetching logs into the gitignored `log/`. |
 | 2026-09-09 | CI restructured into the orchestrator `build.yaml` plus three reusable workflows — `devenv_android.yaml` (env only), `build_gradle.yaml` (Gradle build + artifacts), `release_github.yaml` (GitHub Release). The shared toolchain steps moved into the composite action `.github/actions/devenv-android/action.yml` so env setup is defined once and reused. Naming clarified: env setup / Gradle build / release are now separate, reusable and composed in `build.yaml`. |
 | 2026-09-09 | Removed the redundant `devenv_android.yaml` reusable workflow and the `native` placeholder job in `build.yaml`; the shared toolchain steps now live in per-component composite actions (`install_jdk` / `install_sdk` / `install_ndk`), reused in-job by `build_gradle.yaml`. Native builds, when needed, will be added as per-language workflows (`build_cmake`/`build_python`/`build_perl`/`build_rust`) — not yet present. Architecture principles extracted to `rules/ACTION/detail/GITHUB-ACTION-000002.md`. |
 | 2026-09-09 | Split the monolithic `devenv-android` composite action into three per-component composite actions — `install_jdk` (JDK), `install_sdk` (SDK + per-component cache), `install_ndk` (NDK + per-component cache) — so NDK install is no longer a parameter switch. `build_gradle.yaml` now calls `install_jdk` + `install_sdk`; future native workflows add `install_ndk`. The old `devenv-android/action.yml` is deleted. |

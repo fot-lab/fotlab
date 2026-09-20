@@ -1,11 +1,10 @@
 # Reusable workflow: publishes the built APK as a GitHub Release.
 #
 # Downloads the APK artifact produced by build_gradle.yaml and creates a release.
-# This stage also owns the release asset's file name — the build stage uploads the
-# APK exactly as Gradle produced it. A version ending in -rc is published as a
-# pre-release (prerelease: true); a formal version is a normal release. The -rc
-# semantics are owned by rules/VERSION.md. This workflow has no triggers of its
-# own; build.yaml calls it on a v* tag or a release dispatch. See rules/ACTION.md.
+# A version ending in -rc is published as a pre-release (prerelease: true); a
+# formal version is a normal release. The -rc semantics are owned by rules/VERSION.md.
+# This workflow has no triggers of its own; build.yaml calls it on a v* tag or a
+# release dispatch. See rules/ACTION.md.
 #
 # Publishing uses softprops/action-gh-release (the dedicated GitHub Release
 # action) instead of the gh CLI: it calls the GitHub API directly via
@@ -36,40 +35,20 @@ jobs:
     runs-on: ubuntu-26.04
     steps:
       - name: Download release APK
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v4
         with:
           name: ${{ inputs.apk-artifact-name }}
           path: apk
-
-      # The single release asset name is decided here, not in the build stage:
-      # the build produces one universal APK (no ABI splits — all four ABIs from
-      # the `rawler_fotlab` artifact are packaged together), so the asset carries
-      # the `universal` suffix. Build stages must not invent this name.
-      - name: Name release asset
-        run: |
-          set -euo pipefail
-          mkdir -p release-asset
-          version="${{ inputs.version-name }}"
-          # Resolved with find rather than a fixed glob: the artifact layout is
-          # whatever Gradle produced, and this is the only place the name is set.
-          apk_file="$(find apk -type f -name '*.apk' | head -n 1)"
-          if [ -z "$apk_file" ]; then
-            echo "::error::no APK found in artifact ${{ inputs.apk-artifact-name }}"
-            exit 1
-          fi
-          cp "$apk_file" "release-asset/FotLab-$version-universal-release.apk"
-          ls -l release-asset
-        shell: bash
 
       # softprops/action-gh-release talks to the GitHub API directly via
       # GITHUB_TOKEN, so it needs NO actions/checkout and NO .git on the runner.
       # This is what the previous gh CLI step lacked: gh resolves the repo from a
       # local git checkout, and this job had none ("fatal: not a git repository").
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          files: release-asset/*.apk
+          files: apk/*.apk
           tag_name: ${{ github.ref_name }}
           name: FotLab ${{ inputs.version-name }}
           generate_release_notes: true

@@ -20,10 +20,8 @@ import androidx.room.PrimaryKey
  * the primary key and the `(fs_node_id_child, fs_node_id_parent)` pair is guarded by
  * a UNIQUE index, preserving "the same edge cannot be inserted twice" (R3). Note:
  * SQLite treats `NULL`s as distinct under a UNIQUE index, so two `(child, NULL)`
- * rows are NOT rejected by the index — root edges must go through
- * [FsNodeRelationDao.insertRootLinkIfAbsent], whose `NOT EXISTS` guard makes the
- * root link idempotent (a plain IGNORE insert let a re-imported root file appear
- * twice in the root listing).
+ * rows are not rejected by the index — the `OnConflictStrategy.IGNORE` insert and
+ * the app's single-link-per-child usage make this unreachable in practice.
  */
 @Entity(
     tableName = "fs_node_relation",

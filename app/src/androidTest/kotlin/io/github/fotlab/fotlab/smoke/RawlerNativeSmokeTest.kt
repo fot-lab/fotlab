@@ -82,7 +82,7 @@ class RawlerNativeSmokeTest {
         RawlerFotlabBridge.decodeRawToPng(pngBytes)
     }
 
-    /** A develop request with the default CFA algorithm — used to probe the develop path. */
+        get() = DevelopParams(demosaic_algorithm = DemosaicAlgorithm.Default, exposure_ev = 0.0f, wb = null)
     private val developParams: DevelopParams
         get() = DevelopParams(demosaicAlgorithm = DemosaicAlgorithm.DEFAULT, exposureEv = 0.0f, wb = null)
 

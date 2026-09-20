@@ -48,22 +48,12 @@ enum Algo {
   XTrans,
 }
 
-/// Debayer the scaled mosaic into a colour intermediate, applying the selected
-/// demosaic algorithm, Fuji rotation and active-area crop. Mirrors the demosaic
-/// block of rawler's `RawDevelop::develop_intermediate` (minus the later
-/// calibrate / SRgb steps).
-///
-/// `data` is the scaled f32 pixel buffer, MOVED OUT of the `RawImage` by the
-/// caller (zero-copy) so it is not duplicated: on a 50 MP frame this buffer is
-/// ~210 MB and the colour intermediate it produces is ~630 MB, so a copy here
-/// pushed peak RSS over the device/emulator budget and got the process
-/// low-memory-killed mid-develop. `image` is still borrowed for its geometry,
-/// photometric/CFA config and Fuji hints.
-pub(crate) fn demosaic(
-  image: &RawImage,
-  data: Vec<f32>,
-  algo: DemosaicAlgorithm,
-) -> Result<Intermediate, RawlerFotlabError> {
+/// Debayer `image` (already black/white-level scaled) into a colour
+/// intermediate, applying the selected demosaic algorithm, Fuji rotation and
+/// active-area crop. Mirrors the demosaic block of rawler's
+/// `RawDevelop::develop_intermediate` (minus the later calibrate / SRgb steps).
+pub(crate) fn demosaic(image: &RawImage, algo: DemosaicAlgorithm) -> Result<Intermediate, RawlerFotlabError> {
+  let data = image.data.as_f32().into_owned();
   let (w, h) = (image.width, image.height);
 
   // 1. Project the scaled mosaic (or pre-coloured) data into an Intermediate.

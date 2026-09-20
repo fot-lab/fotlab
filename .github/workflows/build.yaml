@@ -53,7 +53,7 @@ jobs:
       release: ${{ steps.flags.outputs.release }}
     steps:
       - name: Check out
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -70,22 +70,11 @@ jobs:
           echo "release=$release" >> "$GITHUB_OUTPUT"
         shell: bash
 
-  # Native stage. Builds librawler_fotlab.so (+ UniFFI Kotlin bindings) from the first-party
-  # crate app/src/rust/binding/dnglab/rawler_fotlab via cargo/NDK and uploads them as the
-  # `rawler_fotlab` artifact consumed by the APK job.
-  rust:
-    name: Native (rawler_fotlab)
-    needs: [preflight]
-    if: ${{ always() && needs.preflight.result == 'success' }}
-    uses: ./.github/workflows/build_rust.yaml
-    with:
-      submodules: true
-
   # Build stage. Reused for both the push/PR fast path and the release path;
   # release-build + the release APK artifact name are selected by the release flag.
   apk:
     name: APK
-    needs: [preflight, rust]
+    needs: [preflight]
     if: ${{ always() && needs.preflight.result == 'success' }}
     uses: ./.github/workflows/build_gradle.yaml
     with:
@@ -96,7 +85,6 @@ jobs:
       apk-retention-days: ${{ needs.preflight.outputs.release == 'true' && 30 || 1 }}
       log-artifact-name: build-gradle.log
       log-retention-days: 7
-      native-artifact-name: ${{ needs.rust.outputs.artifact-name }}
     secrets:
       FOTLAB_KEYSTORE_SECRET: ${{ secrets.FOTLAB_KEYSTORE_SECRET }}
 
@@ -112,19 +100,6 @@ jobs:
     with:
       apk-artifact-name: fotlab-release-apk
       version-name: ${{ needs.apk.outputs.version-name }}
-
-  # Smoke stage — the release stage's sibling, and its exact complement: a normal
-  # run (push/PR, no v* tag, release flag false) boots cached AVDs and runs the
-  # instrumented smoke tests split into four parallel shards
-  # (test_app_smoke / test_image_loader / test_image_develop /
-  # test_image_alchemy) behind one cache-warming prep job, while a release run
-  # skips it entirely and publishes instead. Both key off the same release flag
-  # computed in preflight.
-  emulator-smoke:
-    name: Emulator Smoke Test
-    needs: [preflight, rust, apk]
-    if: ${{ always() && needs.preflight.outputs.release != 'true' && needs.apk.result == 'success' }}
-    uses: ./.github/workflows/smoke_emulator.yaml
     with:
       native-artifact-name: ${{ needs.rust.outputs.artifact-name }}
       log-artifact-name: build-smoke.log

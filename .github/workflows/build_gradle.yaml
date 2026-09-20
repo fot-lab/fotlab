@@ -26,9 +26,8 @@ on:
         default: false
       release-build:
         description: >
-          Build (and sign) the release variant. The APK is uploaded under the name
-          Gradle produced it — the release asset name is decided by the release
-          stage, not here.
+          Rename the produced APK to FotLab-<VERSION_NAME>-arm64-v8a-release.apk
+          and upload that instead of the raw output directory.
         required: false
         type: boolean
         default: false
@@ -62,13 +61,6 @@ on:
         required: false
         type: number
         default: 7
-      native-artifact-name:
-        description: >
-          Name of the native artifact (librawler_fotlab.so + Kotlin bindings) to download and
-          place before Gradle. Empty means skip native placement (no rawler_fotlab lib).
-        required: false
-        type: string
-        default: ''
     secrets:
       FOTLAB_KEYSTORE_SECRET:
         description: >
@@ -90,16 +82,18 @@ jobs:
     outputs:
       version-name: ${{ steps.version.outputs.version-name }}
     env:
-      # ANDROID_HOME / ANDROID_SDK_ROOT come from the runner image itself
-      # (/usr/local/lib/android/sdk on ubuntu-26.04, where the pinned SDK
-      # components are preinstalled); the "Use prebuilt Android SDK path" step
-      # below asserts that and re-exports SDK_ROOT via $GITHUB_ENV. Only the
-      # pinned package versions belong in this env block.
+      # NOTE: ANDROID_HOME / ANDROID_SDK_ROOT are deliberately NOT set here. The
+      # `env` context is not available inside a job's own `env:` block — GitHub
+      # rejects it with "Unrecognized named-value: 'env'", which invalidates the
+      # whole workflow file (and every reusable workflow that calls it). $HOME is
+      # also a runner variable, not a workflow one. Both are exported from a step
+      # via $GITHUB_ENV instead. See rules/ACTION.md.
       ANDROID_API: '36'
       ANDROID_BUILD_TOOLS: '36.0.0'
+      NDK_VERSION: '28.2.13676358'
     steps:
       - name: Check out
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
           submodules: ${{ inputs.submodules && 'recursive' || 'false' }}
@@ -126,8 +120,13 @@ jobs:
           java-version: '17'
           distribution: temurin
 
-      - name: Locate Android SDK
-        uses: ./.github/actions/locate_sdk
+      # Exports ANDROID_HOME / ANDROID_SDK_ROOT for every later step — the
+      # install_sdk input below reads env.ANDROID_HOME, and Gradle needs both.
+      - name: Export Android SDK path
+        run: |
+          echo "ANDROID_HOME=$HOME/Android/Sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$HOME/Android/Sdk" >> "$GITHUB_ENV"
+        shell: bash
 
       - name: Install Android SDK
         uses: ./.github/actions/install_sdk
@@ -137,7 +136,7 @@ jobs:
           build-tools: ${{ env.ANDROID_BUILD_TOOLS }}
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v5
+        uses: gradle/actions/setup-gradle@v4
         with:
           # Install Gradle 8.14.5 directly on the runner (no checked-in wrapper
           # needed). setup-gradle caches the distribution + dependency caches by
@@ -145,32 +144,6 @@ jobs:
           gradle-version: '8.14.5'
           # We intentionally do not commit a Gradle Wrapper, so skip its validation.
           validate-wrappers: false
-
-      # -------- native (rawler_fotlab) --------
-      # Download the .so + generated Kotlin bindings built by build_rust.yaml and place BOTH in
-      # the Gradle build directory — no downloaded/generated artifact is put under src/
-      # (FOTLAB-STRUCT-000002 R1). app/build.gradle.kts registers both locations (kotlin.srcDir
-      # and jniLibs.srcDir). Skipped when native-artifact-name is empty.
-      - name: Download native artifact (rawler_fotlab)
-        if: inputs.native-artifact-name != ''
-        uses: actions/download-artifact@v7
-        with:
-          name: ${{ inputs.native-artifact-name }}
-          path: native-artifacts
-
-      - name: Place native libs + Kotlin bindings
-        if: inputs.native-artifact-name != ''
-        run: |
-          set -euo pipefail
-          mkdir -p app/build/generated/jniLibs
-          cp -r native-artifacts/jniLibs/* app/build/generated/jniLibs/
-          mkdir -p app/build/generated/uniffi/main/kotlin
-          # UniFFI nests the generated file under its Kotlin package directories —
-          # kotlin/io/github/fotlab/fotlab_rawler/rawler_fotlab.kt —
-          # so a flat `*.kt` glob would match nothing. Copy the whole tree; the .kt
-          # carries its own `package` line, so the srcDir layout does not have to be flat.
-          cp -r native-artifacts/kotlin/. app/build/generated/uniffi/main/kotlin/
-        shell: bash
 
       # -------- keystore (release only) --------
       # The release signing keystore lives in a dedicated `keystore` repo (branch
@@ -244,14 +217,20 @@ jobs:
           echo "No gradle-tasks requested — toolchain set up, nothing to build." | tee build-log.txt
         shell: bash
 
-      # No rename here: the APK is uploaded exactly as Gradle produced it. The
-      # release asset name is owned by the release stage (release_github.yaml).
+      - name: Rename release APK
+        if: inputs.release-build
+        run: |
+          version="${{ steps.version.outputs.version-name }}"
+          mkdir -p release-apk
+          cp app/build/outputs/apk/release/*.apk "release-apk/FotLab-$version-arm64-v8a-release.apk"
+        shell: bash
+
       - name: Upload APK artifact
         if: inputs.apk-artifact-name != '' && inputs.apk-path != ''
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.apk-artifact-name }}
-          path: ${{ inputs.apk-path }}
+          path: ${{ inputs.release-build && 'release-apk/*.apk' || inputs.apk-path }}
           retention-days: ${{ inputs.apk-retention-days }}
           if-no-files-found: error
 
@@ -260,7 +239,7 @@ jobs:
       # surface (build logs can carry dependency/SDK/environment detail).
       - name: Upload build log
         if: failure() && inputs.log-artifact-name != ''
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.log-artifact-name }}
           path: build-log.txt
@@ -269,7 +248,7 @@ jobs:
 
       - name: Upload Gradle log
         if: failure() && inputs.gradle-tasks != ''
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: build_log_gradle.log
           path: build_log_gradle.log

@@ -2,7 +2,7 @@ package io.github.fotlab.fotlab.navigation
 
 import androidx.annotation.StringRes
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CameraRoll
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PermMedia
 import androidx.compose.ui.graphics.vector.ImageVector
 import io.github.fotlab.fotlab.R
@@ -30,7 +30,7 @@ enum class TopLevelDestination(
     STUDIO(
         route = StudioDestination.ROUTE,
         label = R.string.app_nav_studio_label,
-        icon = Icons.Filled.CameraRoll,
+        icon = Icons.Filled.Edit,
     ),
     ;
 

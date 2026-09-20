@@ -249,24 +249,14 @@ object LibraryCore {
         for (uri in uris) {
             takeReadPermission(uri)
             val text = uri.toString()
-            val name = displayNameOf(uri) ?: uri.lastPathSegment ?: text
-            val mime = applicationContext.contentResolver.getType(uri) ?: MimeUnknown
-            val existing = repo().getByUriAnyStatus(text)
-            val childId = if (existing != null) {
-                // Revive a soft-deleted node instead of INSERTing a duplicate that would
-                // violate the UNIQUE index on `uri_storage`.
-                if (existing.timeDeleted != null) {
-                    repo().revive(existing.fsNodeId!!, name, mime)
-                }
-                existing.fsNodeId!!
-            } else {
-                repo().addNode(
-                    nameDisplay = name,
-                    typeMime = mime,
+            val existing = repo().getByUri(text)
+            val childId = existing?.fsNodeId
+                ?: repo().addNode(
+                    nameDisplay = displayNameOf(uri) ?: uri.lastPathSegment ?: text,
+                    typeMime = applicationContext.contentResolver.getType(uri) ?: MimeUnknown,
                     uriStorage = text,
                     timeCreated = System.currentTimeMillis(),
                 )
-            }
             // Re-linking an existing edge is ignored by the DAO rather than aborting.
             repo().link(childId, parentId)
         }

@@ -1,14 +1,14 @@
 //! Develop glue — orchestrates the hand-built develop pipeline and is the FFI
 //! entry point Kotlin calls.
 //!
-//! Pipeline (mirrors rawler's `RawDevelop::develop_intermediate` step ORDER,
-//! minus the final sRGB gamma so `develop_image` always returns a **linear**
+//! Pipeline (mirrors rawler's `RawDevelop::develop_intermediate`, minus the final
+//! sRGB gamma so the output is a true **linear** image):
 //! image):
 //!
 //! 1. `decode`      — `rawler::decode` → rawler `RawImage`
-//! 2. rescale       — black/white-level scaling into 0..1 float (rawler)
-//! 3. `exposure_ev` — linear gain `2^exposure_ev` on the **single-channel** scaled
-//!    mosaic, *before* demosaic (one mul per photosite instead of per output
+//! 3. `demosaic`    — selectable debayer + Fuji rotate + active-area crop
+//! 4. crop-default  — crop to the recommended area (rawler `CropDefault`)
+//! 5. `calibrate`   — white balance + cam→sRGB matrix + exposure EV
 //!    channel; demosaic is linear so the result is identical)
 //! 4. `demosaic`    — selectable debayer + Fuji rotate + active-area crop (ROI)
 //! 5. `calibrate`   — white balance + cam→working-space matrix (exposure already
@@ -20,7 +20,7 @@
 //! is finished into a display-ready sRGB PNG (gamma + clip) for the UI by
 //! `bound::rawlerimagedeveloped_to_png`, or returned unclamped as ProPhoto D50 for the
 //! rawalchemy pipeline by `develop`. Kotlin owns only the UI PNG.
-//!
+use rawler::imgop::develop::Intermediate;
 //! Every parameter change from Kotlin re-runs the whole pipeline (decoding
 //! included) — acceptable for now; re-decoding is optimized later
 //! (`FOTLAB-RAWLER-000003`). Identification/sniff/route are not repeated because
@@ -60,17 +60,10 @@ pub struct DevelopParams {
   #[uniffi(default = None)]
   pub exposure_ev: Option<f32>,
   /// Optional white-balance multipliers (RGBE order). `None` → rawler's as-shot
-  /// `wb_coeffs`.
-  pub wb: Option<Vec<f32>>,
-}
+      .map_err(|e| RawlerFotlabError::Decode(e))?;
 
-/// Grading parameters supplied by Kotlin for [`develop_and_grade`].
-///
-/// **Every field is optional, and `None` means "the engine decides"** — either
-/// "use upstream's own `rawalchemy::GradingParams` default" or "skip this stage".
-/// This Rust side performs **no defaulting of its own**: the values are handed to
-/// the glue as "unset" sentinels precisely so that upstream stays the single
-/// owner of every default it declares. If upstream changes one, we follow it
+    let intermediate = demosaic(&image, params.demosaic_algorithm)?;
+    let intermediate = crop_default(&image, intermediate);
 /// without touching this crate (`rules/REVIEW/detail/FOTLAB-RAWLER-000006.md`).
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct GradeParams {
@@ -80,70 +73,24 @@ pub struct GradeParams {
   /// log encoding (upstream: `logSpaceInfo == nullptr`).
   #[uniffi(default = None)]
   pub log_space: Option<String>,
-  /// Path to a `.cube` 3D LUT, applied to the log-encoded image. `None` = no LUT.
-  #[uniffi(default = None)]
-  pub lut_path: Option<String>,
-  /// Metering mode for automatic exposure (`computeAutoGain`), e.g. `"matrix"`.
-  /// `None` = skip automatic metering, leaving the metered base at unity.
-  #[uniffi(default = None)]
-  pub metering_mode: Option<String>,
+    calibrate(&intermediate, &image, wb, params.exposure_ev)
   /// Upstream's raw `GradingParams::gain` **exposure multiplier** — a linear
   /// factor, *not* an EV and **not** [`DevelopParams::exposure_ev`]. The develop
   /// exposure is applied by rawler to the mosaic before demosaic and never
   /// reaches the grading stage; this one scales the linear ProPhoto data the
-  /// grading loop receives, so the two are separate controls that must not be
-  /// wired to the same UI value. `None` = upstream default (unity) = don't touch
-  /// exposure. Metering, when enabled, is the base this multiplier scales.
-  #[uniffi(default = None)]
-  pub gain: Option<f32>,
-  /// Target gray level for `computeAutoGain` (upstream default `0.18`).
-  /// `None` = upstream default. Only meaningful with `metering_mode`.
-  #[uniffi(default = None)]
-  pub target_gray: Option<f32>,
-  /// Saturation/contrast boost switch. `None` = upstream default.
-  #[uniffi(default = None)]
-  pub enable_boost: Option<bool>,
-  /// Saturation multiplier. `None` = upstream default.
-  #[uniffi(default = None)]
-  pub saturation: Option<f32>,
-  /// Contrast multiplier. `None` = upstream default.
-  #[uniffi(default = None)]
-  pub contrast: Option<f32>,
-  /// Contrast pivot point. `None` = upstream default.
-  #[uniffi(default = None)]
-  pub pivot: Option<f32>,
-}
-
-/// Lift the FFI record onto the glue's override struct.
-///
-/// A pure field-for-field mapping — including the `None`s, which stay `None` so
-/// the glue can tell "unset" from "explicitly set to the upstream default value".
-#[cfg(feature = "rawalchemy")]
-impl From<&GradeParams> for rawalchemy_fotlab::GradeOverrides {
-  fn from(p: &GradeParams) -> Self {
-    Self {
-      log_space: p.log_space.clone(),
-      lut_path: p.lut_path.clone(),
-      metering_mode: p.metering_mode.clone(),
-      gain: p.gain,
-      target_gray: p.target_gray,
-      enable_boost: p.enable_boost,
-      saturation: p.saturation,
-      contrast: p.contrast,
-      pivot: p.pivot,
+/// Crop the intermediate to the recommended area (rawler `CropDefault` step).
+/// Superpixel 1/2 scaling is omitted because we never use superpixel demosaic.
+fn crop_default(image: &RawImage, intermediate: Intermediate) -> Intermediate {
+  if let Some(mut crop) = image.crop_area.or(image.active_area) {
+    if crop.d != intermediate.dim() {
+      return match intermediate {
+        Intermediate::Monochrome(p) => Intermediate::Monochrome(p.crop(crop)),
+        Intermediate::ThreeColor(p) => Intermediate::ThreeColor(p.crop(crop)),
+        Intermediate::FourColor(p) => Intermediate::FourColor(p.crop(crop)),
+      };
     }
   }
-}
-
-/// FFI entry point: develop `raw` (already routed to the raw path) into a linear
-/// **ProPhoto D50** RGB image (`RawlerImageDeveloped`) using `params` — the object handed
-/// to the rawalchemy pipeline. This is the *editing* branch of the dual-fork
-/// (`rules/REVIEW/detail/FOTLAB-RAWLER-000005.md`): wide gamut and **unclamped**,
-/// so negative and >1 components survive for downstream tone/exposure work. No
-/// gamma is applied — ProPhoto is a linear editing space.
-///
-/// Re-runs the full pipeline (decode included) on every call; the cached-decode
-/// path lives in [`crate::loaded::RawlerImageLoaded`] (`FOTLAB-RAWLER-000004`).
+  intermediate
 #[uniffi::export]
 pub fn develop(raw: &[u8], params: DevelopParams) -> Result<RawlerImageDeveloped, RawlerFotlabError> {
   if raw.is_empty() {
