@@ -15,7 +15,8 @@
 //! `SRGB_TO_XYZ_D65`) and `clip_euclidean_norm_avg`. The colour matrix is always
 //! taken from rawler's resolved `RawImage.color_matrix` (D65-normalized via
 //! Bradford adaptation when only another illuminant is available), exactly as
-use rawler::imgop::xyz::{adapt_bradford, Illuminant, SRGB_TO_XYZ_D65};
+//! rawler does. Exposure compensation is **not** applied here — it is applied as
+//! the linear gain `2^exposure_ev` to the single-channel mosaic *before*
 //! demosaic in `develop`, since demosaic is linear and the gain is
 //! channel-uniform, so shifting it earlier is numerically identical.
 
@@ -23,11 +24,17 @@ use rawler::imgop::develop::Intermediate;
 use rawler::imgop::matrix::{multiply, normalize, pseudo_inverse};
 use rawler::imgop::chromatic_adaption::adapt_bradford;
 use rawler::imgop::xyz::{Illuminant, SRGB_TO_XYZ_D65, XYZ_TO_PROFOTORGB_D50};
+use rawler::RawImage;
+
+use crate::develop::RawlerImageDeveloped;
+use crate::RawlerFotlabError;
+
+/// Which RGB primaries (and white point) the developed result lives in.
 ///
-  intermediate: &Intermediate,
-  image: &RawImage,
-  wb: Option<[f32; 4]>,
-  ev: f32,
+/// The two paths exist because they have opposite requirements
+/// (`rules/REVIEW/detail/FOTLAB-RAWLER-000005.md`):
+///
+/// * [`WorkingSpace::SrgbD65`] — the *presentation* path. Small gamut, but it is what a
 ///   display can actually show, so this is the space the UI PNG is finished in (gamma and
 ///   gamut mapping included, applied at PNG encode time — see `bound::rawlerimagedeveloped_to_png`).
 /// * [`WorkingSpace::ProPhotoD50`] — the *editing* path handed to the rawalchemy pipeline.
@@ -83,7 +90,7 @@ pub(crate) fn calibrate(
   let target_illu = space.illuminant();
   let xyz2cam = resolve_xyz_to_cam(image, target_illu)?;
 
-      // channel across RGB and apply EV.
+  // White balance: explicit override, else rawler default (1.0 if NaN).
   let wb = match wb {
     Some(wb) => wb,
     None => {
@@ -95,9 +102,11 @@ pub(crate) fn calibrate(
     }
   };
 
-    Intermediate::ThreeColor(pixels) => {
-      let mut out: Vec<f32> = Vec::with_capacity(pixels.data.len() * 3);
-      for px in pixels.pixels() {
+  // Anchor the camera matrix on the requested working space: sRGB→XYZ (D65) for the
+  // presentation path, ProPhoto→XYZ (D50) for the wide-gamut editing path.
+  //
+  // NOTE: no gamut clamping happens here any more. `clip_euclidean_norm_avg` used to run
+  // per-pixel right after this matrix, which forced every colour inside the sRGB cube and
   // irreversibly destroyed anything outside it *before* the FFI. Clamping now happens only
   // where a finished image is actually produced (`bound::rawlerimagedeveloped_to_png`), so the
   // wide-gamut result handed to rawalchemy keeps its negative and >1 components
@@ -106,16 +115,18 @@ pub(crate) fn calibrate(
   let cam2rgb = pseudo_inverse(rgb2cam);
 
   match intermediate {
-        let c = clip_euclidean_norm_avg(&srgb);
-        out.extend_from_slice(&c);
+    Intermediate::Monochrome(pix) => {
       // No per-channel colour mapping for monochrome; replicate the single
+      // channel across RGB. (3x size expansion is unavoidable.) Exposure EV is
       // already baked into the source mosaic by `develop` before demosaic.
-        width: pixels.width as u32,
-        height: pixels.height as u32,
-        rgb: out,
+      let mut rgb: Vec<f32> = Vec::with_capacity(pix.data.len() * 3);
+      for &v in &pix.data {
+        rgb.extend_from_slice(&[v, v, v]);
       }
       Ok(RawlerImageDeveloped {
         width: pix.width as u32,
+        height: pix.height as u32,
+        rgb,
       })
     }
     Intermediate::ThreeColor(mut pixels) => {
@@ -137,6 +148,19 @@ pub(crate) fn calibrate(
       // Reinterpret the same allocation as flat RGB — no ~630 MB copy.
       Ok(RawlerImageDeveloped {
         width: w as u32,
+        height: h as u32,
+        rgb: flatten_rgb3(pixels.into_inner()),
+      })
+    }
+    Intermediate::FourColor(pixels) => {
+      // 4-channel -> 3-channel shrinks the data; the new vec is 3/4 the size
+      // of the source and the source is dropped right after.
+      let mut out: Vec<f32> = Vec::with_capacity(pixels.data.len() * 3);
+      for px in pixels.pixels() {
+        let ch0 = px[0] * wb[0];
+        let ch1 = px[1] * wb[1];
+        let ch2 = px[2] * wb[2];
+        let ch3 = px[3] * wb[3];
         let mapped = [
           cam2rgb[0][0] * ch0 + cam2rgb[0][1] * ch1 + cam2rgb[0][2] * ch2 + cam2rgb[0][3] * ch3,
           cam2rgb[1][0] * ch0 + cam2rgb[1][1] * ch1 + cam2rgb[1][2] * ch2 + cam2rgb[1][3] * ch3,
