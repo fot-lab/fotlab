@@ -26,7 +26,6 @@ import androidx.compose.material.icons.filled.Gradient
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.WbAuto
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -65,6 +64,8 @@ import io.github.fotlab.fotlab.R
 import io.github.fotlab.fotlab.feature.library.LibraryCore
 import io.github.fotlab.fotlab.feature.studio.StudioRenderResult
 import io.github.fotlab.fotlab.ui.ZoomableAsyncImage
+import io.github.fotlab.fotlab.ui.icons.CustomMaterialStyleIcons
+import io.github.fotlab.fotlab.ui.icons.WhiteBalanceLiteral
 import io.github.fotlab.fotlab.ui.rememberZoomState
 import io.github.fotlab.fotlab_rawler.DemosaicAlgorithm
 import kotlinx.coroutines.launch
@@ -274,7 +275,7 @@ fun StudioScreen() {
         )
     }
 
-    // White-balance input dialog: opened by the top-bar WbAuto icon. The title carries the as-shot
+    // White-balance input dialog: opened by the top-bar WhiteBalance icon. The title carries the as-shot
     // CCT estimated from the decoded multipliers ("As-shot: xxxx K"; "–" when unavailable); the field
     // lets the user enter any target Kelvin, which is projected to camera multipliers natively and
     // re-develops the resident RAW via StudioEngine.setWhiteBalanceKelvin.
@@ -408,7 +409,7 @@ private fun StudioScreenFunBar(
                 }
                 IconButton(onClick = onWhiteBalance) {
                     Icon(
-                        imageVector = Icons.Filled.WbAuto,
+                        imageVector = CustomMaterialStyleIcons.Filled.WhiteBalanceLiteral,
                         contentDescription = stringResource(id = R.string.studio_cd_whitebalance),
                     )
                 }
