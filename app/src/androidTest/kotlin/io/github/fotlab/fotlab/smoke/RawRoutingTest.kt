@@ -15,12 +15,16 @@ import android.provider.MediaStore
 import android.util.Log
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNode
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextClearance
+import androidx.compose.ui.test.performTextInput
 import androidx.test.espresso.intent.Intents
 import androidx.test.espresso.intent.Intents.intended
 import androidx.test.espresso.intent.Intents.intending
@@ -505,23 +509,25 @@ class RawRoutingTest {
         assertDevelopedIsColor(cool.bytes, "Sony ILCE-7R WB 9000K (must stay color, never black)")
     }
 
-    // ---------------------------------------------------------------- grade fork (Boost / LOG)
+    // ---------------------------------------------------- grade fork (boost group / LOG)
 
     /**
      * The grade fork's engine-level user journey on a resident RAW (LUT, which needs a picked
      * file, is covered end to end by
      * [panasonicVLogAndDownloadedLutCubeBothTakeEffect]):
      *
-     *  1. opening a RAW flips `isRawLoaded` true and leaves the Boost/LOG/LUT selection at the
-     *     all-"none" default (no grade error);
-     *  2. Boost ON re-renders through the native rawalchemy path (`develop_and_grade`) and MOVES
-     *     pixels vs the as-shot sRGB develop while keeping a full-frame color PNG;
+     *  1. opening a RAW flips `isRawLoaded` true and leaves the
+     *     Contrast/Saturation/LOG/LUT selection at the all-"none" default (no grade error);
+     *  2. configuring contrast (1.25) derives the boost switch ON (saturation falls back to 1.0
+     *     at Kotlin assembly), re-renders through the native rawalchemy path (`develop_and_grade`)
+     *     and MOVES pixels vs the as-shot sRGB develop while keeping a full-frame color PNG;
      *  3. picking a log curve (S-Log3) on top re-renders again and moves pixels (the log-encoded
      *     frame is intentionally not color-checked — log encoding flattens chroma);
-     *  4. LOG back to "none" while Boost stays on deterministically reproduces the boost-only
-     *     frame;
-     *  5. Boost back to "none" returns the canvas to the develop fork, byte-identical to the
-     *     as-shot frame (all-"none" is a plain reDevelop, not a graded black/linear buffer);
+     *  4. LOG back to "none" while contrast stays configured deterministically reproduces the
+     *     boost-only frame;
+     *  5. contrast cleared again (both boost parameters unconfigured) returns the canvas to the
+     *     develop fork, byte-identical to the as-shot frame (all-"none" is a plain reDevelop, not
+     *     a graded black/linear buffer);
      *  6. switching the node away resets the grade selection, `isRawLoaded` and the error state.
      *
      * Every step also proves the new C++ grade path (log-space lookup, gamut matrix, log curve,
@@ -558,14 +564,17 @@ class RawRoutingTest {
         val spaces = StudioEngine.supportedLogSpaces()
         assertTrue("native log-space list must enumerate S-Log3, got $spaces", "S-Log3" in spaces)
 
-        // 2) Boost ON: contrast/saturation enhancement, pixels must move, color must survive.
-        StudioEngine.setGradeBoost(true)
+        // 2) Boost ON via contrast=1.25 (Kotlin assembles saturation to its 1.0 fallback):
+        // pixels must move, color must survive.
+        StudioEngine.setGradeContrast(1.25f)
         val boosted = runBlocking {
             withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame(requireDifferentFrom = asShotBytes) }
         }
         step("grade", "boost ON -> ${boosted.outWidth}x${boosted.outHeight} (${boosted.bytes.size} bytes), differs")
         assertDevelopedIsColor(boosted.bytes, "Sony ILCE-7R boost ON")
-        assertTrue(StudioEngine.gradeSelection.value.boost)
+        assertTrue(StudioEngine.gradeSelection.value.boostEnabled)
+        assertEquals(1.25f, StudioEngine.gradeSelection.value.contrast)
+        assertNull("saturation must stay unconfigured in the selection", StudioEngine.gradeSelection.value.saturation)
         assertNull("boost grade must not surface a grade error", StudioEngine.gradeError.value)
 
         // 3) S-Log3 ON on top: gamut conversion + log encoding, pixels move again.
@@ -587,8 +596,9 @@ class RawRoutingTest {
             boostOnly.bytes.contentEquals(boosted.bytes),
         )
 
-        // 5) Boost none — all-"none" returns the plain develop fork, byte-identical to as-shot.
-        StudioEngine.setGradeBoost(false)
+        // 5) Contrast cleared — both boost parameters unconfigured again, all-"none" returns the
+        // plain develop fork, byte-identical to as-shot.
+        StudioEngine.setGradeContrast(null)
         val restored = runBlocking {
             withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame(requireDifferentFrom = boostOnly.bytes) }
         }
@@ -610,11 +620,12 @@ class RawRoutingTest {
 
     /**
      * UI-level grade journey through the REAL [StudioScreen]: with a RAW resident the grade bar is
-     * rendered, the Boost chip dropdown drives [StudioEngine.setGradeBoost] end to end (ON moves
-     * pixels, the chip relabels) and the LOG dropdown enumerates the natively-listed log curves;
-     * picking S-Log3 from it drives a second real re-grade. Both chips are then returned to
-     * "none" and the canvas must reproduce the as-shot develop frame. The popup is dismissed by
-     * picking an item ON PURPOSE — system back can reach the hosted MainActivity once the popup
+     * rendered, the Contrast parameter dialog drives [StudioEngine.setGradeContrast] end to end
+     * (a typed 1.25 derives the boost switch ON and moves pixels) and the LOG dropdown enumerates
+     * the natively-listed log curves; picking S-Log3 from it drives a second real re-grade. The
+     * contrast field is then cleared (blank = unset, switch OFF) and LOG returned to "none", and
+     * the canvas must reproduce the as-shot develop frame. Popups are dismissed by picking an
+     * option / OK ON PURPOSE — system back can reach the hosted MainActivity once the popup
      * settles and finish it. LUT needs a picked file and is covered end to end (engine level) by
      * [panasonicVLogAndDownloadedLutCubeBothTakeEffect].
      */
@@ -625,29 +636,31 @@ class RawRoutingTest {
 
         hostContent { AppTheme { StudioScreen() } }
         val none = context.getString(R.string.studio_grade_none)
-        val boostOn = context.getString(R.string.studio_grade_boost_on)
         val tuneCd = context.getString(R.string.studio_cd_tune_image)
-        val boostCd = context.getString(R.string.studio_cd_boost)
+        val contrastCd = context.getString(R.string.studio_cd_contrast)
+        val contrastTitle = context.getString(R.string.studio_contrast_title)
+        val ok = context.getString(R.string.common_action_ok)
         val styleCd = context.getString(R.string.studio_cd_style_filter)
         val logCd = context.getString(R.string.studio_cd_log)
 
-        // TuneImage bar (Boost) is docked by the Tune category icon; open it and confirm Boost.
+        // TuneImage bar (Contrast / Saturation) is docked by the Tune category icon.
         composeRule.waitUntil(30_000) {
             composeRule.onAllNodesWithContentDescription(tuneCd).fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNodeWithContentDescription(tuneCd).performClick()
         composeRule.waitUntil(30_000) {
-            composeRule.onAllNodesWithContentDescription(boostCd).fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithContentDescription(contrastCd).fetchSemanticsNodes().isNotEmpty()
         }
-        step("grade-ui", "TuneImage bar shows the Boost icon")
+        step("grade-ui", "TuneImage bar shows the Contrast icon")
 
-        // Boost icon -> "Boost" item -> a genuine native re-grade that moves pixels.
-        composeRule.onNodeWithContentDescription(boostCd).performClick()
+        // Contrast icon -> parameter dialog -> type 1.25 -> OK: a genuine native re-grade.
+        composeRule.onNodeWithContentDescription(contrastCd).performClick()
         composeRule.waitUntil(30_000) {
-            composeRule.onAllNodesWithText(boostOn).fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithText(contrastTitle).fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithText(boostOn).performClick()
-        step("grade-ui", "picked Boost ON from the Boost dropdown")
+        composeRule.onNode(hasSetTextAction()).performTextInput("1.25")
+        composeRule.onNodeWithText(ok).performClick()
+        step("grade-ui", "entered contrast 1.25 in the parameter dialog")
         val boosted = runBlocking {
             withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame(requireDifferentFrom = initialBytes) }
         }
@@ -671,17 +684,20 @@ class RawRoutingTest {
         }
         step("grade-ui", "picked S-Log3 — native re-grade moved ${logged.bytes.size} bytes")
 
-        // Boost -> none while S-Log3 stays on: still a graded frame, differs from boost+log.
+        // Contrast back to unset while S-Log3 stays on: still a graded frame (log-only), differs
+        // from contrast+log. The dialog opens prefilled with the current 1.25 — clear it and OK
+        // (blank = unset, the derived boost switch turns off).
         composeRule.onNodeWithContentDescription(tuneCd).performClick()
         composeRule.waitUntil(30_000) {
-            composeRule.onAllNodesWithContentDescription(boostCd).fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithContentDescription(contrastCd).fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithContentDescription(boostCd).performClick()
+        composeRule.onNodeWithContentDescription(contrastCd).performClick()
         composeRule.waitUntil(30_000) {
-            composeRule.onAllNodesWithText(none).fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithText(contrastTitle).fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithText(none).performClick()
-        step("grade-ui", "picked none from the Boost dropdown")
+        composeRule.onNode(hasSetTextAction()).performTextClearance()
+        composeRule.onNodeWithText(ok).performClick()
+        step("grade-ui", "cleared contrast in the parameter dialog")
         val logOnly = runBlocking {
             withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame(requireDifferentFrom = logged.bytes) }
         }
@@ -988,7 +1004,7 @@ class RawRoutingTest {
         journey(pngControl(), expectRawler = false)
         hostContent { AppTheme { StudioScreen() } }
         composeRule.waitForIdle()
-        // Dock the TuneImage bar — for a PNG it must not render the Boost icon.
+        // Dock the TuneImage bar — for a PNG it must not render the boost-group icons.
         val tuneCd = context.getString(R.string.studio_cd_tune_image)
         composeRule.waitUntil(30_000) {
             composeRule.onAllNodesWithContentDescription(tuneCd).fetchSemanticsNodes().isNotEmpty()
@@ -996,8 +1012,12 @@ class RawRoutingTest {
         composeRule.onNodeWithContentDescription(tuneCd).performClick()
         composeRule.waitForIdle()
         assertTrue(
-            "no Boost icon may exist for the PNG/Coil route (grade is RAW-only)",
-            composeRule.onAllNodesWithContentDescription(context.getString(R.string.studio_cd_boost)).fetchSemanticsNodes().isEmpty(),
+            "no Contrast/Saturation icons may exist for the PNG/Coil route (grade is RAW-only)",
+            composeRule.onAllNodesWithContentDescription(context.getString(R.string.studio_cd_contrast)).fetchSemanticsNodes().isEmpty(),
+        )
+        assertTrue(
+            "no Contrast/Saturation icons may exist for the PNG/Coil route (grade is RAW-only)",
+            composeRule.onAllNodesWithContentDescription(context.getString(R.string.studio_cd_saturation)).fetchSemanticsNodes().isEmpty(),
         )
         assertFalse("isRawLoaded must stay false for the PNG/Coil route", StudioEngine.isRawLoaded.value)
     }

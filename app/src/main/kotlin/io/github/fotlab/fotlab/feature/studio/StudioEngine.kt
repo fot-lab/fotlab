@@ -238,19 +238,24 @@ object StudioEngine {
     }
 
     /**
-     * The three grade-bar selections. [boost] is the explicit enable flag — the UI's "none" chip
-     * means boost OFF (it is not upstream's engine default, which is on); [logSpace] null = no log
-     * curve (skip gamut + log stages); [lutPath] null = no LUT. [lutName] is only the picked
-     * file's display name for the chip.
+     * The three grade-bar selections. The boost group is the [contrast] / [saturation] pair: both
+     * null = boost OFF; either configured = boost ON, and the unconfigured sibling falls back to
+     * 1.0 at assembly time in [runGrade] (upstream receives both parameters explicitly). Both
+     * floats are free-form — no range limiting. [logSpace] null = no log curve (skip gamut + log
+     * stages); [lutPath] null = no LUT. [lutName] is only the picked file's display name.
      */
     data class GradeSelection(
-        val boost: Boolean = false,
+        val contrast: Float? = null,
+        val saturation: Float? = null,
         val logSpace: String? = null,
         val lutName: String? = null,
         val lutPath: String? = null,
     ) {
+        /** Upstream's boost switch — on as soon as either boost parameter is configured. */
+        val boostEnabled: Boolean get() = contrast != null || saturation != null
+
         /** At least one grading stage switched on; all-"none" keeps the sRGB develop fork. */
-        val isActive: Boolean get() = boost || logSpace != null || lutPath != null
+        val isActive: Boolean get() = boostEnabled || logSpace != null || lutPath != null
     }
 
     /** The log curves rawalchemy accepts — static per loaded .so, queried once and cached. */
@@ -258,9 +263,15 @@ object StudioEngine {
     fun supportedLogSpaces(): List<String> =
         logSpacesCache ?: RawlerFotlabBridge.supportedGradeLogSpaces().also { logSpacesCache = it }
 
-    /** Toggle the default enhancement (upstream saturation/contrast boost); false = the "none" chip. */
-    fun setGradeBoost(enabled: Boolean) {
-        gradeSelectionState.update { it.copy(boost = enabled) }
+    /** Configure the boost-group contrast parameter; null = unconfigured (clears the value). */
+    fun setGradeContrast(value: Float?) {
+        gradeSelectionState.update { it.copy(contrast = value) }
+        reGrade()
+    }
+
+    /** Configure the boost-group saturation parameter; null = unconfigured (clears the value). */
+    fun setGradeSaturation(value: Float?) {
+        gradeSelectionState.update { it.copy(saturation = value) }
         reGrade()
     }
 
@@ -333,17 +344,20 @@ object StudioEngine {
             exposureEv = currentExposureEv,
             wb = null,
         )
-        // Only the three grade-bar controls are wired. Every other rawalchemy parameter stays null
-        // ("the engine decides") — this crate pins no upstream default of its own.
+        // Only the three grade-bar controls are wired. The boost group assembles here: the switch
+        // is derived (either parameter configured), and an unconfigured sibling falls back to 1.0
+        // so upstream always receives both parameters explicitly. Every other rawalchemy parameter
+        // stays null ("the engine decides") — this crate pins no upstream default of its own.
+        val boostOn = selection.boostEnabled
         val grade = GradeParams(
             logSpace = selection.logSpace,
             lutPath = selection.lutPath,
             meteringMode = null,
             gain = null,
             targetGray = null,
-            enableBoost = selection.boost,
-            saturation = null,
-            contrast = null,
+            enableBoost = boostOn,
+            saturation = if (boostOn) (selection.saturation ?: 1.0f) else null,
+            contrast = if (boostOn) (selection.contrast ?: 1.0f) else null,
             pivot = null,
         )
         val kelvin = currentWhiteBalanceKelvin

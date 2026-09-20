@@ -79,14 +79,14 @@
     <string name="studio_cd_develop_film">Develop film tools</string>
     <string name="studio_cd_tune_image">Tune image</string>
     <string name="studio_cd_style_filter">Style filter</string>
-    <string name="studio_cd_boost">Boost</string>
+    <string name="studio_cd_contrast">Contrast</string>
+    <string name="studio_cd_saturation">Saturation</string>
     <string name="studio_cd_log">Log curve</string>
     <string name="studio_cd_lut">LUT</string>
     <!-- Visible labels rendered under each operation-bar icon (short, fits a 56dp slot). -->
     <string name="studio_label_demosaic">Demosaic</string>
     <string name="studio_label_exposure">Exposure</string>
     <string name="studio_label_whitebalance">WB</string>
-    <string name="studio_label_boost">Boost</string>
     <string name="studio_label_log">LOG</string>
     <string name="studio_label_lut">LUT</string>
     <string name="studio_exposure_title">Exposure (EV)</string>
@@ -103,10 +103,12 @@
     <string name="studio_demosaic_bilinear4">Bilinear 4-channel</string>
     <string name="studio_demosaic_xtrans">X-Trans Bilinear</string>
 
-    <!-- Studio grade fork (rawalchemy): Boost / LOG / LUT, hosted in the StyleFilter/Tune operation bars. -->
+    <!-- Studio grade fork (rawalchemy): boost group (Contrast/Saturation) / LOG / LUT. -->
     <string name="studio_grade_none">none</string>
-    <!-- Boost "on" item: upstream's default enhancement (saturation/contrast). -->
-    <string name="studio_grade_boost_on">Boost</string>
+    <!-- Boost-parameter input dialogs (shared shape): free-form float, no range limiting. -->
+    <string name="studio_contrast_title">Contrast</string>
+    <string name="studio_saturation_title">Saturation</string>
+    <string name="studio_boost_param_hint">Float, e.g. 1.2 — empty = unset</string>
     <!-- LUT dropdown items. -->
     <string name="studio_grade_lut_pick">Choose file…</string>
     <string name="studio_grade_lut_clear">None (remove LUT)</string>

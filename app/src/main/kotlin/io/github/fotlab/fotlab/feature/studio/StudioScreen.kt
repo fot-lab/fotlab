@@ -24,10 +24,11 @@ import androidx.compose.material.icons.filled.Gradient
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Contrast
 import androidx.compose.material.icons.filled.MovieFilter
 import androidx.compose.material.icons.filled.PhotoFilter
 import androidx.compose.material.icons.filled.Theaters
+import androidx.compose.material.icons.filled.Tonality
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.WbAuto
 import androidx.compose.material3.DropdownMenu
@@ -232,11 +233,14 @@ fun StudioScreen() {
                                 showWhiteBalanceDialog = true
                             },
                         )
-                        // Grade tools (Boost/LOG/LUT) are RAW-only, like the former grade bar.
+                        // Grade tools (Contrast/Saturation/LOG/LUT) are RAW-only, like the
+                        // former grade bar.
                         StudioOpBar.TuneImage -> if (rawLoaded) {
                             StudioOperationBarTuneImage(
-                                boost = gradeSelection.boost,
-                                onBoost = StudioEngine::setGradeBoost,
+                                contrast = gradeSelection.contrast,
+                                saturation = gradeSelection.saturation,
+                                onContrast = StudioEngine::setGradeContrast,
+                                onSaturation = StudioEngine::setGradeSaturation,
                             )
                         }
                         StudioOpBar.StyleFilter -> if (rawLoaded) {
@@ -365,7 +369,8 @@ private val StudioScreenFunBarHeight = 64.dp
  * The Studio fun bar: the shared skeleton of `FOTLAB-UIXDES-000002`, pinned to the screen's
  * bottom edge. Left-to-right: drawer menu, then the three *category* icons that dock one of the
  * Studio operation bars in the slot above — Theaters (DevelopFilm: Demosaic / Exposure / WB),
- * Tune (TuneImage: Boost) and PhotoFilter (StyleFilter: LOG / LUT); a flexible gap; the
+ * Tune (TuneImage: Contrast / Saturation) and PhotoFilter (StyleFilter: LOG / LUT); a flexible
+ * gap; the
  * file-open action and the overflow (three-dot) at the far right. The develop/grade tools
  * themselves no longer live here — they are `OperationalButton`s inside the operation bars, so
  * reordering them only touches the bar's list. The bar renders no title text
@@ -575,40 +580,108 @@ private fun WhiteBalanceButton(
 }
 
 /**
- * Boost toggle — two-state none (off) / Boost (on). The icon uses the primary tint when boost is
- * on so the bar advertises the active state even though the value itself lives in the dropdown.
+ * Contrast parameter of the boost group. Primary tint while configured. Opens
+ * [BoostParameterDialog]; the boost switch itself is derived (either parameter configured).
  */
 @Composable
-private fun BoostButton(
-    boost: Boolean,
-    onBoost: (Boolean) -> Unit,
+private fun ContrastButton(
+    contrast: Float?,
+    onContrast: (Float?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var open by remember { mutableStateOf(false) }
-    val none = stringResource(id = R.string.studio_grade_none)
-    Box(modifier = modifier) {
-        IconButton(onClick = { open = true }) {
-            Icon(
-                imageVector = Icons.Filled.AutoAwesome,
-                contentDescription = stringResource(id = R.string.studio_cd_boost),
-                tint = if (boost) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-            )
-        }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            DropdownMenuItem(
-                text = { Text(text = none) },
-                onClick = { open = false; onBoost(false) },
-            )
-            DropdownMenuItem(
-                text = { Text(text = stringResource(id = R.string.studio_grade_boost_on)) },
-                onClick = { open = false; onBoost(true) },
-            )
-        }
+    IconButton(onClick = { open = true }, modifier = modifier) {
+        Icon(
+            imageVector = Icons.Filled.Contrast,
+            contentDescription = stringResource(id = R.string.studio_cd_contrast),
+            tint = if (contrast != null) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+        )
     }
+    if (open) {
+        BoostParameterDialog(
+            titleRes = R.string.studio_contrast_title,
+            currentValue = contrast,
+            onApply = { onContrast(it); open = false },
+            onDismiss = { open = false },
+        )
+    }
+}
+
+/**
+ * Saturation parameter of the boost group — same shape as [ContrastButton]'s, Tonality icon.
+ */
+@Composable
+private fun SaturationButton(
+    saturation: Float?,
+    onSaturation: (Float?) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var open by remember { mutableStateOf(false) }
+    IconButton(onClick = { open = true }, modifier = modifier) {
+        Icon(
+            imageVector = Icons.Filled.Tonality,
+            contentDescription = stringResource(id = R.string.studio_cd_saturation),
+            tint = if (saturation != null) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+        )
+    }
+    if (open) {
+        BoostParameterDialog(
+            titleRes = R.string.studio_saturation_title,
+            currentValue = saturation,
+            onApply = { onSaturation(it); open = false },
+            onDismiss = { open = false },
+        )
+    }
+}
+
+/**
+ * Boost-parameter input dialog shared by contrast and saturation: one free-form float field, no
+ * range limiting. OK with a blank field clears the parameter (unconfigured — when the sibling is
+ * unconfigured too the whole boost switch turns off); OK is disabled for non-parseable input.
+ */
+@Composable
+private fun BoostParameterDialog(
+    titleRes: Int,
+    currentValue: Float?,
+    onApply: (Float?) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var input by remember(currentValue) { mutableStateOf(currentValue?.toString() ?: "") }
+    val parsed = input.toFloatOrNull()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(
+                enabled = input.isBlank() || parsed != null,
+                onClick = { onApply(parsed) },
+            ) {
+                Text(text = stringResource(id = R.string.common_action_ok))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(text = stringResource(id = R.string.common_action_cancel))
+            }
+        },
+        title = { Text(text = stringResource(id = titleRes)) },
+        text = {
+            TextField(
+                value = input,
+                onValueChange = { input = it },
+                singleLine = true,
+                placeholder = { Text(text = stringResource(id = R.string.studio_boost_param_hint)) },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            )
+        },
+    )
 }
 
 /**
@@ -718,20 +791,26 @@ private fun StudioOperationBarDevelopFilm(
     )
 }
 
-/** TuneImage bar — Boost. */
+/** TuneImage bar — the boost group: Contrast and Saturation parameter inputs. */
 @Composable
 private fun StudioOperationBarTuneImage(
-    boost: Boolean,
-    onBoost: (Boolean) -> Unit,
+    contrast: Float?,
+    saturation: Float?,
+    onContrast: (Float?) -> Unit,
+    onSaturation: (Float?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     HorizontalOperationBar(
         modifier = modifier,
         items = listOf(
             OperationalButton(
-                id = "boost",
-                label = stringResource(id = R.string.studio_label_boost),
-            ) { BoostButton(boost = boost, onBoost = onBoost) },
+                id = "contrast",
+                label = stringResource(id = R.string.studio_cd_contrast),
+            ) { ContrastButton(contrast = contrast, onContrast = onContrast) },
+            OperationalButton(
+                id = "saturation",
+                label = stringResource(id = R.string.studio_cd_saturation),
+            ) { SaturationButton(saturation = saturation, onSaturation = onSaturation) },
         ),
     )
 }
