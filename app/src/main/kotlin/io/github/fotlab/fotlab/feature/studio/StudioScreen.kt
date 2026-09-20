@@ -3,10 +3,8 @@ package io.github.fotlab.fotlab.feature.studio
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -26,6 +24,12 @@ import androidx.compose.material.icons.filled.Gradient
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.MovieEdit
+import androidx.compose.material.icons.filled.MovieFilter
+import androidx.compose.material.icons.filled.PhotoFilter
+import androidx.compose.material.icons.filled.Theaters
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -40,7 +44,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.material3.DrawerValue
@@ -56,7 +59,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.collectAsState
 import coil3.request.ImageRequest
@@ -66,6 +68,8 @@ import io.github.fotlab.fotlab.feature.studio.StudioRenderResult
 import io.github.fotlab.fotlab.ui.ZoomableAsyncImage
 import io.github.fotlab.fotlab.ui.icons.CustomMaterialStyleIcons
 import io.github.fotlab.fotlab.ui.icons.WhiteBalanceLiteral
+import io.github.fotlab.fotlab.ui.operation.HorizontalOperationBar
+import io.github.fotlab.fotlab.ui.operation.OperationalButton
 import io.github.fotlab.fotlab.ui.rememberZoomState
 import io.github.fotlab.fotlab_rawler.DemosaicAlgorithm
 import kotlinx.coroutines.launch
@@ -102,10 +106,12 @@ fun StudioScreen() {
 
     val zoomState = rememberZoomState()
     val renderResult by StudioEngine.renderResult.collectAsState()
-    // Boost/LOG/LUT grade-fork state; the grade bar exists only while a routed RAW is resident.
+    // Boost/LOG/LUT grade-fork state.
     val gradeSelection by StudioEngine.gradeSelection.collectAsState()
-    val rawLoaded by StudioEngine.isRawLoaded.collectAsState()
     val gradeError by StudioEngine.gradeError.collectAsState()
+    // Grade (Boost/LOG/LUT) is a RAW-only fork: reGrade() is a safe no-op for non-RAW images, but
+    // the former grade bar was gated on a resident RAW and we keep that contract for Tune/Style.
+    val rawLoaded by StudioEngine.isRawLoaded.collectAsState()
     // The log curve names are static per native library; read once for the LOG menu.
     val logSpaces = remember { StudioEngine.supportedLogSpaces() }
     var showUnsupported by remember { mutableStateOf(false) }
@@ -134,6 +140,10 @@ fun StudioScreen() {
 
     var showWhiteBalanceDialog by remember { mutableStateOf(false) }
     var whiteBalanceInput by remember { mutableStateOf("") }
+
+    // Which HorizontalOperationBar is docked in the former grade-bar slot (above the fun bar).
+    // Tapping the same fun-bar category icon again hides the bar; tapping another switches to it.
+    var activeBar by remember { mutableStateOf<StudioOpBar?>(null) }
 
     // LUT picker: deliberately `*/*` — the interaction is not format-restricted; rawalchemy decides
     // whether the picked bytes are a usable .cube LUT (and an error dialog reports it if not).
@@ -164,17 +174,9 @@ fun StudioScreen() {
                     onOpenDrawer = { scope.launch { drawerState.open() } },
                     onOpenFile = { importLauncher.launch(arrayOf("*/*")) },
                     onResetView = { zoomState.reset() },
-                    onAlgorithmPicked = { algo -> StudioEngine.develop(algo) },
-                    onExposure = {
-                        exposureInput = StudioEngine.currentExposureEv().toString()
-                        showExposureDialog = true
-                    },
-                    onWhiteBalance = {
-                        // Prefill the current override, else the as-shot estimate decoded from the RAW.
-                        val kelvin = StudioEngine.currentWhiteBalanceKelvin()
-                        whiteBalanceInput = if (kelvin > 0f) kelvin.roundToInt().toString() else ""
-                        showWhiteBalanceDialog = true
-                    },
+                    onDevelopFilm = { activeBar = activeBar.toggle(StudioOpBar.DevelopFilm) },
+                    onTuneImage = { activeBar = activeBar.toggle(StudioOpBar.TuneImage) },
+                    onStyleFilter = { activeBar = activeBar.toggle(StudioOpBar.StyleFilter) },
                 )
             },
         ) { innerPadding ->
@@ -209,19 +211,46 @@ fun StudioScreen() {
                     }
                 }
 
-                // Grade bar (Boost / LOG / LUT) — the rawalchemy fork, shown only for a resident RAW.
-                // The three chips start at "none"; selecting one re-grades the resident decode and the
-                // graded PNG replaces the canvas (FOTLAB-RAWLER-000006). It sits directly above the
-                // screen's fun bar; its content is unchanged by the layout move.
-                if (rawLoaded) {
-                    StudioGradeBar(
-                        selection = gradeSelection,
-                        logSpaces = logSpaces,
-                        onBoost = StudioEngine::setGradeBoost,
-                        onLogSpace = StudioEngine::setGradeLogSpace,
-                        onPickLut = { lutPickerLauncher.launch(arrayOf("*/*")) },
-                        onClearLut = StudioEngine::clearGradeLut,
-                    )
+                // Active operation bar (the former grade-bar slot, directly above the fun bar).
+                // The three develop/grade groups are HorizontalOperationBars selected by the
+                // fun-bar category icons; only one (or none) is shown at a time. reGrade() is a
+                // safe no-op for non-RAW images (loadedImage == null), so the bar is shown for any
+                // rendered image and the buttons govern their own applicability.
+                if (renderResult is StudioRenderResult.Ready) {
+                    when (activeBar) {
+                        // Develop tools (Demosaic/Exposure/WB) were always on the fun bar.
+                        StudioOpBar.DevelopFilm -> StudioOperationBarDevelopFilm(
+                            onAlgorithmPicked = { algo -> StudioEngine.develop(algo) },
+                            onExposure = {
+                                exposureInput = StudioEngine.currentExposureEv().toString()
+                                showExposureDialog = true
+                            },
+                            onWhiteBalance = {
+                                val kelvin = StudioEngine.currentWhiteBalanceKelvin()
+                                whiteBalanceInput =
+                                    if (kelvin > 0f) kelvin.roundToInt().toString() else ""
+                                showWhiteBalanceDialog = true
+                            },
+                        )
+                        // Grade tools (Boost/LOG/LUT) are RAW-only, like the former grade bar.
+                        StudioOpBar.TuneImage -> if (rawLoaded) {
+                            StudioOperationBarTuneImage(
+                                boost = gradeSelection.boost,
+                                onBoost = StudioEngine::setGradeBoost,
+                            )
+                        }
+                        StudioOpBar.StyleFilter -> if (rawLoaded) {
+                            StudioOperationBarStyleFilter(
+                                logSpace = gradeSelection.logSpace,
+                                lutName = gradeSelection.lutName,
+                                logSpaces = logSpaces,
+                                onLogSpace = StudioEngine::setGradeLogSpace,
+                                onPickLut = { lutPickerLauncher.launch(arrayOf("*/*")) },
+                                onClearLut = StudioEngine::clearGradeLut,
+                            )
+                        }
+                        null -> Unit
+                    }
                 }
             }
         }
@@ -333,26 +362,26 @@ fun StudioScreen() {
 private val StudioScreenFunBarHeight = 64.dp
 
 /**
- * The Studio fun bar: the shared skeleton of `FOTLAB-UIXDES-000002`, currently pinned to the
- * screen's bottom edge — drawer menu at the far left (bottom-left), immediately followed by the
- * three icon-only develop tools (gradient → demosaic algorithm dropdown, exposure → stops input
- * dialog, wb-auto → Kelvin input dialog); a flexible gap; the file-open action and the
- * overflow (three-dot) sit at the far right. The bar renders no title text
- * (`FOTLAB-UIXDES-000004` R6). Anchored at the bottom edge, every dropdown opens upward
- * (drop-up).
+ * The Studio fun bar: the shared skeleton of `FOTLAB-UIXDES-000002`, pinned to the screen's
+ * bottom edge. Left-to-right: drawer menu, then the three *category* icons that dock one of the
+ * Studio operation bars in the slot above — Theaters (DevelopFilm: Demosaic / Exposure / WB),
+ * Tune (TuneImage: Boost) and PhotoFilter (StyleFilter: LOG / LUT); a flexible gap; the
+ * file-open action and the overflow (three-dot) at the far right. The develop/grade tools
+ * themselves no longer live here — they are `OperationalButton`s inside the operation bars, so
+ * reordering them only touches the bar's list. The bar renders no title text
+ * (`FOTLAB-UIXDES-000004` R6). Anchored at the bottom edge, every dropdown opens upward.
  */
 @Composable
 private fun StudioScreenFunBar(
     onOpenDrawer: () -> Unit,
     onOpenFile: () -> Unit,
     onResetView: () -> Unit,
-    onAlgorithmPicked: (DemosaicAlgorithm) -> Unit,
-    onExposure: () -> Unit,
-    onWhiteBalance: () -> Unit,
+    onDevelopFilm: () -> Unit,
+    onTuneImage: () -> Unit,
+    onStyleFilter: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var overflowOpen by remember { mutableStateOf(false) }
-    var demosaicMenuOpen by remember { mutableStateOf(false) }
 
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainer,
@@ -372,45 +401,22 @@ private fun StudioScreenFunBar(
                         contentDescription = stringResource(id = R.string.studio_cd_drawer_open),
                     )
                 }
-                // Demosaic: the gradient icon anchors the algorithm dropdown (opens upward here).
-                Box {
-                    IconButton(onClick = { demosaicMenuOpen = true }) {
-                        Icon(
-                            imageVector = Icons.Filled.Gradient,
-                            contentDescription = stringResource(id = R.string.studio_cd_demosaic),
-                        )
-                    }
-                    DropdownMenu(
-                        expanded = demosaicMenuOpen,
-                        onDismissRequest = { demosaicMenuOpen = false },
-                    ) {
-                        val algorithms = listOf(
-                            DemosaicAlgorithm.DEFAULT to R.string.studio_demosaic_default,
-                            DemosaicAlgorithm.PPG to R.string.studio_demosaic_ppg,
-                            DemosaicAlgorithm.BILINEAR4_CHANNEL to R.string.studio_demosaic_bilinear4,
-                            DemosaicAlgorithm.X_TRANS_BILINEAR to R.string.studio_demosaic_xtrans,
-                        )
-                        for ((algo, labelRes) in algorithms) {
-                            DropdownMenuItem(
-                                text = { Text(text = stringResource(id = labelRes)) },
-                                onClick = {
-                                    demosaicMenuOpen = false
-                                    onAlgorithmPicked(algo)
-                                },
-                            )
-                        }
-                    }
-                }
-                IconButton(onClick = onExposure) {
+                IconButton(onClick = onDevelopFilm) {
                     Icon(
-                        imageVector = Icons.Filled.Exposure,
-                        contentDescription = stringResource(id = R.string.studio_cd_exposure),
+                        imageVector = Icons.Filled.Theaters,
+                        contentDescription = stringResource(id = R.string.studio_cd_develop_film),
                     )
                 }
-                IconButton(onClick = onWhiteBalance) {
+                IconButton(onClick = onTuneImage) {
                     Icon(
-                        imageVector = CustomMaterialStyleIcons.Filled.WhiteBalanceLiteral,
-                        contentDescription = stringResource(id = R.string.studio_cd_whitebalance),
+                        imageVector = Icons.Filled.Tune,
+                        contentDescription = stringResource(id = R.string.studio_cd_tune_image),
+                    )
+                }
+                IconButton(onClick = onStyleFilter) {
+                    Icon(
+                        imageVector = Icons.Filled.PhotoFilter,
+                        contentDescription = stringResource(id = R.string.studio_cd_style_filter),
                     )
                 }
             }
@@ -495,95 +501,150 @@ private fun StudioDrawer(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Operation-bar categories and the buttons that populate them
+// ---------------------------------------------------------------------------
+
+/** The three Studio operation bars docked in the former grade-bar slot. */
+private enum class StudioOpBar { DevelopFilm, TuneImage, StyleFilter }
+
 /**
- * The Studio grade bar: the rawalchemy fork's three chips sitting directly under the canvas,
- * above Studio's own fun bar — `Boost: none`, `LOG: none`, `LUT: none` at the all-"none"
- * initial state. Each chip is a text button anchoring its own dropdown:
- *
- *  * **Boost** — two-state: none (boost explicitly OFF) / Boost (upstream's default enhancement:
- *    saturation 1.25 / contrast 1.10). Note the UI's "none" means off, NOT upstream's engine
- *    default (which is on) — the engine maps it to `enableBoost = false`.
- *  * **LOG** — none (skip gamut + log stages) plus every log curve rawalchemy accepts; the name
- *    list is enumerated natively from upstream's `LOG_SPACES`, not mirrored here.
- *  * **LUT** — "Choose file…" launches the unrestricted SAF picker (wildcard MIME filter, any
- *    file type selectable); the picked file is copied to a native-readable cache path by
- *    [StudioEngine]. none removes it. The selected file's name is shown on the chip.
- *
- * Any non-none selection re-renders the grade fork (resident RAW re-developed with the retained
- * demosaic/exposure/WB, then graded); back to all-none returns the canvas to the sRGB develop fork.
+ * Toggle helper: tapping the category icon for the already-active bar hides it; otherwise it
+ * switches to that bar.
  */
+private fun StudioOpBar?.toggle(target: StudioOpBar): StudioOpBar? =
+    if (this == target) null else target
+
+/** Demosaic algorithm picker (the gradient icon anchors an upward-opening dropdown). */
 @Composable
-private fun StudioGradeBar(
-    selection: StudioEngine.GradeSelection,
-    logSpaces: List<String>,
-    onBoost: (Boolean) -> Unit,
-    onLogSpace: (String?) -> Unit,
-    onPickLut: () -> Unit,
-    onClearLut: () -> Unit,
+private fun DemosaicButton(
+    onAlgorithmPicked: (DemosaicAlgorithm) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var open by remember { mutableStateOf(false) }
+    Box(modifier = modifier) {
+        IconButton(onClick = { open = true }) {
+            Icon(
+                imageVector = Icons.Filled.Gradient,
+                contentDescription = stringResource(id = R.string.studio_cd_demosaic),
+            )
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            val algorithms = listOf(
+                DemosaicAlgorithm.DEFAULT to R.string.studio_demosaic_default,
+                DemosaicAlgorithm.PPG to R.string.studio_demosaic_ppg,
+                DemosaicAlgorithm.BILINEAR4_CHANNEL to R.string.studio_demosaic_bilinear4,
+                DemosaicAlgorithm.X_TRANS_BILINEAR to R.string.studio_demosaic_xtrans,
+            )
+            for ((algo, labelRes) in algorithms) {
+                DropdownMenuItem(
+                    text = { Text(text = stringResource(id = labelRes)) },
+                    onClick = { open = false; onAlgorithmPicked(algo) },
+                )
+            }
+        }
+    }
+}
+
+/** Exposure stops input (opens the EV dialog owned by StudioScreen). */
+@Composable
+private fun ExposureButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    IconButton(onClick = onClick, modifier = modifier) {
+        Icon(
+            imageVector = Icons.Filled.Exposure,
+            contentDescription = stringResource(id = R.string.studio_cd_exposure),
+        )
+    }
+}
+
+/** White-balance Kelvin input (opens the WB dialog owned by StudioScreen). */
+@Composable
+private fun WhiteBalanceButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    IconButton(onClick = onClick, modifier = modifier) {
+        Icon(
+            imageVector = CustomMaterialStyleIcons.Filled.WhiteBalanceLiteral,
+            contentDescription = stringResource(id = R.string.studio_cd_whitebalance),
+        )
+    }
+}
+
+/**
+ * Boost toggle — two-state none (off) / Boost (on). The icon uses the primary tint when boost is
+ * on so the bar advertises the active state even though the value itself lives in the dropdown.
+ */
+@Composable
+private fun BoostButton(
+    boost: Boolean,
+    onBoost: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var open by remember { mutableStateOf(false) }
     val none = stringResource(id = R.string.studio_grade_none)
+    Box(modifier = modifier) {
+        IconButton(onClick = { open = true }) {
+            Icon(
+                imageVector = Icons.Filled.AutoAwesome,
+                contentDescription = stringResource(id = R.string.studio_cd_boost),
+                tint = if (boost) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text(text = none) },
+                onClick = { open = false; onBoost(false) },
+            )
+            DropdownMenuItem(
+                text = { Text(text = stringResource(id = R.string.studio_grade_boost_on)) },
+                onClick = { open = false; onBoost(true) },
+            )
+        }
+    }
+}
 
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surfaceContainer,
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            GradeChip(
-                label = stringResource(
-                    id = R.string.studio_grade_bar_boost,
-                    if (selection.boost) stringResource(id = R.string.studio_grade_boost_on) else none,
-                ),
-            ) { dismiss ->
+/**
+ * LOG curve picker — none plus every curve rawalchemy enumerates. Primary tint while a curve is
+ * selected.
+ */
+@Composable
+private fun LogButton(
+    logSpace: String?,
+    logSpaces: List<String>,
+    onLogSpace: (String?) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var open by remember { mutableStateOf(false) }
+    val none = stringResource(id = R.string.studio_grade_none)
+    Box(modifier = modifier) {
+        IconButton(onClick = { open = true }) {
+            Icon(
+                imageVector = Icons.Filled.MovieEdit,
+                contentDescription = stringResource(id = R.string.studio_cd_log),
+                tint = if (logSpace != null) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text(text = none) },
+                onClick = { open = false; onLogSpace(null) },
+            )
+            for (name in logSpaces) {
                 DropdownMenuItem(
-                    text = { Text(text = none) },
-                    onClick = { dismiss(); onBoost(false) },
-                )
-                DropdownMenuItem(
-                    text = { Text(text = stringResource(id = R.string.studio_grade_boost_on)) },
-                    onClick = { dismiss(); onBoost(true) },
-                )
-            }
-
-            GradeChip(
-                label = stringResource(
-                    id = R.string.studio_grade_bar_log,
-                    selection.logSpace ?: none,
-                ),
-            ) { dismiss ->
-                DropdownMenuItem(
-                    text = { Text(text = none) },
-                    onClick = { dismiss(); onLogSpace(null) },
-                )
-                for (name in logSpaces) {
-                    DropdownMenuItem(
-                        text = { Text(text = name) },
-                        onClick = { dismiss(); onLogSpace(name) },
-                    )
-                }
-            }
-
-            GradeChip(
-                label = stringResource(
-                    id = R.string.studio_grade_bar_lut,
-                    selection.lutName ?: none,
-                ),
-                // A picked LUT name can be long; take the remaining row width and ellipsize.
-                modifier = Modifier.weight(1f),
-            ) { dismiss ->
-                DropdownMenuItem(
-                    text = { Text(text = stringResource(id = R.string.studio_grade_lut_pick)) },
-                    onClick = { dismiss(); onPickLut() },
-                )
-                DropdownMenuItem(
-                    text = { Text(text = stringResource(id = R.string.studio_grade_lut_clear)) },
-                    onClick = { dismiss(); onClearLut() },
+                    text = { Text(text = name) },
+                    onClick = { open = false; onLogSpace(name) },
                 )
             }
         }
@@ -591,34 +652,97 @@ private fun StudioGradeBar(
 }
 
 /**
- * A compact text chip ("Label: value") anchoring a dropdown [menu]. The menu content receives a
- * `dismiss` callback so every item can close the menu itself; the LUT chip passes a [modifier]
- * (weight) so long file names shrink and ellipsize instead of pushing the other chips off-row.
+ * LUT picker — "Choose file…" (SAF) / "None (remove LUT)". Primary tint while a LUT is loaded.
  */
 @Composable
-private fun GradeChip(
-    label: String,
+private fun LutButton(
+    lutName: String?,
+    onPick: () -> Unit,
+    onClear: () -> Unit,
     modifier: Modifier = Modifier,
-    menu: @Composable ColumnScope.(dismiss: () -> Unit) -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
     Box(modifier = modifier) {
-        TextButton(
-            onClick = { open = true },
-            contentPadding = PaddingValues(horizontal = 8.dp),
-        ) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelLarge,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+        IconButton(onClick = { open = true }) {
+            Icon(
+                imageVector = Icons.Filled.MovieFilter,
+                contentDescription = stringResource(id = R.string.studio_cd_lut),
+                tint = if (lutName != null) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
             )
         }
-        DropdownMenu(
-            expanded = open,
-            onDismissRequest = { open = false },
-        ) {
-            menu { open = false }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text(text = stringResource(id = R.string.studio_grade_lut_pick)) },
+                onClick = { open = false; onPick() },
+            )
+            DropdownMenuItem(
+                text = { Text(text = stringResource(id = R.string.studio_grade_lut_clear)) },
+                onClick = { open = false; onClear() },
+            )
         }
     }
+}
+
+/**
+ * DevelopFilm bar — the three develop tools that used to live directly on the fun bar:
+ * Demosaic, Exposure, White Balance. Reordering the list below reorders the bar.
+ */
+@Composable
+private fun StudioOperationBarDevelopFilm(
+    onAlgorithmPicked: (DemosaicAlgorithm) -> Unit,
+    onExposure: () -> Unit,
+    onWhiteBalance: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    HorizontalOperationBar(
+        modifier = modifier,
+        items = listOf(
+            OperationalButton("demosaic") { DemosaicButton(onAlgorithmPicked) },
+            OperationalButton("exposure") { ExposureButton(onExposure) },
+            OperationalButton("wb") { WhiteBalanceButton(onWhiteBalance) },
+        ),
+    )
+}
+
+/** TuneImage bar — Boost. */
+@Composable
+private fun StudioOperationBarTuneImage(
+    boost: Boolean,
+    onBoost: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    HorizontalOperationBar(
+        modifier = modifier,
+        items = listOf(
+            OperationalButton("boost") { BoostButton(boost = boost, onBoost = onBoost) },
+        ),
+    )
+}
+
+/** StyleFilter bar — LOG and LUT. */
+@Composable
+private fun StudioOperationBarStyleFilter(
+    logSpace: String?,
+    lutName: String?,
+    logSpaces: List<String>,
+    onLogSpace: (String?) -> Unit,
+    onPickLut: () -> Unit,
+    onClearLut: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    HorizontalOperationBar(
+        modifier = modifier,
+        items = listOf(
+            OperationalButton("log") {
+                LogButton(logSpace = logSpace, logSpaces = logSpaces, onLogSpace = onLogSpace)
+            },
+            OperationalButton("lut") {
+                LutButton(lutName = lutName, onPick = onPickLut, onClear = onClearLut)
+            },
+        ),
+    )
 }

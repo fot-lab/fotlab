@@ -347,12 +347,21 @@ class RawRoutingTest {
         hostContent { AppTheme { StudioScreen() } }
         composeRule.waitForIdle()
 
-        // The top-bar gradient icon opens the demosaic algorithm dropdown.
+        // The DevelopFilm operation bar (Demosaic / Exposure / WB) is docked by the Theaters
+        // category icon in the fun bar; open it before the demosaic icon is visible.
+        val developFilm = context.getString(R.string.studio_cd_develop_film)
+        composeRule.waitUntil(30_000) {
+            composeRule.onAllNodesWithContentDescription(developFilm).fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithContentDescription(developFilm).performClick()
+        step("ui", "opened the DevelopFilm operation bar")
+
+        // The gradient icon inside the bar opens the demosaic algorithm dropdown.
         val demosaic = context.getString(R.string.studio_cd_demosaic)
         composeRule.waitUntil(30_000) {
             composeRule.onAllNodesWithContentDescription(demosaic).fetchSemanticsNodes().isNotEmpty()
         }
-        step("ui", "top-bar demosaic icon present")
+        step("ui", "demosaic icon present")
         composeRule.onNodeWithContentDescription(demosaic).performClick()
         step("ui", "clicked the demosaic icon")
 
@@ -616,48 +625,42 @@ class RawRoutingTest {
 
         hostContent { AppTheme { StudioScreen() } }
         val none = context.getString(R.string.studio_grade_none)
-        val boostChipNone = context.getString(R.string.studio_grade_bar_boost, none)
-        val logChipNone = context.getString(R.string.studio_grade_bar_log, none)
-        val lutChipNone = context.getString(R.string.studio_grade_bar_lut, none)
-        composeRule.waitUntil(30_000) {
-            composeRule.onAllNodesWithText(boostChipNone).fetchSemanticsNodes().isNotEmpty()
-        }
-        step("grade-ui", "boost chip rendered at all-none")
-        // All three chips compose the bar (LUT chip excluded only from interaction, not rendering).
-        assertTrue(
-            "LOG chip must be rendered for a RAW",
-            composeRule.onAllNodesWithText(logChipNone).fetchSemanticsNodes().isNotEmpty(),
-        )
-        assertTrue(
-            "LUT chip must be rendered for a RAW",
-            composeRule.onAllNodesWithText(lutChipNone).fetchSemanticsNodes().isNotEmpty(),
-        )
-
-        // Boost chip -> "Boost" item -> a genuine native re-grade that moves pixels.
-        composeRule.onNodeWithText(boostChipNone).performClick()
         val boostOn = context.getString(R.string.studio_grade_boost_on)
+        val tuneCd = context.getString(R.string.studio_cd_tune_image)
+        val boostCd = context.getString(R.string.studio_cd_boost)
+        val styleCd = context.getString(R.string.studio_cd_style_filter)
+        val logCd = context.getString(R.string.studio_cd_log)
+
+        // TuneImage bar (Boost) is docked by the Tune category icon; open it and confirm Boost.
+        composeRule.waitUntil(30_000) {
+            composeRule.onAllNodesWithContentDescription(tuneCd).fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithContentDescription(tuneCd).performClick()
+        composeRule.waitUntil(30_000) {
+            composeRule.onAllNodesWithContentDescription(boostCd).fetchSemanticsNodes().isNotEmpty()
+        }
+        step("grade-ui", "TuneImage bar shows the Boost icon")
+
+        // Boost icon -> "Boost" item -> a genuine native re-grade that moves pixels.
+        composeRule.onNodeWithContentDescription(boostCd).performClick()
         composeRule.waitUntil(30_000) {
             composeRule.onAllNodesWithText(boostOn).fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNodeWithText(boostOn).performClick()
-        step("grade-ui", "picked Boost ON from the chip dropdown")
+        step("grade-ui", "picked Boost ON from the Boost dropdown")
         val boosted = runBlocking {
             withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame(requireDifferentFrom = initialBytes) }
         }
         assertDevelopedIsColor(boosted.bytes, "Sony ILCE-7R boost ON via UI")
 
-        // The chip relabels to the active value.
-        val boostChipActive = context.getString(R.string.studio_grade_bar_boost, boostOn)
+        // Switch to the StyleFilter bar (LOG / LUT) via the PhotoFilter category icon, then pick
+        // S-Log3. Picking an item (not system back) closes the popup deterministically — a back
+        // press would be delivered to the hosted MainActivity and finish it.
+        composeRule.onNodeWithContentDescription(styleCd).performClick()
         composeRule.waitUntil(30_000) {
-            composeRule.onAllNodesWithText(boostChipActive).fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithContentDescription(logCd).fetchSemanticsNodes().isNotEmpty()
         }
-
-        // LOG dropdown enumerates the native log-space names. Pick S-Log3 instead of dismissing
-        // with system back: the menu is a Popup, and once its state settles the back press is
-        // delivered to the hosted MainActivity and FINISHES it ("No compose hierarchies found"
-        // on every later node lookup). Picking the item closes the popup deterministically and
-        // additionally proves a log pick drives a real native re-grade through the UI.
-        composeRule.onNodeWithText(logChipNone).performClick()
+        composeRule.onNodeWithContentDescription(logCd).performClick()
         composeRule.waitUntil(30_000) {
             composeRule.onAllNodesWithText("S-Log3").fetchSemanticsNodes().isNotEmpty()
         }
@@ -668,27 +671,37 @@ class RawRoutingTest {
         }
         step("grade-ui", "picked S-Log3 — native re-grade moved ${logged.bytes.size} bytes")
 
-        // Boost chip -> none while S-Log3 stays on: still a graded frame, differs from boost+log.
-        composeRule.onNodeWithText(boostChipActive).performClick()
+        // Boost -> none while S-Log3 stays on: still a graded frame, differs from boost+log.
+        composeRule.onNodeWithContentDescription(tuneCd).performClick()
+        composeRule.waitUntil(30_000) {
+            composeRule.onAllNodesWithContentDescription(boostCd).fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithContentDescription(boostCd).performClick()
+        composeRule.waitUntil(30_000) {
+            composeRule.onAllNodesWithText(none).fetchSemanticsNodes().isNotEmpty()
+        }
         composeRule.onNodeWithText(none).performClick()
-        step("grade-ui", "picked none from the boost dropdown")
+        step("grade-ui", "picked none from the Boost dropdown")
         val logOnly = runBlocking {
             withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame(requireDifferentFrom = logged.bytes) }
         }
 
-        // LOG chip -> none: all-"none" returns the canvas to the as-shot develop frame.
-        val logChipActive = context.getString(R.string.studio_grade_bar_log, "S-Log3")
+        // LOG -> none: all-"none" returns the canvas to the as-shot develop frame.
+        composeRule.onNodeWithContentDescription(styleCd).performClick()
         composeRule.waitUntil(30_000) {
-            composeRule.onAllNodesWithText(logChipActive).fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithContentDescription(logCd).fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithText(logChipActive).performClick()
+        composeRule.onNodeWithContentDescription(logCd).performClick()
+        composeRule.waitUntil(30_000) {
+            composeRule.onAllNodesWithText(none).fetchSemanticsNodes().isNotEmpty()
+        }
         composeRule.onNodeWithText(none).performClick()
         step("grade-ui", "picked none from the LOG dropdown")
         val restored = runBlocking {
             withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame(requireDifferentFrom = logOnly.bytes) }
         }
         assertTrue(
-            "all-none via the chips must restore the as-shot develop frame",
+            "all-none via the operation bars must restore the as-shot develop frame",
             restored.bytes.contentEquals(initialBytes),
         )
     }
@@ -906,30 +919,35 @@ class RawRoutingTest {
         assertTrue("as-shot develop must reach Ready", initial is StudioRenderResult.Ready)
         val asShotBytes = toBytes((initial as StudioRenderResult.Ready).model)
 
-        // The REAL Studio grade bar, with a RAW resident so the LUT chip exists.
+        // The REAL Studio operation bar, with a RAW resident so the StyleFilter (LOG/LUT) bar exists.
         hostContent { AppTheme { StudioScreen() } }
-        val none = context.getString(R.string.studio_grade_none)
-        val lutChipNone = context.getString(R.string.studio_grade_bar_lut, none)
+        val styleCd = context.getString(R.string.studio_cd_style_filter)
+        val lutCd = context.getString(R.string.studio_cd_lut)
+        // Dock the StyleFilter bar (PhotoFilter category icon) so the LUT icon becomes visible.
         composeRule.waitUntil(30_000) {
-            composeRule.onAllNodesWithText(lutChipNone).fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithContentDescription(styleCd).fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithContentDescription(styleCd).performClick()
+        composeRule.waitUntil(30_000) {
+            composeRule.onAllNodesWithContentDescription(lutCd).fetchSemanticsNodes().isNotEmpty()
         }
         assertEquals(StudioEngine.GradeSelection(), StudioEngine.gradeSelection.value)
 
         // Stub the system file picker to answer with the downloaded cube's content uri, then
-        // walk the real UI: chip -> "pick" item -> OpenDocument -> result delivery.
+        // walk the real UI: LUT icon -> "pick" item -> OpenDocument -> result delivery.
         val lutUri = pushedLutAsContentUri()
         Intents.init()
         try {
             intending(hasAction(Intent.ACTION_OPEN_DOCUMENT))
                 .respondWith(Instrumentation.ActivityResult(Activity.RESULT_OK, Intent().setData(lutUri)))
 
-            composeRule.onNodeWithText(lutChipNone).performClick()
+            composeRule.onNodeWithContentDescription(lutCd).performClick()
             val pick = context.getString(R.string.studio_grade_lut_pick)
             composeRule.waitUntil(30_000) {
                 composeRule.onAllNodesWithText(pick).fetchSemanticsNodes().isNotEmpty()
             }
             composeRule.onNodeWithText(pick).performClick()
-            step("lut-ui", "tapped the LUT chip and the pick item — OpenDocument launched")
+            step("lut-ui", "tapped the LUT icon and the pick item — OpenDocument launched")
 
             // The launcher really fired (and only our stub answered it — no real picker ran).
             intended(hasAction(Intent.ACTION_OPEN_DOCUMENT))
@@ -940,15 +958,10 @@ class RawRoutingTest {
             }
             assertNull("LUT pick via the UI must not surface a grade error", StudioEngine.gradeError.value)
             assertEquals(LUT_FIXTURE_NAME, StudioEngine.gradeSelection.value.lutName)
-            // MiddleEllipsis-style labels keep the trailing suffix; ".cube" is the part guaranteed
-            // to still be on the chip after the long cube name truncates.
-            composeRule.waitUntil(30_000) {
-                composeRule.onAllNodesWithText(".cube", substring = true).fetchSemanticsNodes().isNotEmpty()
-            }
-            step("lut-ui", "chip relabeled to the picked cube; graded ${graded.bytes.size} bytes")
+            step("lut-ui", "LUT applied (${graded.bytes.size} bytes); engine lutName = ${StudioEngine.gradeSelection.value.lutName}")
 
-            // The chip's clear item returns the canvas to the as-shot develop frame.
-            composeRule.onAllNodesWithText(".cube", substring = true)[0].performClick()
+            // The LUT icon's clear item returns the canvas to the as-shot develop frame.
+            composeRule.onNodeWithContentDescription(lutCd).performClick()
             val clear = context.getString(R.string.studio_grade_lut_clear)
             composeRule.waitUntil(30_000) {
                 composeRule.onAllNodesWithText(clear).fetchSemanticsNodes().isNotEmpty()
@@ -959,7 +972,7 @@ class RawRoutingTest {
                 withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame(requireDifferentFrom = graded.bytes) }
             }
             assertTrue(
-                "clearing the LUT via the chip must restore the as-shot develop frame",
+                "clearing the LUT via the operation bar must restore the as-shot develop frame",
                 restored.bytes.contentEquals(asShotBytes),
             )
             assertNull(StudioEngine.gradeSelection.value.lutPath)
@@ -969,15 +982,22 @@ class RawRoutingTest {
         }
     }
 
-    /** The grade bar is a RAW-only surface: the Coil/PNG route must keep it off-screen. */
+    /** Grade operation bars (Tune/StyleFilter) are RAW-only: the Coil/PNG route must keep them empty. */
     @Test
     fun gradeBarIsHiddenOnPngRoute() {
         journey(pngControl(), expectRawler = false)
         hostContent { AppTheme { StudioScreen() } }
         composeRule.waitForIdle()
+        // Dock the TuneImage bar — for a PNG it must not render the Boost icon.
+        val tuneCd = context.getString(R.string.studio_cd_tune_image)
+        composeRule.waitUntil(30_000) {
+            composeRule.onAllNodesWithContentDescription(tuneCd).fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithContentDescription(tuneCd).performClick()
+        composeRule.waitForIdle()
         assertTrue(
-            "no grade-bar chip may exist for the PNG/Coil route",
-            composeRule.onAllNodesWithText("Boost:", substring = true).fetchSemanticsNodes().isEmpty(),
+            "no Boost icon may exist for the PNG/Coil route (grade is RAW-only)",
+            composeRule.onAllNodesWithContentDescription(context.getString(R.string.studio_cd_boost)).fetchSemanticsNodes().isEmpty(),
         )
         assertFalse("isRawLoaded must stay false for the PNG/Coil route", StudioEngine.isRawLoaded.value)
     }
