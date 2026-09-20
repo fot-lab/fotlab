@@ -57,11 +57,12 @@ android {
             create("release") {
                 storeFile = file(keystoreProps.getValue("RELEASE_STORE_FILE"))
                 storePassword = keystoreProps.getValue("RELEASE_STORE_PASSWORD")
-            // R8 + resource shrinking for the shipped artifact (rules/ACTION.md Q2). The keep
-            // rules JNA and the UniFFI bindings need live in proguard-rules.pro — R8 must not
-            // rename the generated JNA interface methods, whose names ARE the native symbol names.
-            isMinifyEnabled = true
-            isShrinkResources = true
+                keyAlias = keystoreProps.getValue("RELEASE_KEY_ALIAS")
+                keyPassword = keystoreProps.getValue("RELEASE_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             // R8 minification / resource shrinking stay OFF (rules/ACTION.md Q2): the project is
@@ -166,6 +167,12 @@ dependencies {
 
     // Instrumented smoke tests, run on an emulator by `connectedDebugAndroidTest` in
     // .github/workflows/smoke_emulator.yaml. The cases live in the AGP-default instrumented
+    // source set `app/src/androidTest/kotlin` — no extra `kotlin.srcDir` is needed because
+    // `src/<source-set>/kotlin` is registered out of the box.
+    // `runner` is what `testInstrumentationRunner` above names; `core` supplies
+    // ActivityScenario and `ext-junit` the AndroidJUnit4 bridge.
+    androidTestImplementation(libs.junit)
+    androidTestImplementation(libs.androidx.test.core)
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.runner)
     // Intents.intending(): stub the system DocumentsUI answer of the grade bar's
