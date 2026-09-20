@@ -187,41 +187,15 @@ runs:
         force-avd-creation: false
         emulator-options: ${{ env.EMULATOR_OPTIONS_TEST }}
         disable-animations: true
-        # POSIX sh only (the runner executes this with /usr/bin/sh = dash): no
+        # Single-line script on purpose. The composite-action layer collapses a
+        # multiline `script:` input into one line before handing it to the nested
+        # android-emulator-runner action; with inline `#` comments that turns the
+        # rest of the code (incl. the `fi` closing the guards) into an end-of-line
+        # comment and dash reports "expecting fi". Calling a real file keeps the
+        # newlines and comments intact. POSIX sh only (dash on ubuntu): no
         # PIPESTATUS / pipefail. See smoke_emulator.yaml for the logcat/tombstone
         # rationale (rawler FFI SIGSEGV/SIGABRT backtraces).
-        script: |
-          if [ "$NEED_RAW" = "true" ]; then
-            # The corpus lands in the emulated SD card's Pictures directory — the same
-            # place a camera/file manager drops photos — indexed into MediaStore and
-            # imported by uri exactly like a real photo.
-            adb shell mkdir -p /sdcard/Pictures/rawdb
-            adb push raw-samples/. /sdcard/Pictures/rawdb/
-            adb shell ls -l /sdcard/Pictures/rawdb
-          fi
-
-          if [ "$NEED_LUT" = "true" ]; then
-            # Install first so the package data dir exists, then stream the cube through
-            # run-as stdin (the file gets the APP uid; shell-created dirs under /sdcard
-            # are not app-traversable and /data/local/tmp is SELinux-blocked on API 36).
-            # connectedDebugAndroidTest later reinstalls with -r, preserving app data.
-            gradle --no-daemon :app:installDebug
-            adb shell "run-as io.github.fotlab.fotlab sh -c 'mkdir -p files/lut-fixture && cat > files/lut-fixture/FLog2C_to_CLASSIC-Neg_VLog.cube'" \
-              < lut-samples/FLog2C_to_CLASSIC-Neg_VLog.cube
-            adb shell run-as io.github.fotlab.fotlab ls -l files/lut-fixture
-          fi
-
-          adb logcat -c || true
-          # Strip every whitespace: the YAML filter is folded across several lines
-          # for readability, so it arrives space-separated; am instrument's -e class
-          # list splits on commas and would see " io.Bar" as an unknown class.
-          TEST_FILTER_COMPACT="$(printf '%s' "$SMOKE_TEST_FILTER" | tr -d '[:space:]')"
-          gradle --no-daemon --stacktrace connectedDebugAndroidTest "-PsmokeTestFilter=$TEST_FILTER_COMPACT" > smoke-log.txt 2>&1
-          STATUS=$?
-          cat smoke-log.txt
-          adb logcat -d -b all > logcat.txt 2>&1 || true
-          adb shell ls -l /data/tombstones > tombstones.txt 2>&1 || true
-          exit $STATUS
+        script: bash .github/scripts/run_smoke_shard.sh
 
     # Per-shard diagnostics: build-smoke-<shard>.log on the calling workflow.
     - name: Upload ${{ inputs.shard }} smoke logs
