@@ -91,7 +91,7 @@ object StudioEngine {
     private var currentFormat: String? = null
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-        val header = runCatching { resolver.openInputStream(uri)?.use { it.readHeader(HEADER_BYTES) } }
+
     /** Point the canvas at [uri] (the virtual node's `uri_storage`) and run the render pipeline. */
     fun setCurrentNode(uri: String?) {
         // Release any previously-held decoded RAW and invalidate in-flight work before switching
@@ -100,10 +100,13 @@ object StudioEngine {
         // The Boost/LOG/LUT selection belongs to the previous file's grade fork — every new node
         // starts at all-"none" (the regular sRGB develop presentation).
         gradeSelectionState.value = GradeSelection()
-        val verdicts = when (val sniff = FormatSniffer.sniff(header, timeout)) {
-            is SniffResult.Ok -> sniff.verdicts
-            is SniffResult.Timeout -> return StudioRenderResult.Unsupported
-        }
+        gradeErrorState.value = null
+        rawLoadedState.value = false
+        val token = loadNonce.incrementAndGet()
+        currentNodeUriState.value = uri
+        if (uri == null) {
+            renderResultState.value = StudioRenderResult.Idle
+            return
         }
         val parsed = runCatching { Uri.parse(uri) }.getOrNull()
         if (parsed == null) {
@@ -122,7 +125,8 @@ object StudioEngine {
     private suspend fun runPipeline(resolver: ContentResolver, uri: Uri, token: Long): StudioRenderResult {
         val header = runCatching { resolver.openInputStream(uri)?.use { it.readHeader(Constants.HEADER_BYTES) } }
             .getOrNull()
-    private companion object {
+        if (header == null) return StudioRenderResult.Unsupported
+
         // 1) Sniff: every input passes through the first-party wrapper (R8). Timeout is a hard error.
         // The bound is the user preference (R8 / Q6); a failed read falls back to the default so a
         // broken preference store can never block opening a file.
