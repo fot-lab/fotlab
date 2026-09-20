@@ -61,14 +61,9 @@ inputs:
 
 runs:
   using: composite
-  env:
-    ANDROID_API: '36'
-    ANDROID_BUILD_TOOLS: '36.0.0'
-    # Identical to smoke_emulator.yaml: the snapshot is always generated with
-    # -memory 4096, so every boot that loads it must request the same memory.
-    # The shard adds -no-snapshot-save (it must never overwrite the clean cached
-    # snapshot with app state).
-    EMULATOR_OPTIONS_TEST: '-no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot-save -memory 4096'
+  # NOTE: composite actions do NOT accept an `env:` map here (the runner's
+  # schema rejects the whole runs block). The constants below live on the
+  # steps that consume them.
   steps:
     - name: Check out
       uses: actions/checkout@v7
@@ -88,6 +83,9 @@ runs:
         android-home: ${{ env.ANDROID_HOME }}
         api-level: ${{ env.ANDROID_API }}
         build-tools: ${{ env.ANDROID_BUILD_TOOLS }}
+      env:
+        ANDROID_API: '36'
+        ANDROID_BUILD_TOOLS: '36.0.0'
 
     # Mandatory on Linux runners — see the long KVM note in smoke_emulator.yaml.
     - name: Enable KVM
@@ -178,6 +176,11 @@ runs:
         SMOKE_TEST_FILTER: ${{ inputs.test-filter }}
         NEED_RAW: ${{ inputs.need-raw }}
         NEED_LUT: ${{ inputs.need-lut }}
+        # Identical to smoke_emulator.yaml: the snapshot is always generated with
+        # -memory 4096, so every boot that loads it must request the same memory.
+        # The shard adds -no-snapshot-save (it must never overwrite the clean cached
+        # snapshot with app state).
+        EMULATOR_OPTIONS_TEST: '-no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot-save -memory 4096'
       with:
         api-level: ${{ inputs.api-level }}
         target: ${{ inputs.target }}
