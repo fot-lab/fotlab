@@ -88,8 +88,12 @@ jobs:
   # SAVED before any APK is ever installed, so the cached emulator is pristine and
   # stays valid for every shard and every later build. All four shards start only
   # after this finishes, so their cache restores are warm and their saves are
-      EMULATOR_OPTIONS: '-no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none'
-      EMULATOR_OPTIONS_TEST: '-no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot-save'
+  # unnecessary (a shard that hits an evicted cache creates the AVD locally but
+  # never persists it — see the shard action's cold fallback).
+  prep-emulator:
+    name: Smoke prep (AVD + RAW corpus)
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
     env:
       ANDROID_API: '36'
       ANDROID_BUILD_TOOLS: '36.0.0'

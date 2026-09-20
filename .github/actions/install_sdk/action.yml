@@ -1,16 +1,21 @@
-# Composite action: install the Android SDK (cmdline-tools, platforms,
-# build-tools) on the caller's runner, with per-component caching. Runs in-job,
-# so the Gradle build that follows shares this SDK. The install path and the
-# pinned API/build-tools versions are inputs, so the caller is the single source
-# of truth (rules/ACTION.md). The NDK is a separate action (install_ndk) — it is
-# not toggled here.
+# Composite action: ensure the pinned Android SDK components (cmdline-tools,
+# platforms, build-tools) exist on the caller's runner.
+#
+# Preinstalled-first: the GitHub-hosted ubuntu-26.04 image ships cmdline-tools,
+# platform-tools, platforms;android-36 and build-tools;36.0.0 under its prebuilt
+# ANDROID_HOME (/usr/local/lib/android/sdk, licenses accepted). When the caller
+# points android-home at that SDK — the default on hosted runners — every check
+# below passes and NOTHING is downloaded or cached. Only a runner/image that is
+# missing a pinned component takes the fallback path (cache + setup-android +
+# sdkmanager --install), so a future image rotation heals itself instead of
+# failing deep inside Gradle. The NDK is a separate action (install_ndk).
 
 name: Install Android SDK
-description: Install the Android SDK (cmdline-tools, platforms, build-tools) with caching.
+description: Ensure the pinned Android SDK components exist (prefer runner preinstall, install+caches only what is missing).
 
 inputs:
   android-home:
-    description: ANDROID_HOME path the SDK is installed into.
+    description: ANDROID_HOME path the SDK lives in.
     required: true
   api-level:
     description: Android API level, used as platforms;android-<level>.
@@ -20,16 +25,40 @@ inputs:
     required: true
 
 runs:
-  using: composite
+  using: 'composite'
   steps:
-    # Each component is cached by its own actions/cache step and restored into
-    # its own directory, so the SDK is versioned and reused independently of the
-    # NDK. Restored BEFORE setup-android: on a hit cmdline-tools are already
-    # present so setup-android skips its own download, and the sdkmanager step
-    # below becomes a no-op. On a miss, setup-android installs cmdline-tools and
-    # the sdkmanager step fills in the packages, then the result is saved.
+    - name: Check preinstalled SDK components
+      id: precheck
+      shell: bash
+      env:
+        ANDROID_HOME: ${{ inputs.android-home }}
+        ANDROID_API: ${{ inputs.api-level }}
+        ANDROID_BUILD_TOOLS: ${{ inputs.build-tools }}
+      run: |
+        set -euo pipefail
+        missing=()
+        # Only the packages Gradle consumes matter for the happy path; whether
+        # cmdline-tools exist is irrelevant when nothing has to be installed
+        # (the fallback brings its own sdkmanager via setup-android + PATH).
+        if [ ! -f "$ANDROID_HOME/platforms/android-$ANDROID_API/android.jar" ]; then
+          missing+=("platforms;android-$ANDROID_API")
+        fi
+        if [ ! -x "$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS/aapt2" ]; then
+          missing+=("build-tools;$ANDROID_BUILD_TOOLS")
+        fi
+        if [ ${#missing[@]} -eq 0 ]; then
+          echo "All pinned SDK components already present at $ANDROID_HOME — nothing to install."
+          echo "need-install=false" >> "$GITHUB_OUTPUT"
+        else
+          echo "Missing SDK components: ${missing[*]}"
+          echo "need-install=true" >> "$GITHUB_OUTPUT"
+        fi
+
+    # Fallback path only. Each component is cached/restored into its own SDK
+    # subtree before setup-android runs, so a cache hit makes the installs no-ops.
     - name: Cache Android SDK (cmdline-tools, platforms, build-tools)
-      uses: actions/cache@v4
+      if: steps.precheck.outputs.need-install == 'true'
+      uses: actions/cache@v6
       with:
         path: |
           ${{ inputs.android-home }}/cmdline-tools
@@ -41,18 +70,57 @@ runs:
           ${{ runner.os }}-android-sdk-
 
     - name: Set up Android SDK
-      uses: android-actions/setup-android@v3
+      if: steps.precheck.outputs.need-install == 'true'
+      uses: android-actions/setup-android@v4
+      # setup-android's default package set is "tools platform-tools", but Google
+      # removed the legacy `tools` (SDK Tools 26.x) package from the repository —
+      # `sdkmanager tools` exits 1 with "Failed to find package 'tools'". platform-
+      # tools alone is enough; cmdline-tools are provided by the action itself.
+      with:
+        packages: platform-tools
       env:
         ANDROID_HOME: ${{ inputs.android-home }}
         ANDROID_SDK_ROOT: ${{ inputs.android-home }}
 
-    - name: Install SDK packages
+    - name: Install missing SDK packages
+      if: steps.precheck.outputs.need-install == 'true'
+      shell: bash
+      env:
+        # Step-level env wins over the GITHUB_ENV values setup-android exports:
+        # it pins its own SDK root, but the packages must land in the caller's.
+        ANDROID_HOME: ${{ inputs.android-home }}
+        ANDROID_SDK_ROOT: ${{ inputs.android-home }}
+        ANDROID_API: ${{ inputs.api-level }}
+        ANDROID_BUILD_TOOLS: ${{ inputs.build-tools }}
+      run: |
+        set -euo pipefail
+        # setup-android prepends its bundled cmdline-tools/<ver>/bin to PATH
+        # (GITHUB_PATH); the tool binary does not have to live under our root.
+        command -v sdkmanager
+        yes | sdkmanager --licenses > /dev/null 2>&1 || true
+        sdkmanager --install "platforms;android-$ANDROID_API" "build-tools;$ANDROID_BUILD_TOOLS"
+
+    # Runs on every path: a missing component after the fallback attempt must
+    # fail here with an actionable message, not later as an obscure Gradle error.
+    - name: Verify SDK components
       shell: bash
       env:
         ANDROID_HOME: ${{ inputs.android-home }}
         ANDROID_API: ${{ inputs.api-level }}
         ANDROID_BUILD_TOOLS: ${{ inputs.build-tools }}
       run: |
-        export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
-        yes | sdkmanager --licenses > /dev/null 2>&1 || true
-        sdkmanager --install "platforms;android-$ANDROID_API" "build-tools;$ANDROID_BUILD_TOOLS"
+        set -euo pipefail
+        [ -f "$ANDROID_HOME/platforms/android-$ANDROID_API/android.jar" ] || {
+          echo "::error::platforms;android-$ANDROID_API missing under $ANDROID_HOME"
+          exit 1
+        }
+        [ -x "$ANDROID_HOME/build-tools/$ANDROID_BUILD_TOOLS/aapt2" ] || {
+          echo "::error::build-tools;$ANDROID_BUILD_TOOLS missing under $ANDROID_HOME"
+          exit 1
+        }
+        # setup-android rewrites GITHUB_ENV to its own SDK root on the fallback
+        # path; re-publish the caller's root so later steps (NDK path export,
+        # Gradle) resolve every component under one ANDROID_HOME.
+        echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+        echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+        echo "SDK verified: platforms;android-$ANDROID_API + build-tools;$ANDROID_BUILD_TOOLS at $ANDROID_HOME"
