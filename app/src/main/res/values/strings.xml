@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Single strings file for the whole app (`FOTLAB-STRUCT-000001`).
+  Default-locale (English) strings for the whole app (`FOTLAB-STRUCT-000001`).
+  Chinese lives in values-zh/strings.xml (untranslated keys fall back to here).
   Block order — common, then app (shell), then one block per feature package —
   and key naming follow `FOTLAB-UIXDES-000003` R2/R4.
 -->
@@ -28,8 +29,8 @@
 
     <!-- ===== app (shell) ===== -->
     <string name="app_name">FotLab</string>
-    <string name="app_nav_library_label">图库</string>
-    <string name="app_nav_studio_label">显影</string>
+    <string name="app_nav_library_label">Library</string>
+    <string name="app_nav_studio_label">Studio</string>
 
     <!-- ===== feature: library ===== -->
     <string name="library_new_collection_name">New Folder</string>
@@ -38,8 +39,9 @@
     <string name="library_delete_message">The selected items are removed from the library. The
         original files stay where they are.</string>
 
-    <string name="library_delete_invalid_title">无法删除</string>
-    <string name="library_delete_invalid_message">所有选中节点必须直接属于当前界面展示的目录才可删除</string>
+    <string name="library_delete_invalid_title">Cannot delete</string>
+    <string name="library_delete_invalid_message">Every selected node must belong directly to the
+        directory currently shown to be deletable</string>
 
     <string name="library_empty_directory">This folder is empty</string>
 
@@ -95,7 +97,7 @@
     <string name="studio_wb_hint">Color temperature (K), e.g. 5500</string>
     <string name="studio_decoding">Decoding…</string>
     <string name="studio_unsupported_title">Unsupported Format</string>
-    <string name="studio_unsupported_format">Unsupported Format! 不支持的格式！</string>
+    <string name="studio_unsupported_format">Unsupported format!</string>
 
     <!-- Studio top-bar demosaic dropdown algorithm picker. -->
     <string name="studio_demosaic_default">Default (CFA auto)</string>
