@@ -170,7 +170,6 @@ runs:
 
     # -------- the filtered instrumented shard --------
     - name: Run ${{ inputs.shard }} smoke shard
-      timeout-minutes: ${{ inputs.test-timeout-minutes }}
       uses: reactivecircus/android-emulator-runner@v2
       env:
         SMOKE_TEST_FILTER: ${{ inputs.test-filter }}
@@ -229,7 +228,7 @@ runs:
       if: failure() && inputs.log-artifact-name != ''
       uses: actions/upload-artifact@v7
       with:
-        name: ${{ format('{0}-{1}', replace(inputs.log-artifact-name, '.log', ''), inputs.shard) }}
+        name: ${{ format('{0}-{1}', inputs.log-artifact-name, inputs.shard) }}
         path: |
           smoke-log.txt
           logcat.txt
