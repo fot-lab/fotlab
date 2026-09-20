@@ -6,7 +6,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
@@ -67,7 +66,10 @@ import io.github.fotlab.fotlab.feature.library.LibraryCore
 import io.github.fotlab.fotlab.feature.studio.StudioRenderResult
 import io.github.fotlab.fotlab.ui.ZoomableAsyncImage
 import io.github.fotlab.fotlab.ui.icons.CustomMaterialStyleIcons
+import io.github.fotlab.fotlab.ui.icons.MovieEdit
 import io.github.fotlab.fotlab.ui.icons.WhiteBalanceLiteral
+import io.github.fotlab.fotlab.ui.operation.HorizontalOperationBar
+import io.github.fotlab.fotlab.ui.operation.OperationalButton
 import io.github.fotlab.fotlab.ui.rememberZoomState
 import io.github.fotlab.fotlab_rawler.DemosaicAlgorithm
 import kotlinx.coroutines.launch
@@ -611,7 +613,8 @@ private fun BoostButton(
 
 /**
  * LOG curve picker — none plus every curve rawalchemy enumerates. Primary tint while a curve is
- * selected.
+ * selected. The icon is the official Material "movie_edit" glyph, reproduced first-party in
+ * [CustomMaterialStyleIcons] (the frozen material-icons-extended artifact never generated it).
  */
 @Composable
 private fun LogButton(
@@ -625,7 +628,7 @@ private fun LogButton(
     Box(modifier = modifier) {
         IconButton(onClick = { open = true }) {
             Icon(
-                imageVector = Icons.Filled.Tune,
+                imageVector = CustomMaterialStyleIcons.Filled.MovieEdit,
                 contentDescription = stringResource(id = R.string.studio_cd_log),
                 tint = if (logSpace != null) {
                     MaterialTheme.colorScheme.primary
@@ -696,14 +699,23 @@ private fun StudioOperationBarDevelopFilm(
     onWhiteBalance: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Row(
+    HorizontalOperationBar(
         modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        DemosaicButton(onAlgorithmPicked)
-        ExposureButton(onExposure)
-        WhiteBalanceButton(onWhiteBalance)
-    }
+        items = listOf(
+            OperationalButton(
+                id = "demosaic",
+                label = stringResource(id = R.string.studio_label_demosaic),
+            ) { DemosaicButton(onAlgorithmPicked) },
+            OperationalButton(
+                id = "exposure",
+                label = stringResource(id = R.string.studio_label_exposure),
+            ) { ExposureButton(onExposure) },
+            OperationalButton(
+                id = "wb",
+                label = stringResource(id = R.string.studio_label_whitebalance),
+            ) { WhiteBalanceButton(onWhiteBalance) },
+        ),
+    )
 }
 
 /** TuneImage bar — Boost. */
@@ -713,12 +725,15 @@ private fun StudioOperationBarTuneImage(
     onBoost: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Row(
+    HorizontalOperationBar(
         modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        BoostButton(boost = boost, onBoost = onBoost)
-    }
+        items = listOf(
+            OperationalButton(
+                id = "boost",
+                label = stringResource(id = R.string.studio_label_boost),
+            ) { BoostButton(boost = boost, onBoost = onBoost) },
+        ),
+    )
 }
 
 /** StyleFilter bar — LOG and LUT. */
@@ -732,11 +747,21 @@ private fun StudioOperationBarStyleFilter(
     onClearLut: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Row(
+    HorizontalOperationBar(
         modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        LogButton(logSpace = logSpace, logSpaces = logSpaces, onLogSpace = onLogSpace)
-        LutButton(lutName = lutName, onPick = onPickLut, onClear = onClearLut)
-    }
+        items = listOf(
+            OperationalButton(
+                id = "log",
+                label = stringResource(id = R.string.studio_label_log),
+            ) {
+                LogButton(logSpace = logSpace, logSpaces = logSpaces, onLogSpace = onLogSpace)
+            },
+            OperationalButton(
+                id = "lut",
+                label = stringResource(id = R.string.studio_label_lut),
+            ) {
+                LutButton(lutName = lutName, onPick = onPickLut, onClear = onClearLut)
+            },
+        ),
+    )
 }
