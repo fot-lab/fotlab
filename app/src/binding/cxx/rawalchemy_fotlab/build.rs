@@ -89,7 +89,12 @@ fn main() {
     // A `bundle=<path>` line means the runtime is a SHARED library, so the APK must
     // ship it next to librawler_fotlab.so; build_rust.yaml picks the path up from the
     // same file. A static runtime needs no packaging at all.
+    //
+    // The `rustc-link-*` lines are COLLECTED here but emitted only AFTER the
+    // `static=rawalchemy_grading` directive below — see the replay site for the reason
+    // (ld's left-to-right archive resolution makes the order load-bearing).
     let openmp_link = Path::new(&dst).join("openmp-link.txt");
+    let mut openmp_directives: Vec<String> = Vec::new();
     if let Ok(text) = std::fs::read_to_string(&openmp_link) {
         for line in text.lines() {
             let line = line.trim();
@@ -99,7 +104,7 @@ fn main() {
             if let Some(path) = line.strip_prefix("bundle=") {
                 println!("cargo:warning=rawalchemy_fotlab: OpenMP links the shared runtime — bundle {path} into jniLibs/<abi>/libomp.so");
             } else {
-                println!("cargo:{line}");
+                openmp_directives.push(line.to_string());
             }
         }
     }
@@ -122,6 +127,24 @@ fn main() {
     // Link the grading static lib and the C++ runtime into the final cdylib.
     println!("cargo:rustc-link-search=native={}/lib", dst.display());
     println!("cargo:rustc-link-lib=static=rawalchemy_grading");
+
+    // OpenMP runtime directives MUST be emitted AFTER `static=rawalchemy_grading`.
+    // ld resolves archives strictly left-to-right: an archive is pulled in only to
+    // satisfy references already pending when the archive is scanned. The only
+    // objects that reference the `__kmpc_*` runtime live INSIDE the grading archive
+    // (our own shim is compiled without -fopenmp), so `-lomp` before
+    // `-lrawalchemy_grading` scans an empty undefined set, drops the whole runtime
+    // archive, and leaves `__kmpc_fork_call` undefined in the cdylib. rustc does not
+    // pass `--no-undefined` for cdylibs, so the link then "succeeds" and the failure
+    // is deferred to the device: `dlopen failed: cannot locate symbol
+    // "__kmpc_fork_call"` (observed on the alchemy smoke shard after d5a4662). With
+    // the consumer scanned first, its pending `__kmpc_*` references pull the needed
+    // libomp members in on the very next archive. (The shared-runtime form is
+    // order-insensitive at link time but is harmless here and bundles via the
+    // `bundle=` warning above.)
+    for directive in &openmp_directives {
+        println!("cargo:{directive}");
+    }
     // C++ stdlib.
     //
     // Android: dynamic libc++ (`dylib=c++` -> DT_NEEDED on libc++_shared.so).
@@ -140,8 +163,9 @@ fn main() {
     // consumed by rawler_fotlab's cdylib, only link-lib can carry the runtime.
     //
     // OpenMP's runtime, when `cpp/CMakeLists.txt` enabled it, is linked by the
-    // directives replayed from `openmp-link.txt` above. When OpenMP is off that
-    // file is empty and nothing is emitted — the grading loops then compile as
+    // directives replayed from `openmp-link.txt` immediately above — deliberately
+    // after the grading archive (see the ordering note there). When OpenMP is off
+    // that file is empty and nothing is emitted — the grading loops then compile as
     // plain single-threaded loops, exactly as before this change
     // (`rules/REVIEW/detail/ACTION-PERFOR-000007.md`).
     let cxx_stdlib = if target.contains("android") {
