@@ -240,6 +240,42 @@ jobs:
           done
         shell: bash
 
+      # RawAlchemyCpp's grading loops are now compiled with OpenMP (RA_USE_OPENMP).
+      # `cpp/CMakeLists.txt` prefers the STATIC runtime, in which case there is nothing
+      # to bundle and this step is a no-op. When only the shared runtime is available it
+      # records `bundle=<abs path>` in `openmp-link.txt`, and the .so has to sit next to
+      # librawler_fotlab.so or the app dies at loadLibrary with
+      # `dlopen failed: library "libomp.so" not found` — the same failure mode as the
+      # libc++_shared.so step above. The path is resolved by CMake (which knows the NDK
+      # layout), so we read it back rather than guessing at it in bash.
+      - name: Bundle libomp.so into jniLibs (only when OpenMP links a shared runtime)
+        run: |
+          set -euo pipefail
+          OUT="$GITHUB_WORKSPACE/native-artifacts/jniLibs"
+          # Rust target triples (NOT the GNU sysroot triples used above).
+          declare -A RUST_TRIPLES=(
+            [arm64-v8a]=aarch64-linux-android
+            [armeabi-v7a]=armv7-linux-androideabi
+            [x86]=i686-linux-android
+            [x86_64]=x86_64-linux-android
+          )
+          for abi in "${!RUST_TRIPLES[@]}"; do
+            triple="${RUST_TRIPLES[$abi]}"
+            info=$(find "$CRATE_DIR/target/$triple/release/build" -name openmp-link.txt -print -quit 2>/dev/null || true)
+            [ -n "$info" ] || continue
+            # `|| true`: `head -n1` closes the pipe early, and with `pipefail` the
+            # resulting SIGPIPE from sed would otherwise abort the whole step.
+            bundle=$(sed -n 's/^bundle=//p' "$info" | head -n1 || true)
+            [ -n "$bundle" ] || continue
+            if [ ! -f "$bundle" ]; then
+              echo "::error::OpenMP shared runtime recorded at $bundle is missing for $abi"
+              exit 1
+            fi
+            cp "$bundle" "$OUT/$abi/libomp.so"
+            echo "bundled $abi libomp.so <- $bundle"
+          done
+        shell: bash
+
       # The generator is this crate's own `uniffi-bindgen` bin (`--features cli`), so its
       # version can never drift from the `uniffi` runtime linked into the .so. It reads
       # uniffi.toml (Kotlin `package_name`) from the crate directory via `cargo metadata`,

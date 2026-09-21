@@ -28,6 +28,8 @@
 
 use std::panic::{self, AssertUnwindSafe};
 
+use rayon::prelude::*;
+
 use rawler::rawimage::RawImageData;
 use rawler::RawImage;
 
@@ -226,9 +228,14 @@ pub(crate) fn develop_image(
   // rawler's `RawDevelop::default()` (dnglab's DNG thumbnail pipeline).
   let ev_scale = params.exposure_ev.map_or(1.0, |ev| 2f32.powf(ev));
   if ev_scale != 1.0 {
-    for p in pixels.iter_mut() {
-      *p *= ev_scale;
-    }
+    // One multiply per photosite, no cross-element dependency: chunked so a rayon task
+    // processes a whole slice instead of a single float (`ACTION-PERFOR-000007`). A raw
+    // `par_iter_mut` here would be dominated by per-element scheduling overhead.
+    pixels.par_chunks_mut(64 * 1024).for_each(|chunk| {
+      for p in chunk {
+        *p *= ev_scale;
+      }
+    });
   }
 
   // Demosaic stage — its ROI is already active_area, exactly like rawler's
@@ -296,11 +303,18 @@ fn crop_default(image: &RawImage, mut linear: RawlerImageDeveloped) -> RawlerIma
 
   let src_w = linear.width as usize;
   let (x, y) = (crop.x(), crop.y());
-  let mut rgb = Vec::with_capacity(cw as usize * ch as usize * 3);
-  for row in 0..ch as usize {
-    let start = ((y + row) * src_w + x) * 3;
-    rgb.extend_from_slice(&linear.rgb[start..start + cw as usize * 3]);
+  let cw_usize = cw as usize;
+  let row_len = cw_usize * 3;
+  if cw_usize == 0 || ch == 0 || row_len == 0 {
+    return RawlerImageDeveloped { width: cw, height: ch, rgb: Vec::new() };
   }
+  // Row-wise copy, so each row is an independent contiguous memcpy — parallelised
+  // with rayon instead of being walked sequentially (`ACTION-PERFOR-000007`).
+  let mut rgb = vec![0f32; cw_usize * ch as usize * 3];
+  rgb.par_chunks_mut(row_len).enumerate().for_each(|(row, dst)| {
+    let start = ((y + row) * src_w + x) * 3;
+    dst.copy_from_slice(&linear.rgb[start..start + row_len]);
+  });
   linear.width = cw;
   linear.height = ch;
   linear.rgb = rgb;

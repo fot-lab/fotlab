@@ -20,6 +20,8 @@
 //! demosaic in `develop`, since demosaic is linear and the gain is
 //! channel-uniform, so shifting it earlier is numerically identical.
 
+use rayon::prelude::*;
+
 use rawler::imgop::develop::Intermediate;
 use rawler::imgop::matrix::{multiply, normalize, pseudo_inverse};
 use rawler::imgop::chromatic_adaption::adapt_bradford;
@@ -114,15 +116,20 @@ pub(crate) fn calibrate(
   let rgb2cam = normalize(multiply(&xyz2cam, &space.to_xyz_matrix()));
   let cam2rgb = pseudo_inverse(rgb2cam);
 
+  // Every arm below is a per-pixel mapping with no cross-pixel dependency, so each one is
+  // parallelised with rayon — this is the cost centre the upstream `map_*_to_rgb` helpers
+  // cannot cover for us, because they are `pub(crate)` in rawler
+  // (`rules/REVIEW/detail/ACTION-PERFOR-000007.md`, `FOTLAB-RAWLER-000003`).
   match intermediate {
     Intermediate::Monochrome(pix) => {
       // No per-channel colour mapping for monochrome; replicate the single
       // channel across RGB. (3x size expansion is unavoidable.) Exposure EV is
       // already baked into the source mosaic by `develop` before demosaic.
-      let mut rgb: Vec<f32> = Vec::with_capacity(pix.data.len() * 3);
-      for &v in &pix.data {
-        rgb.extend_from_slice(&[v, v, v]);
-      }
+      let mut rgb: Vec<f32> = vec![0f32; pix.data.len() * 3];
+      pix.data
+          .par_iter()
+          .zip(rgb.par_chunks_exact_mut(3))
+          .for_each(|(&v, out)| out.copy_from_slice(&[v, v, v]));
       Ok(RawlerImageDeveloped {
         width: pix.width as u32,
         height: pix.height as u32,
@@ -133,7 +140,7 @@ pub(crate) fn calibrate(
       // In-place: the 3x3 matrix maps each pixel from its own three channels,
       // so compute the result into a local before overwriting the source pixel.
       let (w, h) = (pixels.width, pixels.height);
-      for px in pixels.pixels_mut() {
+      pixels.pixels_mut().par_iter_mut().for_each(|px| {
         let r = px[0] * wb[0];
         let g = px[1] * wb[1];
         let b = px[2] * wb[2];
@@ -144,7 +151,7 @@ pub(crate) fn calibrate(
         ];
         // No clamp: the result stays in the working space, out-of-[0,1] included.
         *px = mapped;
-      }
+      });
       // Reinterpret the same allocation as flat RGB — no ~630 MB copy.
       Ok(RawlerImageDeveloped {
         width: w as u32,
@@ -155,20 +162,24 @@ pub(crate) fn calibrate(
     Intermediate::FourColor(pixels) => {
       // 4-channel -> 3-channel shrinks the data; the new vec is 3/4 the size
       // of the source and the source is dropped right after.
-      let mut out: Vec<f32> = Vec::with_capacity(pixels.data.len() * 3);
-      for px in pixels.pixels() {
-        let ch0 = px[0] * wb[0];
-        let ch1 = px[1] * wb[1];
-        let ch2 = px[2] * wb[2];
-        let ch3 = px[3] * wb[3];
-        let mapped = [
-          cam2rgb[0][0] * ch0 + cam2rgb[0][1] * ch1 + cam2rgb[0][2] * ch2 + cam2rgb[0][3] * ch3,
-          cam2rgb[1][0] * ch0 + cam2rgb[1][1] * ch1 + cam2rgb[1][2] * ch2 + cam2rgb[1][3] * ch3,
-          cam2rgb[2][0] * ch0 + cam2rgb[2][1] * ch1 + cam2rgb[2][2] * ch2 + cam2rgb[2][3] * ch3,
-        ];
-        // No clamp — see the ThreeColor arm.
-        out.extend_from_slice(&mapped);
-      }
+      let mut out: Vec<f32> = vec![0f32; pixels.data.len() * 3];
+      pixels
+          .pixels()
+          .par_iter()
+          .zip(out.par_chunks_exact_mut(3))
+          .for_each(|(px, dst)| {
+            let ch0 = px[0] * wb[0];
+            let ch1 = px[1] * wb[1];
+            let ch2 = px[2] * wb[2];
+            let ch3 = px[3] * wb[3];
+            let mapped = [
+              cam2rgb[0][0] * ch0 + cam2rgb[0][1] * ch1 + cam2rgb[0][2] * ch2 + cam2rgb[0][3] * ch3,
+              cam2rgb[1][0] * ch0 + cam2rgb[1][1] * ch1 + cam2rgb[1][2] * ch2 + cam2rgb[1][3] * ch3,
+              cam2rgb[2][0] * ch0 + cam2rgb[2][1] * ch1 + cam2rgb[2][2] * ch2 + cam2rgb[2][3] * ch3,
+            ];
+            // No clamp — see the ThreeColor arm.
+            dst.copy_from_slice(&mapped);
+          });
       Ok(RawlerImageDeveloped {
         width: pixels.width as u32,
         height: pixels.height as u32,

@@ -148,9 +148,10 @@ object StudioEngine {
                 // (algorithm / exposure change) reuses the same object (no re-decode, no re-cross of the
                 // pixel buffer; FOTLAB-RAWLER-000004). `decode_to_png` (grayscale preview) is retained in
                 // the bridge/Rust but is no longer called here. `currentFormat` is kept for the stateless fallback.
-                val bytes = runCatching { resolver.openInputStream(uri)?.use { it.readBytes() } }
-                    .getOrNull() ?: return StudioRenderResult.Unsupported
-                val loaded = RawlerFotlabBridge.loadRawlerImage(bytes) ?: return StudioRenderResult.Unsupported
+                val path = runCatching { copySourceToCache(uri) }.getOrNull()
+                    ?: return StudioRenderResult.Unsupported
+                val loaded = RawlerFotlabBridge.loadRawlerImageFromFile(path)
+                    ?: return StudioRenderResult.Unsupported
                 // A newer node was opened while we decoded: discard so we never clobber the new file's state.
                 if (loadNonce.get() != token) return StudioRenderResult.Unsupported
                 loadedImage = loaded
@@ -186,6 +187,23 @@ object StudioEngine {
          * `content://` URIs so the native grader can open a real path.
          */
         const val LUT_CACHE_DIR = "grading-luts"
+
+        /**
+         * App-private cache subdirectory holding opened source documents copied off their
+         * `content://` URIs, so the native decoder can memory-map a real path instead of
+         * receiving a whole-file `ByteArray` (`ACTION-PERFOR-000002`).
+         */
+        const val SOURCE_CACHE_DIR = "source-cache"
+
+        /**
+         * Upper bound on how many source copies [StudioEngine] keeps in the private cache.
+         *
+         * RAW files are tens of megabytes each and `cacheDir` is only reclaimed by the system
+         * under storage pressure, so an unbounded content-addressed copy would quietly grow
+         * into the user's storage. Past this count the least-recently-modified copies are
+         * deleted; re-opening such a file simply copies it again.
+         */
+        const val MAX_SOURCE_CACHE_FILES = 8
     }
 
     /** The demosaic algorithm retained for the next develop re-render (set when the user picks one). */
@@ -411,6 +429,74 @@ object StudioEngine {
             tmp.delete()
         }
         return displayName to dest.absolutePath
+    }
+
+    /**
+     * Copy the opened source document behind [uri] to `cacheDir/source-cache/<key>` and return its
+     * absolute path, so the native decoder can memory-map it instead of being handed the whole file
+     * as a `ByteArray` (`rules/REVIEW/detail/ACTION-PERFOR-000002.md`).
+     *
+     * Why copy at all: rawler's `RawSource::new` needs a real filesystem path, and a `content://`
+     * URI cannot be mapped — the alternative is `readBytes()` followed by `new_from_slice`, i.e.
+     * two complete copies of a file that routinely exceeds 40 MB, plus the Java-heap pressure of
+     * holding it whole.
+     *
+     * The cache key is derived from the source identity (URI + provider-reported size), not from a
+     * SHA-256 of the bytes: hashing a 40 MB file would cost a full extra read just to pick a name.
+     * An existing copy is reused as-is, so re-opening the same node costs nothing.
+     */
+    private fun copySourceToCache(uri: Uri): String {
+        val resolver = appContext.contentResolver
+        val dir = File(appContext.cacheDir, Constants.SOURCE_CACHE_DIR).apply { mkdirs() }
+        val dest = File(dir, sourceCacheKey(uri))
+        if (!dest.exists()) {
+            val tmp = File.createTempFile("src-", ".part", dir)
+            try {
+                (resolver.openInputStream(uri) ?: error("cannot open source")).use { input ->
+                    tmp.outputStream().use { out ->
+                        val buf = ByteArray(64 * 1024)
+                        while (true) {
+                            val n = input.read(buf)
+                            if (n <= 0) break
+                            out.write(buf, 0, n)
+                        }
+                        out.flush()
+                    }
+                }
+                if (!tmp.renameTo(dest)) {
+                    tmp.copyTo(dest, overwrite = true)
+                    tmp.delete()
+                }
+            } catch (t: Throwable) {
+                tmp.delete()
+                throw t
+            }
+        } else {
+            // Touch so the LRU trim below evicts genuinely old sources first.
+            dest.setLastModified(System.currentTimeMillis())
+        }
+        trimSourceCache(dir)
+        return dest.absolutePath
+    }
+
+    /** Stable cache key for [uri]: its own string plus the provider-reported size (both cheap). */
+    private fun sourceCacheKey(uri: Uri): String {
+        val size = appContext.contentResolver
+            .query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)
+            ?.use { c -> if (c.moveToFirst() && !c.isNull(0)) c.getLong(0) else -1L }
+            ?: -1L
+        return MessageDigest.getInstance("SHA-256")
+            .digest("$uri|$size".toByteArray())
+            .joinToString("") { "%02x".format(it) }
+    }
+
+    /** Evict least-recently-modified copies past [Constants.MAX_SOURCE_CACHE_FILES]. Best-effort. */
+    private fun trimSourceCache(dir: File) {
+        val files = runCatching { dir.listFiles()?.toList() }.getOrNull() ?: return
+        if (files.size <= Constants.MAX_SOURCE_CACHE_FILES) return
+        files.sortedBy { it.lastModified() }
+            .take(files.size - Constants.MAX_SOURCE_CACHE_FILES)
+            .forEach { runCatching { it.delete() } }
     }
 
     /** The current exposure compensation in stops; the UI prefills the Exposure dialog from this. */

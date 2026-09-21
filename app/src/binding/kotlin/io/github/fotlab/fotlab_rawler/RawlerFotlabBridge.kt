@@ -45,6 +45,18 @@ object RawlerFotlabBridge {
     fun loadRawlerImage(raw: ByteArray): RawlerImageLoaded? =
         runCatching { decodeRawlerImage(raw) }.getOrNull()
 
+    /**
+     * Path variant of [loadRawlerImage]: decode a RAW that this process already copied into its own
+     * private storage, addressed by real filesystem [path]. The native side memory-maps the file
+     * (`RawSource::new`), so unlike the `ByteArray` variant the source bytes are never read into the
+     * Java heap nor copied a second time inside Rust — the two full-size copies on the open path
+     * disappear (`rules/REVIEW/detail/ACTION-PERFOR-000002.md`). Everything after the decode is
+     * identical: the returned handle behaves exactly like [loadRawlerImage]'s
+     * (`FOTLAB-RAWLER-000004` §lifecycle). Null on failure / absent library.
+     */
+    fun loadRawlerImageFromFile(path: String): RawlerImageLoaded? =
+        runCatching { decodeRawlerImageFromPath(path) }.getOrNull()
+
     /** Grayscale raw-preview PNG from an already-loaded image — no re-decode; null on failure. */
     fun previewRawlerImage(loaded: RawlerImageLoaded): ByteArray? =
         runCatching { loaded.previewPng() }.getOrNull()

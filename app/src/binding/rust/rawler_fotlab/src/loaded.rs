@@ -9,6 +9,7 @@
 //! (the develop pipeline mutates its input in place — `develop.rs`).
 
 use std::panic::{self, AssertUnwindSafe};
+use std::path::Path;
 use std::sync::Arc;
 
 use rawler::RawImage;
@@ -42,6 +43,36 @@ pub fn decode_rawler_image(raw: &[u8]) -> Result<Arc<RawlerImageLoaded>, RawlerF
     }
     panic::catch_unwind(AssertUnwindSafe(|| {
         let image = decode_to_rawimage(raw)?;
+        Ok(Arc::new(RawlerImageLoaded {
+            inner: Arc::new(image),
+        }))
+    }))
+    .unwrap_or_else(|_| {
+        Err(RawlerFotlabError::Decode(
+            "rawler panicked during decode".to_string(),
+        ))
+    })
+}
+
+/// Factory variant that decodes a RAW **straight out of a real filesystem path**
+/// instead of a byte array — `RawSource::new` memory-maps the file, so none of the
+/// source bytes are copied through the FFI or into Rust-owned memory first.
+///
+/// Kotlin copies the opened document into its own private cache once
+/// (`StudioEngine.copySourceToCache`) and hands the path across instead of a
+/// `ByteArray`: that removes both the whole-file `readBytes()` copy and
+/// `RawSource::new_from_slice`'s second copy
+/// (`rules/REVIEW/detail/ACTION-PERFOR-000002.md`). Everything downstream of the
+/// decode is unchanged, and the resident handle behaves exactly like
+/// [`decode_rawler_image`] (same lifecycle, `FOTLAB-RAWLER-000004` §lifecycle).
+#[uniffi::export]
+pub fn decode_rawler_image_from_path(path: String) -> Result<Arc<RawlerImageLoaded>, RawlerFotlabError> {
+    if path.is_empty() {
+        return Err(RawlerFotlabError::Decode("empty path".to_string()));
+    }
+    panic::catch_unwind(AssertUnwindSafe(|| {
+        let src = crate::decode::open_source_file(Path::new(&path))?;
+        let image = crate::decode::decode_source(&src)?;
         Ok(Arc::new(RawlerImageLoaded {
             inner: Arc::new(image),
         }))

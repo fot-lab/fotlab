@@ -92,6 +92,8 @@ The detail file name **must** equal its ID plus `.md`.
 | `LIBRND` | Library Rendering | Library / Recycle view one-level rendering, query scoping, and view-isolation audit for the virtual fs feature |
 | `KOTLIN` | Kotlin Code Quality | First-party Kotlin / Compose source audits: Android & Compose best-practice compliance, control-flow flattening, duplication extraction, localization, and platform / data-layer API usage |
 | `RAWLER` | RAW Decoder / dnglab binding | First-party `rawler_fotlab` Rust binding and integration lessons with the external `dnglab` rawler (Rust) decoder — FFI call selection, header-vs-full-decode contracts, preview quality. Area prefix `DNGLAB` for upstream dnglab findings, `FOTLAB` (or `ACTION`) for first-party binding lessons |
+| `PERFOR` | Performance & Render Pipeline | Latency / memory / throughput of the render pipeline end to end: bottleneck attribution, pixel transport across the FFI, preview resolution policy, parallelism and build-profile headroom, render-backend trade-offs under the `minSdk 26` ceiling. Item count: see `ACTION-PERFOR-000001` (master) + `000002`–`000009` |
+| `ROLLBK` | Architecture Rollback Guard | Process rules that forbid silently degrading or removing first-party architecture to make CI green or to simplify a fix. Item count: see `ACTION-ROLLBK-000001` |
 
 ## Status & Priority
 

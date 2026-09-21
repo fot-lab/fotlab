@@ -22,12 +22,31 @@
 //! namespaces via the conservative fallback `isodng` → `fotlab` → `dnglab` ([`read_shape`]). No
 //! default shape is assumed.
 
-use image::codecs::png::PngEncoder;
+use rayon::prelude::*;
+
+use image::codecs::png::{CompressionType, FilterType, PngEncoder};
 use image::{ExtendedColorType, ImageEncoder};
 use rawler::imgop::srgb::srgb_apply_gamma;
 
 use crate::develop::RawlerImageDeveloped;
 use crate::intermediate::{read_shape, FotRaw, FotRawBuffer};
+
+/// The PNG parameters used by every preview encoder below.
+///
+/// Preview PNGs are a **one-way intermediate**: they are handed straight to Coil in
+/// the same process and never persisted, so paying for compression is waste
+/// (`rules/REVIEW/detail/ACTION-PERFOR-000004.md`).
+///
+/// `image` 0.25 already defaults `PngEncoder::new` to `CompressionType::Fast`
+/// (flate level 1 — there is no "store" level exposed by `image`/`png`), so the
+/// knob that is actually still spendable here is the **filter**: the default
+/// `FilterType::Adaptive` runs a per-scanline heuristic over the whole image
+/// before deflating, which costs O(pixels) extra passes. `NoFilter` skips that
+/// entirely — combined with level 1 this is as close to "no compression" as the
+/// crate's public API allows.
+fn png_encoder<'a>(out: &'a mut Vec<u8>) -> PngEncoder<&'a mut Vec<u8>> {
+    PngEncoder::new_with_quality(out, CompressionType::Fast, FilterType::NoFilter)
+}
 
 /// Encode a decoded [`FotRaw`] to PNG.
 ///
@@ -41,37 +60,44 @@ pub(crate) fn fotraw_to_png(pixel: &FotRaw) -> Result<Vec<u8>, String> {
     if w == 0 || h == 0 {
         return Err("decoded image has no pixels".to_string());
     }
-    let cpp = shape.cpp.max(1) as usize;
-    let mut rgba: Vec<u8> = Vec::with_capacity((w as usize) * (h as usize) * 4);
+    // Per-pixel and dependency-free, so it is parallelised with rayon: at 50 MP this
+    // is ~50M iterations of pure arithmetic over a ~200 MB output buffer
+    // (`rules/REVIEW/detail/ACTION-PERFOR-000007.md`).
+    let px_count = (w as usize) * (h as usize);
+    let mut rgba: Vec<u8> = vec![0u8; px_count * 4];
 
     // Grayscale raw preview: the undeveloped sensor dump has had no demosaic / calibrate, so it is
     // shown as luminance. A CFA mosaic (`cpp == 1`) collapses to its single channel; a pre-coloured
     // buffer (`cpp >= 3`) collapses via Rec.709 luma.
     match &pixel.data.buffer {
         FotRawBuffer::Integer(data) => {
-            for px in data.chunks(cpp) {
-                let gray = if cpp >= 3 {
-                    luma8(shrink_u16(px[0]), shrink_u16(px[1]), shrink_u16(px[2]))
-                } else {
-                    shrink_u16(px.first().copied().unwrap_or(0))
-                };
-                rgba.extend_from_slice(&[gray, gray, gray, 255]);
-            }
+            data.par_chunks(cpp)
+                .zip(rgba.par_chunks_exact_mut(4))
+                .for_each(|(px, out)| {
+                    let gray = if cpp >= 3 {
+                        luma8(shrink_u16(px[0]), shrink_u16(px[1]), shrink_u16(px[2]))
+                    } else {
+                        shrink_u16(px.first().copied().unwrap_or(0))
+                    };
+                    out.copy_from_slice(&[gray, gray, gray, 255]);
+                });
         }
         FotRawBuffer::Float(data) => {
-            for px in data.chunks(cpp) {
-                let gray = if cpp >= 3 {
-                    luma_f32(px[0], px[1], px[2])
-                } else {
-                    shrink_f32(px.first().copied().unwrap_or(0.0))
-                };
-                rgba.extend_from_slice(&[gray, gray, gray, 255]);
-            }
+            data.par_chunks(cpp)
+                .zip(rgba.par_chunks_exact_mut(4))
+                .for_each(|(px, out)| {
+                    let gray = if cpp >= 3 {
+                        luma_f32(px[0], px[1], px[2])
+                    } else {
+                        shrink_f32(px.first().copied().unwrap_or(0.0))
+                    };
+                    out.copy_from_slice(&[gray, gray, gray, 255]);
+                });
         }
     }
 
     let mut out: Vec<u8> = Vec::new();
-    PngEncoder::new(&mut out)
+    png_encoder(&mut out)
         .write_image(&rgba, w, h, ExtendedColorType::Rgba8)
         .map_err(|e| e.to_string())?;
     Ok(out)
@@ -119,13 +145,19 @@ pub(crate) fn rawlerimagedeveloped_to_png(image: &RawlerImageDeveloped) -> Resul
         ));
     }
 
-    let mut rgba: Vec<u8> = Vec::with_capacity((w as usize) * (h as usize) * 4);
-    for px in image.rgb.chunks_exact(3) {
-        rgba.extend_from_slice(&[encode_srgb(px[0]), encode_srgb(px[1]), encode_srgb(px[2]), 255]);
-    }
+    // Per-pixel, order-independent: parallelised with rayon (this is the ~50 MP
+    // gamma + RGBA expansion, see `ACTION-PERFOR-000007`).
+    let mut rgba: Vec<u8> = vec![0u8; (w as usize) * (h as usize) * 4];
+    image
+        .rgb
+        .par_chunks_exact(3)
+        .zip(rgba.par_chunks_exact_mut(4))
+        .for_each(|(px, out)| {
+            out.copy_from_slice(&[encode_srgb(px[0]), encode_srgb(px[1]), encode_srgb(px[2]), 255]);
+        });
 
     let mut out: Vec<u8> = Vec::new();
-    PngEncoder::new(&mut out)
+    png_encoder(&mut out)
         .write_image(&rgba, w, h, ExtendedColorType::Rgba8)
         .map_err(|e| e.to_string())?;
     Ok(out)
@@ -159,18 +191,22 @@ pub(crate) fn graded_to_png(width: u32, height: u32, rgb: &[f32]) -> Result<Vec<
         ));
     }
 
-    let mut rgba: Vec<u8> = Vec::with_capacity((width as usize) * (height as usize) * 4);
-    for px in rgb.chunks_exact(3) {
-        rgba.extend_from_slice(&[
-            shrink_f32(px[0]),
-            shrink_f32(px[1]),
-            shrink_f32(px[2]),
-            255,
-        ]);
-    }
+    // Per-pixel quantization with no cross-pixel dependency: parallelised with rayon
+    // (`ACTION-PERFOR-000007`).
+    let mut rgba: Vec<u8> = vec![0u8; (width as usize) * (height as usize) * 4];
+    rgb.par_chunks_exact(3)
+        .zip(rgba.par_chunks_exact_mut(4))
+        .for_each(|(px, out)| {
+            out.copy_from_slice(&[
+                shrink_f32(px[0]),
+                shrink_f32(px[1]),
+                shrink_f32(px[2]),
+                255,
+            ]);
+        });
 
     let mut out: Vec<u8> = Vec::new();
-    PngEncoder::new(&mut out)
+    png_encoder(&mut out)
         .write_image(&rgba, width, height, ExtendedColorType::Rgba8)
         .map_err(|e| e.to_string())?;
     Ok(out)

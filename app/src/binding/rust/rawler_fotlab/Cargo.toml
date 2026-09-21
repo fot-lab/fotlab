@@ -42,6 +42,12 @@ required-features = ["cli"]
 rawler = { path = "../../../../../external/dnglab/rawler" }
 thiserror = "2.0"
 uniffi = "0.28"
+# Data parallelism for our own per-pixel stages (exposure / calibrate / PNG expansion /
+# crop), which upstream rawler cannot parallelise for us — it only parallelises its own
+# internals (`demosaic`). Pinned to the same major version rawler uses so both share a
+# single rayon instance and therefore one worker pool per process
+# (`rules/REVIEW/detail/ACTION-PERFOR-000007.md`).
+rayon = "1"
 # PNG only: the binding emits PNG (R3 of FOTLAB-STUDIO-000001). Disabling default
 # features avoids pulling every image format the `image` crate can decode.
 image = { version = "0.25", default-features = false, features = ["png"] }
