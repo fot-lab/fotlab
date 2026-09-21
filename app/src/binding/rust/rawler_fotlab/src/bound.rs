@@ -60,6 +60,7 @@ pub(crate) fn fotraw_to_png(pixel: &FotRaw) -> Result<Vec<u8>, String> {
     if w == 0 || h == 0 {
         return Err("decoded image has no pixels".to_string());
     }
+    let cpp = shape.cpp.max(1) as usize;
     // Per-pixel and dependency-free, so it is parallelised with rayon: at 50 MP this
     // is ~50M iterations of pure arithmetic over a ~200 MB output buffer
     // (`rules/REVIEW/detail/ACTION-PERFOR-000007.md`).
