@@ -47,5 +47,11 @@ rust::Vec<float> grade(rust::Slice<const float> data,
                        float contrast,
                        float pivot);
 
-/// Every key of upstream's `LOG_SPACES` map — the log curves the grader accepts.
+/// Every log curve the grader accepts (`"F-Log"`, `"S-Log3"`, `"Arri LogC4"`, …).
+///
+/// Self-contained: the list is maintained as a standalone constant in the shim and
+/// does NOT read upstream's `LOG_SPACES` map, so the enumeration can never be
+/// affected by how the parallel grading engine (`applyGradingFused`, built under
+/// `RA_USE_OPENMP`) is linked. Keep it in sync with upstream's `LOG_SPACES` keys in
+/// external/RawAlchemyCpp/include/color_data.h.
 rust::Vec<rust::String> log_spaces();

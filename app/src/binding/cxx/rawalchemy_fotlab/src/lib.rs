@@ -64,11 +64,11 @@ mod ffi {
             pivot: f32,
         ) -> Result<Vec<f32>>;
 
-        /// Names of every log space upstream's `LOG_SPACES` map accepts
-        /// (`"F-Log"`, `"S-Log3"`, `"Arri LogC4"`, …). The list is single-sourced
-        /// upstream: the Kotlin LOG chooser renders exactly these names, so a new
-        /// upstream curve needs no change on our side (`FOTLAB-RAWLER-000006`).
-        /// Iteration order of the upstream `unordered_map` is unspecified; callers
+        /// Names of every log space the grader accepts (`"F-Log"`, `"S-Log3"`,
+        /// `"Arri LogC4"`, …). Maintained as a standalone constant in the shim,
+        /// DECOUPLED from upstream's `LOG_SPACES` map so the enumeration cannot be
+        /// broken by how the parallel grading engine is linked. Keep in sync with
+        /// upstream's `LOG_SPACES` keys. Iteration order is unspecified; callers
         /// that need a stable order sort the result themselves.
         fn log_spaces() -> Vec<String>;
     }
@@ -153,9 +153,10 @@ pub fn grade(
     .map_err(|e| e.to_string())
 }
 
-/// Names of the log spaces upstream accepts — a pass-through enumeration of the
-/// `LOG_SPACES` map keys. The order mirrors upstream's `unordered_map` and is
-/// intentionally not sorted here: the consuming crate sorts for UI stability.
+/// Names of the log spaces upstream accepts — a pass-through enumeration kept in
+/// a standalone shim constant, decoupled from the parallel grading engine. The
+/// order mirrors the shim constant and is intentionally not sorted here: the
+/// consuming crate sorts for UI stability.
 pub fn log_spaces() -> Vec<String> {
     ffi::log_spaces()
 }

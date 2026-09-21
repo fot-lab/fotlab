@@ -124,18 +124,48 @@ rust::Vec<float> grade(rust::Slice<const float> data,
   return out;
 }
 
-// Enumerate upstream's LOG_SPACES keys verbatim. Order is whatever the
-// unordered_map yields; the Rust caller sorts for a stable UI menu. The map
-// itself is the single source of truth — a curve added upstream appears here
-// with no glue change.
+// ---------------------------------------------------------------------------
+// Enumerate the log spaces the grader accepts — DECOUPLED from the parallel
+// grading engine.
+//
+// This list is intentionally self-contained: it does NOT read upstream's
+// `LOG_SPACES` map (color_data.h). That map is the grading static library's
+// header-global, entangled with the OpenMP-compiled `applyGradingFused` path;
+// relying on it here made the enumeration fragile under the static-archive +
+// cdylib link (the very failure this change fixes — the Studio LOG chooser
+// enumerated 0 of 14 curves). The actual grading computation stays parallel
+// (`grade` -> `applyGradingFused` still runs under RA_USE_OPENMP); only the
+// *enumeration* is pulled out into a standalone constant so it can never be
+// affected by how the parallel machinery is linked or built.
+//
+// The Rust caller sorts for a stable UI menu, so order here is irrelevant.
+// Keep this in sync with upstream's `LOG_SPACES` keys in
+// external/RawAlchemyCpp/include/color_data.h (currently 14 curves).
+// ---------------------------------------------------------------------------
+namespace {
+const char* const kLogSpaceNames[] = {
+    "F-Log",
+    "F-Log2",
+    "F-Log2C",
+    "V-Log",
+    "N-Log",
+    "L-Log",
+    "Canon Log 2",
+    "Canon Log 3",
+    "S-Log3",
+    "S-Log3.Cine",
+    "Arri LogC3",
+    "Arri LogC4",
+    "Log3G10",
+    "D-Log",
+};
+}  // namespace
+
 rust::Vec<rust::String> log_spaces() {
   rust::Vec<rust::String> out;
-  // `LOG_SPACES` lives in upstream's `rawalchemy` namespace (color_data.h); the
-  // `using namespace rawalchemy;` inside `grade` above does not extend here.
-  const auto& spaces = rawalchemy::LOG_SPACES;
-  out.reserve(spaces.size());
-  for (const auto& entry : spaces) {
-    out.push_back(rust::String(entry.first));
+  out.reserve(sizeof(kLogSpaceNames) / sizeof(kLogSpaceNames[0]));
+  for (const char* name : kLogSpaceNames) {
+    out.push_back(rust::String(name));
   }
   return out;
 }
