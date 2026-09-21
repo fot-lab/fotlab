@@ -93,19 +93,33 @@ fn main() {
     // The `rustc-link-*` lines are COLLECTED here but emitted only AFTER the
     // `static=rawalchemy_grading` directive below — see the replay site for the reason
     // (ld's left-to-right archive resolution makes the order load-bearing).
+    // Contract with cpp/CMakeLists.txt: it ALWAYS writes this file into
+    // CMAKE_INSTALL_PREFIX, which is exactly the `dst` returned by
+    // `cmake::Config::build()` (the file is simply empty when OpenMP is off). A
+    // missing file is therefore a real break in the build graph and must NOT be
+    // swallowed: an unread file means the OpenMP link directives never reach rustc,
+    // the cdylib keeps unresolved `__kmpc_*` symbols, and rustc does not pass
+    // `--no-undefined` for cdylibs — so the link "succeeds" and the failure is only
+    // discovered on device at `dlopen`. That silent skip is exactly how a one-level
+    // path mismatch hid across two CI cycles (`ACTION-PERFOR-000007`).
     let openmp_link = Path::new(&dst).join("openmp-link.txt");
+    let openmp_text = std::fs::read_to_string(&openmp_link).unwrap_or_else(|e| {
+        panic!(
+            "rawalchemy_fotlab: expected OpenMP link info at {} — cpp/CMakeLists.txt always \
+             writes it into CMAKE_INSTALL_PREFIX (= the `dst` this build script received): {e}",
+            openmp_link.display()
+        )
+    });
     let mut openmp_directives: Vec<String> = Vec::new();
-    if let Ok(text) = std::fs::read_to_string(&openmp_link) {
-        for line in text.lines() {
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-            if let Some(path) = line.strip_prefix("bundle=") {
-                println!("cargo:warning=rawalchemy_fotlab: OpenMP links the shared runtime — bundle {path} into jniLibs/<abi>/libomp.so");
-            } else {
-                openmp_directives.push(line.to_string());
-            }
+    for line in openmp_text.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if let Some(path) = line.strip_prefix("bundle=") {
+            println!("cargo:warning=rawalchemy_fotlab: OpenMP links the shared runtime — bundle {path} into jniLibs/<abi>/libomp.so");
+        } else {
+            openmp_directives.push(line.to_string());
         }
     }
 

@@ -167,6 +167,15 @@ endif()
 
 # Hand whatever link requirement we resolved back to build.rs. Always written, so
 # build.rs can read it unconditionally; empty when OpenMP is off.
-file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/openmp-link.txt" "${RA_OPENMP_LINK_INFO}")
+#
+# Written into CMAKE_INSTALL_PREFIX on purpose — NOT CMAKE_CURRENT_BINARY_DIR. The
+# former is the value `cmake::Config::build()` hands back to build.rs as `dst` (the
+# documented return of that API, and where `install(TARGETS ...)` lands); the cmake
+# crate's own build tree is the internal `dst/build`, one level deeper. Writing to
+# CMAKE_CURRENT_BINARY_DIR put the file exactly one directory away from where
+# build.rs looked, so `read_to_string` failed, the directives were dropped, and the
+# cdylib shipped unresolved `__kmpc_*` symbols — dlopen then failed on device and
+# every native call degraded (the `test_image_alchemy` "0 of 14 log spaces" symptom).
+file(WRITE "${CMAKE_INSTALL_PREFIX}/openmp-link.txt" "${RA_OPENMP_LINK_INFO}")
 
 install(TARGETS rawalchemy_grading ARCHIVE DESTINATION lib)
