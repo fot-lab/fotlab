@@ -14,7 +14,7 @@ rules/
 │       Master item table with ID links; no stats, no changelog
 │
 └── REVIEW/detail/
-    └── ACTION-XXXXXX-NNNNNN.md      ← Layer 3
+    └── {AREA}-XXXXXX-NNNNNN.md       ← Layer 3
         Full analysis per item + human-readable Change History
 ```
 
@@ -43,7 +43,7 @@ rules/
 
 1. Pick the category code from the table below.
 2. Take the next sequence number **for that category** from `rules/REVIEW/index.md` — 6 digits, zero-padded, counting independently inside the category.
-3. Create `REVIEW/detail/ACTION-{CATEGORY}-{NNNNNN}.md` from the template below.
+3. Create `REVIEW/detail/{AREA}-{CATEGORY}-{NNNNNN}.md` from the template below (substitute the area code for this effort, e.g. `ACTION`, `OPTIMZ`, `DNGLAB`, `FOTLAB`).
 4. Append exactly one row to the table in `rules/REVIEW/index.md`, linking the new detail file.
 5. Never modify existing rows except the `Status` and `Title` fields.
 
@@ -76,7 +76,7 @@ ID format: `XXXXXX-XXXXXX-NNNNNN` — fixed length, 18 characters excluding hyph
 
 | Segment | Value | Rule |
 | --- | --- | --- |
-| 1 | `XXXXXX` | Area code, always `ACTION` for review items |
+| 1 | `XXXXXX` | Area code — identifies the owning effort; **not** fixed to `ACTION`. Use a stable 6-char code per effort (e.g. `ACTION` for review items, `OPTIMZ` for optimization work, `DNGLAB` for upstream dnglab, `FOTLAB` for first-party bindings) |
 | 2 | `XXXXXX` | Category code, exactly 6 characters (see table below) |
 | 3 | `NNNNNN` | 6-digit zero-padded sequence, **counting independently inside each category** — the first item of a new category starts at `000001` regardless of other categories |
 
@@ -92,7 +92,7 @@ The detail file name **must** equal its ID plus `.md`.
 | `LIBRND` | Library Rendering | Library / Recycle view one-level rendering, query scoping, and view-isolation audit for the virtual fs feature |
 | `KOTLIN` | Kotlin Code Quality | First-party Kotlin / Compose source audits: Android & Compose best-practice compliance, control-flow flattening, duplication extraction, localization, and platform / data-layer API usage |
 | `RAWLER` | RAW Decoder / dnglab binding | First-party `rawler_fotlab` Rust binding and integration lessons with the external `dnglab` rawler (Rust) decoder — FFI call selection, header-vs-full-decode contracts, preview quality. Area prefix `DNGLAB` for upstream dnglab findings, `FOTLAB` (or `ACTION`) for first-party binding lessons |
-| `PERFOR` | Performance & Render Pipeline | Latency / memory / throughput of the render pipeline end to end: bottleneck attribution, pixel transport across the FFI, preview resolution policy, parallelism and build-profile headroom, render-backend trade-offs under the `minSdk 26` ceiling. Item count: see `ACTION-PERFOR-000001` (master) + `000002`–`000009` |
+| `PERFRM` | Performance & Render Pipeline | Latency / memory / throughput of the render pipeline end to end: bottleneck attribution, pixel transport across the FFI, preview resolution policy, parallelism and build-profile headroom, render-backend trade-offs under the `minSdk 26` ceiling. Item count: see `OPTIMZ-PERFRM-000001` (master) + `000002`–`000009` |
 | `ROLLBK` | Architecture Rollback Guard | Process rules that forbid silently degrading or removing first-party architecture to make CI green or to simplify a fix. Item count: see `ACTION-ROLLBK-000001` |
 
 ## Status & Priority

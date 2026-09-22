@@ -1,11 +1,11 @@
 # 预览始终走全分辨率 — 没有降采样路径，且 Coil 未被给出解码尺寸
 
-- ID: ACTION-PERFOR-000003
+- ID: OPTIMZ-PERFRM-000003
 - Status: Observation
 - Priority: P1
 - Created: 2026-09-21
 - Owner: —
-- Related: `rules/REVIEW/detail/ACTION-PERFOR-000001.md`（总览）、`rules/REVIEW/detail/FOTLAB-RAWLER-000003.md`（superpixel 1/4 已设计未接线）、`rules/REVIEW/detail/DNGLAB-RAWLER-000001.md`（preview 曾是未处理 dump）、`rules/REVIEW/detail/ACTION-LIBRND-000001.md`（Library 单层渲染）
+- Related: `rules/REVIEW/detail/OPTIMZ-PERFRM-000001.md`（总览）、`rules/REVIEW/detail/FOTLAB-RAWLER-000003.md`（superpixel 1/4 已设计未接线）、`rules/REVIEW/detail/DNGLAB-RAWLER-000001.md`（preview 曾是未处理 dump）、`rules/REVIEW/detail/ACTION-LIBRND-000001.md`（Library 单层渲染）
 
 ## Background & Goal
 
@@ -54,7 +54,7 @@ Coil 在无尺寸约束时按图片原始分辨率解码（这一点尚未实测
 
 - **画质契约属产品决策**：交互时用 1/4、导出/放大到 >100% 时才跑全分辨率，需要人工确认（总览 C4）。在契约确认前不能擅自把Studio 的输出降级。
 - `FOTLAB-RAWLER-000003` §C 已把 1/4 设计好但未接线，本条目的实现应顺着既有设计走，而不是另立一套。
-- 与 `ACTION-PERFOR-000005`（缓存已显影 buffer）存在收益重叠：两者都减少"重跑全量像素"的次数，但解决的是不同问题（前者减小单次成本，后者消除重复执行）。
+- 与 `OPTIMZ-PERFRM-000005`（缓存已显影 buffer）存在收益重叠：两者都减少"重跑全量像素"的次数，但解决的是不同问题（前者减小单次成本，后者消除重复执行）。
 
 ## Recommendation
 
@@ -62,7 +62,7 @@ Coil 在无尺寸约束时按图片原始分辨率解码（这一点尚未实测
 
 1. **先给 Coil 指定尺寸**（三处调用各加一个基于视图像素的目标 size，放大场景可用 2× 余量）。这是纯 UI 侧改动，不动 native 契约，也不需要画质决策。
 2. **再接 superpixel 1/4**：沿 `FOTLAB-RAWLER-000003` §C 的 `ScaleMode`，让 native 在预览时直接出 1/4。只有在人工确认了"交互 1/4、导出全分辨率"的契约之后才实施。
-3. 以上都需要先有 `ACTION-PERFOR-000009` 的打点数据作为基线。
+3. 以上都需要先有 `OPTIMZ-PERFRM-000009` 的打点数据作为基线。
 
 ## Change History
 

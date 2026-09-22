@@ -1,11 +1,11 @@
 # PNG 作为跨 FFI 的像素载荷 — 预览路径背负一次完整 deflate 与一次完整 inflate
 
-- ID: ACTION-PERFOR-000004
+- ID: OPTIMZ-PERFRM-000004
 - Status: Observation
 - Priority: P1
 - Created: 2026-09-21
 - Owner: —
-- Related: `rules/REVIEW/detail/ACTION-PERFOR-000001.md`（总览）、`rules/REVIEW/detail/ACTION-PERFOR-000002.md`（瓶颈归因）、`rules/REVIEW/detail/FOTLAB-RAWLER-000004.md`（解码一次 / RawlerImageLoaded）、`rules/REVIEW/detail/FOTLAB-RAWLER-000005.md`（双分叉，UI 分支在 `bound.rs` 收尾）
+- Related: `rules/REVIEW/detail/OPTIMZ-PERFRM-000001.md`（总览）、`rules/REVIEW/detail/OPTIMZ-PERFRM-000002.md`（瓶颈归因）、`rules/REVIEW/detail/FOTLAB-RAWLER-000004.md`（解码一次 / RawlerImageLoaded）、`rules/REVIEW/detail/FOTLAB-RAWLER-000005.md`（双分叉，UI 分支在 `bound.rs` 收尾）
 
 ## Background & Goal
 
@@ -25,7 +25,7 @@ Rust 与 Kotlin 之间目前只通过两种载荷传递图像：PNG 字节（`Ve
 
 而这条链的下游马上就是 Coil（`app/src/main/kotlin/io/github/fotlab/fotlab/feature/studio/StudioScreen.kt:248`），它拿到 PNG 后要 inflate 出一张 200 MB 的 Bitmap。也就是说**同一帧的无损压缩被做了两遍**：native 侧压缩一次，UI 侧解压一次，中间还会落到一次 Java `ByteArray`。
 
-预览（preview）是一次性的中间结果，按定义既不需要无损也不需要磁盘友好 —— 这也是 `ACTION-PERFOR-000002` 把它列为"最确定的纯浪费"的原因。
+预览（preview）是一次性的中间结果，按定义既不需要无损也不需要磁盘友好 —— 这也是 `OPTIMZ-PERFRM-000002` 把它列为"最确定的纯浪费"的原因。
 
 ### 2. 可选方案
 
@@ -45,7 +45,7 @@ Rust 与 Kotlin 之间目前只通过两种载荷传递图像：PNG 字节（`Ve
 ## Recommendation
 
 1. 先把 A 做掉（降压缩档位）——它没有任何取舍，纯粹是有收益。
-2. B 是真正的解法，但属于架构变更：**先把量级数据（`ACTION-PERFOR-000009`）摆在人工面前**，确认"是否允许新增 JNI 层"之后再动。
+2. B 是真正的解法，但属于架构变更：**先把量级数据（`OPTIMZ-PERFRM-000009`）摆在人工面前**，确认"是否允许新增 JNI 层"之后再动。
 3. D 不建议：minSdk 26 下拿不到封装 API，手写 mmap 的复杂度高于收益。
 
 ## Change History

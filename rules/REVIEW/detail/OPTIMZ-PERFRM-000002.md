@@ -1,15 +1,15 @@
 # 渲染瓶颈归因 — FFI 调用开销被误判；真正的成本是像素搬运、重复拷贝与 PNG 编解码
 
-- ID: ACTION-PERFOR-000002
+- ID: OPTIMZ-PERFRM-000002
 - Status: Observation
 - Priority: P1
 - Created: 2026-09-21
 - Owner: —
-- Related: `rules/REVIEW/detail/ACTION-PERFOR-000001.md`（总览）、`rules/REVIEW/detail/ACTION-PERFOR-000003.md`、`rules/REVIEW/detail/ACTION-PERFOR-000004.md`、`rules/REVIEW/detail/ACTION-PERFOR-000009.md`
+- Related: `rules/REVIEW/detail/OPTIMZ-PERFRM-000001.md`（总览）、`rules/REVIEW/detail/OPTIMZ-PERFRM-000003.md`、`rules/REVIEW/detail/OPTIMZ-PERFRM-000004.md`、`rules/REVIEW/detail/OPTIMZ-PERFRM-000009.md`
 
 ## Background & Goal
 
-`ACTION-PERFOR-000001` 的调研由一个前提触发："跨越 FFI 传递是比较慢的"。本条目专门验证这个前提，因为一旦它是错的，后续所有优化方向都会被带偏——例如会倾向于"把计算搬到另一个进程/WebView 里以便少跨一次 FFI"，而那样省掉的是 µs，付出的却是一次额外的全量像素搬运。
+`OPTIMZ-PERFRM-000001` 的调研由一个前提触发："跨越 FFI 传递是比较慢的"。本条目专门验证这个前提，因为一旦它是错的，后续所有优化方向都会被带偏——例如会倾向于"把计算搬到另一个进程/WebView 里以便少跨一次 FFI"，而那样省掉的是 µs，付出的却是一次额外的全量像素搬运。
 
 ## Finding
 
@@ -39,7 +39,7 @@ UniFFI 0.28 生成的 Kotlin 绑定在 Android 上通过 JNA 调用（`app/build
 
 ### 3. PNG 编解码是交互路径上最确定的纯浪费
 
-`app/src/binding/rust/rawler_fotlab/src/bound.rs:128` 与 `:174` 用 `PngEncoder::new(...)` 对整幅 RGBA8 做无损 deflate，Coil 侧再 inflate 一遍。预览（preview）按定义就是中间结果，既不需要无损也不需要磁盘友好。这一项展开在 `ACTION-PERFOR-000004`。
+`app/src/binding/rust/rawler_fotlab/src/bound.rs:128` 与 `:174` 用 `PngEncoder::new(...)` 对整幅 RGBA8 做无损 deflate，Coil 侧再 inflate 一遍。预览（preview）按定义就是中间结果，既不需要无损也不需要磁盘友好。这一项展开在 `OPTIMZ-PERFRM-000004`。
 
 ### 4. 量级排序（估算，待实测）
 
@@ -52,12 +52,12 @@ PNG deflate（200 MB 级无损压缩）  ≳  PNG inflate（Coil 侧）
       ≫  JNA / FFI 单次调用开销（µs 级）
 ```
 
-上述排序、`image` crate `PngEncoder::new` 的默认压缩档位、以及 Coil 未指定 `size` 时的解码行为**均未实测**，全部列为 `ACTION-PERFOR-000009` 的打点目标。
+上述排序、`image` crate `PngEncoder::new` 的默认压缩档位、以及 Coil 未指定 `size` 时的解码行为**均未实测**，全部列为 `OPTIMZ-PERFRM-000009` 的打点目标。
 
 ## Impact / Conflict
 
-- 优化顺序会被带偏：按"少跨一次 FFI"选型，最容易选中"搬到 WebView / 另起进程"这一类方案，而它会**增加**一次全量像素搬运（见 `ACTION-PERFOR-000008`）。
-- `ACTION-PERFOR-000004` 的 NDK 直填 Bitmap 方案会在 UniFFI 之外新增 JNI 层，与 `app/src/binding/kotlin/io/github/fotlab/fotlab_rawler/RawlerFotlabBridge.kt:14-19` 的"唯一跨语言边界"规矩冲突 —— 属人工拍板项（总览 C2）。
+- 优化顺序会被带偏：按"少跨一次 FFI"选型，最容易选中"搬到 WebView / 另起进程"这一类方案，而它会**增加**一次全量像素搬运（见 `OPTIMZ-PERFRM-000008`）。
+- `OPTIMZ-PERFRM-000004` 的 NDK 直填 Bitmap 方案会在 UniFFI 之外新增 JNI 层，与 `app/src/binding/kotlin/io/github/fotlab/fotlab_rawler/RawlerFotlabBridge.kt:14-19` 的"唯一跨语言边界"规矩冲突 —— 属人工拍板项（总览 C2）。
 
 ## Recommendation
 
@@ -65,7 +65,7 @@ PNG deflate（200 MB 级无损压缩）  ≳  PNG inflate（Coil 侧）
 
 - **源数据不要复制两次**：参照项目里已有的落缓存做法（`app/src/main/kotlin/io/github/fotlab/fotlab/feature/studio/StudioEngine.kt` 的 `copyLutToCache`），把 SAF 文件一次性落到 app 私有缓存，再用 `RawSource::new(path)` 走 mmap，省掉 `new_from_slice` 的那次复制，后续重复解码也不必再读一遍源文件。
 
-其余（"到底是 PNG 贵还是 develop 贵"）必须由实测决定，打点方案见 `ACTION-PERFOR-000009`。
+其余（"到底是 PNG 贵还是 develop 贵"）必须由实测决定，打点方案见 `OPTIMZ-PERFRM-000009`。
 
 **明确不建议**：基于"FFI 慢"这个前提去做任何以减少跨界调用次数为目标的改造 —— 它没有省掉任何字节。
 

@@ -1,11 +1,11 @@
 # 每次调参都重跑整条 develop 链 — 缓存的粒度停在"已解码"，没到"已显影"
 
-- ID: ACTION-PERFOR-000005
+- ID: OPTIMZ-PERFRM-000005
 - Status: Observation
 - Priority: P1
 - Created: 2026-09-21
 - Owner: —
-- Related: `rules/REVIEW/detail/ACTION-PERFOR-000001.md`（总览）、`rules/REVIEW/detail/FOTLAB-RAWLER-000004.md`（decode-once，`RawlerImageLoaded`）、`rules/REVIEW/detail/FOTLAB-RAWLER-000008.md`（boost 四参数语义 / §Impact 已提出缓存已显影 buffer）、`rules/DESIGN/detail/FOTLAB-PIPELN-000001.md`（FotRaw / FotDev IR）
+- Related: `rules/REVIEW/detail/OPTIMZ-PERFRM-000001.md`（总览）、`rules/REVIEW/detail/FOTLAB-RAWLER-000004.md`（decode-once，`RawlerImageLoaded`）、`rules/REVIEW/detail/FOTLAB-RAWLER-000008.md`（boost 四参数语义 / §Impact 已提出缓存已显影 buffer）、`rules/DESIGN/detail/FOTLAB-PIPELN-000001.md`（FotRaw / FotDev IR）
 
 ## Background & Goal
 
@@ -47,11 +47,11 @@ pub struct RawlerImageLoaded {
 
 ### 3. 这一点已被既有条目指出过
 
-`rules/REVIEW/detail/FOTLAB-RAWLER-000008.md` §Impact 已经写明：改 boost 只需要重跑 grading，正确修法是缓存已显影 buffer。本条目把它正式提升为一个独立的阻塞项，因为它同时是其它优化的前置条件——不缓存 `FotDev`，`ACTION-PERFOR-000003`（降分辨率）之外的每一次改造都还得从头跑。
+`rules/REVIEW/detail/FOTLAB-RAWLER-000008.md` §Impact 已经写明：改 boost 只需要重跑 grading，正确修法是缓存已显影 buffer。本条目把它正式提升为一个独立的阻塞项，因为它同时是其它优化的前置条件——不缓存 `FotDev`，`OPTIMZ-PERFRM-000003`（降分辨率）之外的每一次改造都还得从头跑。
 
 ## Impact / Conflict
 
-- **收益与其它条目重叠但不等价**：`ACTION-PERFOR-000003` 降低单次成本，本条目消除重复执行。两者互补。
+- **收益与其它条目重叠但不等价**：`OPTIMZ-PERFRM-000003` 降低单次成本，本条目消除重复执行。两者互补。
 - **工作空间未决**（与既有设计的开放问题重合）：`rules/DESIGN/detail/FOTLAB-PIPELN-000001.md` 的开放问题里，"FotDev 到底活在 D65 还是 D50"仍未拍板，而 `FOTLAB-RAWLER-000005` 确立的双分叉正好是：`SrgbD65`（显示）与 `ProPhotoD50`（交给 rawalchemy）两条路。缓存 `FotDev` 必须先决定缓存的是哪一支，或者两支都缓存。
 - UI 侧 readiness：这正是未来上滑杆（拖动式调参）的前置改造，目前 Studio 的 API 结构还不能承载连续调参。
 

@@ -1,11 +1,11 @@
 # 渲染后端路线评估 — WebView/RapidRAW 不成立；真正的对应物是 GPU，但受 minSdk 26 约束
 
-- ID: ACTION-PERFOR-000008
+- ID: OPTIMZ-PERFRM-000008
 - Status: Observation
 - Priority: P2
 - Created: 2026-09-21
 - Owner: —
-- Related: `rules/REVIEW/detail/ACTION-PERFOR-000001.md`（总览）、`ACTION-PERFOR-000003.md`（降分辨率，收益可替代一部分 GPU 收益）、`ACTION-PERFOR-000005.md`（缓存已显影 buffer，是 GPU 常驻纹理的 CPU 侧对应物）、`rules/REVIEW/detail/ACTION-ROLLBK-000001.md`（架构变更须人工确认）
+- Related: `rules/REVIEW/detail/OPTIMZ-PERFRM-000001.md`（总览）、`OPTIMZ-PERFRM-000003.md`（降分辨率，收益可替代一部分 GPU 收益）、`OPTIMZ-PERFRM-000005.md`（缓存已显影 buffer，是 GPU 常驻纹理的 CPU 侧对应物）、`rules/REVIEW/detail/ACTION-ROLLBK-000001.md`（架构变更须人工确认）
 
 ## Background & Goal
 
@@ -29,7 +29,7 @@ RapidRAW 的技术栈是 Tauri + Rust + **wgpu**：Web 前端只是 UI 壳。它
 
 - 像素必须先从 native 进 WebView 一侧 —— 可选通道只有 blob URL / base64 data URI / `MessagePort`，每一种都是一次**全量拷贝**（base64 还额外膨胀 33%）；
 - 再额外背一个 WebView 进程的内存开销与 GPU 上下文；
-- 它要解决的本项目瓶颈（`ACTION-PERFOR-000002`：全分辨率 CPU 计算 + 数百 MB 的像素搬运）一个都没动，只是把最后一跳换了个地方。
+- 它要解决的本项目瓶颈（`OPTIMZ-PERFRM-000002`：全分辨率 CPU 计算 + 数百 MB 的像素搬运）一个都没动，只是把最后一跳换了个地方。
 
 **结论：WebView 不成立。** 它既不像 RapidRAW 那样有 wgpu 做底座，也不解决我们的瓶颈。
 
@@ -59,12 +59,12 @@ minSdk 26 这条线本身在项目其它位置也已经反复约束过实现（�
 - **两条路互斥，需要人拍板**（总览 C1）：
   - 写原生 GLES3 —— 不抬 minSdk，但要把 developed 管线的每一段重写成 shader；
   - 抬 minSdk —— 换取更简单的实现（SharedMemory / HardwareBuffer / AGSL），代价是放弃一部分设备覆盖，属产品决策。
-- GPU 路线与 `ACTION-PERFOR-000003`（降分辨率）、`ACTION-PERFOR-000005`（缓存已显影 buffer）的动机完全一致——都是让"全分辨率重算"只发生一次。差别在于：那两条仍在 CPU 上，成本低得多；GPU 路线是把整条管线换掉。**在打点数据出来之前，不应直接跳到 GPU 路线。**
+- GPU 路线与 `OPTIMZ-PERFRM-000003`（降分辨率）、`OPTIMZ-PERFRM-000005`（缓存已显影 buffer）的动机完全一致——都是让"全分辨率重算"只发生一次。差别在于：那两条仍在 CPU 上，成本低得多；GPU 路线是把整条管线换掉。**在打点数据出来之前，不应直接跳到 GPU 路线。**
 
 ## Recommendation
 
 1. **不采纳 WebView 方案**，理由记录如上（增加搬运、不解决瓶颈、且拿不到 RapidRAW 的 wgpu 底座）。
-2. GPU 路线的落地顺序应该是：先 `ACTION-PERFOR-000003` + `ACTION-PERFOR-000005`（让全分辨率只算一次），如果仍然不够，才评估 GLES3。
+2. GPU 路线的落地顺序应该是：先 `OPTIMZ-PERFRM-000003` + `OPTIMZ-PERFRM-000005`（让全分辨率只算一次），如果仍然不够，才评估 GLES3。
 3. 其中 **`GL_TEXTURE_3D` 替掉 CPU LUT 插值**这一项收益最确定、范围最小（只动 grading 的 LUT 环节），可作为 GPU 路线的第一个试点。
 4. 是否抬 minSdk：**纯产品决策，不由 Agent 侧决定**。
 

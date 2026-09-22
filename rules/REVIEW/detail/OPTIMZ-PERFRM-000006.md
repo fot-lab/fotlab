@@ -1,11 +1,11 @@
 # Library 里 RAW 没有真实缩略图 — Coil 解不了 RAW，落到 MIME 图标，内嵌预览没被使用
 
-- ID: ACTION-PERFOR-000006
+- ID: OPTIMZ-PERFRM-000006
 - Status: Observation
 - Priority: P2
 - Created: 2026-09-21
 - Owner: —
-- Related: `rules/REVIEW/detail/ACTION-PERFOR-000001.md`（总览）、`rules/REVIEW/detail/ACTION-LIBRND-000001.md`（Library 单层渲染与视图隔离）、`rules/REVIEW/detail/FOTLAB-RAWLER-000001.md`（preview 曾为未处理 dump）、`rules/REVIEW/detail/DNGLAB-RAWLER-000001.md`（同一问题的早期记录）
+- Related: `rules/REVIEW/detail/OPTIMZ-PERFRM-000001.md`（总览）、`rules/REVIEW/detail/ACTION-LIBRND-000001.md`（Library 单层渲染与视图隔离）、`rules/REVIEW/detail/FOTLAB-RAWLER-000001.md`（preview 曾为未处理 dump）、`rules/REVIEW/detail/DNGLAB-RAWLER-000001.md`（同一问题的早期记录）
 
 ## Background & Goal
 

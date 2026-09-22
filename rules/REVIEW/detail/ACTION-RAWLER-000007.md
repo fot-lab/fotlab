@@ -5,7 +5,7 @@
 - Priority: P2
 - Created: 2026-09-22
 - Owner: —
-- Related: `rules/REVIEW/detail/FOTLAB-RAWLER-000006.md`（同一个 `rawalchemy_fotlab` cxx 胶水，本条目是其枚举面的延伸）、`rules/REVIEW/detail/ACTION-PERFOR-000001.md`（本条目所依据的枚举解耦背景）
+- Related: `rules/REVIEW/detail/FOTLAB-RAWLER-000006.md`（同一个 `rawalchemy_fotlab` cxx 胶水，本条目是其枚举面的延伸）、`rules/REVIEW/detail/OPTIMZ-PERFRM-000001.md`（本条目所依据的枚举解耦背景）
 
 ## Background & Goal
 
@@ -103,7 +103,7 @@ app/src/binding/cxx/rawalchemy_fotlab/cpp/rawalchemy_shim.cc
 2. 若要正式化同步义务，可考虑在上游 vendored 版本升级时加一条检查（比对 canonical 列与
    `LOG_SPACES` 键集合），但当前规模（14 条、低变更频率）下人工同步足够。
 3. 语言：`rules/REVIEW.md` §General Rules 第 1 条仍写着英文撰写；本条目按 2026-09-21/22 的人工口头许可
-   用中文撰写，与 `ACTION-PERFOR-*` 批次一致。该规则文本本身未改，是否放宽仍待人工拍板。
+   用中文撰写，与 `OPTIMZ-PERFRM-*` 批次一致。该规则文本本身未改，是否放宽仍待人工拍板。
 
 ## Change History
 

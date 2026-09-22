@@ -1,13 +1,13 @@
 # 原生侧算力未被利用 — 自写像素循环是单线程标量，rawalchemy 的 OpenMP 未开启，release profile 未调优
 
-- ID: ACTION-PERFOR-000007
+- ID: OPTIMZ-PERFRM-000007
 - Status: Observation
 - Priority: P2
 - Created: 2026-09-21
 - Owner: —
-- Related: `rules/REVIEW/detail/ACTION-PERFOR-000001.md`（总览）、`rules/REVIEW/detail/ACTION-PERFOR-000003.md`（降分辨率会削弱本条收益）、`rules/REVIEW/detail/DNGLAB-RAWLER-000005.md`（解码并行度随编码而定，不随厂商）
+- Related: `rules/REVIEW/detail/OPTIMZ-PERFRM-000001.md`（总览）、`rules/REVIEW/detail/OPTIMZ-PERFRM-000003.md`（降分辨率会削弱本条收益）、`rules/REVIEW/detail/DNGLAB-RAWLER-000005.md`（解码并行度随编码而定，不随厂商）
 
-> 注：`Related` 只列真实相邻的条目：`rules/REVIEW/detail/ACTION-PERFOR-000001.md`、`ACTION-PERFOR-000003.md`、`DNGLAB-RAWLER-000005.md`。`FOTLAB-CRASH-000001` 在本文件内以正文形式引用（其内容可从 `app/src/binding/rust/rawler_fotlab/src/loaded.rs:36,79,114` 等处的注释读到），该 ID 尚未在 `rules/REVIEW/index.md` 中登记。
+> 注：`Related` 只列真实相邻的条目：`rules/REVIEW/detail/OPTIMZ-PERFRM-000001.md`、`OPTIMZ-PERFRM-000003.md`、`DNGLAB-RAWLER-000005.md`。`FOTLAB-CRASH-000001` 在本文件内以正文形式引用（其内容可从 `app/src/binding/rust/rawler_fotlab/src/loaded.rs:36,79,114` 等处的注释读到），该 ID 尚未在 `rules/REVIEW/index.md` 中登记。
 
 ## Background & Goal
 
@@ -50,7 +50,7 @@
 
 ## Impact / Conflict
 
-- 本条目的收益**依赖于** `ACTION-PERFOR-000003`：一旦预览降到 1/4，像素数 ÷16，并行化与编译优化带来的绝对收益会同比缩小。这也是总览把它放在 T0 之后的原因。
+- 本条目的收益**依赖于** `OPTIMZ-PERFRM-000003`：一旦预览降到 1/4，像素数 ÷16，并行化与编译优化带来的绝对收益会同比缩小。这也是总览把它放在 T0 之后的原因。
 - **`panic = "abort"` 不可用**：项目靠 `catch_unwind` 把 rawler panic 挡在 FFI 边界之内（见 `app/src/binding/rust/rawler_fotlab/src/loaded.rs:36,79,114` 等处的注释 `FOTLAB-CRASH-000001`）。任何 profile 改动都必须保留 unwind。
 - OpenMP 路线需要引入 `libomp.so`：APK 体积增加，CI 的 jniLibs 拷贝步骤要补一份（跟现状里的 `libc++_shared.so` 一样）。
 - `-C target-feature=+neon` 一类改动涉及 ABI / 设备兼容性，不能盲目启用。
@@ -60,7 +60,7 @@
 1. **先 rayon 化我们自己的三段循环**（`develop.rs:229`、`calibrate.rs:136/159`、`bound.rs:123/163`）。逐像素无依赖，8 核上接近线性；不引入任何新构件。
 2. **grading 的并行优先在 Rust 侧切片**：按行把 buffer 切成 N 份、用 rayon 并发调用 `grade`，可以不引入 `libomp.so`。是否宁可接受新增一个 .so 去换 OpenMP 的写法 —— **属人工决策**（总览 C3）。
 3. profile：加 `lto = "thin"`、`codegen-units = 1`，**保留 unwind**。aarch64 的 target-feature 需要真机兼容性验证后再决定。
-4. 以上都要先有 `ACTION-PERFOR-000009` 的基线数据，否则无法判断并行化是否值得（尤其是这几段循环有可能是内存带宽受限而非 CPU 受限）。
+4. 以上都要先有 `OPTIMZ-PERFRM-000009` 的基线数据，否则无法判断并行化是否值得（尤其是这几段循环有可能是内存带宽受限而非 CPU 受限）。
 
 ## Change History
 

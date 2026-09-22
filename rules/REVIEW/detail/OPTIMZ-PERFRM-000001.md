@@ -1,11 +1,11 @@
 # 渲染管线性能审计总览 — 瓶颈归因、加速手段分级与待拍板项
 
-- ID: ACTION-PERFOR-000001
+- ID: OPTIMZ-PERFRM-000001
 - Status: Observation
 - Priority: P1
 - Created: 2026-09-21
 - Owner: —
-- Related: `rules/REVIEW/detail/ACTION-PERFOR-000002.md`（瓶颈归因）、`ACTION-PERFOR-000003.md`（全分辨率预览）、`ACTION-PERFOR-000004.md`（PNG 载荷）、`ACTION-PERFOR-000005.md`（调参重跑全链路）、`ACTION-PERFOR-000006.md`（Library 缩略图）、`ACTION-PERFOR-000007.md`（原生侧算力未被利用）、`ACTION-PERFOR-000008.md`（渲染后端路线）、`ACTION-PERFOR-000009.md`（度量缺失）、`rules/REVIEW/detail/FOTLAB-RAWLER-000003.md`（superpixel 1/4 设计，未接线）、`rules/REVIEW/detail/FOTLAB-RAWLER-000004.md`（解码一次）、`rules/REVIEW/detail/FOTLAB-RAWLER-000008.md`（boost 语义）、`rules/DESIGN/detail/FOTLAB-PIPELN-000001.md`（FotRaw/FotDev IR）
+- Related: `rules/REVIEW/detail/OPTIMZ-PERFRM-000002.md`（瓶颈归因）、`OPTIMZ-PERFRM-000003.md`（全分辨率预览）、`OPTIMZ-PERFRM-000004.md`（PNG 载荷）、`OPTIMZ-PERFRM-000005.md`（调参重跑全链路）、`OPTIMZ-PERFRM-000006.md`（Library 缩略图）、`OPTIMZ-PERFRM-000007.md`（原生侧算力未被利用）、`OPTIMZ-PERFRM-000008.md`（渲染后端路线）、`OPTIMZ-PERFRM-000009.md`（度量缺失）、`rules/REVIEW/detail/FOTLAB-RAWLER-000003.md`（superpixel 1/4 设计，未接线）、`rules/REVIEW/detail/FOTLAB-RAWLER-000004.md`（解码一次）、`rules/REVIEW/detail/FOTLAB-RAWLER-000008.md`（boost 语义）、`rules/DESIGN/detail/FOTLAB-PIPELN-000001.md`（FotRaw/FotDev IR）
 
 > 本条目组为中文撰写（以往 `rules/**` 条目为英文）。是否要把这一条放宽写进 `rules/REVIEW.md` §General Rules 的第 1 条，见本文件 §Impact / Conflict 的 C5，**待人工确认**。
 
@@ -19,13 +19,13 @@
 2. 列出除"换渲染后端到 WebView"之外可用的加速杠杆，按性价比与侵入性分档；
 3. 把需要人工拍板的结构性取舍（minSdk、是否新增 JNI 层、是否引入 libomp、画质契约）单独拎出来，按项目规矩不自行择一。
 
-结论拆成了 8 个子条目（`ACTION-PERFOR-000002` … `000009`），本文件是它们的索引与背景。
+结论拆成了 8 个子条目（`OPTIMZ-PERFRM-000002` … `000009`），本文件是它们的索引与背景。
 
 ## Finding
 
 ### 1. 前置假设不成立：FFI 本身不是瓶颈
 
-UniFFI 0.28 的 Kotlin 绑定底层走 JNA（`app/build.gradle.kts:163`），单次跨界调用开销在 µs 级。真正消耗时间的是**一次调用要搬运的字节量**，以及**同一份像素被反复拷贝、deflate、再 inflate**——详见 `ACTION-PERFOR-000002`。
+UniFFI 0.28 的 Kotlin 绑定底层走 JNA（`app/build.gradle.kts:163`），单次跨界调用开销在 µs 级。真正消耗时间的是**一次调用要搬运的字节量**，以及**同一份像素被反复拷贝、deflate、再 inflate**——详见 `OPTIMZ-PERFRM-000002`。
 
 ### 2. 当前链路（Studio 每次参数变化都会整条重跑）
 
@@ -59,21 +59,21 @@ UniFFI 0.28 的 Kotlin 绑定底层走 JNA（`app/build.gradle.kts:163`），单
 
 | 档 | 手段 | 子条目 |
 |---|---|---|
-| **T0** | 预览降分辨率（让后半段全部同比变快） | `ACTION-PERFOR-000003` |
-| **T0** | Coil 显式指定解码尺寸 | `ACTION-PERFOR-000003` |
-| **T0** | PNG 搬出交互路径 | `ACTION-PERFOR-000004` |
-| **T0** | 缓存"已显影 buffer"（`FotDev`）而非只缓存 `RawImage` | `ACTION-PERFOR-000005` |
-| **T0** | Library 用 RAW 内嵌预览出缩略图 | `ACTION-PERFOR-000006` |
-| **T0** | 源数据不要复制两次 | `ACTION-PERFOR-000002` |
-| **T1** | rayon 并行我们自己的三个全分辨率循环 | `ACTION-PERFOR-000007` |
-| **T1** | rawalchemy 的 OpenMP / Rust 侧切片并发 | `ACTION-PERFOR-000007` |
-| **T1** | release profile（LTO / codegen-units / NEON） | `ACTION-PERFOR-000007` |
-| **T2** | 换掉"字节数组过 FFI"：native 直填 Bitmap / DirectByteBuffer | `ACTION-PERFOR-000004` |
-| **T3** | GPU 后端（GLES3 着色器链；LUT 走 `GL_TEXTURE_3D`） | `ACTION-PERFOR-000008` |
+| **T0** | 预览降分辨率（让后半段全部同比变快） | `OPTIMZ-PERFRM-000003` |
+| **T0** | Coil 显式指定解码尺寸 | `OPTIMZ-PERFRM-000003` |
+| **T0** | PNG 搬出交互路径 | `OPTIMZ-PERFRM-000004` |
+| **T0** | 缓存"已显影 buffer"（`FotDev`）而非只缓存 `RawImage` | `OPTIMZ-PERFRM-000005` |
+| **T0** | Library 用 RAW 内嵌预览出缩略图 | `OPTIMZ-PERFRM-000006` |
+| **T0** | 源数据不要复制两次 | `OPTIMZ-PERFRM-000002` |
+| **T1** | rayon 并行我们自己的三个全分辨率循环 | `OPTIMZ-PERFRM-000007` |
+| **T1** | rawalchemy 的 OpenMP / Rust 侧切片并发 | `OPTIMZ-PERFRM-000007` |
+| **T1** | release profile（LTO / codegen-units / NEON） | `OPTIMZ-PERFRM-000007` |
+| **T2** | 换掉"字节数组过 FFI"：native 直填 Bitmap / DirectByteBuffer | `OPTIMZ-PERFRM-000004` |
+| **T3** | GPU 后端（GLES3 着色器链；LUT 走 `GL_TEXTURE_3D`） | `OPTIMZ-PERFRM-000008` |
 
 ### 5. 关于"WebView 里画（RapidRAW 式）"
 
-RapidRAW 快的原因是 **wgpu / GPU**（解码一次 → 常驻纹理 → 调参只改 shader uniform），不是"它是网页"。搬进 Android WebView 只会给已有链路**再加一跳**像素搬运（blob / base64，后者还膨胀 33%），外加一个 WebView 进程的内存与 GPU 上下文。它不解决本项目的瓶颈。完整评估见 `ACTION-PERFOR-000008`。
+RapidRAW 快的原因是 **wgpu / GPU**（解码一次 → 常驻纹理 → 调参只改 shader uniform），不是"它是网页"。搬进 Android WebView 只会给已有链路**再加一跳**像素搬运（blob / base64，后者还膨胀 33%），外加一个 WebView 进程的内存与 GPU 上下文。它不解决本项目的瓶颈。完整评估见 `OPTIMZ-PERFRM-000008`。
 
 ## Impact / Conflict
 
@@ -89,7 +89,7 @@ RapidRAW 快的原因是 **wgpu / GPU**（解码一次 → 常驻纹理 → 调�
 
 按"先度量、再改"的顺序执行，**在实测量级出来之前不动 Tier 2 / Tier 3**：
 
-1. **先打点**（`ACTION-PERFOR-000009`）：decode / demosaic / calibrate / grade / png-encode / ui-display 六个断面，真机跑一张 45–60 MP 的 RAW。本报告的所有量级判断都是估算，必须实测确认。
+1. **先打点**（`OPTIMZ-PERFRM-000009`）：decode / demosaic / calibrate / grade / png-encode / ui-display 六个断面，真机跑一张 45–60 MP 的 RAW。本报告的所有量级判断都是估算，必须实测确认。
 2. **T0**：降分辨率 + Coil 指定 size（收益最大、改动最小）。
 3. **T0**：缓存已显影 buffer —— 为所有"只重跑一个阶段"的优化铺路，也正好落在 `rules/DESIGN/detail/FOTLAB-PIPELN-000001.md` 的 `FotDev` 契约上。
 4. **T0**：Library 内嵌预览缩略图。
@@ -98,4 +98,4 @@ RapidRAW 快的原因是 **wgpu / GPU**（解码一次 → 常驻纹理 → 调�
 
 ## Change History
 
-- 2026-09-21 — 创建。只读调研（未改动任何代码），把"FFI 跨界慢"的前提纠正为"像素搬运 / 拷贝 / PNG 编解码慢"，并拆出 `ACTION-PERFOR-000002` 至 `000009` 共 8 个子条目；同时新增 `PERFOR` 分类。全条目按人工许可使用中文撰写。
+- 2026-09-21 — 创建。只读调研（未改动任何代码），把"FFI 跨界慢"的前提纠正为"像素搬运 / 拷贝 / PNG 编解码慢"，并拆出 `OPTIMZ-PERFRM-000002` 至 `000009` 共 8 个子条目；同时新增 `PERFOR` 分类。全条目按人工许可使用中文撰写。
