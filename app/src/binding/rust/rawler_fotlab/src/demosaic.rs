@@ -11,13 +11,25 @@
 //! demosaic. A user selection that is incompatible with the CFA falls back to
 //! the CFA-appropriate default (and logs).
 //!
+//! The stage also owns the **quarter-resolution** switch: when `downsample` is
+//! set, rawler's superpixel debayer (a different `Demosaic` implementation, not
+//! a resize) replaces the selected algorithm and this stage returns an
+//! intermediate at *half* the linear dimensions. Everything downstream —
+//! calibrate, crop, PNG encode, the rawalchemy grade — sees only that smaller
+//! `Intermediate` / `RawlerImageDeveloped`, so the branch is invisible to them
+//! (`rules/REVIEW/detail/OPTIMZ-PERFRM-000010.md`).
+//!
 //! Fuji rotation and active-area crop are part of this stage because they are
 //! tightly coupled to the demosaic ROI (rawler's own pipeline interleaves them).
 //! `fuji_normalize_rotation` is `pub(crate)` upstream, so it is replicated here
 //! verbatim from `external/dnglab/rawler/src/imgop/fuji_rotate.rs`.
 
 use rawler::imgop::develop::Intermediate;
-use rawler::imgop::sensor::bayer::{bilinear::Bilinear4Channel, ppg::PPGDemosaic};
+use rawler::imgop::sensor::bayer::{
+  bilinear::Bilinear4Channel,
+  ppg::PPGDemosaic,
+  superpixel::{Superpixel3Channel, Superpixel4Channel},
+};
 use rawler::imgop::sensor::xtrans::bilinear::XTransBilinearDemosaic;
 use rawler::imgop::sensor::{Demosaic as RawlerDemosaic, SensorType};
 use rawler::imgop::Dim2;
@@ -46,12 +58,23 @@ enum Algo {
   Ppg,
   Bilinear4,
   XTrans,
+  /// Quarter-resolution 2×2 combine for a three-colour Bayer mosaic
+  /// (`Superpixel3Channel`). Output is half the linear dimensions.
+  Superpixel,
+  /// The same combine for a four-colour mosaic (`Superpixel4Channel`).
+  Superpixel4,
 }
 
 /// Debayer the scaled mosaic into a colour intermediate, applying the selected
 /// demosaic algorithm, Fuji rotation and active-area crop. Mirrors the demosaic
 /// block of rawler's `RawDevelop::develop_intermediate` (minus the later
 /// calibrate / SRgb steps).
+///
+/// `downsample` swaps the resolved algorithm for rawler's superpixel debayer —
+/// a quarter-resolution *demosaic*, not a resize — when the sensor supports it
+/// (see [`superpixel_algo`]); otherwise it has no effect and `algo` runs at full
+/// resolution. Either way the return value is one `Intermediate`, which is what
+/// makes the switch invisible to the calibrate stage and beyond.
 ///
 /// `data` is the scaled f32 pixel buffer, MOVED OUT of the `RawImage` by the
 /// caller (zero-copy) so it is not duplicated: on a 50 MP frame this buffer is
@@ -63,6 +86,7 @@ pub(crate) fn demosaic(
   image: &RawImage,
   data: Vec<f32>,
   algo: DemosaicAlgorithm,
+  downsample: bool,
 ) -> Result<Intermediate, RawlerFotlabError> {
   let (w, h) = (image.width, image.height);
 
@@ -94,7 +118,15 @@ pub(crate) fn demosaic(
         pixels.rect()
       };
 
-      let chosen = effective_algorithm(config, algo);
+      // The downsampling switch takes precedence over the algorithm selection, so that the
+      // drawer's preference and the Demosaic dropdown stay independent knobs: with the switch
+      // ON the image is quarter-resolution; with it OFF the picked algorithm runs. A sensor that
+      // cannot use superpixel keeps the picked algorithm — the switch degrades, it never fails.
+      // (Pre-coloured input never reaches here: it has no CFA and is returned untouched below.)
+      let chosen = match downsample.then(|| superpixel_algo(image, config)).flatten() {
+        Some(superpixel) => superpixel,
+        None => effective_algorithm(config, algo),
+      };
       let next = match chosen {
         Algo::Ppg => {
           let rgb = PPGDemosaic::new().demosaic(pixels, &config.cfa, &config.colors, roi);
@@ -108,12 +140,57 @@ pub(crate) fn demosaic(
           let rgb = XTransBilinearDemosaic::new().demosaic(pixels, &config.cfa, &config.colors, roi);
           Intermediate::ThreeColor(fuji_rotate_if_needed(rgb, image))
         }
+        // Superpixel needs no Fuji rotation here: `superpixel_algo` refuses Fuji-rotated
+        // sensors, because `rotate_45cw` mixes the absolute `fuji_rotation_width` with the
+        // source width and the source is half-scale on this path.
+        Algo::Superpixel => {
+          let rgb = Superpixel3Channel::new().demosaic(pixels, &config.cfa, &config.colors, roi);
+          Intermediate::ThreeColor(rgb)
+        }
+        Algo::Superpixel4 => {
+          let rgb = Superpixel4Channel::new().demosaic(pixels, &config.cfa, &config.colors, roi);
+          Intermediate::FourColor(rgb)
+        }
       };
       return Ok(next);
     }
   }
 
   Ok(intermediate)
+}
+
+/// Resolve the superpixel (quarter-resolution) variant for this sensor, or `None` when the
+/// quarter-resolution path cannot run and the caller must fall back to a full-resolution
+/// algorithm.
+///
+/// The guards are hard requirements of the upstream primitives, not policy:
+/// * `Superpixel3Channel` matches the CFA **name** against the four RGGB-family patterns and
+///   `unreachable!()`s on anything else — so a three-colour X-Trans name (and any malformed 2×2
+///   string) must never reach it.
+/// * `Superpixel4Channel` requires four colour planes and panics otherwise.
+/// * A Fuji-rotated sensor is excluded because the rotation step is a *later* stage of this same
+///   pipeline and mixes the absolute `fuji_rotation_width` with the source width — which is
+///   half-scale on this path, so the rotated crop would be wrong.
+fn superpixel_algo(image: &RawImage, config: &CFAConfig) -> Option<Algo> {
+  if config.sensor != SensorType::Bayer || image.fuji_rotation_width.is_some() {
+    return None;
+  }
+  match config.colors.plane_count() {
+    3 if matches!(config.cfa.name.as_str(), "RGGB" | "BGGR" | "GBRG" | "GRBG") => Some(Algo::Superpixel),
+    4 => Some(Algo::Superpixel4),
+    _ => None,
+  }
+}
+
+/// Whether this decoded image can be developed at quarter resolution — the question the Studio
+/// drawer's downsampling switch asks before offering itself. Same guard as [`superpixel_algo`], so
+/// the answer and the pipeline's behaviour cannot drift apart: `false` also covers pre-coloured
+/// (non-CFA) input, which has no mosaic to combine and is passed through untouched.
+pub(crate) fn supports_downsample(image: &RawImage) -> bool {
+  match &image.photometric {
+    RawPhotometricInterpretation::Cfa(config) => superpixel_algo(image, config).is_some(),
+    _ => false,
+  }
 }
 
 /// Resolve a user selection against the sensor CFA, falling back to the

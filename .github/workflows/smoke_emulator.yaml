@@ -270,7 +270,7 @@ jobs:
           log-artifact-name: ${{ inputs.log-artifact-name }}
           log-retention-days: ${{ inputs.log-retention-days }}
 
-  # -------- shard 3: demosaic / develop (10 tests, the heavy shard) --------
+  # -------- shard 3: demosaic / develop (12 tests, the heavy shard) --------
   test-image-develop:
     name: Smoke / test_image_develop
     needs: [prep-emulator]
@@ -280,10 +280,13 @@ jobs:
     timeout-minutes: 75
     env:
       # Native develop-entry boundary; one develop-through-menu journey per RAW
-      # brand; the every-menu-option + exposure recompute proof.
+      # brand; the every-menu-option + exposure recompute proof; the drawer's
+      # quarter-resolution switch (preference semantics, no re-render on toggle,
+      # both axes halved on BOTH the develop and the rawalchemy grade fork, and
+      # the byte-identical round trip back to full resolution).
       TEST_FILTER: >-
         io.github.fotlab.fotlab.smoke.RawlerNativeSmokeTest#developOfNonRawBytesReturnsNull+developOfPngSurvives+developDirectCallSurfacesJvmException,
-        io.github.fotlab.fotlab.smoke.RawRoutingTest#canonCr2DevelopsThroughDemosaicMenu+sonyIlce7rArwDevelopsThroughDemosaicMenu+sonyIlce7rm2ArwDevelopsThroughDemosaicMenu+nikonD850NefDevelopsThroughDemosaicMenu+panasonicDcS1rRw2DevelopsThroughDemosaicMenu+everyDemosaicMenuOptionRedevelopsOnBayerAndExposureRecomputes+manualKelvinWhiteBalanceRedevelopsWithoutBlack
+        io.github.fotlab.fotlab.smoke.RawRoutingTest#canonCr2DevelopsThroughDemosaicMenu+sonyIlce7rArwDevelopsThroughDemosaicMenu+sonyIlce7rm2ArwDevelopsThroughDemosaicMenu+nikonD850NefDevelopsThroughDemosaicMenu+panasonicDcS1rRw2DevelopsThroughDemosaicMenu+everyDemosaicMenuOptionRedevelopsOnBayerAndExposureRecomputes+manualKelvinWhiteBalanceRedevelopsWithoutBlack+fullResolutionDevelopKeepsBothAxesAboveThePreviewFloor+downsampleSwitchHalvesBothAxesOnDevelopAndGradeWithoutReRendering
     steps:
       # Checkout must precede the local action — see the test-app-smoke shard above.
       - name: Check out

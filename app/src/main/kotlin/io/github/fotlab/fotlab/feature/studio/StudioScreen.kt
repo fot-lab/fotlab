@@ -46,6 +46,7 @@ import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
@@ -123,6 +124,10 @@ fun StudioScreen() {
     // Grade (Boost/LOG/LUT) is a RAW-only fork: reGrade() is a safe no-op for non-RAW images, but
     // the former grade bar was gated on a resident RAW and we keep that contract for Tune/Style.
     val rawLoaded by StudioEngine.isRawLoaded.collectAsState()
+    // The quarter-resolution develop switch (a preference: flipping it re-renders nothing) and
+    // whether the resident RAW can actually honour it (`null` = nothing resident yet).
+    val downsample by StudioEngine.downsample.collectAsState()
+    val downsampleSupported by StudioEngine.downsampleSupported.collectAsState()
     // The log curve names are static per native library; read once for the LOG menu.
     val logSpaces = remember { StudioEngine.supportedLogSpaces() }
     var showUnsupported by remember { mutableStateOf(false) }
@@ -205,7 +210,15 @@ fun StudioScreen() {
         drawerState = drawerState,
         gesturesEnabled = false,
         drawerContent = {
-            StudioDrawer(onClose = { scope.launch { drawerState.close() } })
+            StudioDrawer(
+                downsample = downsample,
+                // The switch is a preference, so it stays settable with nothing open; it is only
+                // disabled when the RAW on the canvas reports it cannot downsample at all, which
+                // the summary line then says out loud instead of leaving it silently inert.
+                downsampleAvailable = downsampleSupported != false,
+                onDownsampleChange = { StudioEngine.setDownsample(it) },
+                onClose = { scope.launch { drawerState.close() } },
+            )
         },
     ) {
         // Module-level Scaffold nested inside the shell's root Scaffold (allowed by
@@ -528,11 +541,21 @@ private fun StudioScreenFunBar(
  * level with the fun bar's menu icon, so opening the drawer replaces that icon in place
  * (R6); the close row shares the fun bar's 64.dp height and the navigation-bar inset.
  *
+ * The sheet's one setting today is the **quarter-resolution develop switch**: a persisted
+ * preference, so flipping it deliberately does not re-render the canvas — the frame the user is
+ * looking at stays put and the next develop picks the choice up. That is why the row says so in
+ * its summary line (`rules/REVIEW/detail/OPTIMZ-PERFRM-000010.md`), and why
+ * [downsampleAvailable] exists: a sensor that cannot use the superpixel debayer disables the
+ * switch and states the reason rather than accepting a toggle it will ignore.
+ *
  * TODO: drawer content — tool categories / recent edits. Module-private per `FOTLAB-UIXDES-000002` R5.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun StudioDrawer(
+    downsample: Boolean,
+    downsampleAvailable: Boolean,
+    onDownsampleChange: (Boolean) -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -546,6 +569,42 @@ private fun StudioDrawer(
             style = MaterialTheme.typography.titleMedium,
             modifier = Modifier.padding(16.dp),
         )
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(id = R.string.studio_drawer_downsample),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = if (downsampleAvailable) {
+                        MaterialTheme.colorScheme.onSurface
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+                Text(
+                    text = stringResource(
+                        id = if (downsampleAvailable) {
+                            R.string.studio_drawer_downsample_summary
+                        } else {
+                            R.string.studio_drawer_downsample_unavailable
+                        },
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked = downsample,
+                onCheckedChange = onDownsampleChange,
+                enabled = downsampleAvailable,
+                modifier = Modifier.padding(start = 12.dp),
+            )
+        }
 
         // Push the close affordance to the bottom-left, level with the fun bar's menu icon.
         Spacer(modifier = Modifier.weight(1f))

@@ -10,11 +10,17 @@
 //! 3. `exposure_ev` — linear gain `2^exposure_ev` on the **single-channel** scaled
 //!    mosaic, *before* demosaic (one mul per photosite instead of per output
 //!    channel; demosaic is linear so the result is identical)
-//! 4. `demosaic`    — selectable debayer + Fuji rotate + active-area crop (ROI)
+//! 4. `demosaic`    — selectable debayer + Fuji rotate + active-area crop (ROI). When
+//!    `downsample` is set this stage runs rawler's **superpixel** debayer instead: same
+//!    input (the exposed mosaic), same slot, but the result is quarter-resolution. The
+//!    switch chooses between two producers of the *same* `Intermediate`, so it never
+//!    reaches the stages below (`rules/REVIEW/detail/OPTIMZ-PERFRM-000010.md`).
 //! 5. `calibrate`   — white balance + cam→working-space matrix (exposure already
 //!    applied); `WorkingSpace` selects sRGB D65 (presentation) or ProPhoto D50
 //!    (editing). **No clipping** — out-of-[0,1] is kept for the editing branch.
-//! 6. crop-default  — crop to the recommended area (rawler `CropDefault`)
+//! 6. crop-default  — crop to the recommended area (rawler `CropDefault`); the crop
+//!    rectangle is halved when the demosaic stage produced a quarter-resolution image,
+//!    derived from the dimensions rather than from the switch.
 //!
 //! Dual fork (`rules/REVIEW/detail/FOTLAB-RAWLER-000005.md`): the linear result
 //! is finished into a display-ready sRGB PNG (gamma + clip) for the UI by
@@ -41,6 +47,15 @@ use crate::RawlerFotlabError;
 /// The product of the develop pipeline: a linear RGB image (no gamma applied).
 ///
 /// `rgb` is row-major linear RGB float, length `width * height * 3`.
+///
+/// **Path-independent by contract.** There is one of these regardless of which
+/// demosaic path ran — full-resolution PPG/bilinear/X-Trans, or the
+/// quarter-resolution superpixel switch. `width`/`height` are the dimensions of
+/// the buffer actually produced (post-crop), nothing else records the choice, and
+/// no consumer may infer or branch on it: calibrate, crop, the PNG encoder and
+/// the rawalchemy grade all see the same structure with the same invariants and
+/// simply process fewer pixels when the switch is on
+/// (`rules/REVIEW/detail/OPTIMZ-PERFRM-000010.md`).
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct RawlerImageDeveloped {
   pub width: u32,
@@ -53,6 +68,20 @@ pub struct RawlerImageDeveloped {
 pub struct DevelopParams {
   /// Demosaic algorithm selection (defaults to rawler's CFA-appropriate choice).
   pub demosaic_algorithm: DemosaicAlgorithm,
+  /// Quarter-resolution preview switch — the Studio drawer's persisted downsampling
+  /// preference. `true` replaces the demosaic stage with rawler's superpixel debayer: each
+  /// 2×2 CFA block collapses into one RGB(E) pixel, so every later stage (calibrate, crop,
+  /// PNG encode, rawalchemy grade) runs on a quarter of the pixels, i.e. the same picture
+  /// at half the linear dimensions. This is a *different demosaic*, not a post-demosaic
+  /// resize (`rules/REVIEW/detail/OPTIMZ-PERFRM-000010.md`).
+  ///
+  /// Ignored — the requested [`DemosaicAlgorithm`] runs at full resolution instead — when
+  /// the sensor cannot use superpixel: X-Trans, a CFA that is neither the RGGB family nor
+  /// four-colour, a Fuji-rotated sensor, or pre-coloured (non-CFA) input.
+  /// `RawlerImageLoaded::supports_downsample` answers the capability in advance so the UI
+  /// can disable the switch rather than let it silently do nothing.
+  #[uniffi(default = false)]
+  pub downsample: bool,
   /// Exposure compensation in stops; applied as the linear multiplier
   /// `2^exposure_ev` (the linear `exp_scale`) to the scaled mosaic *before*
   /// demosaic (single-channel). `None` = as-shot: no compensation, unity gain —
@@ -243,8 +272,12 @@ pub(crate) fn develop_image(
   }
 
   // Demosaic stage — its ROI is already active_area, exactly like rawler's
-  // Demosaic + FujiRotate + CropActiveArea steps.
-  let intermediate = demosaic(&image, pixels, params.demosaic_algorithm)?;
+  // Demosaic + FujiRotate + CropActiveArea steps. `params.downsample` picks the superpixel
+  // producer instead of the selected algorithm; both return one `Intermediate`, which is the
+  // convergence point of the two paths: from here on nothing knows which one ran, and every
+  // pixel-count-dependent number (`pixels` above is the only full-resolution buffer left) is
+  // simply whatever the intermediate's dimensions say.
+  let intermediate = demosaic(&image, pixels, params.demosaic_algorithm, params.downsample)?;
 
   let wb = params.wb.as_ref().map(|v| {
     let mut a = [1.0f32; 4];
@@ -260,7 +293,7 @@ pub(crate) fn develop_image(
   // but keeping the identical order means the crop coordinates resolve
   // exactly the way upstream resolves them.
   let linear = calibrate(intermediate, &image, wb, space)?;
-  Ok(crop_default(&image, linear))
+  crop_default(&image, linear)
 }
 
 /// Take ownership of the scaled f32 pixel buffer from [RawImage] without a
@@ -277,8 +310,7 @@ fn take_scaled_pixels(image: &mut RawImage) -> Result<Vec<f32>, RawlerFotlabErro
 }
 
 /// Crop the developed image to the recommended area — rawler's `CropDefault`
-/// step, applied after calibrate. Superpixel 1/2 scaling is omitted because we
-/// never use superpixel demosaic.
+/// step, applied after calibrate.
 ///
 /// CRITICAL coordinate fix (the "every format develops to Unsupported" bug):
 /// `RawImage.crop_area` is in **full-sensor** coordinates, but the demosaic
@@ -293,34 +325,105 @@ fn take_scaled_pixels(image: &mut RawImage) -> Result<Vec<f32>, RawlerFotlabErro
 /// `catch_unwind` boundary turned the panic into a Decode error and the UI
 /// showed "Unsupported Format". When `active_area` is `None` the demosaic ROI
 /// was the full frame, so no re-basing happens — matching upstream.
-fn crop_default(image: &RawImage, mut linear: RawlerImageDeveloped) -> RawlerImageDeveloped {
+///
+/// SCALE fix (the downsample switch's own trap): the intermediate can be a
+/// **decimated** view of that ROI — the downsampling switch runs rawler's
+/// superpixel debayer, which emits one output pixel per 2×2 CFA block, so a
+/// half-size buffer carries the ROI's coordinates at half scale. The crop
+/// rectangle has to be brought into the buffer's coordinate space before it is
+/// sliced.
+///
+/// The factor is **derived from the dimensions that actually came back** — never
+/// from a "was superpixel used" flag threaded down from the caller, and never
+/// from a hardcoded `0.5` — so the rectangle and the buffer it slices cannot
+/// disagree, and a future decimation ratio needs no change here. The mapping is
+/// `out = in / factor` in **integer** arithmetic, which is exactly how the
+/// decimator itself truncates (`roi.d.w >> 1` discards the odd last column);
+/// multiplying by the real ratio `buf/roi` would instead drift by a pixel
+/// whenever the ROI is odd (`3664 * (1833/3667) = 1831`, but the true answer is
+/// `1832`). When the dimensions do not describe a clean integer decimation the
+/// factor stays `1` and the bounds check below reports the mismatch with its
+/// numbers, rather than letting the slice panic and resurface as the same bogus
+/// "Unsupported Format".
+fn crop_default(
+  image: &RawImage,
+  mut linear: RawlerImageDeveloped,
+) -> Result<RawlerImageDeveloped, RawlerFotlabError> {
   let Some(mut crop) = image.crop_area.or(image.active_area) else {
-    return linear;
+    return Ok(linear);
   };
-  if let Some(active_area) = image.active_area {
-    crop = crop.adapt(&active_area);
-  }
-  let (cw, ch) = (crop.width() as u32, crop.height() as u32);
-  if cw == linear.width && ch == linear.height {
-    return linear;
+  // The demosaic ROI is `active_area` (the whole frame when there is none), so that — not
+  // `RawImage.width` — is the full-scale space both the crop rectangle and the intermediate are
+  // measured in once the rectangle has been re-based.
+  let (roi_w, roi_h) = match image.active_area {
+    Some(active_area) => {
+      crop = crop.adapt(&active_area);
+      (active_area.d.w, active_area.d.h)
+    }
+    None => (image.width, image.height),
+  };
+
+  let factor = decimation_factor(roi_w, roi_h, linear.width as usize, linear.height as usize);
+  if factor > 1 {
+    crop.p.x /= factor;
+    crop.p.y /= factor;
+    crop.d.w /= factor;
+    crop.d.h /= factor;
   }
 
-  let src_w = linear.width as usize;
+  let (buf_w, buf_h) = (linear.width as usize, linear.height as usize);
+  let (cw, ch) = (crop.width(), crop.height());
   let (x, y) = (crop.x(), crop.y());
-  let cw_usize = cw as usize;
-  let row_len = cw_usize * 3;
-  if cw_usize == 0 || ch == 0 || row_len == 0 {
-    return RawlerImageDeveloped { width: cw, height: ch, rgb: Vec::new() };
+  if cw == buf_w && ch == buf_h {
+    return Ok(linear);
   }
+  if cw == 0 || ch == 0 {
+    return Ok(RawlerImageDeveloped { width: cw as u32, height: ch as u32, rgb: Vec::new() });
+  }
+  // The rectangle has to sit inside the buffer it is about to slice. Falling outside means the
+  // intermediate's dimensions did not describe a decimation this stage recognises — report the
+  // numbers that disagree instead of letting the slice panic.
+  if x + cw > buf_w || y + ch > buf_h {
+    return Err(RawlerFotlabError::Decode(format!(
+      "crop rect {cw}x{ch}+{x}+{y} does not fit the {buf_w}x{buf_h} developed buffer \
+       (roi {roi_w}x{roi_h}, decimation factor {factor})"
+    )));
+  }
+
+  let row_len = cw * 3;
   // Row-wise copy, so each row is an independent contiguous memcpy — parallelised
   // with rayon instead of being walked sequentially (`OPTIMZ-PERFRM-000007`).
-  let mut rgb = vec![0f32; cw_usize * ch as usize * 3];
+  let mut rgb = vec![0f32; cw * ch * 3];
   rgb.par_chunks_mut(row_len).enumerate().for_each(|(row, dst)| {
-    let start = ((y + row) * src_w + x) * 3;
+    let start = ((y + row) * buf_w + x) * 3;
     dst.copy_from_slice(&linear.rgb[start..start + row_len]);
   });
-  linear.width = cw;
-  linear.height = ch;
+  linear.width = cw as u32;
+  linear.height = ch as u32;
   linear.rgb = rgb;
-  linear
+  Ok(linear)
+}
+
+/// Integer decimation factor between the demosaic ROI and the intermediate that came back: `1`
+/// when they are the same size, `n` when the buffer is that ROI reduced by `n` on both axes.
+///
+/// Only clean integer decimation is recognised. The quotient is checked by *truncating back*
+/// (`roi / n == buf`) rather than by exact divisibility, because that is how the decimator itself
+/// works — superpixel emits `roi.d.w >> 1`, so a 3667-wide ROI yields a 1833-wide buffer and
+/// `1833 * 2 != 3667` even though the factor is unambiguously 2. Both axes must agree. Anything
+/// unrecognised returns `1`, leaving the caller's bounds check to report the mismatch instead of
+/// guessing a rectangle.
+fn decimation_factor(roi_w: usize, roi_h: usize, buf_w: usize, buf_h: usize) -> usize {
+  if buf_w == 0 || buf_h == 0 || buf_w > roi_w || buf_h > roi_h {
+    return 1;
+  }
+  if buf_w == roi_w && buf_h == roi_h {
+    return 1;
+  }
+  let (fw, fh) = (roi_w / buf_w, roi_h / buf_h);
+  if fw == fh && fw > 1 && roi_w / fw == buf_w && roi_h / fh == buf_h {
+    fw
+  } else {
+    1
+  }
 }

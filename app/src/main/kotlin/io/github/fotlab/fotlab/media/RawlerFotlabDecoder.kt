@@ -30,12 +30,19 @@ class RawlerFotlabDecoder : RawDecoder {
         format: String,
         algorithm: DemosaicAlgorithm,
         exposureEv: Float,
+        downsample: Boolean,
         open: suspend () -> InputStream,
     ): ByteArray? {
         val bytes = runCatching { open().use { it.readBytes() } }.getOrNull() ?: return null
         // exposureEv carries the user's exposure compensation (2^ev linear gain in the Rust
-        // calibrate step); wb = null keeps the camera's as-shot white balance.
-        val params = DevelopParams(demosaicAlgorithm = algorithm, exposureEv = exposureEv, wb = null)
+        // calibrate step); wb = null keeps the camera's as-shot white balance; downsample carries
+        // the Studio drawer's quarter-resolution preference (superpixel debayer on the native side).
+        val params = DevelopParams(
+            demosaicAlgorithm = algorithm,
+            exposureEv = exposureEv,
+            wb = null,
+            downsample = downsample,
+        )
         return RawlerFotlabBridge.developRawToPng(bytes, params)
     }
 }

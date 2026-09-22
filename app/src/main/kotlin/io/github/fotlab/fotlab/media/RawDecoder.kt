@@ -33,11 +33,17 @@ interface RawDecoder {
      * PNG (no gamma), or `null` if it cannot be decoded. This re-runs the full develop pipeline and
      * is what the Studio bottom-bar demosaic menu and Exposure dialog trigger once the user is
      * already in the Studio interface.
+     *
+     * [downsample] carries the Studio drawer's persisted quarter-resolution preference (rawler's
+     * superpixel debayer — a different demosaic, not a resize). It defaults to `false` so the
+     * stateless fallback stays full-resolution unless the caller opts in; the resident-image path
+     * in `StudioEngine` always passes the preference explicitly.
      */
     suspend fun developToPng(
         format: String,
         algorithm: DemosaicAlgorithm,
         exposureEv: Float = 0.0f,
+        downsample: Boolean = false,
         open: suspend () -> InputStream,
     ): ByteArray?
 }
@@ -53,6 +59,7 @@ object StubRawDecoder : RawDecoder {
         format: String,
         algorithm: DemosaicAlgorithm,
         exposureEv: Float,
+        downsample: Boolean,
         open: suspend () -> InputStream,
     ): ByteArray? = null
 }

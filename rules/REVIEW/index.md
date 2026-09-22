@@ -40,4 +40,5 @@ This file contains **only** the item table. No statistics, no changelog — git 
 | `OPTIMZ-PERFRM-000008` | 渲染后端路线评估 — WebView/RapidRAW 不成立；真正的对应物是 GPU，但受 minSdk 26 约束 | `PERFRM` | Observation | P2 | [detail](rules/REVIEW/detail/OPTIMZ-PERFRM-000008.md) |
 | `OPTIMZ-PERFRM-000009` | 缺少断面度量 — `OPTIMZ-PERFRM-000001` 至 `000008` 的量级判断全部未经实测，附 7 条待验证假设清单 | `PERFRM` | Observation | P1 | [detail](rules/REVIEW/detail/OPTIMZ-PERFRM-000009.md) |
 | `ACTION-RAWLER-000007` | 对数空间枚举的别名契约 — 展示名与引擎名由 shim 内的单一映射表对齐，上游保持只读 | `RAWLER` | Implemented | P2 | [detail](rules/REVIEW/detail/ACTION-RAWLER-000007.md) |
-<!-- Next sequence per category: PREPIN 000002, LIBRND 000002, RAWLER 000008, KOTLIN 000008, FOTLAB-RAWLER 000009, ROLLBK 000002, PERFRM 000010. Append one row per new item; never reuse or renumber IDs. -->
+| `OPTIMZ-PERFRM-000010` | 预览降采样开关 — Kotlin 侧偏好驱动 `DevelopParams.downsample`，在 demosaic 阶段分支为 rawler superpixel 1/4；两路在 calibrate 前汇聚，crop 需半尺度修正 | `PERFRM` | Implemented | P1 | [detail](rules/REVIEW/detail/OPTIMZ-PERFRM-000010.md) |
+<!-- Next sequence per category: PREPIN 000002, LIBRND 000002, RAWLER 000008, KOTLIN 000008, FOTLAB-RAWLER 000009, ROLLBK 000002, PERFRM 000011. Append one row per new item; never reuse or renumber IDs. -->

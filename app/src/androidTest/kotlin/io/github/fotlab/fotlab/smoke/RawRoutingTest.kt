@@ -53,6 +53,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Before
@@ -135,6 +136,11 @@ class RawRoutingTest {
     @After
     fun tearDown() {
         runCatching { StudioEngine.setCurrentNode(null) }
+        // The downsampling switch is a PERSISTED preference, so a test that leaves it on would
+        // change every later test's frame dimensions in this process — including dropping them
+        // below the full-frame floor `waitForDevelopedFrame` asserts. Reset the in-memory value
+        // (and the store) here rather than trusting test order.
+        runCatching { StudioEngine.setDownsample(false) }
     }
 
     // ---------------------------------------------------------------- corpus
@@ -506,6 +512,231 @@ class RawRoutingTest {
         }
         step("develop", "WB 9000 K -> ${cool.outWidth}x${cool.outHeight} (${cool.bytes.size} bytes)")
         assertDevelopedIsColor(cool.bytes, "Sony ILCE-7R WB 9000K (must stay color, never black)")
+    }
+
+    // ------------------------------------------- the drawer's quarter-resolution develop switch
+    //
+    // The criterion, stated once and applied to EVERY fork:
+    //   * switch OFF — both axes stay well above any embedded-preview size (`> 3000` px each);
+    //   * switch ON  — both axes come back BELOW 55 % of that fork's own switch-OFF baseline.
+    // Superpixel halves each axis, so 50 % is the expected landing point and 55 % is the pass line
+    // (a floor at 40 % catches a frame truncated into a strip, which "< 55 %" alone would accept).
+    // Develop AND the rawalchemy grade are both checked, because the switch belongs to the debayer
+    // stage: every downstream fork inherits it, and a fork that failed to inherit it would quietly
+    // keep rendering full-resolution frames.
+
+    /** 无降采样: the persisted default must leave a plain open at full resolution on both axes. */
+    @Test
+    fun fullResolutionDevelopKeepsBothAxesAboveThePreviewFloor() {
+        // Adding the switch must not have changed what a plain open produces: the preference
+        // defaults to OFF, so the canvas is the full frame. "> 3000 px on each axis" is the
+        // no-downsampling criterion — an embedded preview is at most ~2k px across.
+        val frame = openResident(sonyArw7r)
+        assertFalse(
+            "the downsampling preference must default to OFF (a plain open stays full resolution)",
+            StudioEngine.downsample.value,
+        )
+        assertTrue(
+            "a Bayer RGB RAW must report that it can be downsampled, so the drawer offers the switch",
+            StudioEngine.downsampleSupported.value == true,
+        )
+        assertTrue(
+            "no-downsample frame is ${frame.outWidth}x${frame.outHeight} — the width must stay above " +
+                "$FULL_FRAME_MIN_WIDTH px",
+            frame.outWidth > FULL_FRAME_MIN_WIDTH,
+        )
+        assertTrue(
+            "no-downsample frame is ${frame.outWidth}x${frame.outHeight} — the height must stay above " +
+                "$FULL_FRAME_MIN_WIDTH px",
+            frame.outHeight > FULL_FRAME_MIN_WIDTH,
+        )
+        assertDevelopedIsColor(frame.bytes, "Sony ILCE-7R full-resolution (switch OFF)")
+    }
+
+    /**
+     * 有降采样: the switch, end to end on the resident image
+     * (`rules/REVIEW/detail/OPTIMZ-PERFRM-000010.md`). ONE ARW only, on purpose — the switch
+     * selects the debayer producer rather than a per-brand behaviour, so running the other four
+     * corpus samples would cost emulator minutes without adding coverage.
+     *
+     *  1. the decode reports that it CAN be downsampled — the native capability query that decides
+     *     whether the drawer offers the switch or disables it with a reason;
+     *  2. both switch-OFF baselines are taken FIRST — develop, then grade — so each fork gets a
+     *     genuine before/after of its own with the switch as the only variable;
+     *  3. flipping the switch re-renders NOTHING. A preference is not a render trigger, so the
+     *     canvas must still hold the very same frame object afterwards — not merely an equal frame;
+     *  4. the NEXT develop, and then the next grade, each halve both axes (rawler's superpixel
+     *     debayer: one output pixel per 2×2 CFA block) and both stay COLOR frames, so
+     *     calibrate/white-balance/crop ran on the smaller buffer rather than erroring out;
+     *  5. flipping it back and redeveloping reproduces the full-resolution as-shot frame byte for
+     *     byte — the convergence proof: the switch only selects a different producer of the debayer
+     *     result, and calibrate / crop / PNG are identical for both.
+     *
+     * Step 4 is also the regression for the crop trap this switch steps into: a quarter-resolution
+     * intermediate carries ROI coordinates at half scale, so a crop rectangle that is not decimated
+     * with it runs off the end of the buffer and the panic surfaces as "Unsupported Format".
+     */
+    @Test
+    fun downsampleSwitchHalvesBothAxesOnDevelopAndGradeWithoutReRendering() {
+        val developFull = openResident(sonyArw7r)
+        assertFalse("the switch must start OFF", StudioEngine.downsample.value)
+        assertTrue(
+            "a Bayer RGB RAW must report that it can be downsampled",
+            StudioEngine.downsampleSupported.value == true,
+        )
+
+        StudioEngine.setGradeContrast(1.25f) // grade fork, switch OFF
+        val gradeFull = runBlocking {
+            withTimeout(DECODE_TIMEOUT_MS) {
+                waitForDevelopedFrame(requireDifferentFrom = developFull.bytes)
+            }
+        }
+        step(
+            "downsample",
+            "switch OFF baselines: develop=${developFull.outWidth}x${developFull.outHeight}, " +
+                "grade=${gradeFull.outWidth}x${gradeFull.outHeight}",
+        )
+        assertEquals(
+            "grading re-develops the same frame, so both switch-OFF baselines must share dimensions",
+            developFull.outWidth to developFull.outHeight,
+            gradeFull.outWidth to gradeFull.outHeight,
+        )
+        assertTrue(
+            "the switch-OFF grade baseline must be full resolution too " +
+                "(${gradeFull.outWidth}x${gradeFull.outHeight})",
+            gradeFull.outWidth > FULL_FRAME_MIN_WIDTH && gradeFull.outHeight > FULL_FRAME_MIN_WIDTH,
+        )
+
+        // Flipping the switch stores a preference and nothing else — same frame OBJECT, still Ready.
+        val before = StudioEngine.renderResult.value
+        StudioEngine.setDownsample(true)
+        assertTrue("the switch value must be readable back", StudioEngine.downsample.value)
+        assertSame(
+            "flipping the downsampling switch must not re-render the canvas",
+            before,
+            StudioEngine.renderResult.value,
+        )
+        step("downsample", "switch ON — canvas untouched: no Loading, same Ready frame")
+
+        // ---- develop fork, switch ON ----
+        StudioEngine.develop(DemosaicAlgorithm.DEFAULT)
+        val quarterDevelop = runBlocking {
+            withTimeout(DECODE_TIMEOUT_MS) {
+                waitForDevelopedFrame(requireDifferentFrom = developFull.bytes, minWidth = 1)
+            }
+        }
+        step(
+            "downsample",
+            "switch ON develop -> ${quarterDevelop.outWidth}x${quarterDevelop.outHeight} " +
+                "(${quarterDevelop.bytes.size} bytes)",
+        )
+        assertDownsampledBothAxes("develop (superpixel)", quarterDevelop, developFull)
+        assertDevelopedIsColor(quarterDevelop.bytes, "Sony ILCE-7R downsampled develop")
+
+        // ---- rawalchemy grade fork, switch ON — same contrast, so only the switch moved ----
+        StudioEngine.setGradeContrast(1.25f)
+        val quarterGraded = runBlocking {
+            withTimeout(DECODE_TIMEOUT_MS) {
+                waitForDevelopedFrame(requireDifferentFrom = quarterDevelop.bytes, minWidth = 1)
+            }
+        }
+        step(
+            "downsample",
+            "switch ON grade -> ${quarterGraded.outWidth}x${quarterGraded.outHeight} " +
+                "(${quarterGraded.bytes.size} bytes)",
+        )
+        assertNull("the downsampled grade must not surface a grade error", StudioEngine.gradeError.value)
+        assertDownsampledBothAxes("rawalchemy grade (superpixel)", quarterGraded, gradeFull)
+        assertDevelopedIsColor(quarterGraded.bytes, "Sony ILCE-7R downsampled grade")
+
+        // ---- back OFF: identical downstream stages, so the full-resolution frame returns exactly ----
+        StudioEngine.setDownsample(false)
+        StudioEngine.setGradeContrast(null) // all-"none" returns the canvas to the develop fork
+        val restored = runBlocking {
+            withTimeout(DECODE_TIMEOUT_MS) {
+                waitForDevelopedFrame(requireDifferentFrom = quarterGraded.bytes)
+            }
+        }
+        step(
+            "downsample",
+            "switch OFF restore -> ${restored.outWidth}x${restored.outHeight} (${restored.bytes.size} bytes)",
+        )
+        assertTrue(
+            "switch OFF must reproduce the full-resolution as-shot frame byte for byte",
+            restored.bytes.contentEquals(developFull.bytes),
+        )
+    }
+
+    /**
+     * The "有降采样" criterion, applied to one fork: both axes must land strictly BELOW
+     * [DOWNSAMPLE_MAX_EDGE_RATIO] of that fork's own switch-OFF baseline (superpixel halves each
+     * axis, so 50 % is the expected landing point), and still above [DOWNSAMPLE_MIN_EDGE_RATIO] so a
+     * frame truncated into a thin strip cannot pass a one-sided "smaller than 55 %" test.
+     */
+    private fun assertDownsampledBothAxes(label: String, frame: DevelopedFrame, baseline: DevelopedFrame) {
+        val maxW = (baseline.outWidth * DOWNSAMPLE_MAX_EDGE_RATIO).toInt()
+        val maxH = (baseline.outHeight * DOWNSAMPLE_MAX_EDGE_RATIO).toInt()
+        val minW = (baseline.outWidth * DOWNSAMPLE_MIN_EDGE_RATIO).toInt()
+        val minH = (baseline.outHeight * DOWNSAMPLE_MIN_EDGE_RATIO).toInt()
+        assertTrue(
+            "$label: downsampled frame is ${frame.outWidth}x${frame.outHeight} — both axes must be " +
+                "below 55% of the ${baseline.outWidth}x${baseline.outHeight} same-fork baseline " +
+                "(ceiling ${maxW}x${maxH})",
+            frame.outWidth < maxW && frame.outHeight < maxH,
+        )
+        assertTrue(
+            "$label: downsampled frame is ${frame.outWidth}x${frame.outHeight} — below the " +
+                "${minW}x${minH} sanity floor, which means a truncated strip rather than a half-scale frame",
+            frame.outWidth > minW && frame.outHeight > minH,
+        )
+        step(
+            "downsample",
+            "$label: ${frame.outWidth}x${frame.outHeight} vs ${baseline.outWidth}x${baseline.outHeight} " +
+                "= ${"%.1f".format(100.0 * frame.outWidth / baseline.outWidth)}% x " +
+                "${"%.1f".format(100.0 * frame.outHeight / baseline.outHeight)}%",
+        )
+    }
+
+    /**
+     * Open [sample] resident in Studio the way the engine-level tests do (index into MediaStore →
+     * import at the library root → [StudioEngine.setCurrentNode]) and return the as-shot developed
+     * frame, asserting it is a full-resolution frame. The grid/viewer detour is deliberately
+     * skipped: [journey] already covers it, and every extra open costs the emulator another
+     * 36..50 MP software demosaic.
+     */
+    private fun openResident(sample: Sample): DevelopedFrame {
+        val uri = indexAndFind(sample)
+            ?: throw AssertionError("${sample.label} not on the SD card at /sdcard/Pictures/rawdb/${sample.file}")
+        step("sdcard", "source=${sample.file}")
+        runBlocking { LibraryCore.importUris(parentId = null, uris = listOf(uri)) }
+        val node = runBlocking { LibraryCore.getByUri(uri.toString()) }
+            ?: throw AssertionError("import produced no fs_node for $uri")
+        StudioEngine.setCurrentNode(node.uriStorage)
+
+        val ready = runBlocking {
+            withTimeout(DECODE_TIMEOUT_MS) {
+                StudioEngine.renderResult
+                    .filterNot { it is StudioRenderResult.Idle || it is StudioRenderResult.Loading }
+                    .first()
+            }
+        }
+        assertTrue("as-shot develop must reach Ready", ready is StudioRenderResult.Ready)
+        val bytes = toBytes((ready as StudioRenderResult.Ready).model)
+        val (w, h) = boundsOf(bytes)
+        step("develop", "${sample.label} as-shot canvas frame: ${w}x${h} (${bytes.size} bytes)")
+        assertTrue(
+            "the as-shot frame is ${w}x${h} — that is an embedded preview, not a demosaiced full frame",
+            w >= FULL_FRAME_MIN_WIDTH,
+        )
+        return DevelopedFrame(w, h, bytes)
+    }
+
+    /** Decode a PNG's dimensions without allocating its pixels. */
+    private fun boundsOf(bytes: ByteArray): Pair<Int, Int> {
+        val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+        assertTrue("output is not a decodable PNG", opts.outWidth > 0)
+        return opts.outWidth to opts.outHeight
     }
 
     // ---------------------------------------------------- grade fork (boost group / LOG)
@@ -1087,9 +1318,15 @@ class RawRoutingTest {
      * incompatible menu picks (bilinear-4 / X-Trans on a Bayer sensor) fall back to that same PPG — so
      * redeveloping with them deterministically reproduces the same PNG. Only callers that changed a
      * parameter guaranteed to move pixels (e.g. exposure EV) set [requireDifferentFrom].
+     *
+     * [minWidth] is the "not an embedded preview" floor. It defaults to [FULL_FRAME_MIN_WIDTH] and a
+     * caller expecting a DOWNSAMPLED frame must lower it: a half-scale frame from a 4000 px sensor
+     * would legitimately fall under the full-frame floor, so asserting that floor there would be
+     * semantically wrong even though every 36..50 MP corpus sample happens to stay above it.
      */
     private suspend fun waitForDevelopedFrame(
         requireDifferentFrom: ByteArray? = null,
+        minWidth: Int = FULL_FRAME_MIN_WIDTH,
     ): DevelopedFrame {
         StudioEngine.renderResult.filter { it is StudioRenderResult.Loading }.first()
         val ready = StudioEngine.renderResult
@@ -1107,9 +1344,8 @@ class RawRoutingTest {
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
         assertTrue("developed output is not a decodable PNG", opts.outWidth > 0)
         assertTrue(
-            "developed frame is ${opts.outWidth}x${opts.outHeight} — that is an embedded preview, not a " +
-                "demosaiced full frame",
-            opts.outWidth >= FULL_FRAME_MIN_WIDTH,
+            "developed frame is ${opts.outWidth}x${opts.outHeight} — below the $minWidth px floor",
+            opts.outWidth >= minWidth,
         )
         return DevelopedFrame(opts.outWidth, opts.outHeight, bytes)
     }
@@ -1258,6 +1494,20 @@ class RawRoutingTest {
 
         /** At least 1/50 (2 %) of sampled pixels must be colored for the frame to count as demosaiced. */
         const val COLOR_COLORED_MIN_FRACTION = 50
+
+        /**
+         * Downsampling pass line: with the switch ON every axis must land strictly BELOW this
+         * fraction of that fork's switch-OFF baseline. Superpixel halves each axis, so the expected
+         * landing point is 50 % and 55 % leaves room for the odd-dimension truncation.
+         */
+        const val DOWNSAMPLE_MAX_EDGE_RATIO = 0.55
+
+        /**
+         * Downsampling sanity floor: a genuine half-scale frame sits near 50 %, so a frame below
+         * 40 % is a truncated strip rather than a downsampled photograph — a one-sided
+         * "smaller than the ceiling" test would accept it.
+         */
+        const val DOWNSAMPLE_MIN_EDGE_RATIO = 0.40
 
         /**
          * The grade-LUT fixture, fetched from fot-lab/V-Log-Alchemy by `smoke_emulator.yaml`:

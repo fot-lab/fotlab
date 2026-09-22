@@ -106,6 +106,12 @@
     <string name="studio_demosaic_bilinear4">Bilinear 4-channel</string>
     <string name="studio_demosaic_xtrans">X-Trans Bilinear</string>
 
+    <!-- Studio drawer: the quarter-resolution develop switch (a persisted preference, so its
+         summary line has to say that the change lands on the next develop, not immediately). -->
+    <string name="studio_drawer_downsample">Downsample preview (1/4)</string>
+    <string name="studio_drawer_downsample_summary">Quarter resolution; applies on the next develop</string>
+    <string name="studio_drawer_downsample_unavailable">This sensor\'s mosaic cannot be downsampled</string>
+
     <!-- Studio grade fork (rawalchemy): boost group (Contrast/Saturation) / LOG / LUT. -->
     <string name="studio_grade_none">none</string>
     <!-- Boost-parameter input dialogs (shared shape): free-form float, no range limiting. -->

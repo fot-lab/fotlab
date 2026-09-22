@@ -51,6 +51,13 @@ import kotlin.jvm.Volatile
  * The rawler native decode bridge ([RawDecoder]) is wired to the native `rawler_fotlab` library
  * ([RawlerFotlabDecoder]); when `librawler_fotlab.so` is absent it returns null and the source falls
  * through to [StudioRenderResult.Unsupported] (FOTLAB-STUDIO-000001).
+ *
+ * Develop parameters that are **preferences** rather than render state are held as `StateFlow`s
+ * here — today the quarter-resolution downsampling switch ([downsample] / [setDownsample]). Setting
+ * one stores the choice and deliberately re-renders nothing; every later develop (a new file, a
+ * demosaic/exposure/WB change, a grade change) reads it and passes it to the native pipeline, which
+ * picks rawler's superpixel debayer instead of the selected algorithm
+ * (`rules/REVIEW/detail/OPTIMZ-PERFRM-000010.md`).
  */
 object StudioEngine {
 
@@ -63,6 +70,16 @@ object StudioEngine {
         // The sniff timeout is a user preference (R8 / Q6). Reading it here keeps the sniffer free of
         // preference plumbing and lets the future settings screen change the bound with no code change.
         mediaPreference = MediaPreference(appContext)
+        // The quarter-resolution develop preference, loaded once so the very first open already
+        // develops with the user's last choice (`OPTIMZ-PERFRM-000010`). A broken store must not
+        // block Studio, hence `runCatching` + the `false` (full resolution) default.
+        developPreference = StudioDevelopPreference(appContext)
+        scope.launch {
+            val persisted = runCatching { developPreference.downsample.first() }.getOrDefault(false)
+            // A toggle that landed while the store was still being read wins: the switch is a user
+            // action and must never be silently reverted by a slower disk read.
+            if (!downsampleTouched) downsampleState.value = persisted
+        }
     }
 
     /**
@@ -84,6 +101,9 @@ object StudioEngine {
     /** Media-layer user preferences; the sniff timeout is read from it per open (R8 / Q6). */
     private lateinit var mediaPreference: MediaPreference
 
+    /** Studio develop preferences (the quarter-resolution switch); owned here, written per toggle. */
+    private lateinit var developPreference: StudioDevelopPreference
+
     /** The node currently on the canvas, retained so a develop re-render can re-open the source. */
     private var currentUri: Uri? = null
 
@@ -102,6 +122,10 @@ object StudioEngine {
         gradeSelectionState.value = GradeSelection()
         gradeErrorState.value = null
         rawLoadedState.value = false
+        // The quarter-resolution capability is a property of the decode, so it is re-answered for
+        // the new file (null = nothing resident yet). The switch's own value is a preference and
+        // deliberately survives the file switch.
+        downsampleSupportedState.value = null
         val token = loadNonce.incrementAndGet()
         currentNodeUriState.value = uri
         if (uri == null) {
@@ -155,13 +179,24 @@ object StudioEngine {
                 // A newer node was opened while we decoded: discard so we never clobber the new file's state.
                 if (loadNonce.get() != token) return StudioRenderResult.Unsupported
                 loadedImage = loaded
+                // Ask the decode itself whether the quarter-resolution switch can apply to it, so
+                // the drawer can disable the switch instead of leaving it inert on a sensor that
+                // cannot use superpixel (`OPTIMZ-PERFRM-000010`).
+                downsampleSupportedState.value = RawlerFotlabBridge.supportsDownsample(loaded)
                 // Develop once with as-shot params: pass `null` for both `exposureEv` and `wb` so the
                 // pipeline adopts the decoded as-shot values (rawler's `RawDevelop::default()`, which
                 // dnglab uses for its DNG thumbnail and applies no exposure step — FOTLAB-RAWLER-000004
-                // §as-shot). Later develops reuse this same object.
+                // §as-shot). Later develops reuse this same object. The downsampling preference does
+                // apply here: opening the file is a develop, so the frame it lands on already honours
+                // the switch.
                 val png = RawlerFotlabBridge.developRawlerImage(
                     loaded,
-                    DevelopParams(demosaicAlgorithm = DemosaicAlgorithm.DEFAULT, exposureEv = null, wb = null),
+                    DevelopParams(
+                        demosaicAlgorithm = DemosaicAlgorithm.DEFAULT,
+                        exposureEv = null,
+                        wb = null,
+                        downsample = downsampleState.value,
+                    ),
                 ) ?: return StudioRenderResult.Unsupported
                 currentFormat = r.format
                 rawLoadedState.value = true
@@ -204,6 +239,45 @@ object StudioEngine {
          * deleted; re-opening such a file simply copies it again.
          */
         const val MAX_SOURCE_CACHE_FILES = 8
+    }
+
+    /**
+     * The quarter-resolution develop switch — a **preference**, not render state: flipping it
+     * deliberately re-renders nothing (`rules/REVIEW/detail/OPTIMZ-PERFRM-000010.md`). The value is
+     * handed to the next develop call (opening another file, a demosaic/exposure/WB change, a grade
+     * change), where the native pipeline runs rawler's superpixel debayer instead of the selected
+     * demosaic algorithm. The canvas therefore keeps the frame it has until something else
+     * develops, which is exactly the contract the drawer documents.
+     */
+    private val downsampleState = MutableStateFlow(false)
+
+    /** The switch state the drawer binds to; see [downsampleState]. */
+    val downsample: StateFlow<Boolean> = downsampleState.asStateFlow()
+
+    /**
+     * Set once the user has toggled, so the one-shot store read in [prepare] can never revert a
+     * choice the user made while it was still reading.
+     */
+    @Volatile private var downsampleTouched = false
+
+    /**
+     * Whether the resident RAW can be developed at quarter resolution, decided by the native
+     * sensor/CFA guard; `null` while no routed RAW is resident (the switch is a preference and
+     * stays settable, it just has nothing to apply to yet). The drawer disables the switch on
+     * `false`, so a sensor that cannot downsample (X-Trans, Fuji-rotated) is *stated* instead of
+     * the switch silently doing nothing.
+     */
+    private val downsampleSupportedState = MutableStateFlow<Boolean?>(null)
+    val downsampleSupported: StateFlow<Boolean?> = downsampleSupportedState.asStateFlow()
+
+    /**
+     * Record the drawer's downsampling choice and persist it. Persisting is all this does — see
+     * [downsampleState] for why no develop is triggered here.
+     */
+    fun setDownsample(enabled: Boolean) {
+        downsampleTouched = true
+        downsampleState.value = enabled
+        scope.launch { runCatching { developPreference.setDownsample(enabled) } }
     }
 
     /** The demosaic algorithm retained for the next develop re-render (set when the user picks one). */
@@ -366,6 +440,9 @@ object StudioEngine {
             demosaicAlgorithm = currentAlgorithm,
             exposureEv = currentExposureEv,
             wb = null,
+            // The grade fork develops through the same pipeline, so it honours the switch too —
+            // grading a quarter-resolution frame is simply grading fewer pixels.
+            downsample = downsampleState.value,
         )
         // Only the three grade-bar controls are wired. The boost group assembles here: the switch
         // is derived (either parameter configured), and an unconfigured sibling falls back to 1.0
@@ -572,23 +649,36 @@ object StudioEngine {
         // If the file was switched while we were about to develop, bail — never develop a different
         // file's pixels (FOTLAB-RAWLER-000004 §lifecycle: exactly one handle per current file).
         if (loadNonce.get() != token) return StudioRenderResult.Unsupported
+        // The downsampling preference is read here, i.e. at render time: the drawer only stores it,
+        // so this is where the switch actually reaches the pipeline (either branch below).
+        val downsample = downsampleState.value
         // Reuse the resident decoded image; fall back to a stateless re-decode only if it is absent.
         val loaded = loadedImage
         val png = if (loaded != null) {
             if (wbKelvin != null) {
                 RawlerFotlabBridge.developRawlerImageAtKelvin(
                     loaded,
-                    DevelopParams(demosaicAlgorithm = algorithm, exposureEv = exposureEv, wb = null),
+                    DevelopParams(
+                        demosaicAlgorithm = algorithm,
+                        exposureEv = exposureEv,
+                        wb = null,
+                        downsample = downsample,
+                    ),
                     wbKelvin,
                 )
             } else {
                 RawlerFotlabBridge.developRawlerImage(
                     loaded,
-                    DevelopParams(demosaicAlgorithm = algorithm, exposureEv = exposureEv, wb = null),
+                    DevelopParams(
+                        demosaicAlgorithm = algorithm,
+                        exposureEv = exposureEv,
+                        wb = null,
+                        downsample = downsample,
+                    ),
                 )
             }
         } else {
-            rawDecoder.developToPng(currentFormat ?: "", algorithm, exposureEv) {
+            rawDecoder.developToPng(currentFormat ?: "", algorithm, exposureEv, downsample) {
                 resolver.openInputStream(uri) ?: error("cannot open source")
             }
         }
