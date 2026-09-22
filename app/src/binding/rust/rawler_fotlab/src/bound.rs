@@ -35,7 +35,7 @@ use crate::intermediate::{read_shape, FotRaw, FotRawBuffer};
 ///
 /// Preview PNGs are a **one-way intermediate**: they are handed straight to Coil in
 /// the same process and never persisted, so paying for compression is waste
-/// (`rules/REVIEW/detail/ACTION-PERFOR-000004.md`).
+/// (`rules/REVIEW/detail/OPTIMZ-PERFRM-000004.md`).
 ///
 /// `image` 0.25 already defaults `PngEncoder::new` to `CompressionType::Fast`
 /// (flate level 1 — there is no "store" level exposed by `image`/`png`), so the
@@ -63,7 +63,7 @@ pub(crate) fn fotraw_to_png(pixel: &FotRaw) -> Result<Vec<u8>, String> {
     let cpp = shape.cpp.max(1) as usize;
     // Per-pixel and dependency-free, so it is parallelised with rayon: at 50 MP this
     // is ~50M iterations of pure arithmetic over a ~200 MB output buffer
-    // (`rules/REVIEW/detail/ACTION-PERFOR-000007.md`).
+    // (`rules/REVIEW/detail/OPTIMZ-PERFRM-000007.md`).
     let px_count = (w as usize) * (h as usize);
     let mut rgba: Vec<u8> = vec![0u8; px_count * 4];
 
@@ -147,7 +147,7 @@ pub(crate) fn rawlerimagedeveloped_to_png(image: &RawlerImageDeveloped) -> Resul
     }
 
     // Per-pixel, order-independent: parallelised with rayon (this is the ~50 MP
-    // gamma + RGBA expansion, see `ACTION-PERFOR-000007`).
+    // gamma + RGBA expansion, see `OPTIMZ-PERFRM-000007`).
     let mut rgba: Vec<u8> = vec![0u8; (w as usize) * (h as usize) * 4];
     image
         .rgb
@@ -193,7 +193,7 @@ pub(crate) fn graded_to_png(width: u32, height: u32, rgb: &[f32]) -> Result<Vec<
     }
 
     // Per-pixel quantization with no cross-pixel dependency: parallelised with rayon
-    // (`ACTION-PERFOR-000007`).
+    // (`OPTIMZ-PERFRM-000007`).
     let mut rgba: Vec<u8> = vec![0u8; (width as usize) * (height as usize) * 4];
     rgb.par_chunks_exact(3)
         .zip(rgba.par_chunks_exact_mut(4))

@@ -101,7 +101,7 @@ fn main() {
     // the cdylib keeps unresolved `__kmpc_*` symbols, and rustc does not pass
     // `--no-undefined` for cdylibs — so the link "succeeds" and the failure is only
     // discovered on device at `dlopen`. That silent skip is exactly how a one-level
-    // path mismatch hid across two CI cycles (`ACTION-PERFOR-000007`).
+    // path mismatch hid across two CI cycles (`OPTIMZ-PERFRM-000007`).
     let openmp_link = Path::new(&dst).join("openmp-link.txt");
     let openmp_text = std::fs::read_to_string(&openmp_link).unwrap_or_else(|e| {
         panic!(
@@ -181,7 +181,7 @@ fn main() {
     // after the grading archive (see the ordering note there). When OpenMP is off
     // that file is empty and nothing is emitted — the grading loops then compile as
     // plain single-threaded loops, exactly as before this change
-    // (`rules/REVIEW/detail/ACTION-PERFOR-000007.md`).
+    // (`rules/REVIEW/detail/OPTIMZ-PERFRM-000007.md`).
     let cxx_stdlib = if target.contains("android") {
         "c++"
     } else {

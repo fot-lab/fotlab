@@ -191,7 +191,7 @@ object StudioEngine {
         /**
          * App-private cache subdirectory holding opened source documents copied off their
          * `content://` URIs, so the native decoder can memory-map a real path instead of
-         * receiving a whole-file `ByteArray` (`ACTION-PERFOR-000002`).
+         * receiving a whole-file `ByteArray` (`OPTIMZ-PERFRM-000002`).
          */
         const val SOURCE_CACHE_DIR = "source-cache"
 
@@ -439,7 +439,7 @@ object StudioEngine {
     /**
      * Copy the opened source document behind [uri] to `cacheDir/source-cache/<key>` and return its
      * absolute path, so the native decoder can memory-map it instead of being handed the whole file
-     * as a `ByteArray` (`rules/REVIEW/detail/ACTION-PERFOR-000002.md`).
+     * as a `ByteArray` (`rules/REVIEW/detail/OPTIMZ-PERFRM-000002.md`).
      *
      * Why copy at all: rawler's `RawSource::new` needs a real filesystem path, and a `content://`
      * URI cannot be mapped — the alternative is `readBytes()` followed by `new_from_slice`, i.e.

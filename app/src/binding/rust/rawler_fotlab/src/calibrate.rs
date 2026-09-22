@@ -119,7 +119,7 @@ pub(crate) fn calibrate(
   // Every arm below is a per-pixel mapping with no cross-pixel dependency, so each one is
   // parallelised with rayon — this is the cost centre the upstream `map_*_to_rgb` helpers
   // cannot cover for us, because they are `pub(crate)` in rawler
-  // (`rules/REVIEW/detail/ACTION-PERFOR-000007.md`, `FOTLAB-RAWLER-000003`).
+  // (`rules/REVIEW/detail/OPTIMZ-PERFRM-000007.md`, `FOTLAB-RAWLER-000003`).
   match intermediate {
     Intermediate::Monochrome(pix) => {
       // No per-channel colour mapping for monochrome; replicate the single

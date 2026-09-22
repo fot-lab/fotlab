@@ -62,7 +62,7 @@ pub fn decode_rawler_image(raw: &[u8]) -> Result<Arc<RawlerImageLoaded>, RawlerF
 /// (`StudioEngine.copySourceToCache`) and hands the path across instead of a
 /// `ByteArray`: that removes both the whole-file `readBytes()` copy and
 /// `RawSource::new_from_slice`'s second copy
-/// (`rules/REVIEW/detail/ACTION-PERFOR-000002.md`). Everything downstream of the
+/// (`rules/REVIEW/detail/OPTIMZ-PERFRM-000002.md`). Everything downstream of the
 /// decode is unchanged, and the resident handle behaves exactly like
 /// [`decode_rawler_image`] (same lifecycle, `FOTLAB-RAWLER-000004` §lifecycle).
 #[uniffi::export]

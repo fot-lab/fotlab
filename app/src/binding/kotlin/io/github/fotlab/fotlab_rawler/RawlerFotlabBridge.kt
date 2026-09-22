@@ -50,7 +50,7 @@ object RawlerFotlabBridge {
      * private storage, addressed by real filesystem [path]. The native side memory-maps the file
      * (`RawSource::new`), so unlike the `ByteArray` variant the source bytes are never read into the
      * Java heap nor copied a second time inside Rust — the two full-size copies on the open path
-     * disappear (`rules/REVIEW/detail/ACTION-PERFOR-000002.md`). Everything after the decode is
+     * disappear (`rules/REVIEW/detail/OPTIMZ-PERFRM-000002.md`). Everything after the decode is
      * identical: the returned handle behaves exactly like [loadRawlerImage]'s
      * (`FOTLAB-RAWLER-000004` §lifecycle). Null on failure / absent library.
      */

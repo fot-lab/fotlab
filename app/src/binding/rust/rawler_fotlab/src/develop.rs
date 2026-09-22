@@ -233,7 +233,7 @@ pub(crate) fn develop_image(
   let ev_scale = params.exposure_ev.map_or(1.0, |ev| 2f32.powf(ev));
   if ev_scale != 1.0 {
     // One multiply per photosite, no cross-element dependency: chunked so a rayon task
-    // processes a whole slice instead of a single float (`ACTION-PERFOR-000007`). A raw
+    // processes a whole slice instead of a single float (`OPTIMZ-PERFRM-000007`). A raw
     // `par_iter_mut` here would be dominated by per-element scheduling overhead.
     pixels.par_chunks_mut(64 * 1024).for_each(|chunk| {
       for p in chunk {
@@ -313,7 +313,7 @@ fn crop_default(image: &RawImage, mut linear: RawlerImageDeveloped) -> RawlerIma
     return RawlerImageDeveloped { width: cw, height: ch, rgb: Vec::new() };
   }
   // Row-wise copy, so each row is an independent contiguous memcpy — parallelised
-  // with rayon instead of being walked sequentially (`ACTION-PERFOR-000007`).
+  // with rayon instead of being walked sequentially (`OPTIMZ-PERFRM-000007`).
   let mut rgb = vec![0f32; cw_usize * ch as usize * 3];
   rgb.par_chunks_mut(row_len).enumerate().for_each(|(row, dst)| {
     let start = ((y + row) * src_w + x) * 3;

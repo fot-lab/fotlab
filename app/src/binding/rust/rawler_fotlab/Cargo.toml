@@ -46,7 +46,7 @@ uniffi = "0.28"
 # crop), which upstream rawler cannot parallelise for us — it only parallelises its own
 # internals (`demosaic`). Pinned to the same major version rawler uses so both share a
 # single rayon instance and therefore one worker pool per process
-# (`rules/REVIEW/detail/ACTION-PERFOR-000007.md`).
+# (`rules/REVIEW/detail/OPTIMZ-PERFRM-000007.md`).
 rayon = "1"
 # PNG only: the binding emits PNG (R3 of FOTLAB-STUDIO-000001). Disabling default
 # features avoids pulling every image format the `image` crate can decode.

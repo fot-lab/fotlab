@@ -30,7 +30,7 @@ use crate::RawlerFotlabError;
 ///
 /// Note this copies the whole source once into Rust-owned memory. Prefer
 /// [`decode_source`] + `RawSource::new(path)` for anything already sitting on
-/// the filesystem (`rules/REVIEW/detail/ACTION-PERFOR-000002.md`).
+/// the filesystem (`rules/REVIEW/detail/OPTIMZ-PERFRM-000002.md`).
 pub(crate) fn decode_to_rawimage(raw: &[u8]) -> Result<RawImage, RawlerFotlabError> {
     let src = RawSource::new_from_slice(raw);
     decode_source(&src)

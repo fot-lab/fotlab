@@ -35,7 +35,7 @@ target_include_directories(rawalchemy_grading PUBLIC "${RA_INC}")
 # undefined each parallel region compiles out and the grading loops degrade to
 # sequential scalar code — a 50 MP grade then pays its full tri-linear LUT (8
 # gathers per pixel) on one core. See
-# `rules/REVIEW/detail/ACTION-PERFOR-000007.md`.
+# `rules/REVIEW/detail/OPTIMZ-PERFRM-000007.md`.
 #
 # Two constraints make this more than a one-line toggle:
 #
@@ -52,7 +52,7 @@ target_include_directories(rawalchemy_grading PUBLIC "${RA_INC}")
 # The runtime is preferred STATIC: our only consumer is a single cdylib, so a
 # statically linked runtime needs no `libomp.so` inside the APK and can never
 # fail at `dlopen` time — which removes the runtime-packaging half of the risk
-# (`ACTION-PERFOR-000001` C3) entirely. A shared runtime is accepted when that is
+# (`OPTIMZ-PERFRM-000001` C3) entirely. A shared runtime is accepted when that is
 # all the toolchain ships, and is then reported for bundling.
 #
 # Escape hatch: set the environment variable RA_ENABLE_OPENMP=OFF to build
