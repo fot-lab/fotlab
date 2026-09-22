@@ -34,8 +34,8 @@ class StudioDevelopPreference(context: Context) {
 
     private val store = context.applicationContext.studioDevelopDataStore
 
-    /** The persisted switch; `false` (full resolution) when nothing has been stored yet. */
-    val downsample: Flow<Boolean> = store.data.map { prefs -> prefs[KEY_DOWNSAMPLE] ?: false }
+    /** The persisted switch; `true` (quarter resolution) when nothing has been stored yet. */
+    val downsample: Flow<Boolean> = store.data.map { prefs -> prefs[KEY_DOWNSAMPLE] ?: true }
 
     /** Persist the switch so the next launch starts from the same choice. */
     suspend fun setDownsample(enabled: Boolean) {
