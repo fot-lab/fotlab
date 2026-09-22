@@ -18,6 +18,8 @@
 #   NEED_RAW         'true'/'false' — push the RAW corpus from raw-samples/ to the SD card
 #   NEED_LUT         'true'/'false' — stage the grade LUT cube into the app's internal files
 #   SMOKE_TEST_FILTER AndroidJUnitRunner -e class list (may be folded/whitespace-padded)
+#   EXPECTED_TESTS   how many tests that list must select; '' skips the selector check
+#   SHARD_ID         shard id (app/loader/develop/alchemy), used in the check's log lines
 
 if [ "$NEED_RAW" = "true" ]; then
   # The corpus lands in the emulated SD card's Pictures directory — the same place a
@@ -53,4 +55,27 @@ STATUS=$?
 cat smoke-log.txt
 adb logcat -d -b all > logcat.txt 2>&1 || true
 adb shell ls -l /data/tombstones > tombstones.txt 2>&1 || true
+
+# -------- selector sanity net --------
+# AndroidJUnitRunner understands `Class`, `Class#method` and comma-separated lists
+# of those — nothing else. It does NOT reject a malformed token: `Class#m1+m2` is
+# read as class `Class` with method `m1+m2`, which selects ZERO tests, prints no
+# warning, fails nothing, and still ends in BUILD SUCCESSFUL. Most of the
+# instrumented suite was silently unexecuted for exactly that reason. Comparing
+# AGP's own count against the number the shard declares turns the silent zero into
+# a red job.
+# Deliberately NOT fatal when the count cannot be read: that wording belongs to
+# AGP, so a reworded build tool must not fail an otherwise healthy shard.
+if [ -n "$EXPECTED_TESTS" ]; then
+  SELECTED="$(sed -n 's/.*Starting \([0-9][0-9]*\) tests on .*/\1/p' smoke-log.txt | tail -n 1)"
+  if [ -z "$SELECTED" ]; then
+    echo "::warning::[$SHARD_ID] could not read the selected-test count from smoke-log.txt; selector check skipped."
+  elif [ "$SELECTED" -ne "$EXPECTED_TESTS" ]; then
+    echo "::error::[$SHARD_ID] the -e class filter selected $SELECTED tests, expected $EXPECTED_TESTS. Most likely a TEST_FILTER token is not a legal selector (only Class, Class#method and comma-separated lists exist) — such a token selects nothing and still passes."
+    STATUS=1
+  else
+    echo "[$SHARD_ID] selector check OK: $SELECTED tests selected."
+  fi
+fi
+
 exit $STATUS

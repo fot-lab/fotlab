@@ -24,6 +24,20 @@
 # connectedDebugAndroidTest via -PsmokeTestFilter (mapped in app/build.gradle.kts).
 # The membership of every @Test lives in one place: the TEST_FILTER env below.
 #
+# ONLY three selector forms exist: `Class`, `Class#method`, and a comma-separated
+# list of those. A token the runner cannot parse is NOT a syntax error — it
+# selects nothing, nothing is reported, and the shard still ends in
+# BUILD SUCCESSFUL with "Starting 0 tests". `Class#m1+m2` is exactly such a token
+# (the runner reads it as class `Class`, method `m1+m2`), so 29 of the 40
+# instrumented tests were silently unexecuted for as long as they had been
+# written that way. Hence two rules when editing a TEST_FILTER below:
+#   * one selector per line, comma-separated, never `+` (a line inside this folded
+#     block is a plain scalar, and the `#` in `Class#method` is part of it — do NOT
+#     add `#` comments inside it);
+#   * keep the shard's `expected-tests` in step with the list. run_smoke_shard.sh
+#     compares it against the count AGP reports and fails the job on a mismatch,
+#     so a filter that selects the wrong number can no longer pass quietly.
+#
 # A fifth job, prep-emulator, warms the two big caches (the AVD+snapshot and the
 # ~250 MB RAW corpus) exactly once; all four shards `needs: prep-emulator` and
 # only ever RESTORE them. This keeps cache writes off the parallel jobs, so N
@@ -230,6 +244,7 @@ jobs:
           native-artifact-name: ${{ inputs.native-artifact-name }}
           shard: app
           test-filter: ${{ env.TEST_FILTER }}
+          expected-tests: '7'
           need-raw: 'false'
           need-lut: 'false'
           test-timeout-minutes: '20'
@@ -248,8 +263,19 @@ jobs:
       # brands (load + as-shot render), plus the grade-bar hidden-on-PNG assertion.
       TEST_FILTER: >-
         io.github.fotlab.fotlab.smoke.PngEndToEndFlowTest,
-        io.github.fotlab.fotlab.smoke.RawlerNativeSmokeTest#nativeLibraryIsLoadableOnThisAbi+identifyRejectsNonRawBytes+identifyOnPngSurvives+decodeOfNonRawBytesReturnsNull+decodeOfPngSurvives+identifyCallSurfacesJvmExceptions,
-        io.github.fotlab.fotlab.smoke.RawRoutingTest#pngOpensInStudioThroughCoil+canonCr2OpensInStudioThroughRawler+sonyIlce7rArwOpensInStudioThroughRawler+sonyIlce7rm2ArwOpensInStudioThroughRawler+nikonD850NefOpensInStudioThroughRawler+panasonicDcS1rRw2OpensInStudioThroughRawler+gradeBarIsHiddenOnPngRoute
+        io.github.fotlab.fotlab.smoke.RawlerNativeSmokeTest#nativeLibraryIsLoadableOnThisAbi,
+        io.github.fotlab.fotlab.smoke.RawlerNativeSmokeTest#identifyRejectsNonRawBytes,
+        io.github.fotlab.fotlab.smoke.RawlerNativeSmokeTest#identifyOnPngSurvives,
+        io.github.fotlab.fotlab.smoke.RawlerNativeSmokeTest#decodeOfNonRawBytesReturnsNull,
+        io.github.fotlab.fotlab.smoke.RawlerNativeSmokeTest#decodeOfPngSurvives,
+        io.github.fotlab.fotlab.smoke.RawlerNativeSmokeTest#identifyCallSurfacesJvmExceptions,
+        io.github.fotlab.fotlab.smoke.RawRoutingTest#pngOpensInStudioThroughCoil,
+        io.github.fotlab.fotlab.smoke.RawRoutingTest#canonCr2OpensInStudioThroughRawler,
+        io.github.fotlab.fotlab.smoke.RawRoutingTest#sonyIlce7rArwOpensInStudioThroughRawler,
+        io.github.fotlab.fotlab.smoke.RawRoutingTest#sonyIlce7rm2ArwOpensInStudioThroughRawler,
+        io.github.fotlab.fotlab.smoke.RawRoutingTest#nikonD850NefOpensInStudioThroughRawler,
+        io.github.fotlab.fotlab.smoke.RawRoutingTest#panasonicDcS1rRw2OpensInStudioThroughRawler,
+        io.github.fotlab.fotlab.smoke.RawRoutingTest#gradeBarIsHiddenOnPngRoute
     steps:
       # Checkout must precede the local action — see the test-app-smoke shard above.
       - name: Check out
@@ -264,6 +290,7 @@ jobs:
           native-artifact-name: ${{ inputs.native-artifact-name }}
           shard: loader
           test-filter: ${{ env.TEST_FILTER }}
+          expected-tests: '16'
           need-raw: 'true'
           need-lut: 'false'
           test-timeout-minutes: '35'
@@ -285,8 +312,18 @@ jobs:
       # both axes halved on BOTH the develop and the rawalchemy grade fork, and
       # the byte-identical round trip back to full resolution).
       TEST_FILTER: >-
-        io.github.fotlab.fotlab.smoke.RawlerNativeSmokeTest#developOfNonRawBytesReturnsNull+developOfPngSurvives+developDirectCallSurfacesJvmException,
-        io.github.fotlab.fotlab.smoke.RawRoutingTest#canonCr2DevelopsThroughDemosaicMenu+sonyIlce7rArwDevelopsThroughDemosaicMenu+sonyIlce7rm2ArwDevelopsThroughDemosaicMenu+nikonD850NefDevelopsThroughDemosaicMenu+panasonicDcS1rRw2DevelopsThroughDemosaicMenu+everyDemosaicMenuOptionRedevelopsOnBayerAndExposureRecomputes+manualKelvinWhiteBalanceRedevelopsWithoutBlack+fullResolutionDevelopKeepsBothAxesAboveThePreviewFloor+downsampleSwitchHalvesBothAxesOnDevelopAndGradeWithoutReRendering
+        io.github.fotlab.fotlab.smoke.RawlerNativeSmokeTest#developOfNonRawBytesReturnsNull,
+        io.github.fotlab.fotlab.smoke.RawlerNativeSmokeTest#developOfPngSurvives,
+        io.github.fotlab.fotlab.smoke.RawlerNativeSmokeTest#developDirectCallSurfacesJvmException,
+        io.github.fotlab.fotlab.smoke.RawRoutingTest#canonCr2DevelopsThroughDemosaicMenu,
+        io.github.fotlab.fotlab.smoke.RawRoutingTest#sonyIlce7rArwDevelopsThroughDemosaicMenu,
+        io.github.fotlab.fotlab.smoke.RawRoutingTest#sonyIlce7rm2ArwDevelopsThroughDemosaicMenu,
+        io.github.fotlab.fotlab.smoke.RawRoutingTest#nikonD850NefDevelopsThroughDemosaicMenu,
+        io.github.fotlab.fotlab.smoke.RawRoutingTest#panasonicDcS1rRw2DevelopsThroughDemosaicMenu,
+        io.github.fotlab.fotlab.smoke.RawRoutingTest#everyDemosaicMenuOptionRedevelopsOnBayerAndExposureRecomputes,
+        io.github.fotlab.fotlab.smoke.RawRoutingTest#manualKelvinWhiteBalanceRedevelopsWithoutBlack,
+        io.github.fotlab.fotlab.smoke.RawRoutingTest#fullResolutionDevelopKeepsBothAxesAboveThePreviewFloor,
+        io.github.fotlab.fotlab.smoke.RawRoutingTest#downsampleSwitchHalvesBothAxesOnDevelopAndGradeWithoutReRendering
     steps:
       # Checkout must precede the local action — see the test-app-smoke shard above.
       - name: Check out
@@ -301,6 +338,7 @@ jobs:
           native-artifact-name: ${{ inputs.native-artifact-name }}
           shard: develop
           test-filter: ${{ env.TEST_FILTER }}
+          expected-tests: '12'
           need-raw: 'true'
           need-lut: 'false'
           test-timeout-minutes: '60'
@@ -318,7 +356,10 @@ jobs:
       # Panasonic V-Log + downloaded .cube LUT; the SAF LUT-picker contract.
       TEST_FILTER: >-
         io.github.fotlab.fotlab.smoke.RawlerNativeSmokeTest#gradeLogSpacesAreEnumeratedNatively,
-        io.github.fotlab.fotlab.smoke.RawRoutingTest#boostAndLogGradesReRenderThroughEngineAndNoneRestoresDevelop+gradeBarChipsDriveGradingThroughRealStudioUi+panasonicVLogAndDownloadedLutCubeBothTakeEffect+lutChipOpensSystemPickerAndAppliesDownloadedCube
+        io.github.fotlab.fotlab.smoke.RawRoutingTest#boostAndLogGradesReRenderThroughEngineAndNoneRestoresDevelop,
+        io.github.fotlab.fotlab.smoke.RawRoutingTest#gradeBarChipsDriveGradingThroughRealStudioUi,
+        io.github.fotlab.fotlab.smoke.RawRoutingTest#panasonicVLogAndDownloadedLutCubeBothTakeEffect,
+        io.github.fotlab.fotlab.smoke.RawRoutingTest#lutChipOpensSystemPickerAndAppliesDownloadedCube
     steps:
       # Checkout must precede the local action — see the test-app-smoke shard above.
       - name: Check out
@@ -333,6 +374,7 @@ jobs:
           native-artifact-name: ${{ inputs.native-artifact-name }}
           shard: alchemy
           test-filter: ${{ env.TEST_FILTER }}
+          expected-tests: '5'
           need-raw: 'true'
           need-lut: 'true'
           test-timeout-minutes: '60'

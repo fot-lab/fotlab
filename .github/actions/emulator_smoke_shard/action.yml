@@ -38,6 +38,13 @@ inputs:
   test-filter:
     description: Comma-separated AndroidJUnitRunner -e class list this shard runs.
     required: true
+  expected-tests:
+    description: >-
+      How many tests that filter must select. run_smoke_shard.sh fails the job when the count
+      AGP reports differs, because an unparseable selector (e.g. `Class#m1+m2`) silently selects
+      zero tests and still ends in BUILD SUCCESSFUL. Empty disables the check.
+    required: false
+    default: ''
   need-raw:
     description: Whether to restore and push the RAW corpus ('true'/'false').
     required: false
@@ -173,6 +180,8 @@ runs:
       uses: reactivecircus/android-emulator-runner@v2
       env:
         SMOKE_TEST_FILTER: ${{ inputs.test-filter }}
+        SHARD_ID: ${{ inputs.shard }}
+        EXPECTED_TESTS: ${{ inputs.expected-tests }}
         NEED_RAW: ${{ inputs.need-raw }}
         NEED_LUT: ${{ inputs.need-lut }}
         # Identical to smoke_emulator.yaml: the snapshot is always generated with
