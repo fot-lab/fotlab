@@ -40,7 +40,7 @@ Coil 在无尺寸约束时按图片原始分辨率解码（这一点尚未实测
 
 ### 3. 为什么这一项的收益是最大的
 
-分辨率是唯一的乘法因子。像素数 ÷16 之后，下面这些环节全部同比变快：
+分辨率是唯一的乘法因子。像素数 ÷4 之后（边长各减半，见 Finding 1），下面这些环节全部同比变快：
 
 - `app/src/binding/rust/rawler_fotlab/src/calibrate.rs:136,159` 的逐像素矩阵；
 - `app/src/binding/rust/rawler_fotlab/src/bound.rs:123,163` 的 gamma + RGBA 展开；
@@ -48,7 +48,7 @@ Coil 在无尺寸约束时按图片原始分辨率解码（这一点尚未实测
 - Coil 的 inflate 与 Bitmap 分配；
 - 纹理上传。
 
-而内存峰值从 1 GB 级降到 100 MB 级 —— 这会连带消除 low-memory-kill 与 GC 抖动带来的主观卡顿。
+而内存峰值同比下降约 4× —— 按 `OPTIMZ-PERFRM-000001` 记的 50 MP 构成：f32×3 中间 buffer 约 600 MB → 约 150 MB，RGBA8 展开约 200 MB → 约 50 MB。这会显著减轻 low-memory-kill 与 GC 抖动的风险（但不会消除：单帧仍在数百 MB 级）。
 
 ## Impact / Conflict
 
@@ -67,3 +67,5 @@ Coil 在无尺寸约束时按图片原始分辨率解码（这一点尚未实测
 ## Change History
 
 - 2026-09-21 — 创建。确认 `rawler_fotlab` 全仓库无降分辨率路径（`develop.rs:270` 的注释反而记录了"我们绝不使用 superpixel"），rawler 的 `Superpixel3/4Channel`（`superpixel.rs:16/78`，1/4 输出）仍未接线；Coil 三处调用点均未指定解码尺寸。
+- 2026-09-22 — 修正 Finding 3 与 Impact 里的像素数倍率。原文写「像素数 ÷16」，与本案事实不符：superpixel 是每 2×2 块合成 1 个 RGB(E) 像素（`external/dnglab/rawler/src/imgop/sensor/bayer/superpixel.rs:27/73`，输出 `roi.d.w >> 1, roi.d.h >> 1`）⇒ **边长各减半，像素数 ÷4**（不是 ÷16）；`FOTLAB-RAWLER-000003.md:111` 亦记「Superpixel 1/4 cuts pixel count 4×」。连带把 Finding 3 末句的「内存峰值从 1 GB 级降到 100 MB 级」改为按 ÷4 推算的构成（沿用 `OPTIMZ-PERFRM-000001.md:52-53`：f32×3 约 600 MB → 约 150 MB，RGBA8 约 200 MB → 约 50 MB），并把「消除 low-memory-kill」软化为「显著减轻风险」——单帧仍在数百 MB 级。本次只改这两处数字与措辞，**未重新测算峰值总量**（那属于 `OPTIMZ-PERFRM-000009` 的打点范围）。同源的错误表述另见 `OPTIMZ-PERFRM-000007`，已一并修正。
+- 2026-09-22 — **Finding 1 指出的"未接线"已部分闭合**：Superpixel3/4Channel 现已接入 demosaic 阶段，但**不是**按本条目 Finding 1 设想的 `ScaleMode { Full, Quarter }` 建模，而是以独立的 `downsample: bool`（`DevelopParams.downsample`）+ Kotlin Studio drawer 的用户偏好驱动。因此本条目 Finding 1 的"从不使用 superpixel"、Recommendation 2 的"沿 §C 的 `ScaleMode`"两处描述**仅剩历史意义**（未改正文，保留原始诊断）。本条目 Finding 2（Coil 三处调用未指定解码尺寸）与 Recommendation 1 **仍未做**，依然成立。详见 `OPTIMZ-PERFRM-000010`。

@@ -50,7 +50,7 @@
 
 ## Impact / Conflict
 
-- 本条目的收益**依赖于** `OPTIMZ-PERFRM-000003`：一旦预览降到 1/4，像素数 ÷16，并行化与编译优化带来的绝对收益会同比缩小。这也是总览把它放在 T0 之后的原因。
+- 本条目的收益**依赖于** `OPTIMZ-PERFRM-000003`：一旦预览降到 1/4（边长各减半，像素数 ÷4），并行化与编译优化带来的绝对收益会同比缩小。这也是总览把它放在 T0 之后的原因。
 - **`panic = "abort"` 不可用**：项目靠 `catch_unwind` 把 rawler panic 挡在 FFI 边界之内（见 `app/src/binding/rust/rawler_fotlab/src/loaded.rs:36,79,114` 等处的注释 `FOTLAB-CRASH-000001`）。任何 profile 改动都必须保留 unwind。
 - OpenMP 路线需要引入 `libomp.so`：APK 体积增加，CI 的 jniLibs 拷贝步骤要补一份（跟现状里的 `libc++_shared.so` 一样）。
 - `-C target-feature=+neon` 一类改动涉及 ABI / 设备兼容性，不能盲目启用。
@@ -65,3 +65,4 @@
 ## Change History
 
 - 2026-09-21 — 创建。确认四段自写像素循环为单线程标量（`develop.rs:228-232/300-303`、`calibrate.rs:136-171`、`bound.rs:123-170`）；`grading_fused.cpp:69-70` 的 OpenMP pragma 因 `RA_USE_OPENMP` 未定义而被编译掉（这是 `cpp/CMakeLists.txt:21-29` 记录的有意决定）；CI 的 `--release` 无 profile 覆盖（`.github/workflows/build_rust.yaml:205`）。明确 `panic = "abort"` 与 `catch_unwind` 边界冲突，禁止使用。
+- 2026-09-22 — 修正 Impact 第 1 条引用 `OPTIMZ-PERFRM-000003` 时的像素数倍率：原文写「像素数 ÷16」，应为 **÷4**（superpixel 每 2×2 块出 1 像素，边长各减半，`superpixel.rs:27/73`）。结论方向不变——并行化与编译优化的绝对收益仍随像素数同比下降，本条目排在 T0 之后的判断也不变。
