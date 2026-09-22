@@ -39,4 +39,5 @@ This file contains **only** the item table. No statistics, no changelog — git 
 | `ACTION-PERFOR-000007` | 原生侧算力未被利用 — 自写像素循环是单线程标量，rawalchemy 的 OpenMP 未开启，release profile 未调优 | `PERFOR` | Observation | P2 | [detail](rules/REVIEW/detail/ACTION-PERFOR-000007.md) |
 | `ACTION-PERFOR-000008` | 渲染后端路线评估 — WebView/RapidRAW 不成立；真正的对应物是 GPU，但受 minSdk 26 约束 | `PERFOR` | Observation | P2 | [detail](rules/REVIEW/detail/ACTION-PERFOR-000008.md) |
 | `ACTION-PERFOR-000009` | 缺少断面度量 — `ACTION-PERFOR-000001` 至 `000008` 的量级判断全部未经实测，附 7 条待验证假设清单 | `PERFOR` | Observation | P1 | [detail](rules/REVIEW/detail/ACTION-PERFOR-000009.md) |
-<!-- Next sequence per category: PREPIN 000002, LIBRND 000002, RAWLER 000007, KOTLIN 000008, FOTLAB-RAWLER 000009, ROLLBK 000002, PERFOR 000010. Append one row per new item; never reuse or renumber IDs. -->
+| `ACTION-RAWLER-000007` | 对数空间枚举的别名契约 — 展示名与引擎名由 shim 内的单一映射表对齐，上游保持只读 | `RAWLER` | Implemented | P2 | [detail](rules/REVIEW/detail/ACTION-RAWLER-000007.md) |
+<!-- Next sequence per category: PREPIN 000002, LIBRND 000002, RAWLER 000008, KOTLIN 000008, FOTLAB-RAWLER 000009, ROLLBK 000002, PERFOR 000010. Append one row per new item; never reuse or renumber IDs. -->

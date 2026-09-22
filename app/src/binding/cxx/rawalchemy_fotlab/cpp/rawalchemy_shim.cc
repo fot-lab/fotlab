@@ -35,6 +35,75 @@ constexpr int32_t kBoostUnset = -1;
 inline bool is_unset(float v) { return std::isnan(v); }
 }  // namespace
 
+// ---------------------------------------------------------------------------
+// Log-space alias table — the one place the UI name and the engine name meet.
+//
+// DECOUPLED from the parallel grading engine on purpose: this table is a
+// standalone constant, so the enumeration handed to the UI can never be
+// affected by how `applyGradingFused` / OpenMP is built or linked (the failure
+// that motivated the split — see `rules/REVIEW/detail/ACTION-RAWLER-000007.md`).
+//
+// Two columns, two audiences:
+//   * `canonical` — the key upstream's `LOG_SPACES` map is keyed by
+//     (external/RawAlchemyCpp/include/color_data.h). This is the ONLY string
+//     that may ever reach `LOG_SPACES`; the submodule is read-only for us.
+//   * `display`   — what Kotlin renders. The vendor is spelled out and the
+//     curve is named the way the vendor names it, so the user reads
+//     "FUJIFILM F-Log2 C" rather than upstream's internal "F-Log2C".
+//
+// Where the vendors already ship a vendor-prefixed official name (Canon "Canon
+// Log 2", ARRI "ARRI LogC3", Sony "S-Log3.Cine") the display column keeps their
+// spelling; only the bare ones gain a vendor prefix.
+//
+// Keep the canonical column in sync with upstream's LOG_SPACES keys (14 curves).
+// Row order is irrelevant: the Rust caller sorts for a stable menu, and the
+// vendor prefixes make that sort group by vendor as a side effect.
+// ---------------------------------------------------------------------------
+namespace {
+struct LogSpaceAlias {
+  const char* canonical;
+  const char* display;
+};
+
+const LogSpaceAlias kLogSpaceAliases[] = {
+    {"F-Log", "FUJIFILM F-Log"},
+    {"F-Log2", "FUJIFILM F-Log2"},
+    {"F-Log2C", "FUJIFILM F-Log2 C"},
+    {"V-Log", "Panasonic V-Log"},
+    {"N-Log", "Nikon N-Log"},
+    {"L-Log", "Leica L-Log"},
+    {"Canon Log 2", "Canon Log 2"},
+    {"Canon Log 3", "Canon Log 3"},
+    {"S-Log3", "Sony S-Log3"},
+    {"S-Log3.Cine", "Sony S-Log3.Cine"},
+    {"Arri LogC3", "ARRI LogC3"},
+    {"Arri LogC4", "ARRI LogC4"},
+    {"Log3G10", "RED Log3G10"},
+    {"D-Log", "DJI D-Log"},
+};
+
+// Resolve whatever the caller sent to the upstream canonical key, or nullptr
+// when it is neither a known display name nor a known canonical one.
+//
+// Display first, canonical second: the menu's own vocabulary always wins, and
+// the canonical fallback keeps values that predate the aliasing working —
+// persisted selections from an older build, the raw upstream spelling used
+// directly over FFI, and callers that never went through `log_spaces()`.
+const char* resolve_log_space(const std::string& name) {
+  for (const LogSpaceAlias& alias : kLogSpaceAliases) {
+    if (name == alias.display) {
+      return alias.canonical;
+    }
+  }
+  for (const LogSpaceAlias& alias : kLogSpaceAliases) {
+    if (name == alias.canonical) {
+      return alias.canonical;
+    }
+  }
+  return nullptr;
+}
+}  // namespace
+
 rust::Vec<float> grade(rust::Slice<const float> data,
                        uint32_t width,
                        uint32_t height,
@@ -63,11 +132,22 @@ rust::Vec<float> grade(rust::Slice<const float> data,
   // An empty name mirrors the upstream C API's null `logSpace`: `logSpaceInfo`
   // keeps its nullptr default and `applyGradingFused` then skips BOTH the gamut
   // matrix and the log OETF (`doGamut = (logSpaceInfo != nullptr)`).
+  //
+  // The name arrives from Kotlin as a *display* name ("FUJIFILM F-Log2 C") and is
+  // translated back to the canonical key upstream's table is keyed by ("F-Log2C")
+  // right here, so `LOG_SPACES` — and therefore the submodule — stays untouched.
   std::string ls(log_space.data(), log_space.size());
   if (!ls.empty()) {
-    auto it = LOG_SPACES.find(ls);
-    if (it == LOG_SPACES.end()) {
+    const char* canonical = resolve_log_space(ls);
+    if (canonical == nullptr) {
       throw std::runtime_error("grade: unknown log space '" + ls + "'");
+    }
+    auto it = LOG_SPACES.find(canonical);
+    if (it == LOG_SPACES.end()) {
+      // The alias table lists a curve upstream does not ship: our table drifted.
+      throw std::runtime_error("grade: log space '" + ls +
+                               "' maps to '" + canonical +
+                               "', which upstream does not provide");
     }
     p.logSpaceInfo = &it->second;
   }
@@ -124,48 +204,18 @@ rust::Vec<float> grade(rust::Slice<const float> data,
   return out;
 }
 
-// ---------------------------------------------------------------------------
-// Enumerate the log spaces the grader accepts — DECOUPLED from the parallel
-// grading engine.
+// Enumerate the log spaces the grader accepts, as DISPLAY names.
 //
-// This list is intentionally self-contained: it does NOT read upstream's
-// `LOG_SPACES` map (color_data.h). That map is the grading static library's
-// header-global, entangled with the OpenMP-compiled `applyGradingFused` path;
-// relying on it here made the enumeration fragile under the static-archive +
-// cdylib link (the very failure this change fixes — the Studio LOG chooser
-// enumerated 0 of 14 curves). The actual grading computation stays parallel
-// (`grade` -> `applyGradingFused` still runs under RA_USE_OPENMP); only the
-// *enumeration* is pulled out into a standalone constant so it can never be
-// affected by how the parallel machinery is linked or built.
+// Pulled straight out of `kLogSpaceAliases` (see the top of this file) so the
+// list the UI renders and the lookup `grade` performs can never disagree: one
+// table, read in two directions.
 //
 // The Rust caller sorts for a stable UI menu, so order here is irrelevant.
-// Keep this in sync with upstream's `LOG_SPACES` keys in
-// external/RawAlchemyCpp/include/color_data.h (currently 14 curves).
-// ---------------------------------------------------------------------------
-namespace {
-const char* const kLogSpaceNames[] = {
-    "F-Log",
-    "F-Log2",
-    "F-Log2C",
-    "V-Log",
-    "N-Log",
-    "L-Log",
-    "Canon Log 2",
-    "Canon Log 3",
-    "S-Log3",
-    "S-Log3.Cine",
-    "Arri LogC3",
-    "Arri LogC4",
-    "Log3G10",
-    "D-Log",
-};
-}  // namespace
-
 rust::Vec<rust::String> log_spaces() {
   rust::Vec<rust::String> out;
-  out.reserve(sizeof(kLogSpaceNames) / sizeof(kLogSpaceNames[0]));
-  for (const char* name : kLogSpaceNames) {
-    out.push_back(rust::String(name));
+  out.reserve(sizeof(kLogSpaceAliases) / sizeof(kLogSpaceAliases[0]));
+  for (const LogSpaceAlias& alias : kLogSpaceAliases) {
+    out.push_back(rust::String(alias.display));
   }
   return out;
 }

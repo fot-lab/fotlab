@@ -147,11 +147,15 @@ pub fn develop_to_png(raw: &[u8], params: DevelopParams) -> Result<Vec<u8>, Rawl
     loaded.develop_to_png(params)
 }
 
-/// Names of the log spaces the rawalchemy grading engine accepts (`"F-Log"`,
-/// `"S-Log3"`, `"Arri LogC4"`, …), sorted for a stable Studio LOG menu. The list
-/// is single-sourced from upstream's `LOG_SPACES` map — the glue only
-/// enumerates its keys (`FOTLAB-RAWLER-000006`). Gated on the `rawalchemy`
+/// Log spaces the rawalchemy grading engine accepts, as UI display names
+/// (`"FUJIFILM F-Log2 C"`, `"Sony S-Log3"`, `"ARRI LogC4"`, …), sorted for a
+/// stable Studio LOG menu. These are exactly the strings [`GradeParams::log_space`]
+/// takes back; the cxx shim owns the display↔canonical alias table, so this crate
+/// neither spells the names nor knows upstream's keys (`FOTLAB-RAWLER-000006`,
+/// `rules/REVIEW/detail/ACTION-RAWLER-000007.md`). Gated on the `rawalchemy`
 /// feature (on by default); without the feature the export is not compiled.
+///
+/// [`GradeParams::log_space`]: crate::GradeParams::log_space
 #[cfg(feature = "rawalchemy")]
 #[uniffi::export]
 pub fn supported_log_spaces() -> Vec<String> {

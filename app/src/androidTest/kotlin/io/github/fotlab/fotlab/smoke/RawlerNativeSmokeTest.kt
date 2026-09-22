@@ -99,25 +99,44 @@ class RawlerNativeSmokeTest {
     }
 
     /**
-     * Call #4 (grade support list): the cxx shim enumerates rawalchemy's accepted log-curve names
-     * from inside the loaded .so — no RAW input required. Upstream's `LOG_SPACES` table ships 14
-     * curves (F-Log … D-Log), the Rust side sorts them, and the list is what fills the Studio LOG
-     * chooser. A broken cxx bridge / missing rawalchemy feature degrades to an empty list via
-     * `runCatching`, which this case fails loudly on; a native abort in the shim kills the
-     * instrumentation by construction.
+     * Call #4 (grade support list): the cxx shim enumerates the log curves it accepts from inside the
+     * loaded .so — no RAW input required. The list is the display column of the shim's alias table:
+     * 14 curves, each carrying its vendor name and spelled the vendor's way ("FUJIFILM F-Log2 C"),
+     * and the Rust side sorts them for the Studio LOG chooser. The shim resolves those same display
+     * names back to upstream's canonical keys before touching `LOG_SPACES`, so the names asserted
+     * here are exactly what [StudioEngine.setGradeLogSpace] takes (see
+     * `rules/REVIEW/detail/ACTION-RAWLER-000007.md`).
+     * A broken cxx bridge / missing rawalchemy feature degrades to an empty list via `runCatching`,
+     * which this case fails loudly on; a native abort in the shim kills the instrumentation by
+     * construction.
      */
     @Test
     fun gradeLogSpacesAreEnumeratedNatively() {
         val spaces = RawlerFotlabBridge.supportedGradeLogSpaces()
         assertNotNull(spaces)
-        assertEquals("upstream LOG_SPACES ships 14 curves: $spaces", 14, spaces.size)
+        // Pinned in full, in sorted order: the vendor prefixes are the point of the alias table, so a
+        // rebuild that drops one, forgets to alias it, or lets the list unsync from the table must
+        // fail here. Sorted() is applied so the expectation reads in menu order rather than table order.
+        val expected = listOf(
+            "ARRI LogC3",
+            "ARRI LogC4",
+            "Canon Log 2",
+            "Canon Log 3",
+            "DJI D-Log",
+            "FUJIFILM F-Log",
+            "FUJIFILM F-Log2",
+            "FUJIFILM F-Log2 C",
+            "Leica L-Log",
+            "Nikon N-Log",
+            "Panasonic V-Log",
+            "RED Log3G10",
+            "Sony S-Log3",
+            "Sony S-Log3.Cine",
+        )
+        assertEquals("the shim alias table must ship 14 curves: $spaces", 14, spaces.size)
         assertEquals("the log-space list must be de-duplicated", spaces.distinct().size, spaces.size)
         assertEquals("the log-space list must be sorted", spaces.sorted(), spaces)
-        // One representative per vendor family, so a table rebuild that silently drops a vendor is
-        // caught without pinning every name's spelling.
-        listOf("F-Log", "V-Log", "Canon Log 2", "S-Log3", "Arri LogC4", "D-Log").forEach { name ->
-            assertTrue("log-space list must contain $name: $spaces", name in spaces)
-        }
+        assertEquals("every curve must be enumerated under its aliased display name", expected, spaces)
     }
 
     /**

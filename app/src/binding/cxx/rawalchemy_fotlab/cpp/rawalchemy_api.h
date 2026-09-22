@@ -34,6 +34,13 @@
 /// `RawlerImageDeveloped.rgb`. Returns the graded buffer in that same layout.
 /// Throws `std::runtime_error` on bad input, which the bridge (declared
 /// `Result<..>`) turns into `Err(cxx::Exception)` on the Rust side.
+///
+/// `log_space` is accepted in either vocabulary: the display name that
+/// [`log_spaces`] hands the UI (`"FUJIFILM F-Log2 C"`) or the upstream canonical
+/// key (`"F-Log2C"`). The shim resolves the display name back to the canonical one
+/// before touching upstream's `LOG_SPACES`, so the submodule stays unmodified; the
+/// canonical spelling is still accepted so values that predate the aliasing keep
+/// working. Empty = skip the gamut and log stages.
 rust::Vec<float> grade(rust::Slice<const float> data,
                        uint32_t width,
                        uint32_t height,
@@ -47,11 +54,16 @@ rust::Vec<float> grade(rust::Slice<const float> data,
                        float contrast,
                        float pivot);
 
-/// Every log curve the grader accepts (`"F-Log"`, `"S-Log3"`, `"Arri LogC4"`, …).
+/// Every log curve the grader accepts, as DISPLAY names (`"FUJIFILM F-Log2 C"`,
+/// `"Sony S-Log3"`, `"ARRI LogC4"`, …).
 ///
-/// Self-contained: the list is maintained as a standalone constant in the shim and
-/// does NOT read upstream's `LOG_SPACES` map, so the enumeration can never be
+/// Self-contained: the list is the display column of the shim's own alias table
+/// and does NOT read upstream's `LOG_SPACES` map, so the enumeration can never be
 /// affected by how the parallel grading engine (`applyGradingFused`, built under
-/// `RA_USE_OPENMP`) is linked. Keep it in sync with upstream's `LOG_SPACES` keys in
-/// external/RawAlchemyCpp/include/color_data.h.
+/// `RA_USE_OPENMP`) is linked. The same table maps each display name back to the
+/// canonical key `grade` needs, so the two directions cannot drift apart.
+///
+/// Names here are for the UI only. Upstream's `LOG_SPACES` keys live in
+/// external/RawAlchemyCpp/include/color_data.h and stay untouched; keep the
+/// table's canonical column in sync with them (14 curves).
 rust::Vec<rust::String> log_spaces();

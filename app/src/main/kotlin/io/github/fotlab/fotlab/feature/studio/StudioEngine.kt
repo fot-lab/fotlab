@@ -276,7 +276,12 @@ object StudioEngine {
         val isActive: Boolean get() = boostEnabled || logSpace != null || lutPath != null
     }
 
-    /** The log curves rawalchemy accepts — static per loaded .so, queried once and cached. */
+    /**
+     * The log curves rawalchemy accepts — static per loaded .so, queried once and cached. These are
+     * UI display names (vendor spelled out, e.g. "FUJIFILM F-Log2 C") and are exactly what
+     * [setGradeLogSpace] / [GradeSelection.logSpace] carry; the display↔engine mapping lives in the
+     * cxx shim, so this layer never sees upstream's keys.
+     */
     @Volatile private var logSpacesCache: List<String>? = null
     fun supportedLogSpaces(): List<String> =
         logSpacesCache ?: RawlerFotlabBridge.supportedGradeLogSpaces().also { logSpacesCache = it }

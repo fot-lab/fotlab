@@ -95,9 +95,12 @@ object RawlerFotlabBridge {
     ): ByteArray? = runCatching { loaded.developAndGradeToPngAtKelvin(params, kelvin, gradeParams) }.getOrNull()
 
     /**
-     * Names of the log curves the native grading engine accepts (sorted natively), for the Studio
-     * LOG chooser. Empty when the library / the `rawalchemy` feature is absent — the chooser then
-     * only offers "none".
+     * Log curves the native grading engine accepts (sorted natively), for the Studio LOG chooser.
+     * These are display names — vendor spelled out, curve written the vendor's way, e.g.
+     * "FUJIFILM F-Log2 C" — and they are exactly the strings [GradeParams.logSpace] takes back;
+     * the display↔engine mapping lives in the cxx shim, so nothing here needs to know it.
+     * Empty when the library / the `rawalchemy` feature is absent — the chooser then only offers
+     * "none".
      */
     fun supportedGradeLogSpaces(): List<String> =
         runCatching { supportedLogSpaces().toList() }.getOrDefault(emptyList())

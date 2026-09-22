@@ -40,6 +40,12 @@ mod ffi {
         /// layout as `rawler_fotlab::RawlerImageDeveloped.rgb`. Returns the graded
         /// buffer in that same layout.
         ///
+        /// `log_space` takes either vocabulary: a display name from
+        /// [`log_spaces`] (`"FUJIFILM F-Log2 C"`) or the upstream canonical key
+        /// (`"F-Log2C"`). Resolution happens in the shim, which then looks the
+        /// canonical key up in upstream's `LOG_SPACES` — the submodule itself is
+        /// never modified.
+        ///
         /// "Unset" is encoded out of band, because cxx has no `Option<f32>`:
         /// `log_space` / `lut_path` / `metering_mode` empty = that stage is
         /// skipped; `gain` / `target_gray` / `saturation` / `contrast` / `pivot`
@@ -64,12 +70,13 @@ mod ffi {
             pivot: f32,
         ) -> Result<Vec<f32>>;
 
-        /// Names of every log space the grader accepts (`"F-Log"`, `"S-Log3"`,
-        /// `"Arri LogC4"`, …). Maintained as a standalone constant in the shim,
-        /// DECOUPLED from upstream's `LOG_SPACES` map so the enumeration cannot be
-        /// broken by how the parallel grading engine is linked. Keep in sync with
-        /// upstream's `LOG_SPACES` keys. Iteration order is unspecified; callers
-        /// that need a stable order sort the result themselves.
+        /// Display names of every log space the grader accepts (`"FUJIFILM F-Log2 C"`,
+        /// `"Sony S-Log3"`, `"ARRI LogC4"`, …). These are what the Studio LOG chooser
+        /// shows and what [`grade`] takes back; the shim's alias table maps each one
+        /// to the upstream canonical key, so the list and the lookup share a single
+        /// source. DECOUPLED from upstream's `LOG_SPACES` map so the enumeration cannot
+        /// be broken by how the parallel grading engine is linked. Iteration order is
+        /// unspecified; callers that need a stable order sort the result themselves.
         fn log_spaces() -> Vec<String>;
     }
 }
@@ -89,8 +96,10 @@ pub const BOOST_ON: i32 = 1;
 /// keeps upstream the single owner of its own defaults.
 #[derive(Debug, Clone, Default)]
 pub struct GradeOverrides {
-    /// Log space name (e.g. `"F-Log"`, `"S-Log3"`). Also selects the
-    /// ProPhoto→target gamut matrix. `None` = skip gamut **and** log encode.
+    /// Log space — a display name from [`log_spaces`] (`"FUJIFILM F-Log2 C"`) or
+    /// the upstream canonical key (`"F-Log2C"`); both work, the shim resolves the
+    /// former to the latter. Also selects the ProPhoto→target gamut matrix.
+    /// `None` = skip gamut **and** log encode.
     pub log_space: Option<String>,
     /// `.cube` 3D LUT path, applied to the log-encoded image. `None` = no LUT.
     pub lut_path: Option<String>,
@@ -153,10 +162,11 @@ pub fn grade(
     .map_err(|e| e.to_string())
 }
 
-/// Names of the log spaces upstream accepts — a pass-through enumeration kept in
-/// a standalone shim constant, decoupled from the parallel grading engine. The
-/// order mirrors the shim constant and is intentionally not sorted here: the
-/// consuming crate sorts for UI stability.
+/// Display names of the log spaces the grader accepts — the display column of the
+/// shim's alias table (`"FUJIFILM F-Log2 C"`, …), decoupled from the parallel
+/// grading engine. The same table resolves these back to the canonical keys
+/// [`grade`] needs. The order mirrors the table and is intentionally not sorted
+/// here: the consuming crate sorts for UI stability.
 pub fn log_spaces() -> Vec<String> {
     ffi::log_spaces()
 }

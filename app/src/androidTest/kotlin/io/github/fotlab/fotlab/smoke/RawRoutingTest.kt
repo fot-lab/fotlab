@@ -561,7 +561,7 @@ class RawRoutingTest {
         )
         assertNull(StudioEngine.gradeError.value)
         val spaces = StudioEngine.supportedLogSpaces()
-        assertTrue("native log-space list must enumerate S-Log3, got $spaces", "S-Log3" in spaces)
+        assertTrue("native log-space list must enumerate Sony S-Log3, got $spaces", "Sony S-Log3" in spaces)
 
         // 2) Boost ON via contrast=1.25 (Kotlin assembles saturation to its 1.0 fallback):
         // pixels must move, color must survive.
@@ -576,14 +576,15 @@ class RawRoutingTest {
         assertNull("saturation must stay unconfigured in the selection", StudioEngine.gradeSelection.value.saturation)
         assertNull("boost grade must not surface a grade error", StudioEngine.gradeError.value)
 
-        // 3) S-Log3 ON on top: gamut conversion + log encoding, pixels move again.
-        StudioEngine.setGradeLogSpace("S-Log3")
+        // 3) Sony S-Log3 ON on top: gamut conversion + log encoding, pixels move again. The name is
+        // the UI display name the shim enumerates; the shim resolves it back to upstream's "S-Log3".
+        StudioEngine.setGradeLogSpace("Sony S-Log3")
         val logged = runBlocking {
             withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame(requireDifferentFrom = boosted.bytes) }
         }
-        step("grade", "S-Log3 -> ${logged.outWidth}x${logged.outHeight} (${logged.bytes.size} bytes), differs")
+        step("grade", "Sony S-Log3 -> ${logged.outWidth}x${logged.outHeight} (${logged.bytes.size} bytes), differs")
         assertNull("log grade must not surface a grade error", StudioEngine.gradeError.value)
-        assertTrue(StudioEngine.gradeSelection.value.logSpace == "S-Log3")
+        assertEquals("Sony S-Log3", StudioEngine.gradeSelection.value.logSpace)
 
         // 4) LOG none, Boost still ON — deterministic reproduction of the boost-only frame.
         StudioEngine.setGradeLogSpace(null)
@@ -666,24 +667,26 @@ class RawRoutingTest {
         assertDevelopedIsColor(boosted.bytes, "Sony ILCE-7R boost ON via UI")
 
         // Switch to the StyleFilter bar (LOG / LUT) via the PhotoFilter category icon, then pick
-        // S-Log3. Picking an item (not system back) closes the popup deterministically — a back
-        // press would be delivered to the hosted MainActivity and finish it.
+        // Sony S-Log3 by its aliased display name — the only spelling the menu ever shows. Picking an
+        // item (not system back) closes the popup deterministically — a back press would be delivered
+        // to the hosted MainActivity and finish it. (The LOG button is icon-only, so the menu item is
+        // the only node carrying this text.)
         composeRule.onNodeWithContentDescription(styleCd).performClick()
         composeRule.waitUntil(30_000) {
             composeRule.onAllNodesWithContentDescription(logCd).fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNodeWithContentDescription(logCd).performClick()
         composeRule.waitUntil(30_000) {
-            composeRule.onAllNodesWithText("S-Log3").fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithText("Sony S-Log3").fetchSemanticsNodes().isNotEmpty()
         }
-        step("grade-ui", "LOG dropdown enumerates native spaces (S-Log3 present)")
-        composeRule.onNodeWithText("S-Log3").performClick()
+        step("grade-ui", "LOG dropdown enumerates native spaces (Sony S-Log3 present)")
+        composeRule.onNodeWithText("Sony S-Log3").performClick()
         val logged = runBlocking {
             withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame(requireDifferentFrom = boosted.bytes) }
         }
-        step("grade-ui", "picked S-Log3 — native re-grade moved ${logged.bytes.size} bytes")
+        step("grade-ui", "picked Sony S-Log3 — native re-grade moved ${logged.bytes.size} bytes")
 
-        // Contrast back to unset while S-Log3 stays on: still a graded frame (log-only), differs
+        // Contrast back to unset while Sony S-Log3 stays on: still a graded frame (log-only), differs
         // from contrast+log. The dialog opens prefilled with the current 1.25 — clear it and OK
         // (blank = unset, the derived boost switch turns off).
         composeRule.onNodeWithContentDescription(tuneCd).performClick()
@@ -732,7 +735,7 @@ class RawRoutingTest {
      *  1. the corpus RW2 is imported and loaded into Studio exactly like
      *     [panasonicDcS1rRw2OpensInStudioThroughRawler]; the canvas is the as-shot full-frame
      *     color develop;
-     *  2. **V-Log** — [StudioEngine.setGradeLogSpace] re-renders through the native
+     *  2. **Panasonic V-Log** — [StudioEngine.setGradeLogSpace] re-renders through the native
      *     gamut-matrix + V-Log curve path; the frame must change and no grade error may surface;
      *  3. **LUT** — the cube (downloaded from fot-lab/V-Log-Alchemy by `smoke_emulator.yaml`,
      *     SHA-256 pinned, staged into the app's files via `run-as`) is republished as a
@@ -780,16 +783,17 @@ class RawRoutingTest {
         assertEquals(StudioEngine.GradeSelection(), StudioEngine.gradeSelection.value)
         assertNull(StudioEngine.gradeError.value)
         val spaces = StudioEngine.supportedLogSpaces()
-        assertTrue("native log-space list must enumerate V-Log, got $spaces", "V-Log" in spaces)
+        assertTrue("native log-space list must enumerate Panasonic V-Log, got $spaces", "Panasonic V-Log" in spaces)
 
-        // ---- 2) V-Log curve takes effect (flat log image, pixels move, no error) ----
-        StudioEngine.setGradeLogSpace("V-Log")
+        // ---- 2) Panasonic V-Log curve takes effect (flat log image, pixels move, no error) ----
+        // The display name is what the menu enumerates; the shim maps it back to upstream's "V-Log".
+        StudioEngine.setGradeLogSpace("Panasonic V-Log")
         val vlogOnly = runBlocking {
             withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame(requireDifferentFrom = asShotBytes) }
         }
-        step("lut-e2e", "V-Log -> ${vlogOnly.outWidth}x${vlogOnly.outHeight}, differs from as-shot")
-        assertNull("V-Log grade must not surface a grade error", StudioEngine.gradeError.value)
-        assertEquals("V-Log", StudioEngine.gradeSelection.value.logSpace)
+        step("lut-e2e", "Panasonic V-Log -> ${vlogOnly.outWidth}x${vlogOnly.outHeight}, differs from as-shot")
+        assertNull("Panasonic V-Log grade must not surface a grade error", StudioEngine.gradeError.value)
+        assertEquals("Panasonic V-Log", StudioEngine.gradeSelection.value.logSpace)
 
         // ---- 3) the downloaded cube takes effect through the real SAF-shaped content uri ----
         val lutUri = pushedLutAsContentUri()
@@ -800,7 +804,7 @@ class RawRoutingTest {
 
         val selection = StudioEngine.gradeSelection.value
         assertNull("LUT grade must not surface a grade error", StudioEngine.gradeError.value)
-        assertEquals("V-Log stays selected while the LUT is on", "V-Log", selection.logSpace)
+        assertEquals("Panasonic V-Log stays selected while the LUT is on", "Panasonic V-Log", selection.logSpace)
         assertEquals(LUT_FIXTURE_NAME, selection.lutName)
         val lutPath = selection.lutPath
             ?: throw AssertionError("grade selection must carry the cached cube path after setGradeLut")

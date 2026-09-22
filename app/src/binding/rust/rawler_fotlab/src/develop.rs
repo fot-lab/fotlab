@@ -76,10 +76,14 @@ pub struct DevelopParams {
 /// without touching this crate (`rules/REVIEW/detail/FOTLAB-RAWLER-000006.md`).
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct GradeParams {
-  /// Log space name selecting the camera log curve and the ProPhoto→target
-  /// gamut matrix (e.g. `"F-Log"`, `"S-Log3"`, `"Arri LogC4"`), i.e. the
-  /// linear→log encode stage. `None` = skip **both** the gamut transform and the
-  /// log encoding (upstream: `logSpaceInfo == nullptr`).
+  /// Log space selecting the camera log curve and the ProPhoto→target gamut
+  /// matrix (e.g. `"FUJIFILM F-Log2 C"`, `"Sony S-Log3"`, `"ARRI LogC4"`), i.e.
+  /// the linear→log encode stage. Pass a display name as returned by
+  /// `supported_log_spaces()`; the cxx shim also still accepts upstream's
+  /// canonical key (`"F-Log2C"`) for values that predate the aliasing, and it is
+  /// the shim — not this crate — that spells either vocabulary. `None` = skip
+  /// **both** the gamut transform and the log encoding (upstream:
+  /// `logSpaceInfo == nullptr`).
   #[uniffi(default = None)]
   pub log_space: Option<String>,
   /// Path to a `.cube` 3D LUT, applied to the log-encoded image. `None` = no LUT.
