@@ -75,10 +75,12 @@
     <string name="studio_cd_more_options">More options</string>
     <string name="studio_reset_view">Reset view</string>
     <string name="studio_open_prompt">Open a file from the toolbar to start editing</string>
-    <!-- DevelopFilm operation-bar icons (demosaic / exposure / white balance). -->
+    <!-- DevelopFilm operation-bar icons (denoise / dehaze / exposure / demosaic / white balance). -->
     <string name="studio_cd_demosaic">Demosaic algorithm</string>
     <string name="studio_cd_exposure">Exposure</string>
     <string name="studio_cd_whitebalance">White balance</string>
+    <string name="studio_cd_denoise">Denoise</string>
+    <string name="studio_cd_dehaze">Dehaze</string>
     <string name="studio_cd_develop_film">Develop film tools</string>
     <string name="studio_cd_tune_image">Tune image</string>
     <string name="studio_cd_style_filter">Style filter</string>
@@ -90,12 +92,20 @@
     <string name="studio_label_demosaic">Demosaic</string>
     <string name="studio_label_exposure">Exposure</string>
     <string name="studio_label_whitebalance">WB</string>
+    <string name="studio_label_denoise">Denoise</string>
+    <string name="studio_label_dehaze">Dehaze</string>
     <string name="studio_label_log">LOG</string>
     <string name="studio_label_lut">LUT</string>
     <string name="studio_exposure_title">Exposure (EV)</string>
     <string name="studio_exposure_hint">Stops, e.g. -2.0 … 2.0</string>
     <string name="studio_wb_title">As-shot: %1$s K</string>
     <string name="studio_wb_hint">Color temperature (K), e.g. 5500</string>
+    <string name="studio_denoise_title">Denoise strength</string>
+    <string name="studio_denoise_hint">Sensitivity ×, 0.0 – 8.0 (0 = off)</string>
+    <string name="studio_dehaze_title">Dehaze</string>
+    <string name="studio_dehaze_strength_hint">Strength 0.0 – 1.0 (0 = off)</string>
+    <string name="studio_dehaze_percentile_hint">Haze-floor percentile 0.0 – 1.0 (default 0.01)</string>
+    <string name="studio_enable_stage">Enable</string>
     <string name="studio_decoding">Decoding…</string>
     <string name="studio_unsupported_title">Unsupported Format</string>
     <string name="studio_unsupported_format">Unsupported format!</string>

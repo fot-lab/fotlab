@@ -19,6 +19,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.AddPhotoAlternate
@@ -34,6 +37,8 @@ import androidx.compose.material.icons.filled.PhotoFilter
 import androidx.compose.material.icons.filled.Theaters
 import androidx.compose.material.icons.filled.Tonality
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Air
+import androidx.compose.material.icons.filled.Grain
 import androidx.compose.material.icons.filled.WbAuto
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -99,9 +104,8 @@ import kotlin.math.roundToInt
  * R3 under conditions (a)–(c): the drawer wraps the Scaffold, the navigation-bar inset is
  * consumed exactly once, and the bar stays module-owned. The fun bar follows the shared
  * skeleton — drawer menu at the far left (bottom-left), overflow at the far right, and a
- * file-open action just left of the overflow (`FOTLAB-UIXDES-000002`). The three develop tools
- * sit as icon-only buttons right of the drawer menu — gradient (demosaic dropdown), exposure
- * (stops input) and wb-auto (Kelvin input); the dropdowns anchor at the fun bar and therefore
+ * file-open action just left of the overflow (`FOTLAB-UIXDES-000002`). The develop tools (Denoise / Dehaze / Exposure / Demosaic / White Balance)
+ * sit as icon-only buttons right of the drawer menu — ordered Denoise (grain, strength input) → Dehaze (air, strength + percentile input) → Exposure (stops input) → Demosaic (dropdown) → White Balance (Kelvin input); the dropdowns anchor at the fun bar and therefore
  * open upward. Directly above the fun bar (RAW files only) sits the grade bar — the rawalchemy
  * fork's Boost / LOG / LUT chips (`StudioGradeBar`), its content unchanged by the layout move.
  * The module also owns its drawer; nothing here is shared with the shell.
@@ -157,6 +161,26 @@ fun StudioScreen() {
 
     var showWhiteBalanceDialog by remember { mutableStateOf(false) }
     var whiteBalanceInput by remember { mutableStateOf("") }
+
+    // Denoise strength dialog state (opened by the DevelopFilm bar Denoise icon). The entered
+    // sensitivity multiplier is written into the develop params and re-develops the canvas.
+    var showDenoiseDialog by remember { mutableStateOf(false) }
+    var denoiseInput by remember { mutableStateOf("") }
+
+    // Dehaze dialog state (opened by the DevelopFilm bar Dehaze icon). The stage needs both the
+    // strength (0..1 blend) and the haze-floor percentile (0..1) to take effect, so both are entered
+    // and written into the develop params together.
+    var showDehazeDialog by remember { mutableStateOf(false) }
+    var dehazeStrengthInput by remember { mutableStateOf("") }
+    var dehazePercentileInput by remember { mutableStateOf("") }
+
+    // Per-stage enable toggles for the develop dialogs. The switch has priority over the numeric
+    // value: OFF skips the stage regardless of the field (the engine writes `null`, the native stage
+    // early-returns), ON enables it and passes the value. Each is prefilled from the engine state when
+    // its dialog opens.
+    var exposureEnabled by remember { mutableStateOf(false) }
+    var denoiseEnabled by remember { mutableStateOf(false) }
+    var dehazeEnabled by remember { mutableStateOf(false) }
 
     // Which HorizontalOperationBar is docked in the former grade-bar slot (above the fun bar).
     // Tapping the same fun-bar category icon again hides the bar; tapping another switches to it.
@@ -288,8 +312,20 @@ fun StudioScreen() {
                         StudioOpBar.DevelopFilm -> StudioOperationBarDevelopFilm(
                             demosaicCandidates = StudioEngine.demosaicCandidates,
                             onAlgorithmPicked = { algo -> StudioEngine.develop(algo) },
+                            onDenoise = {
+                                denoiseEnabled = StudioEngine.currentDenoiseStrength() != null
+                                denoiseInput = StudioEngine.currentDenoiseStrength()?.toString() ?: ""
+                                showDenoiseDialog = true
+                            },
+                            onDehaze = {
+                                dehazeEnabled = StudioEngine.currentDehazeStrength() != null
+                                dehazeStrengthInput = StudioEngine.currentDehazeStrength()?.toString() ?: ""
+                                dehazePercentileInput = StudioEngine.currentDehazePercentile()?.toString() ?: ""
+                                showDehazeDialog = true
+                            },
                             onExposure = {
-                                exposureInput = StudioEngine.currentExposureEv().toString()
+                                exposureEnabled = StudioEngine.currentExposureEv() != null
+                                exposureInput = StudioEngine.currentExposureEv()?.toString() ?: ""
                                 showExposureDialog = true
                             },
                             onWhiteBalance = {
@@ -339,20 +375,22 @@ fun StudioScreen() {
         )
     }
 
-    // Exposure input dialog: opened by the top-bar Exposure icon. The entered stops value is
-    // written into the develop params and re-develops + re-renders the canvas (Rust applies 2^ev in
-    // the linear domain before the cam->sRGB matrix).
+    // Exposure dialog: the enable switch gates *application*, not editing — the value field is always
+    // editable (so a metered value can be tweaked even while the stage is off). On OK, when the switch
+    // is OFF the stage is skipped (exposureEv = null → native as-shot) regardless of the field; when ON
+    // the parsed stops are applied. OK is disabled only when the switch is ON and the field is not a
+    // parseable number.
     if (showExposureDialog) {
         AlertDialog(
             onDismissRequest = { showExposureDialog = false },
             confirmButton = {
-                TextButton(onClick = {
-                    val ev = exposureInput.toFloatOrNull()
-                    if (ev != null) {
-                        StudioEngine.setExposureEv(ev)
+                TextButton(
+                    enabled = !exposureEnabled || exposureInput.toFloatOrNull() != null,
+                    onClick = {
+                        StudioEngine.setExposureEv(if (exposureEnabled) exposureInput.toFloatOrNull() else null)
                         showExposureDialog = false
-                    }
-                }) {
+                    },
+                ) {
                     Text(text = stringResource(id = R.string.common_action_ok))
                 }
             },
@@ -363,13 +401,21 @@ fun StudioScreen() {
             },
             title = { Text(text = stringResource(id = R.string.studio_exposure_title)) },
             text = {
-                TextField(
-                    value = exposureInput,
-                    onValueChange = { exposureInput = it },
-                    singleLine = true,
-                    placeholder = { Text(text = stringResource(id = R.string.studio_exposure_hint)) },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                )
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(text = stringResource(id = R.string.studio_enable_stage))
+                        Spacer(modifier = Modifier.weight(1f))
+                        Switch(checked = exposureEnabled, onCheckedChange = { exposureEnabled = it })
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    TextField(
+                        value = exposureInput,
+                        onValueChange = { exposureInput = it },
+                        singleLine = true,
+                        placeholder = { Text(text = stringResource(id = R.string.studio_exposure_hint)) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    )
+                }
             },
         )
     }
@@ -412,6 +458,112 @@ fun StudioScreen() {
         )
     }
 
+    // Denoise dialog: the enable switch has priority over the strength value — when OFF the stage is
+    // skipped (denoiseStrength = null → native identity) regardless of the field; when ON the parsed
+    // sensitivity multiplier is applied. OK is disabled unless the switch is ON with a parseable number.
+    if (showDenoiseDialog) {
+        AlertDialog(
+            onDismissRequest = { showDenoiseDialog = false },
+            confirmButton = {
+                TextButton(
+                    enabled = !denoiseEnabled || denoiseInput.toFloatOrNull() != null,
+                    onClick = {
+                        StudioEngine.setDenoiseStrength(if (denoiseEnabled) denoiseInput.toFloatOrNull() else null)
+                        showDenoiseDialog = false
+                    },
+                ) {
+                    Text(text = stringResource(id = R.string.common_action_ok))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDenoiseDialog = false }) {
+                    Text(text = stringResource(id = R.string.common_action_cancel))
+                }
+            },
+            title = { Text(text = stringResource(id = R.string.studio_denoise_title)) },
+            text = {
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(text = stringResource(id = R.string.studio_enable_stage))
+                        Spacer(modifier = Modifier.weight(1f))
+                        Switch(checked = denoiseEnabled, onCheckedChange = { denoiseEnabled = it })
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    TextField(
+                        value = denoiseInput,
+                        onValueChange = { denoiseInput = it },
+                        enabled = denoiseEnabled,
+                        singleLine = true,
+                        placeholder = { Text(text = stringResource(id = R.string.studio_denoise_hint)) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    )
+                }
+            },
+        )
+    }
+
+    // Dehaze dialog: the enable switch has priority over the strength / percentile values — when OFF
+    // the stage is skipped (dehazeStrength = null → native identity) regardless of the fields; when ON
+    // both the blend and the haze-floor percentile are applied. OK is disabled unless the switch is ON
+    // with both fields parseable.
+    if (showDehazeDialog) {
+        AlertDialog(
+            onDismissRequest = { showDehazeDialog = false },
+            confirmButton = {
+                TextButton(
+                    enabled = !dehazeEnabled ||
+                        (dehazeStrengthInput.toFloatOrNull() != null && dehazePercentileInput.toFloatOrNull() != null),
+                    onClick = {
+                        if (dehazeEnabled) {
+                            StudioEngine.setDehaze(
+                                dehazeStrengthInput.toFloatOrNull(),
+                                dehazePercentileInput.toFloatOrNull(),
+                            )
+                        } else {
+                            StudioEngine.setDehaze(null, null)
+                        }
+                        showDehazeDialog = false
+                    },
+                ) {
+                    Text(text = stringResource(id = R.string.common_action_ok))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDehazeDialog = false }) {
+                    Text(text = stringResource(id = R.string.common_action_cancel))
+                }
+            },
+            title = { Text(text = stringResource(id = R.string.studio_dehaze_title)) },
+            text = {
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(text = stringResource(id = R.string.studio_enable_stage))
+                        Spacer(modifier = Modifier.weight(1f))
+                        Switch(checked = dehazeEnabled, onCheckedChange = { dehazeEnabled = it })
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    TextField(
+                        value = dehazeStrengthInput,
+                        onValueChange = { dehazeStrengthInput = it },
+                        enabled = dehazeEnabled,
+                        singleLine = true,
+                        placeholder = { Text(text = stringResource(id = R.string.studio_dehaze_strength_hint)) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    TextField(
+                        value = dehazePercentileInput,
+                        onValueChange = { dehazePercentileInput = it },
+                        enabled = dehazeEnabled,
+                        singleLine = true,
+                        placeholder = { Text(text = stringResource(id = R.string.studio_dehaze_percentile_hint)) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    )
+                }
+            },
+        )
+    }
+
     // Grade-fork error (a picked file that is not a readable .cube LUT, or a grader failure):
     // StudioEngine already fell back to the sRGB develop presentation, so this only explains why.
     gradeError?.let { message ->
@@ -434,7 +586,7 @@ private val StudioScreenFunBarHeight = 64.dp
 /**
  * The Studio fun bar: the shared skeleton of `FOTLAB-UIXDES-000002`, pinned to the screen's
  * bottom edge. Left-to-right: drawer menu, then the three *category* icons that dock one of the
- * Studio operation bars in the slot above — Theaters (DevelopFilm: Demosaic / Exposure / WB),
+ * Studio operation bars in the slot above — Theaters (DevelopFilm: Denoise / Dehaze / Exposure / Demosaic / White Balance),
  * Tune (TuneImage: Contrast / Saturation) and PhotoFilter (StyleFilter: LOG / LUT); a flexible
  * gap; the
  * file-open action and the overflow (three-dot) at the far right. The develop/grade tools
@@ -667,11 +819,13 @@ private fun DemosaicButton(
             )
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            for (candidate in candidates) {
-                DropdownMenuItem(
-                    text = { Text(text = demosaicLabel(candidate)) },
-                    onClick = { open = false; onAlgorithmPicked(candidate.algorithm) },
-                )
+            Column(Modifier.verticalScroll(rememberScrollState()).heightIn(max = 240.dp)) {
+                for (candidate in candidates) {
+                    DropdownMenuItem(
+                        text = { Text(text = demosaicLabel(candidate)) },
+                        onClick = { open = false; onAlgorithmPicked(candidate.algorithm) },
+                    )
+                }
             }
         }
     }
@@ -719,6 +873,34 @@ private fun WhiteBalanceButton(
         Icon(
             imageVector = Icons.Filled.WbAuto,
             contentDescription = stringResource(id = R.string.studio_cd_whitebalance),
+        )
+    }
+}
+
+/** Denoise strength input (opens the Denoise dialog owned by StudioScreen). */
+@Composable
+private fun DenoiseButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    IconButton(onClick = onClick, modifier = modifier) {
+        Icon(
+            imageVector = Icons.Filled.Grain,
+            contentDescription = stringResource(id = R.string.studio_cd_denoise),
+        )
+    }
+}
+
+/** Dehaze input (opens the Dehaze dialog owned by StudioScreen). */
+@Composable
+private fun DehazeButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    IconButton(onClick = onClick, modifier = modifier) {
+        Icon(
+            imageVector = Icons.Filled.Air,
+            contentDescription = stringResource(id = R.string.studio_cd_dehaze),
         )
     }
 }
@@ -787,9 +969,12 @@ private fun SaturationButton(
 }
 
 /**
- * Boost-parameter input dialog shared by contrast and saturation: one free-form float field, no
- * range limiting. OK with a blank field clears the parameter (unconfigured — when the sibling is
- * unconfigured too the whole boost switch turns off); OK is disabled for non-parseable input.
+ * Boost-parameter input dialog shared by contrast and saturation: an enable switch plus one free-form
+ * float field, no range limiting. The switch has priority over the value — when OFF the parameter is
+ * cleared (unconfigured; when the sibling is unconfigured too the whole boost switch turns off) and
+ * the field is ignored; when ON the parsed value is applied. OK is disabled while ON with a
+ * non-parseable field. The two boost parameters are coupled by the engine (rawalchemy applies both
+ * together, the unconfigured sibling falling back to 1.0), so each dialog only toggles its own.
  */
 @Composable
 private fun BoostParameterDialog(
@@ -798,14 +983,15 @@ private fun BoostParameterDialog(
     onApply: (Float?) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    var enabled by remember(currentValue) { mutableStateOf(currentValue != null) }
     var input by remember(currentValue) { mutableStateOf(currentValue?.toString() ?: "") }
     val parsed = input.toFloatOrNull()
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
             TextButton(
-                enabled = input.isBlank() || parsed != null,
-                onClick = { onApply(parsed) },
+                enabled = !enabled || parsed != null,
+                onClick = { onApply(if (enabled) parsed else null) },
             ) {
                 Text(text = stringResource(id = R.string.common_action_ok))
             }
@@ -817,13 +1003,22 @@ private fun BoostParameterDialog(
         },
         title = { Text(text = stringResource(id = titleRes)) },
         text = {
-            TextField(
-                value = input,
-                onValueChange = { input = it },
-                singleLine = true,
-                placeholder = { Text(text = stringResource(id = R.string.studio_boost_param_hint)) },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-            )
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(text = stringResource(id = R.string.studio_enable_stage))
+                    Spacer(modifier = Modifier.weight(1f))
+                    Switch(checked = enabled, onCheckedChange = { enabled = it })
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                TextField(
+                    value = input,
+                    onValueChange = { input = it },
+                    enabled = enabled,
+                    singleLine = true,
+                    placeholder = { Text(text = stringResource(id = R.string.studio_boost_param_hint)) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                )
+            }
         },
     )
 }
@@ -855,15 +1050,17 @@ private fun LogButton(
             )
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            DropdownMenuItem(
-                text = { Text(text = none) },
-                onClick = { open = false; onLogSpace(null) },
-            )
-            for (name in logSpaces) {
+            Column(Modifier.verticalScroll(rememberScrollState()).heightIn(max = 240.dp)) {
                 DropdownMenuItem(
-                    text = { Text(text = name) },
-                    onClick = { open = false; onLogSpace(name) },
+                    text = { Text(text = none) },
+                    onClick = { open = false; onLogSpace(null) },
                 )
+                for (name in logSpaces) {
+                    DropdownMenuItem(
+                        text = { Text(text = name) },
+                        onClick = { open = false; onLogSpace(name) },
+                    )
+                }
             }
         }
     }
@@ -906,16 +1103,22 @@ private fun LutButton(
 }
 
 /**
- * DevelopFilm bar — the three develop tools that used to live directly on the fun bar:
- * Demosaic, Exposure, White Balance. Reordering the list below reorders the bar.
+ * DevelopFilm bar — the develop tools that used to live directly on the fun bar, now ordered
+ * Denoise → Dehaze → Exposure → Demosaic → White Balance: the mosaic-cleaning stages run before
+ * demosaic, exposure is third, and white balance sits after demosaic. Reordering the list below
+ * reorders the bar.
  *
  * [demosaicCandidates] is the native catalogue, passed in rather than read here so the bar stays a
- * pure renderer of state the engine owns.
+ * pure renderer of state the engine owns. Each tool is an icon-only `OperationalButton`; the dialogs
+ * they open are owned by `StudioScreen`, so the bar itself carries no parameter UI (the function /
+ * layout decoupling the screen keeps — `FOTLAB-UIXDES-000002`).
  */
 @Composable
 private fun StudioOperationBarDevelopFilm(
     demosaicCandidates: List<DemosaicCandidate>,
     onAlgorithmPicked: (DemosaicAlgorithm) -> Unit,
+    onDenoise: () -> Unit,
+    onDehaze: () -> Unit,
     onExposure: () -> Unit,
     onWhiteBalance: () -> Unit,
     modifier: Modifier = Modifier,
@@ -924,13 +1127,21 @@ private fun StudioOperationBarDevelopFilm(
         modifier = modifier,
         items = listOf(
             OperationalButton(
-                id = "demosaic",
-                label = stringResource(id = R.string.studio_label_demosaic),
-            ) { DemosaicButton(demosaicCandidates, onAlgorithmPicked) },
+                id = "denoise",
+                label = stringResource(id = R.string.studio_label_denoise),
+            ) { DenoiseButton(onDenoise) },
+            OperationalButton(
+                id = "dehaze",
+                label = stringResource(id = R.string.studio_label_dehaze),
+            ) { DehazeButton(onDehaze) },
             OperationalButton(
                 id = "exposure",
                 label = stringResource(id = R.string.studio_label_exposure),
             ) { ExposureButton(onExposure) },
+            OperationalButton(
+                id = "demosaic",
+                label = stringResource(id = R.string.studio_label_demosaic),
+            ) { DemosaicButton(demosaicCandidates, onAlgorithmPicked) },
             OperationalButton(
                 id = "wb",
                 label = stringResource(id = R.string.studio_label_whitebalance),

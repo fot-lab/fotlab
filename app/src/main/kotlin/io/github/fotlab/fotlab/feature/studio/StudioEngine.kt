@@ -196,6 +196,9 @@ object StudioEngine {
                         demosaicAlgorithm = DemosaicAlgorithm.DEFAULT,
                         exposureEv = null,
                         wb = null,
+                        denoiseStrength = currentDenoiseStrength,
+                        dehazeStrength = currentDehazeStrength,
+                        dehazePercentile = currentDehazePercentile,
                         downsample = downsampleState.value,
                     ),
                 ) ?: return StudioRenderResult.Unsupported
@@ -301,11 +304,24 @@ object StudioEngine {
     /** The list the DevelopFilm bar renders; see [demosaicCandidatesCache]. */
     val demosaicCandidates: List<DemosaicCandidate> get() = demosaicCandidatesCache
 
-    /** The exposure compensation (in stops) retained for the next develop re-render. */
-    private var currentExposureEv: Float = 0.0f
-
     /** The white-balance color temperature (Kelvin) retained for the next develop re-render; null = as-shot. */
     private var currentWhiteBalanceKelvin: Float? = null
+
+    /**
+     * The exposure compensation (in stops) retained for the next develop re-render. `null` means the
+     * exposure stage is skipped entirely (as-shot, unity gain) — this is how the Exposure dialog's
+     * enable switch turns the stage off; the native `apply_exposure` also early-returns on `None`.
+     */
+    private var currentExposureEv: Float? = null
+
+    /** The denoise strength (sensitivity multiplier) retained for the next develop re-render; null = off. */
+    private var currentDenoiseStrength: Float? = null
+
+    /** The dehaze strength (0..1 blend) retained for the next develop re-render; null = off. */
+    private var currentDehazeStrength: Float? = null
+
+    /** The dehaze haze-floor percentile (0..1) retained for the next develop re-render; null = default (0.01). */
+    private var currentDehazePercentile: Float? = null
 
     /**
      * The RAW decoded once and held resident as a UniFFI handle; null when no raw file is loaded.
@@ -458,6 +474,9 @@ object StudioEngine {
             demosaicAlgorithm = currentAlgorithm,
             exposureEv = currentExposureEv,
             wb = null,
+            denoiseStrength = currentDenoiseStrength,
+            dehazeStrength = currentDehazeStrength,
+            dehazePercentile = currentDehazePercentile,
             // The grade fork develops through the same pipeline, so it honours the switch too —
             // grading a quarter-resolution frame is simply grading fewer pixels.
             downsample = downsampleState.value,
@@ -599,8 +618,8 @@ object StudioEngine {
             .forEach { runCatching { it.delete() } }
     }
 
-    /** The current exposure compensation in stops; the UI prefills the Exposure dialog from this. */
-    fun currentExposureEv(): Float = currentExposureEv
+    /** The current exposure compensation in stops; `null` means the stage is skipped (as-shot). The UI prefills the Exposure dialog from this. */
+    fun currentExposureEv(): Float? = currentExposureEv
 
     /** The as-shot color temperature (Kelvin) decoded from the current RAW, or 0f when unavailable. */
     fun asShotWhiteBalanceKelvin(): Float = loadedImage?.asShotColorTempKelvin() ?: 0f
@@ -636,12 +655,46 @@ object StudioEngine {
 
     /**
      * Re-develop the current RAW with a new exposure compensation [ev] (in stops) entered from the
-     * Studio Exposure dialog, keeping the current demosaic algorithm. The value is written into
+     * Studio Exposure dialog, keeping the current demosaic algorithm. [ev] is written into
      * [DevelopParams.exposureEv] so the native calibrate step applies the `2^ev` linear gain before
-     * the cam→sRGB matrix; the canvas is re-rendered from the re-developed PNG.
+     * the cam→sRGB matrix; the canvas is re-rendered from the re-developed PNG. `null` skips the
+     * exposure stage entirely (as-shot), which is how the Exposure dialog's enable switch turns it off.
      */
-    fun setExposureEv(ev: Float) {
+    fun setExposureEv(ev: Float?) {
         currentExposureEv = ev
+        reDevelop()
+    }
+
+    /** The current denoise strength; the UI prefills the Denoise dialog from this. */
+    fun currentDenoiseStrength(): Float? = currentDenoiseStrength
+
+    /** The current dehaze strength; the UI prefills the Dehaze dialog from this. */
+    fun currentDehazeStrength(): Float? = currentDehazeStrength
+
+    /** The current dehaze percentile; the UI prefills the Dehaze dialog from this. */
+    fun currentDehazePercentile(): Float? = currentDehazePercentile
+
+    /**
+     * Re-develop the current RAW with a denoise [strength] (sensitivity multiplier on the detection
+     * threshold) entered from the Studio Denoise dialog, keeping the current demosaic algorithm,
+     * exposure, white balance and dehaze. `null` (or 0) is the identity — [DevelopParams.denoiseStrength]
+     * is `None`/0, so the stage is skipped; the canvas is re-rendered from the re-developed PNG.
+     */
+    fun setDenoiseStrength(strength: Float?) {
+        currentDenoiseStrength = strength
+        reDevelop()
+    }
+
+    /**
+     * Re-develop the current RAW with a dehaze [strength] (0..1 blend) and [percentile] (0..1 haze-floor
+     * quantile) entered from the Studio Dehaze dialog, keeping the current demosaic algorithm, exposure,
+     * white balance and denoise. Both are required for the stage to take effect: [DevelopParams.dehazeStrength]
+     * `None`/0 makes the whole dehaze an identity, so the blend must be set alongside the percentile.
+     * The canvas is re-rendered from the re-developed PNG.
+     */
+    fun setDehaze(strength: Float?, percentile: Float?) {
+        currentDehazeStrength = strength
+        currentDehazePercentile = percentile
         reDevelop()
     }
 
@@ -661,7 +714,7 @@ object StudioEngine {
         uri: Uri,
         token: Long,
         algorithm: DemosaicAlgorithm,
-        exposureEv: Float,
+        exposureEv: Float?,
         wbKelvin: Float? = null,
     ): StudioRenderResult {
         // If the file was switched while we were about to develop, bail — never develop a different
@@ -680,6 +733,9 @@ object StudioEngine {
                         demosaicAlgorithm = algorithm,
                         exposureEv = exposureEv,
                         wb = null,
+                        denoiseStrength = currentDenoiseStrength,
+                        dehazeStrength = currentDehazeStrength,
+                        dehazePercentile = currentDehazePercentile,
                         downsample = downsample,
                     ),
                     wbKelvin,
@@ -691,6 +747,9 @@ object StudioEngine {
                         demosaicAlgorithm = algorithm,
                         exposureEv = exposureEv,
                         wb = null,
+                        denoiseStrength = currentDenoiseStrength,
+                        dehazeStrength = currentDehazeStrength,
+                        dehazePercentile = currentDehazePercentile,
                         downsample = downsample,
                     ),
                 )

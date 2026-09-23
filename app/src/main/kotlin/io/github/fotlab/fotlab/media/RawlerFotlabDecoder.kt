@@ -17,8 +17,8 @@ import java.io.InputStream
  * [developToPng] is the same pattern routed through [RawlerFotlabBridge.developRawToPng]. The
  * Studio fun bar passes the user's chosen demosaic [algorithm] and exposure compensation
  * [exposureEv] (in stops; `wb` stays `null` so the Rust side resolves to `RawImage.wb_coeffs`, the
- * camera's as-shot white balance). `exposureEv` defaults to `0f` (no compensation) for callers that
- * do not override it.
+ * camera's as-shot white balance). `exposureEv` is `null` (no exposure step) by default for callers
+ * that do not override it; a non-null value applies the `2^ev` linear gain on the native side.
  */
 class RawlerFotlabDecoder : RawDecoder {
     override suspend fun decodeToPng(format: String, open: suspend () -> InputStream): ByteArray? {
@@ -29,7 +29,7 @@ class RawlerFotlabDecoder : RawDecoder {
     override suspend fun developToPng(
         format: String,
         algorithm: DemosaicAlgorithm,
-        exposureEv: Float,
+        exposureEv: Float?,
         downsample: Boolean,
         open: suspend () -> InputStream,
     ): ByteArray? {

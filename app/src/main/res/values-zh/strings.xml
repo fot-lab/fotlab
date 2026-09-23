@@ -72,10 +72,12 @@
     <string name="studio_cd_more_options">更多选项</string>
     <string name="studio_reset_view">重置视图</string>
     <string name="studio_open_prompt">从工具栏打开文件开始编辑</string>
-    <!-- DevelopFilm operation-bar icons (demosaic / exposure / white balance). -->
+    <!-- DevelopFilm operation-bar icons (denoise / dehaze / exposure / demosaic / white balance). -->
     <string name="studio_cd_demosaic">解马赛克算法</string>
     <string name="studio_cd_exposure">曝光</string>
     <string name="studio_cd_whitebalance">白平衡</string>
+    <string name="studio_cd_denoise">降噪</string>
+    <string name="studio_cd_dehaze">去雾</string>
     <string name="studio_cd_develop_film">胶片冲洗工具</string>
     <string name="studio_cd_tune_image">调整图像</string>
     <string name="studio_cd_style_filter">风格滤镜</string>
@@ -87,12 +89,20 @@
     <string name="studio_label_demosaic">解马赛克</string>
     <string name="studio_label_exposure">曝光</string>
     <string name="studio_label_whitebalance">白平衡</string>
+    <string name="studio_label_denoise">降噪</string>
+    <string name="studio_label_dehaze">去雾</string>
     <string name="studio_label_log">LOG</string>
     <string name="studio_label_lut">LUT</string>
     <string name="studio_exposure_title">曝光（EV）</string>
     <string name="studio_exposure_hint">档位，例如 -2.0 … 2.0</string>
     <string name="studio_wb_title">机内白平衡：%1$s K</string>
     <string name="studio_wb_hint">色温（K），例如 5500</string>
+    <string name="studio_denoise_title">降噪强度</string>
+    <string name="studio_denoise_hint">灵敏度倍率，0.0 – 8.0（0 关闭）</string>
+    <string name="studio_dehaze_title">去雾</string>
+    <string name="studio_dehaze_strength_hint">强度 0.0 – 1.0（0 关闭）</string>
+    <string name="studio_dehaze_percentile_hint">雾底百分位 0.0 – 1.0（默认 0.01）</string>
+    <string name="studio_enable_stage">启用</string>
     <string name="studio_decoding">解码中…</string>
     <string name="studio_unsupported_title">不支持的格式</string>
     <string name="studio_unsupported_format">不支持的格式！</string>

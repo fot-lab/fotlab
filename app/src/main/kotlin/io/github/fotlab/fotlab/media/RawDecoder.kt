@@ -42,7 +42,7 @@ interface RawDecoder {
     suspend fun developToPng(
         format: String,
         algorithm: DemosaicAlgorithm,
-        exposureEv: Float = 0.0f,
+        exposureEv: Float? = null,
         downsample: Boolean = false,
         open: suspend () -> InputStream,
     ): ByteArray?
@@ -58,7 +58,7 @@ object StubRawDecoder : RawDecoder {
     override suspend fun developToPng(
         format: String,
         algorithm: DemosaicAlgorithm,
-        exposureEv: Float,
+        exposureEv: Float?,
         downsample: Boolean,
         open: suspend () -> InputStream,
     ): ByteArray? = null
