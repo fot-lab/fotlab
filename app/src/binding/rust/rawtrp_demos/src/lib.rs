@@ -150,9 +150,8 @@ pub fn demosaic_bayer(algo: BayerAlgo, cfa: &CfaDesc, mosaic: &Array2D<f32>, par
     return Err(Error::Shape(format!("mosaic too small: {w}x{h}")));
   }
 
-  // `params` is read by the DCB and dual-hybrid arms; the simple kernels ignore
-  // it, exactly as upstream's do.
-  let _ = params;
+  // `params` is read by the DCB, LMMSE and dual-hybrid arms; the simple kernels
+  // ignore it, exactly as upstream's do.
 
   // Ported kernels land one at a time (FOTLAB-NATIVE-000004 C6); an unported
   // algorithm stays out of `algo::candidates` until its arm exists here.
@@ -174,6 +173,9 @@ pub fn demosaic_bayer(algo: BayerAlgo, cfa: &CfaDesc, mosaic: &Array2D<f32>, par
     // curve is indexed in `rawData` units), and it is the only one that takes a
     // parameter — upstream's `lmmse_iterations`.
     BayerAlgo::Lmmse => bayer::lmmse::bayer_lmmse_demosaic(cfa, mosaic, params.lmmse_iterations),
+    // DCB tiles the frame itself (192-square with a 10-pixel margin, upstream's
+    // own geometry) and takes both of its parameters.
+    BayerAlgo::Dcb => bayer::dcb::bayer_dcb_demosaic(cfa, mosaic, params.dcb_iterations, params.dcb_enhance),
     other => Err(Error::UnsupportedAlgo(other.original_name())),
   }
 }
