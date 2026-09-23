@@ -169,11 +169,17 @@ ipf.rgbProc(working, lab, &pp);   // or call leaf methods (vibrance/shadowsHighl
   ```
 - **Pipeline call site**: `dcrop.cc:1416` `parent->ipf.defringe(labnCrop)` (also `defringecam` at `improcfun.cc:1709` when CIECAM is active).
 
+> **Green fringe (绿边) vs. green equilibration (绿平衡) — do not conflate.**
+> - **Green *edge* fringe** (high-contrast edges turning green) is the *same* chromatic-fringe symptom as purple fringe and is removed by this **same `defringe` tool** — the user simply lifts the **green** segment of `defringe.huecurve` (`PF_correct_RT.cc:108` reads the curve; a green-hue selection desaturates only green-fringe pixels). **B-tier, no patch.**
+> - **`green_equilibrate` / `green_equilibrate_global`** (`green_equil_RT.cc`) is a *different* raw-stage routine: it equalises the two green sub-pixels (G1 vs G2) of a Bayer CFA to kill a **green cast / green tinge**, not edge fringing. It is a `protected` member of `RawImageSource final` (`rawimagesource.h:272–273`), so it is **C-tier** (pre-demosaic, needs patch or `processImage`). It is *not* what removes green edge fringes.
+
 ### 5.2 RAW-stage CA auto-correction — root-cause, strongest, but C-tier (patch or `processImage`)
 
 - **Code**: `RawImageSource::CA_correct_RT(...)` @ `CA_correct_RT.cc:120` (declared `rawimagesource.h:247`).
 - **Position**: operates on the **mosaic, before demosaic** (Ingo Weyrich auto-fit algorithm). Called from `rawimagesource.cc:1765-1772` inside `getImage()` (per-frame `rawDataFrames[...]` + the full `rawData`), so it corrects R/B radially on the raw CFA — the most thorough removal of strong purple/green edges.
 - **Reachability**: `rawimagesource.h:247` sits inside the `protected:` block opened at `:236`, and `RawImageSource` is `final` (`:43`) — **external call is impossible without a patch** (C-tier, same wall as the demosaic kernels in `RAWTRP-SURVEY-000003` §3). Options: drive the whole pipeline via `rtengine::processImage` (accept RT's own decode + CA), or patch/vendor.
+
+> **Adjacent raw-stage pass — `cfa_linedn` (`cfa_linedn_RT.cc`, Emil's CFA line-denoise / per-row CA):** runs *around* the demosaic on the mosaic (`rawimagesource.h:270`, `protected` → C-tier). It suppresses per-row chromatic aberration / line noise on the CFA — another non-patch-free raw-stage lever, reachable only via `processImage` or a patch/vendor.
 
 ### 5.3 Lens lateral CA correction — gentle R/B shift, B-tier (no patch)
 
@@ -193,8 +199,17 @@ ipf.rgbProc(working, lab, &pp);   // or call leaf methods (vibrance/shadowsHighl
 | Regular purple / green fringe | `ImProcFunctions::defringe` (huecurve selects the hue) | **B** | ✅ |
 | Strong fringe, root-cause | `RawImageSource::CA_correct_RT` (RAW stage) | **C** | ❌ (patch or `processImage`) |
 | Lateral CA (magenta/green edge) | `ImProcFunctions::transform` `cacorrection` | **B** | ✅ |
+| Green-channel equalisation (cast, not fringe) | `RawImageSource::green_equilibrate[_global]` | **C** | ❌ (patch or `processImage`) |
+| Per-row CA / line noise (raw stage) | `RawImageSource::cfa_linedn` | **C** | ❌ (patch or `processImage`) |
+| Astigmatism (像散) | — (not implemented in RT) | — | ❌ (absent) |
 
-Consistent with `RAWTRP-SURVEY-000003`: grading, WB, defringe, and lens-CA are all patch-free via `ImProcFunctions`; only the RAW-stage CA and the demosaic kernels are C-tier.
+### 5.5 Astigmatism (像散) — NOT present in RawTherapee
+
+- A grep of `rtengine/*.cc/.h/.cpp` for `stigm|astig|Astig|ASTIG` returns **0 hits**. RawTherapee has **no dedicated astigmatism-correction algorithm**.
+- RT's lens correction is delegated to **lensfun** (`rtlensfun.cc`), which models distortion, transversal (lateral) CA, and vignetting — **not astigmatism**. Astigmatism would require a directional / deconvolution PSF model that RT does not implement.
+- **Verdict**: 像散 is **absent** — neither patch-free nor patch-required, simply unavailable in RT. Any astigmatism correction must come from an external module or be implemented independently.
+
+Consistent with `RAWTRP-SURVEY-000003`: grading, WB, defringe, and lens-CA are all patch-free via `ImProcFunctions`; only the RAW-stage CA, `green_equilibrate`, `cfa_linedn`, and the demosaic kernels are C-tier.
 
 ## Constraints (STRUCT.md principle 5)
 
@@ -211,3 +226,4 @@ Consistent with `RAWTRP-SURVEY-000003`: grading, WB, defringe, and lens-CA are a
 
 - 2026-09-21 (rev 1) — Deep dive on the two B-tier reusable classes of `RAWTRP-SURVEY-000003`. **`ImProcFunctions`** (`improcfun.h:137`, `public:` `:169`, ctor `:197` takes `ProcParams*` + `bool multiThread` only — never an `ImageSource*`, so grading is parameter-driven not object-coupled; member `bool multiThread` `:145` gates 47 OpenMP regions in `improcfun.cc`; three carrier types `Imagefloat*`/`LabImage*`/`CieImage*`; full public grading catalogue with lines: tone `tone_eqcam` `:452`/`EPDToneMap` `:311`/`sigmoid_main` `:459`, RGB-stage `rgbProc` `:217` impl `improcfun.cc:2050`, colour `vibrance` `:250`/`shadowsHighlights` `:599`/`defringe` `:583`/`dehaze` `:593`/`toning*` `:229`, sharpen `sharpening` `:254`/`deconvsharpening` `:289`/`MLsharpen` `:292`/`MLmicrocontrast` `:293`, denoise `impulsedenoise` `:297`/`dirpyrdenoise` `:302`/`DeNoise` `:504`, wavelet `dirpyrequalizer` `:303`/`ip_wavelet` `:520`, colour-conv `rgb2lab`/`lab2rgb` `:624`/`:625`, TRC `workingtrc` `:614`, lens `transform` `:261`; only `rgb2lab`/`lab2rgb` depend on `ICCStore::getInstance()->workingSpaceMatrix(name)`). **`ColorTemp`** (`colortemp.h:44`, members `:5–:9`, fully standalone — no engine/`ICCStore` handle; ctors `:61`/`:62`/`:63`/`:64` (`:64` builds from per-channel multipliers — the bridge to our pipeline); `getMultipliers` `:107`, `temp2mul` `:56`, `mul2temp` `:112`, `update` `:67`, Bradford `cieCAT02` `:115`, `clip` `:53`, `spectrum_to_xyz_*`/whitepoint `:634` — the cleanest reusable WB primitive, patch-free, no `ProcParams`). Filed as `RAWTRP-SURVEY-000004`; row appended to `rules/STRUCT/index.md`; SURVEY next-sequence advanced to 000005.
 - 2026-09-21 (rev 2) — Added §5 **fringe & CA correction** (purple/green edge removal). **Defringing** = `ImProcFunctions::defringe(LabImage*)` `improcfun.cc:5111` (`improcfun.h:583`), CIECAM `defringecam(CieImage*)` `:5121` (`:584`); real impl `PF_correct_RT(LabImage*,radius,thresh)` `PF_correct_RT.cc:51` (`improcfun.h:588`), `PF_correct_RTcam` `:589`; mechanism Lab a/b chroma blur vs neighbourhood gated by `defringe.huecurve` (FlatCurve) at `PF_correct_RT.cc:55-114` → one tool strips purple OR green by hue selection; params `DefringeParams{enabled,radius,threshold,huecurve}` (`rtgui/paramsedited.cc:498-501`); pipeline `dcrop.cc:1416`. **RAW-stage CA** = `RawImageSource::CA_correct_RT(...)` `CA_correct_RT.cc:120` (`rawimagesource.h:247`, inside `protected:` block from `:236`, class `final` `:43` → C-tier) called `rawimagesource.cc:1765-1772` in `getImage`, pre-demosaic. **Lens lateral CA** = `CACorrectionParams{red,blue}` applied in `ImProcFunctions::transform`/`resize` geometry path `iptransform.cc:562`/`:564`/`:1114`/`:1118`/`:1390` (B-tier, no patch). Updated §1.3 catalogue (added `defringe`/`defringecam` row + `cacorrection` note on `transform`), §1.4 (`defringe`/lateral-CA need no `ICCStore`), §5.4 reuse table, Q4. Title widened to include fringe & CA. Index row title for `RAWTRP-SURVEY-000004` updated accordingly.
+- 2026-09-23 (rev 3) — Clarified the five aberration/fringe terms against the source. **Green *edge* fringe** is the same `defringe`/hue-curve tool as purple (B-tier, no patch); **`green_equilibrate[_global]`** (`green_equil_RT.cc`) is a *separate* raw-stage G1/G2 channel-balance routine for green cast, **C-tier** (`rawimagesource.h:272–273`, `protected` of `RawImageSource final`), not edge fringing. Added **`cfa_linedn`** (`cfa_linedn_RT.cc`, `rawimagesource.h:270`, C-tier) as an adjacent raw-stage per-row CA/line-noise pass. Confirmed **astigmatism (像散) is absent** in RT (grep `stigm|astig` over `rtengine/*.cc/.h/.cpp` → 0 hits); lens correction is lensfun (distortion/TCA/vignetting only), no astigmatic model. Extended §5.4 reuse table (green-equilibrate C-tier row, cfa_linedn C-tier row, astigmatism absent row) and added §5.5. Path-casing note: the module is `external/RawTherapee` (capital R); the lowercase `external/rawtherapee` only resolves on a case-insensitive FS.
