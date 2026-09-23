@@ -133,7 +133,7 @@ app/src/binding/rust/rawtrp_demos/
     │   ├── rcd.rs             # rcd_demosaic.cc（348）✅ 已落地
     │   ├── igv.rs             # demosaic_algos.cc:609（IGV，**标量**分支）✅ 已落地
     │   ├── lmmse.rs           # lmmse_demosaic.cc（830）✅ 已落地
-    │   ├── dcb.rs             # demosaic_algos.cc:1406（DCB）
+    │   ├── dcb.rs             # demosaic_algos.cc:963-1548（DCB，13 个函数）✅ 已落地
     │   ├── amaze.rs           # amaze_demosaic_RT.cc（1610）
     │   ├── ahd.rs             # ahd_demosaic_RT.cc（235）
     │   ├── eahd.rs            # eahd_demosaic.cc（447）
@@ -239,7 +239,7 @@ rawler Intermediate::ThreeColor  →  develop 后续（calibrate …）不变
 | --- | --- | --- |
 | **B0 骨架** ✅ | crate + `CfaDesc`/`Array2D`/`Rgb`/`math`/`border`/`algo`(字典+candidates)/`bridge`(→`Intermediate`) + **bilinear** 内核 + 单测；registrar 为 `rawler_fotlab` 的 path dep | 已落地（本批随 CI 首验编译） |
 | **B1 打通** | **VNG4** 内核 ✅ + `lib.rs::demosaic_bayer` 分发 ✅ + `IMPLEMENTED_BAYER` 放开 ✅；**待做**：`rawler_fotlab::demosaic.rs` 分发 + `demosaic_candidates()` 暴露 + Kotlin 菜单动态化 | 选 `RAWTRP VNG4` 能出图；`DEFAULT` 逐像素不变；UI 候选可见 |
-| **B2 质量层** | **RCD** ✅、**IGV** ✅、**LMMSE** ✅（内核 + 分发 + 候选）；**待做**：DCB | 各自单测 + 与 RT golden 数值比对达标 |
+| **B2 质量层** | **RCD** ✅、**IGV** ✅、**LMMSE** ✅、**DCB** ✅ —— 四个内核 + 分发 + 候选全部落地 | 单测均已落地；**与 RT golden 数值比对仍待做**（Q1），故 B2 的出口标准只算完成一半 |
 | **B3 高端层** | AMAZE、AHD、EAHD、HPHD（AMAZE 为质量基准，含 SIMD） | 同上 |
 | **B4 X-Trans** | `xtrans_interpolate`(1/3-pass)、`xtrans/fast`、`dual` 混合封装 | X-Trans 图可选；CFA 自检 |
 
@@ -324,3 +324,16 @@ rawler Intermediate::ThreeColor  →  develop 后续（calibrate …）不变
   11. **分配失败 ⇒ 回落 IGV，与上游同（且这与四色守卫*不同*）。** `:103-133` 在 plane 分配失败时 `return igv_interpolate(W, H)`。本库 `Planes::try_new` 返回 `None` 即 `return super::igv::bayer_igv_demosaic(...)`。**注意别和四色守卫混为一谈**：四色 CFA 的那条回落**本身不可用**（IGV 自己就会越界，见 rev 7 第 7 条）⇒ 那里是**拒绝**；这里 IGV 拿到的是**三色 Bayer**，回落**可用** ⇒ 忠实复现。
   12. **四色 CFA / 非 Bayer CFA ⇒ `UnsupportedCfa`**（与 vng4/rcd 一致，理由同 rev 7 第 7 条）。
   另：本批同时修正 `math.rs` 的 `median3`（第 5 条）、新增 `xdiv2f`（第 6 条）与 `median9`（第 7 条），共 **11 个单测**；另留一份 Python 参照模型（`log/lmmse_ref.py`、`log/lmmse_check.py`，`log/` 已 gitignore）做结构校验：平坦场在 iter=0/2 的内部区域恒为 0.5、7/8 与 5/6 输出逐位相同、iterations 0..8 全程有限且非负、四种 Bayer 排布在平坦场上一致 —— 全部通过。**golden 数值比对（B2 出口标准）仍未做**，仍挂在 Q1 下。
+- 2026-09-23 — **rev 9：B2 第四个内核 DCB 落地（B2 内核覆盖面就此齐全）**（`bayer/dcb.rs`，`demosaic_algos.cc:963-1548` —— 13 个函数：`dcb_initTileLimits` 963、`fill_raw` 987、`fill_border` 998、`copy_to_buffer` 1043、`restore_from_buffer` 1054、`dcb_hid` 1065、`dcb_color` 1081、`dcb_hid2` 1123、`dcb_map` 1154、`dcb_correction` 1177、`dcb_pp` 1200、`dcb_correction2` 1257、`dcb_refinement` 1297、`dcb_color_full` 1340、`dcb_demosaic` 1406；提交 `f747c7e`）。11 条结论，均已在源码 `//!` 里交叉引用：
+  1. **数值域：必须显式往返，且理由与 RCD 相反。** RCD 载入归一化、写出反归一化 ⇒ 一对换算**自动抵消**；DCB 则是 `cache[indx][fc] = rawData[y][x]` **原样读入**、写出 `std::max(0.f, …)` 原样送出 ⇒ 内核内部**就是 `rawData` 域**。故本库在载入乘 `SCALE = 65536`、写出除回（`SCALE` 与 RCD 同一个，同源于"mosaic = rawData/65536"这条 crate 约定）。**这不能当风格问题**：`dcb_refinement` 六处除数是 `1.f + 2.f*currPix`、`1.f + image[..][c] + currPix`，`dcb_color_full` 也全是 `1.f / (1.f + Σ|差|)` 加常数 `1.325/0.175/0.075/0.875` —— `1.f` 是**绝对**常数，喂 0..1 会让它压过全部信号。输出**不上钳**（只有 `std::max(0.f, ·)`），故与 LMMSE 同理允许 >1。
+  2. **`fill_border` 不是"补一圈边"**，三处易丢细节都已复现：① `col = W - border` 那一跳使它在**画幅内部行上直接跳过整段内部**，合起来只访问「`row < border` / `row >= H - border` / `col < border` / `col >= W - border`」这条 **6px 画幅边环**；② 邻域求和**没有下界判断** —— 画幅第 0 行/列时 `row-1`/`col-1` = `-1`，cache 索引 `(y-y0+TILEBORDER)*CACHESIZE + TILEBORDER + (x-x0)` 恰好落在 **cache 第 9 行/列（零环）**，于是**样本读成 0.0，而 `sum[f+4]` 照样 +1** ⇒ 均值被零环**稀释**，这是上游输出的一部分；③ `FC` 也在那些**负坐标**上求值，按 C 的补码回绕（`fc_i`）—— 一个"不存在的行/列"的颜色。
+  3. **DCB 没有收尾的 `border_interpolate`。** 上游每个像素都由**它自己那个 tile** 写出（`for(y=0;y<TILESIZE&&y0+y<H;y++)` 全写，不缩边）⇒ **tile 行恰好划分整幅**（区间两两不交**且**首尾相接、无缝无叠）。这正是本库能用 `par_chunks_mut(TILESIZE*w)` 把三张平面切成 tile 行、把**真实 `&mut` 切片**交给每个 rayon 任务而**无需 `unsafe`** 的原因，也是为什么这里**没有** RCD/IGV 那样的收尾补边调用。该性质由单测 `tile_row_chunks_partition_every_row` 钉住。
+  4. **`buffer` 与 `chrm` 是*同一块内存*。** 上游 `float (*chrm)[2] = (float(*)[2]) (buffer);`（`:1435`，注释"No overlap in usage of buffer and chrm means we can reuse buffer"）。本库合成**一个**字段 `Tile::rbuf`。拆成两个字段看着更整洁，却会**静默改变行为**：enhance 分支依赖 `memset(chrm, …)` 清掉 `restore_from_buffer` **刚读过**的那块缓冲。
+  5. **`dcb_color` 第二个循环的列奇偶取自 `FC(absRow, absColMin + 1)` —— 全文件独一份的"绿列"。** 其余所有循环（`dcb_hid`/`dcb_hid2`/第一个 `dcb_color`/`dcb_correction`/`dcb_correction2`/`dcb_refinement`）都用 `FC(absRow, absColMin)` 起跳（红/蓝列），只有它多算一列；而且它的颜色索引取 `FC(absRow, col + 1)` —— 取**邻居**的颜色，不是本站点的。写错任一者都会把通道接反且不报错。
+  6. **`dcb_color_full` 第一个 pass 走的是*整个 cache*（`1..CACHESIZE-1`），不看 `dcb_initTileLimits`。** 这是全文件**唯一**忽略 tile 限界的循环，而且是**必须**的：后面两个 pass 的核够到 ±3 行/±1 列，超出 tile 限界。本库照抄（并用注释标出这个例外）。
+  7. **`dcb_pp` 是就地、且*顺序相关*的**：它写出的 `image[indx][0]/[2]` 会被**后面的**像素当作邻域读回，所以不能并行、也不能改成先算后写。上游用一个 `float (*pix)[3]` 指针在 8 邻域上按**行主序**走（`indx-u-1, -u, -u+1, -1, +1, +u-1, +u, +u+1`）—— 本库按**同一顺序**列出偏移，因为每个累加器的浮点舍入取决于加数顺序。
+  8. **`min`/`max` 是 RT 自己的模板**（`rt_math.h:60/73`：`b < a ? b : a` 与 `a < b ? b : a`），**恰好就是**本库既有的 `math::min2`/`math::max2`（当初为 IGV 复刻 libstdc++ 语义时加的）。`dcb_map`、`dcb_refinement` 直接复用，无需新增。（若误用 `f32::min`/`f32::max`，NaN 传播方向会不同 —— 与 rev 7 第 10①② 是同一类坑。）
+  9. **DCB *完全没有* SIMD。** 其源区（`:963-1548`）内 `_mm_`/`__m128`/`vld1`/`simde`/`LVFU` 计数为 **0**（`demosaic_algos` 的 50 个命中全在 IGV 那两段）。⇒ 与 RCD 同理**无"待补的 SIMD"**，标量 + rayon 即完整移植（对照 Q3）。
+  10. **并行粒度：上游只在 tile 循环上并行**（`:1423` 的 `omp parallel` + `:1437` 的 `omp for schedule(dynamic) nowait`，外加 `:1543` 一个进度计数器 atomic），**所有 helper 都是串行**。本库按 **tile 行**分片（tile 之间互不依赖 ⇒ 粒度等价），tile 内保持串行 —— 与上游同一粒度，且完全在安全 Rust 内。**这是"上游并行 ≠ 本库并行"的第四例**（RCD 块行 / IGV chroma 四相 / LMMSE 步骤 6-7 / DCB tile 行），四例模式一致：**凡上游靠"类别不相交"或"任务天然独立"而并行的地方，本库优先找*结构上可切分*的维度**，找不到就留在有界串行并留档。
+  11. **`iterations <= 0` 走同一条路**（上游 `for (int i = iterations; i > 0; i--)`），GUI 默认 `dcb_iterations = 2`、`dcb_enhance = true`。`dcb_enhance` 切换的是**最后一级**（`dcb_color` ↔ `dcb_refinement` + `dcb_color_full`），不是装饰开关 —— 单测 `enhance_is_not_a_no_op` 与 `zero_and_negative_iterations_take_the_same_path` 分别钉住两端。
+  另：DCB 的 `tile_row_bands`/`Tile` 结构与 RCD 同族但更简单（无收尾补边、无 `tileBorder != kernelBorder` 的三元式），`Tile::clear()` **每块 tile 都清零**（复刻上游每块 `memset`，因为外层零环会被 `fill_border` 的邻域和读到）；单测用**分段常数马赛克**（红站 0.2 / 绿站 0.5 / 蓝站 0.8）作 DCB 的**不动点**做精度断言 —— 该输入下所有 pass 只在**同一通道内部**做差或加权，故四种 Bayer 排布都应**精确**重建（1e-4 容差），任何奇偶/通道接反都会立刻失败。**golden 数值比对仍未做，B2 出口标准只完成一半。**
