@@ -1,45 +1,51 @@
-//! Denoise stage — pure-functional noise reduction on the scaled mosaic, applied
-//! *before* demosaic (the exposure slot).
+//! Denoise stage — pure-functional impulse (hot/dead-pixel) denoise on the scaled
+//! mosaic, applied *before* demosaic (the exposure slot).
 //!
-//! ## Algorithm: RawTherapee's CFA-stage impulse denoise
+//! ## Algorithm: RawTherapee's CFA-stage impulse denoise, generalised to any CFA
 //!
 //! RawTherapee's **Impulse Denoise** (the "hot/dead pixel" removal in RT's *Raw*
-//! tab) runs on the single-channel Bayer mosaic, *before* demosaic. It treats
+//! tab) runs on the single-channel CFA mosaic, *before* demosaic. It treats
 //! photosite defects — hot pixels, dead pixels, stuck sensors, salt-and-pepper
 //! impulse noise — as *isolated outliers* and replaces each with the median of its
-//! same-colour neighbours. We port that idea here, working on the same 0..1
-//! scaled mosaic the exposure slot hands us.
+//! same-colour neighbours. We port that idea here, on the same 0..1 scaled mosaic
+//! the exposure slot hands us.
 //!
-//! Two enhancements over the textbook RT median test, while keeping the same
-//! contract:
+//! Unlike the original port (which hard-coded the 2×2 Bayer sublattices and was
+//! therefore skipped on X-Trans), this version groups pixels by
+//! **`CFA::color_at(row, col)`** and so works on **every periodic CFA** —
+//! 2×2 Bayer (RGGB / four-colour), 6×6 X-Trans, and anything else rawler
+//! describes — as well as on single-channel (non-CFA, monochrome) input, with no
+//! 2×2-only gating. The same-colour neighbour set of a pixel is the fixed list of
+//! `(Δrow, Δcol)` offsets (within a `RADIUS × RADIUS` window, default 2 → a 5×5
+//! mosaic neighbourhood) whose CFA colour matches the pixel's own; because the
+//! CFA is periodic, this list depends only on `(row mod period_h, col mod
+//! period_w)` and is **precomputed once**, so the per-pixel cost is a constant
+//! gather + a tiny median — independent of the CFA family.
 //!
-//! 1. **Per-colour planes, never a box blur.** Like RT we split the RGGB (or any
-//!    2×2-periodic) CFA into its four same-colour sublattices and detect only
-//!    against same-colour neighbours at mosaic distance 2. A defect is never
-//!    averaged with a neighbouring colour and no colour bleeds across planes — the
-//!    old box-blur baseline could not make that guarantee.
+//! Two enhancements over the textbook RT median test, kept from the original:
+//!
+//! 1. **Same-colour-only comparison, never a box blur.** A defect is detected and
+//!    corrected only against same-colour neighbours, so no colour bleeds across
+//!    planes and the median estimate is never contaminated by a neighbouring
+//!    colour.
 //! 2. **Beyond-neighbour-range test + soft knee.** RT flags a pixel when it
-//!    deviates from the neighbour *median* by more than a threshold; that can nick
-//!    genuine high-contrast edges (where the median sits mid-edge and the edge
-//!    pixel legitimately deviates from it). We instead require the pixel to sit
+//!    deviates from the neighbour *median* by more than a threshold, which can
+//!    nick genuine high-contrast edges. We instead require the pixel to sit
 //!    *outside the neighbour range* by the threshold — a true isolated spike — and
-//!    blend smoothly across a knee so the keep↔replace transition is continuous
-//!    and seam-free. This is strictly fewer false positives than a pure
-//!    median-deviation test for the same sensitivity.
+//!    blend smoothly across a knee so the keep↔replace transition is continuous.
 //!
-//! The stage is gated to **2×2-periodic CFAs** by the orchestrator (`develop.rs`):
-//! X-Trans (6×6) is not 2×2-periodic, so the parity grouping would compare
-//! against mismatched colours and is skipped there — matching
-//! `bayer_cfa_desc`'s `cfa.width == 2 && cfa.height == 2` predicate.
+//! ## Contract
 //!
-//! The pure signature `denoise(pixels, width, height, strength) -> pixels` is the
-//! contract the develop pipeline depends on; swap this for a stronger model
-//! without changing any caller. `strength = None` (or `0`) is the identity stage,
-//! so the default pipeline output is unchanged until a strength is supplied.
+//! `denoise(pixels, width, height, strength, cfa) -> pixels`. `strength = None`
+//! (or `0`) is identity; multi-channel (`cpp > 1`) input is also left untouched
+//! by the length check. The orchestrator passes the `CFAConfig` so the stage is
+//! colour-aware; `None` (non-CFA) falls back to a single-colour impulse filter.
 //! `strength` is a sensitivity multiplier on the detection threshold
-//! (`≈1.0` = mild, higher = more aggressive).
+//! (`≈1.0` = mild, higher = more aggressive). Swapping this for a stronger model
+//! does not touch the caller.
 
 use rayon::prelude::*;
+use rawler::rawimage::CFAConfig;
 
 /// Base detection threshold in the normalised [0,1] mosaic. A pixel must exceed
 /// the surrounding same-colour neighbour *range* by this much to be touched; the
@@ -47,151 +53,165 @@ use rayon::prelude::*;
 /// replaced by the neighbour median.
 const BASE_THRESHOLD: f32 = 0.05;
 
+/// Impulse-detection window radius (in mosaic pixels). `RADIUS = 2` is a 5×5
+/// neighbourhood; for Bayer this recovers the original 8 same-colour neighbours
+/// (the 3×3 sublattice), and for X-Trans it yields ~5–14 same-colour samples
+/// depending on the colour.
+const RADIUS: usize = 2;
+
+/// Minimum number of same-colour neighbours required before a pixel may be
+/// corrected; fewer (e.g. at awkward parities) leaves it untouched.
+const MIN_NEIGH: usize = 4;
+
+/// Largest possible same-colour neighbour count within the window (all 24
+/// off-centre positions). Used for a stack-allocated gather buffer.
+const MAX_NEIGH: usize = (2 * RADIUS + 1) * (2 * RADIUS + 1) - 1;
+
 /// Denoise the scaled mosaic, treated as a `width × height` grid of single-channel
 /// CFA samples. `strength` is a sensitivity multiplier on [`BASE_THRESHOLD]
-/// (`None` or `0` → identity). Multi-channel (pre-coloured, `cpp > 1`) input is
-/// left untouched — the stage only understands a 2×2-periodic single-channel
-/// grid, and the orchestrator already skips it for non-2×2 CFAs (e.g. X-Trans).
+/// (`None` or `0` → identity). `cfa` enables per-colour grouping; `None` falls
+/// back to a single-colour impulse filter (monochrome / non-CFA input).
+/// Multi-channel (pre-coloured, `cpp > 1`) input is left untouched by the length
+/// check.
 pub(crate) fn denoise(
     mut pixels: Vec<f32>,
     width: usize,
     height: usize,
     strength: Option<f32>,
+    cfa: Option<&CFAConfig>,
 ) -> Vec<f32> {
     let Some(strength) = strength else {
         return pixels;
     };
     let strength = strength.clamp(0.0, 8.0);
-    if strength == 0.0 || width == 0 || height == 0 || pixels.len() != width * height {
+    if strength == 0.0
+        || width <= 2 * RADIUS
+        || height <= 2 * RADIUS
+        || pixels.len() != width * height
+    {
         return pixels;
     }
-    let thr = BASE_THRESHOLD * strength;
-    // Impulse-denoise each same-colour sublattice of the RGGB/Bayer grid
-    // independently (offset 0/1 on each axis).
-    for row_off in 0..2 {
-        for col_off in 0..2 {
-            impulse_plane(&mut pixels, width, height, row_off, col_off, thr);
-        }
-    }
-    pixels
-}
 
-/// Run the impulse detector over the `(row_off, col_off)` Bayer sublattice of the
-/// `width × height` grid, in place. The sublattice is `⌈width/2⌉ × ⌈height/2⌉`
-/// samples at `(2*r + row_off, 2*c + col_off)`. Each output depends only on the
-/// *original* sublattice (read from `src`, written to `dst`), so the row-parallel
-/// pass is race-free and deterministic.
-fn impulse_plane(
-    buf: &mut [f32],
-    width: usize,
-    height: usize,
-    row_off: usize,
-    col_off: usize,
-    thr: f32,
-) {
-    let sw = (width + 1) / 2;
-    let sh = (height + 1) / 2;
-    // Need a 3×3 interior to have orthogonal+diagonal same-colour neighbours; a
-    // sublattice smaller than that has no interior pixels to test.
-    if sw < 3 || sh < 3 {
-        return;
-    }
-
-    // Extract the sublattice into a dense buffer; `dst` starts as a copy of `src`
-    // so every pixel we do not explicitly rewrite is preserved untouched.
-    let mut src: Vec<f32> = vec![0.0; sw * sh];
-    let mut dst: Vec<f32> = vec![0.0; sw * sh];
-    for r in 0..sh {
-        let src_row = 2 * r + row_off;
-        if src_row >= height {
-            break;
-        }
-        for c in 0..sw {
-            let src_col = 2 * c + col_off;
-            if src_col >= width {
-                break;
+    // Precompute, for every CFA parity, the same-colour neighbour offsets inside
+    // the window. For `cfa = None` we treat every pixel as one colour, so the
+    // table has a single entry holding all off-centre offsets.
+    let period_w = cfa.map(|c| c.cfa.width).unwrap_or(1);
+    let period_h = cfa.map(|c| c.cfa.height).unwrap_or(1);
+    let color_of = |r: i64, c: i64| -> usize {
+        match cfa {
+            // `color_at` is periodic; rem_euclid keeps the parity index in range.
+            Some(cfg) => {
+                let rr = r.rem_euclid(period_h as i64);
+                let cc = c.rem_euclid(period_w as i64);
+                cfg.cfa.color_at(rr as usize, cc as usize)
             }
-            let v = buf[src_row * width + src_col];
-            src[r * sw + c] = v;
-            dst[r * sw + c] = v;
+            None => 0,
         }
-    }
+    };
+    let offsets = build_offset_table(period_w, period_h, color_of);
 
-    // Knee width == threshold: a pixel is fully replaced by the neighbour median
-    // once it overshoots the neighbour range by `thr` beyond the detection margin.
+    let thr = BASE_THRESHOLD * strength;
     let soft = thr;
 
-    // Process interior rows in parallel. Border rows/cols are left equal to `src`.
-    dst.par_chunks_mut(sw).enumerate().for_each(|(r, row_out)| {
-        if r == 0 || r + 1 >= sh {
-            return;
-        }
-        for c in 1..sw - 1 {
-            // 8 same-colour neighbours in the sublattice = a 5×5-in-mosaic
-            // neighbourhood, all the same photosite colour (distance 2 in the mosaic).
-            let ns: [f32; 8] = [
-                src[(r - 1) * sw + c],
-                src[(r + 1) * sw + c],
-                src[r * sw + c - 1],
-                src[r * sw + c + 1],
-                src[(r - 1) * sw + c - 1],
-                src[(r + 1) * sw + c - 1],
-                src[(r - 1) * sw + c + 1],
-                src[(r + 1) * sw + c + 1],
-            ];
-            let mut lo = ns[0];
-            let mut hi = ns[0];
-            for &n in ns.iter().skip(1) {
-                if n < lo {
-                    lo = n;
-                }
-                if n > hi {
-                    hi = n;
-                }
-            }
-            let med = median8(&ns);
-            let lo_t = lo - thr;
-            let hi_t = hi + thr;
-            let v = src[r * sw + c];
-            if v > hi_t {
-                // Hot-pixel / impulse above the neighbour range: pull down toward
-                // the median, fully once the excess exceeds `soft`.
-                let excess = v - hi_t;
-                let frac = (excess / soft).min(1.0);
-                row_out[c] = hi_t + (med - hi_t) * frac;
-            } else if v < lo_t {
-                // Dead-pixel / impulse below the neighbour range: pull up toward
-                // the median.
-                let excess = lo_t - v;
-                let frac = (excess / soft).min(1.0);
-                row_out[c] = lo_t + (med - lo_t) * frac;
-            } else {
-                row_out[c] = v;
-            }
-        }
-    });
+    // Read neighbours from the original grid (`src`); write corrections to `dst`.
+    // Both are full-resolution; `dst` starts as a copy so untouched pixels (and
+    // the `RADIUS`-pixel border, which we skip) are preserved unchanged.
+    let src = pixels.clone();
+    let mut dst = pixels;
 
-    // Write the corrected sublattice back into the mosaic.
-    for r in 0..sh {
-        let src_row = 2 * r + row_off;
-        if src_row >= height {
-            break;
-        }
-        for c in 0..sw {
-            let src_col = 2 * c + col_off;
-            if src_col >= width {
-                break;
+    dst.par_chunks_mut(width)
+        .enumerate()
+        .for_each(|(row, row_out)| {
+            // Leave a `RADIUS` border untouched so every gathered neighbour is
+            // in-bounds (matches the original interior-only behaviour).
+            if row < RADIUS || row + RADIUS >= height {
+                return;
             }
-            buf[src_row * width + src_col] = dst[r * sw + c];
-        }
-    }
+            let row = row as i64;
+            for col in RADIUS..width - RADIUS {
+                let col = col as i64;
+                let pr = (row.rem_euclid(period_h as i64)) as usize;
+                let pc = (col.rem_euclid(period_w as i64)) as usize;
+                let offs = &offsets[pr * period_w + pc];
+                let mut vals = [0.0f32; MAX_NEIGH];
+                let mut n = 0usize;
+                let center = src[(row as usize) * width + (col as usize)];
+                for &(dr, dc) in offs {
+                    if n >= vals.len() {
+                        break;
+                    }
+                    let v = src[((row + dr as i64) as usize) * width + ((col + dc as i64) as usize)];
+                    vals[n] = v;
+                    n += 1;
+                }
+                if n < MIN_NEIGH {
+                    row_out[col as usize] = center;
+                    continue;
+                }
+                let (lo, hi, med) = min_max_median(&mut vals[..n]);
+                let lo_t = lo - thr;
+                let hi_t = hi + thr;
+                if center > hi_t {
+                    // Hot-pixel / impulse above the neighbour range: pull down
+                    // toward the median, fully once the excess exceeds `soft`.
+                    let excess = center - hi_t;
+                    let frac = (excess / soft).min(1.0);
+                    row_out[col as usize] = hi_t + (med - hi_t) * frac;
+                } else if center < lo_t {
+                    // Dead-pixel / impulse below the neighbour range: pull up
+                    // toward the median.
+                    let excess = lo_t - center;
+                    let frac = (excess / soft).min(1.0);
+                    row_out[col as usize] = lo_t + (med - lo_t) * frac;
+                } else {
+                    row_out[col as usize] = center;
+                }
+            }
+        });
+
+    dst
 }
 
-/// Median of 8 values: the mean of the two middle samples after sorting. `NaN`s
-/// (which should not occur in scaled mosaic data) sort as equal rather than
-/// panicking.
-fn median8(ns: &[f32; 8]) -> f32 {
-    let mut a = *ns;
-    a.sort_unstable_by(|x, y| x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal));
-    (a[3] + a[4]) * 0.5
+/// Build, for each CFA parity `(pr, pc)`, the list of `(dr, dc)` window offsets
+/// whose CFA colour equals the parity's own colour. Because the CFA is periodic,
+/// these offsets are identical for every pixel sharing that parity.
+fn build_offset_table(
+    period_w: usize,
+    period_h: usize,
+    color_of: impl Fn(i64, i64) -> usize,
+) -> Vec<Vec<(i32, i32)>> {
+    let mut table = Vec::with_capacity(period_w * period_h);
+    for pr in 0..period_h as i64 {
+        for pc in 0..period_w as i64 {
+            let color = color_of(pr, pc);
+            let mut offs: Vec<(i32, i32)> = Vec::new();
+            for dr in -(RADIUS as i64)..=RADIUS as i64 {
+                for dc in -(RADIUS as i64)..=RADIUS as i64 {
+                    if dr == 0 && dc == 0 {
+                        continue;
+                    }
+                    if color_of(pr + dr, pc + dc) == color {
+                        offs.push((dr as i32, dc as i32));
+                    }
+                }
+            }
+            table.push(offs);
+        }
+    }
+    table
+}
+
+/// Compute `(min, max, median)` of a small slice. `NaN`s (which should not occur
+/// in scaled mosaic data) sort as equal rather than panicking.
+fn min_max_median(vals: &mut [f32]) -> (f32, f32, f32) {
+    vals.sort_unstable_by(|x, y| x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal));
+    let n = vals.len();
+    let lo = vals[0];
+    let hi = vals[n - 1];
+    let med = if n % 2 == 1 {
+        vals[n / 2]
+    } else {
+        (vals[n / 2 - 1] + vals[n / 2]) * 0.5
+    };
+    (lo, hi, med)
 }
