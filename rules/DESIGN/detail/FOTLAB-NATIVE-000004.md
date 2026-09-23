@@ -135,9 +135,9 @@ app/src/binding/rust/rawtrp_demos/
     │   ├── lmmse.rs           # lmmse_demosaic.cc（830）✅ 已落地
     │   ├── dcb.rs             # demosaic_algos.cc:963-1548（DCB，13 个函数）✅ 已落地
     │   ├── amaze.rs           # amaze_demosaic_RT.cc（1610）
-    │   ├── ahd.rs             # ahd_demosaic_RT.cc（235）
+    │   ├── ahd.rs             # ahd_demosaic_RT.cc（235）✅ 已落地
     │   ├── eahd.rs            # eahd_demosaic.cc（447）
-    │   ├── hphd.rs            # hphd_demosaic_RT.cc（364）
+    │   ├── hphd.rs            # hphd_demosaic_RT.cc（364）✅ 已落地
     │   └── fast.rs            # fast_demo.cc（498）
     ├── xtrans/
     │   ├── mod.rs
@@ -264,7 +264,7 @@ rawler Intermediate::ThreeColor  →  develop 后续（calibrate …）不变
 | **B0 骨架** ✅ | crate + `CfaDesc`/`Array2D`/`Rgb`/`math`/`border`/`algo`(字典+candidates)/`bridge`(→`Intermediate`) + **bilinear** 内核 + 单测；registrar 为 `rawler_fotlab` 的 path dep | 已落地（本批随 CI 首验编译） |
 | **B1 打通** ✅ | **VNG4** 内核 ✅ + `lib.rs::demosaic_bayer` 分发 ✅ + `IMPLEMENTED_BAYER` 放开 ✅；**打通三件套全部落地**（提交 `52be623`）：`rawler_fotlab::demosaic.rs` 分发（`Algo::{Rawler,RawtrpBayer}` 双生产者）✅ + `demosaic_candidates()` UniFFI 暴露 ✅ + Kotlin 菜单动态化（去掉硬编码列表）✅ | 选 `RAWTRP vng4` 能出图：`everyDemosaicMenuOptionRedevelopsOnBayerAndExposureRecomputes` 现从**候选目录**取 `rawtrp:vng4` 端到端 develop 一次并断言"出图、满幅、彩色、与 PPG **不同**"；`DEFAULT` 逐像素不变（`cfa_default_algo` 分支顺序未动 + 四个 rawler 选项仍断言与 DEFAULT 逐字节相同）；UI 候选可见（菜单由目录驱动） |
 | **B2 质量层** | **RCD** ✅、**IGV** ✅、**LMMSE** ✅、**DCB** ✅ —— 四个内核 + 分发 + 候选全部落地 | 单测均已落地；**与 RT golden 数值比对仍待做**（Q1），故 B2 的出口标准只算完成一半 |
-| **B3 高端层** | AMAZE、AHD、EAHD、HPHD（AMAZE 为质量基准，含 SIMD） | 同上 |
+| **B3 高端层** | AMAZE、AHD、EAHD、HPHD（AMAZE 为质量基准，含 SIMD）—— **HPHD** ✅、**AHD** ✅ 已落地；剩 AMAZE、EAHD | 同上 |
 | **B4 X-Trans** | `xtrans_interpolate`(1/3-pass)、`xtrans/fast`、`dual` 混合封装 | X-Trans 图可选；CFA 自检 |
 
 ## Constraints
@@ -372,3 +372,14 @@ rawler Intermediate::ThreeColor  →  develop 后续（calibrate …）不变
   7. **`kind` 消歧 `fast` 是必须的，不是防御性的。** 两侧都有 `fast`，只按名字解析会在 B3 放开 Bayer `fast` 的那次改动里**静默**把 `rawtrp:xtrans_fast` 派给 Bayer 内核（同名字、跨传感器）。已在代码注释与单测里各钉一次。
   8. **instrumented 测试的前提随本批失效，已改写。** `everyDemosaicMenuOptionRedevelopsOnBayerAndExposureRecomputes` 原文断言"**每个**菜单项都与 DEFAULT 帧逐字节相同"——这在四项全部回落 PPG 时成立，现在不成立（RAWTRP 项跑自己的内核）。改为两个契约：四个 rawler 项维持逐字节相等（钉住 CFA 解析与回落），**并从候选目录取 `rawtrp:vng4` 端到端 develop 一次**，断言"出图、满幅、彩色、与 PPG **不同**"—— 这正是 B1 的出口标准"选 RAWTRP vng4 能出图"。取目录而非硬编码变体，使该用例同时验证 `demosaic_candidates()` 在 Kotlin 侧可达、且 id/algorithm 配对就是分发所用的那一对。**只跑一个内核**：每个额外选项都是一次 36MP 全幅 develop，其余内核由 crate 单测与本批的解析/目录单测覆盖。
   9. **本批未做**：RT 三个调参项（DCB iterations/enhance、LMMSE iterations）走 `BayerParams::default()`（D4-6）；`kind` 灰化（D5-6）。**且 B2 的 golden 数值比对仍挂在 Q1 下** —— 也就是说 `rawtrp:vng4` 端到端"出图"现在有了证据，"数值与 RT 一致"仍然**没有**。
+
+- 2026-09-23 — **rev 11：B3 前两个内核（HPHD、AHD）落地；首次出现"每幅图像的数据"而非调参项**（提交 `6a97f72`、`61e42c5`）。6 条结论：
+
+  1. **AHD/EAHD 需要相机色彩矩阵，这是移植以来第一个"每幅图像的数据"需求。** 上游从 `imatrices.rgb_cam` 派生 `xyz_cam` 用于 Lab 判别，而本 crate 只被交给马赛克 + CFA，**看不到任何相机元数据**。两条路：退化为单位阵（等价于"相机通道就是 sRGB"），或把它作为参数传进来。选了后者 —— `BayerParams` 新增 `xyz_cam`，`rawler_fotlab` 用 `RawImage::cam_to_xyz_normalized()` 填。理由是 rawler 的矩阵与 RT 的派生**同约定**（中性 (1,1,1) → XYZ (1,1,1)），因而可互换，退化并无必要。**⚠️ 但两者并不逐位相同**：RT 的 `rgb_cam` 走 sRGB D65 白点并含白平衡约定，rawler 的归一化按相机自身中性点 —— 差异只影响**方向判别的准确度**，不影响图像形状或量程（AHD 只用矩阵做**比较**）。这是**保真度缺口，不是架构降级**，等级与"未做 golden 比对（Q1）"相当，尚未与上游逐位核对。
+  2. **守卫与接线同等重要。** 没有色彩矩阵的相机求逆可得非有限或全零矩阵；用它建的 Lab 平面会让**每个像素同等均匀**，AHD 于是退化成"两个方向的平均"—— 不报错、不崩、只是悄悄变钝。故 `xyz_cam_for()` 校验有限性 + 非全零，否则回落到 `XYZ_CAM_FROM_SRGB` 并记日志。
+  3. **AHD 留在 0..1 域，由 Lab 转换补偿 —— 与 RCD/LMMSE/DCB 的"整趟缩放"路线不同。** 决定因素只有一处：`cbrt` LUT 是**被 XYZ 三元组索引**的（`cbrt[xyz[0]]`），所以工作量程在那一处是承载性的。其余项对样本齐一次（全是差或加权平均），于是只在两次查表乘 `SCALE`、`CLIP` 换成 `lim01`。**这样做的收益是 `border_interpolate` 与 tile 内部同单位** —— 它直接从马赛克填 5 像素边框，整趟缩放会让两者差 65536 倍。故本内核的域选择跟随 `igv.rs` 而非 `dcb.rs`。
+  4. **`cbrt` 表不是"查表"**：`LUTf::operator[](float)` 先把索引**朝零截断**（上游注释明写 "don't use floor!"），再在两个相邻项之间**线性插值**；越界索引**不夹取**而是沿末段外插（负系数矩阵可把 XYZ 推到 0 以下，故该路径可达）。65536 项的表因此表现得像连续立方根而非阶梯。
+  5. **并行只按行带，不按 tile。** 上游 `collapse(2)` 两个维度都调度，但**水平相邻的两个 tile 写的是同一批行的不同列** —— 行主序 `Array2D` 无法在不 `unsafe` 的前提下拆成不相交 `&mut` 切片。行维度可以：相邻 `top` 相距 `TS-6=138`，每带发射 `[top+3, top+TS-3)`，正好无缝铺满内部 ⇒ 三个输出面按带切块、列循环在带内串行。**`TS-6` 不是随手取的**：一个 tile 每边丢 3 行 3 列（四个 pass 各 1）。tile 缓冲按带分配一次、跨列 tile 复用（与上游每线程一份复用同构）—— 其成立依赖于"每个 pass 读到的位置都由同一 tile 更早的 pass 写过"，各 pass 的 halo 边界恰是前一 pass 的写边界，已逐段写在代码注释里。
+  6. **单测策略**：平场是不动点（四种旋转、含边框全帧）；**线性斜坡必须在内部精确还原** —— 内核的估计都是"样本 + 二阶差分校正"，二阶差分**精确湮灭平面**，故任意 CFA 奇偶错、列偏移、`cng` 取错行都会让某项混入两个颜色从而使恒等式失效；这是平场测不出来的。再断言**曲面不是不动点**，使前两条无法靠"抄马赛克"通过。另直接钉住 `cbrt` 表与"中性三元组 → XYZ (1,1,1)"约定（后者是把白点送到 LUT 顶端的原因）。
+
+  （HPHD 本身的结论见 rev 11 之前并入的同批提交 `6a97f72`：5 阶高通幅值选向、垂直 pass 串行、水平 pass 复用缓冲复刻上游"不重新清零"、`interpolate_row_rb_mul_pp` 提取到 `bayer/interp.rs` 供 EAHD 共用。）
