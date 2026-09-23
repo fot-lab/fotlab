@@ -1,0 +1,38 @@
+rawtrp_demos — first-party Rust port of the RawTherapee demosaic kernels
+=========================================================================
+
+The demosaicing algorithms in this crate are **ports of RawTherapee**, which is
+licensed under the GNU General Public License v3.0. This project (fot-lab/fotlab)
+is likewise licensed under the GNU General Public License v3.0, so the port is
+licence-compatible.
+
+Upstream project:  RawTherapee  <https://www.rawtherapee.com/>
+Upstream licence:  GNU General Public License v3.0
+Upstream source:   external/RawTherapee (git submodule, pinned)
+
+Provenance
+----------
+Each ported file carries a header naming the upstream source file it was ported
+from, e.g.
+
+    Ported from external/RawTherapee/rtengine/vng4_demosaic_RT.cc
+
+and reproduces the upstream copyright line(s) of that file. The upstream sources
+are used read-only: this repository never modifies them and never ships a
+`.patch` against them (rules/DESIGN/detail/FOTLAB-NATIVE-000004.md C1).
+
+Ported files and their upstream origin
+--------------------------------------
+  src/bayer/bilinear.rs   <- rtengine/bayer_bilinear_demosaic.cc   (c) 2020 Ingo Weyrich
+  src/bayer/vng4.rs       <- rtengine/vng4_demosaic_RT.cc          (c) Ingo Weyrich
+  ...                    (see each file's header for the exact origin)
+
+Shared helpers reproduce small pieces of rtengine infrastructure that the
+kernels depend on, with the upstream file named in each header:
+
+  src/cfa.rs     <- rtengine/rawimage.h  (FC / ISGREEN / ISBLUE / prefilters)
+  src/array2d.rs <- rtengine/array2D.h   (array2D<T>)
+  src/math.rs    <- rtengine/rt_math.h   (intp / min / max / LIM / CLIP / SGN)
+  src/border.rs  <- rtengine/demosaic_algos.cc  (RawImageSource::border_interpolate)
+
+No warranty. See LICENSE.md at the repository root for the full GPL-3.0 text.

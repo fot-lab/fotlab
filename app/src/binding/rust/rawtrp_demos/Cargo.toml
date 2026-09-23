@@ -1,0 +1,37 @@
+[package]
+name = "rawtrp_demos"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "First-party pure-Rust port of the RawTherapee demosaic kernels (Bayer + X-Trans), rayon-parallel"
+
+# First-party native algorithm crate. It is a sibling of `rawler_fotlab` under
+# app/src/binding/rust/ and is consumed by it as a *path* dependency, exactly like
+# the upstream `rawler` crate is (FOTLAB-NATIVE-000001 R4 — upstream is read-only).
+#
+# Pure Rust: no C++, no `librtengine`, no git submodule hook. The RawTherapee
+# sources under external/RawTherapee are the *reference* for the port and are
+# never compiled or modified (rules/DESIGN/detail/FOTLAB-NATIVE-000004.md).
+# RawTherapee is GPL-3.0 and this project is GPL-3.0, so the port is
+# licence-compatible; every ported file keeps its upstream attribution.
+#
+# Not part of the dnglab Cargo workspace (that workspace is upstream and
+# read-only); this is a standalone workspace whose third-party source is reached
+# through the path dependency below.
+
+[lib]
+name = "rawtrp_demos"
+crate-type = ["rlib"]
+path = "src/lib.rs"
+
+[dependencies]
+# Data parallelism for the pixel loops, replacing RawTherapee's `#pragma omp` at
+# the *same* sharding points (row strips). Pinned to the same major version
+# `rawler_fotlab` and `rawler` use so the whole process shares one rayon pool
+# (rules/REVIEW/detail/OPTIMZ-PERFRM-000007.md).
+rayon = "1"
+# rawler is used ONLY by `bridge`, to hand the ported kernels' R/G/B planes back
+# as the exact `Intermediate::ThreeColor` type the rest of the develop pipeline
+# (calibrate onwards) already consumes — so a RawTherapee demosaic can be
+# swapped in without touching anything downstream (FOTLAB-NATIVE-000004 R3).
+rawler = { path = "../../../../../external/dnglab/rawler" }

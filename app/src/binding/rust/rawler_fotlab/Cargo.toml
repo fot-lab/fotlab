@@ -56,3 +56,10 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 # The crate lives under binding/cxx/ (the whole bridge is confined there), so the
 # path crosses from rust/ to cxx/ — this is NOT a sibling of rawler_fotlab.
 rawalchemy_fotlab = { path = "../../cxx/rawalchemy_fotlab", optional = true }
+# First-party pure-Rust port of the RawTherapee demosaic kernels (Bayer + X-Trans).
+# A sibling crate under app/src/binding/rust/, consumed as a path dependency like
+# `rawler` itself; it is pure Rust (no C++, no librtengine, no submodule hook) and
+# returns its result as `rawler`'s own `Intermediate::ThreeColor`, so the develop
+# pipeline downstream of demosaic does not change
+# (rules/DESIGN/detail/FOTLAB-NATIVE-000004.md).
+rawtrp_demos = { path = "../rawtrp_demos" }
