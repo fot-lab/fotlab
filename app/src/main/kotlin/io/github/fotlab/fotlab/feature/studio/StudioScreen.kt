@@ -78,6 +78,7 @@ import io.github.fotlab.fotlab.ui.operation.HorizontalOperationBar
 import io.github.fotlab.fotlab.ui.operation.OperationalButton
 import io.github.fotlab.fotlab.ui.rememberZoomState
 import io.github.fotlab.fotlab_rawler.DemosaicAlgorithm
+import io.github.fotlab.fotlab_rawler.DemosaicCandidate
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.io.ByteArrayOutputStream
@@ -285,6 +286,7 @@ fun StudioScreen() {
                     when (activeBar) {
                         // Develop tools (Demosaic/Exposure/WB) were always on the fun bar.
                         StudioOpBar.DevelopFilm -> StudioOperationBarDevelopFilm(
+                            demosaicCandidates = StudioEngine.demosaicCandidates,
                             onAlgorithmPicked = { algo -> StudioEngine.develop(algo) },
                             onExposure = {
                                 exposureInput = StudioEngine.currentExposureEv().toString()
@@ -642,9 +644,17 @@ private enum class StudioOpBar { DevelopFilm, TuneImage, StyleFilter }
 private fun StudioOpBar?.toggle(target: StudioOpBar): StudioOpBar? =
     if (this == target) null else target
 
-/** Demosaic algorithm picker (the gradient icon anchors an upward-opening dropdown). */
+/**
+ * Demosaic algorithm picker (the gradient icon anchors an upward-opening dropdown).
+ *
+ * The entries come from the native catalogue ([StudioEngine.demosaicCandidates]), not from a list
+ * written here: the menu and the pipeline read the same catalogue, so a kernel ported in
+ * `rawtrp_demos` cannot show up in one without the other (`FOTLAB-NATIVE-000004` D5). See
+ * [demosaicLabel] for how each entry's text is chosen.
+ */
 @Composable
 private fun DemosaicButton(
+    candidates: List<DemosaicCandidate>,
     onAlgorithmPicked: (DemosaicAlgorithm) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -657,20 +667,32 @@ private fun DemosaicButton(
             )
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            val algorithms = listOf(
-                DemosaicAlgorithm.DEFAULT to R.string.studio_demosaic_default,
-                DemosaicAlgorithm.PPG to R.string.studio_demosaic_ppg,
-                DemosaicAlgorithm.BILINEAR4_CHANNEL to R.string.studio_demosaic_bilinear4,
-                DemosaicAlgorithm.X_TRANS_BILINEAR to R.string.studio_demosaic_xtrans,
-            )
-            for ((algo, labelRes) in algorithms) {
+            for (candidate in candidates) {
                 DropdownMenuItem(
-                    text = { Text(text = stringResource(id = labelRes)) },
-                    onClick = { open = false; onAlgorithmPicked(algo) },
+                    text = { Text(text = demosaicLabel(candidate)) },
+                    onClick = { open = false; onAlgorithmPicked(candidate.algorithm) },
                 )
             }
         }
     }
+}
+
+/**
+ * Display text for one demosaic candidate: the localised resource for the ids Studio shipped
+ * before the menu became data-driven, and the catalogue's own label (`RAWTRP vng4`, `RAWLER Ppg`)
+ * for anything else.
+ *
+ * The fallback is deliberate. The *list* is dynamic, but the four rawler entries keep their
+ * translated names; for a kernel ported later only the translated string is missing, and the entry
+ * degrades to its technical name rather than vanishing from the menu.
+ */
+@Composable
+private fun demosaicLabel(candidate: DemosaicCandidate): String = when (candidate.id) {
+    "rawler:default" -> stringResource(id = R.string.studio_demosaic_default)
+    "rawler:ppg" -> stringResource(id = R.string.studio_demosaic_ppg)
+    "rawler:bilinear4" -> stringResource(id = R.string.studio_demosaic_bilinear4)
+    "rawler:xtrans_bilinear" -> stringResource(id = R.string.studio_demosaic_xtrans)
+    else -> candidate.label
 }
 
 /** Exposure stops input (opens the EV dialog owned by StudioScreen). */
@@ -886,9 +908,13 @@ private fun LutButton(
 /**
  * DevelopFilm bar — the three develop tools that used to live directly on the fun bar:
  * Demosaic, Exposure, White Balance. Reordering the list below reorders the bar.
+ *
+ * [demosaicCandidates] is the native catalogue, passed in rather than read here so the bar stays a
+ * pure renderer of state the engine owns.
  */
 @Composable
 private fun StudioOperationBarDevelopFilm(
+    demosaicCandidates: List<DemosaicCandidate>,
     onAlgorithmPicked: (DemosaicAlgorithm) -> Unit,
     onExposure: () -> Unit,
     onWhiteBalance: () -> Unit,
@@ -900,7 +926,7 @@ private fun StudioOperationBarDevelopFilm(
             OperationalButton(
                 id = "demosaic",
                 label = stringResource(id = R.string.studio_label_demosaic),
-            ) { DemosaicButton(onAlgorithmPicked) },
+            ) { DemosaicButton(demosaicCandidates, onAlgorithmPicked) },
             OperationalButton(
                 id = "exposure",
                 label = stringResource(id = R.string.studio_label_exposure),

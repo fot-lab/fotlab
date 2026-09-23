@@ -48,6 +48,13 @@ uniffi = "0.28"
 # single rayon instance and therefore one worker pool per process
 # (`rules/REVIEW/detail/OPTIMZ-PERFRM-000007.md`).
 rayon = "1"
+# Same crate + major as rawler's own `log = "0.4"`, so the demosaic fallback
+# warnings below land in the same logger as upstream's messages instead of
+# splitting the log across two versions (a no-op crate-dedup concern, but it
+# also keeps `Cargo.lock` unchanged). Used only to *state* a fallback: when a
+# RAWTRP pick cannot run on the image's CFA we silently produce the CFA default,
+# and this is the only trace of it (`FOTLAB-NATIVE-000004` D4).
+log = "0.4"
 # PNG only: the binding emits PNG (R3 of FOTLAB-STUDIO-000001). Disabling default
 # features avoids pulling every image format the `image` crate can decode.
 image = { version = "0.25", default-features = false, features = ["png"] }

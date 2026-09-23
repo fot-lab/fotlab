@@ -39,6 +39,7 @@ import io.github.fotlab.fotlab.feature.studio.StudioRenderResult
 import io.github.fotlab.fotlab.feature.studio.StudioScreen
 import io.github.fotlab.fotlab.ui.theme.AppTheme
 import io.github.fotlab.fotlab_rawler.DemosaicAlgorithm
+import io.github.fotlab.fotlab_rawler.RawlerFotlabBridge
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -399,13 +400,21 @@ class RawRoutingTest {
     }
 
     /**
-     * Every demosaic option the menu exposes must redevelop the resident RAW through the real native
-     * `develop_rawler_image` path without error and keep a full-frame COLOR PNG. On a Bayer sensor
-     * (this Sony ARW) the resolution contract is: DEFAULT and PPG both run PPG, while the incompatible
-     * picks (BILINEAR4_CHANNEL, X_TRANS_BILINEAR) fall back to PPG — so every option must produce a
-     * frame byte-identical to the as-shot DEFAULT frame. Deterministic equality is asserted on
-     * purpose: it pins both the CFA resolution and the fallback behavior, and still proves each menu
-     * option completes (no panic surfaced as Unsupported, no error frame).
+     * The demosaic menu must redevelop the resident RAW through the real native `develop_rawler_image`
+     * path without error and keep a full-frame COLOR PNG — for both halves of the catalogue, which
+     * have *different* contracts.
+     *
+     * The four rawler options: DEFAULT and PPG both run PPG on this Bayer sensor, and the incompatible
+     * picks (BILINEAR4_CHANNEL, X_TRANS_BILINEAR) fall back to PPG — so all four must produce a frame
+     * byte-identical to the as-shot DEFAULT frame. Deterministic equality is asserted on purpose: it
+     * pins both the CFA resolution and the fallback behavior.
+     *
+     * The RAWTRP options are the opposite case. A ported RawTherapee kernel does **not** fall back —
+     * it debayers the mosaic itself — so its contract is: completes, stays full-frame and colour, and
+     * genuinely differs from PPG. This is the acceptance criterion of the RAWTRP wiring
+     * (`FOTLAB-NATIVE-000004` B1, "selecting RAWTRP VNG4 produces an image"). One kernel is developed
+     * here; the others are covered by the crate's own kernel tests plus the catalogue/wiring
+     * assertions, and each extra option costs another full develop of a 36 MP frame.
      *
      * Finally, a parameter that MUST move pixels — exposure EV +1 stop via [StudioEngine.setExposureEv]
      * — has to produce a different (still color, full-frame) PNG and EV 0 must reproduce the original,
@@ -446,12 +455,33 @@ class RawRoutingTest {
             }
             step("develop", "$algo -> ${developed.outWidth}x${developed.outHeight} (${developed.bytes.size} bytes)")
             assertDevelopedIsColor(developed.bytes, "Sony ILCE-7R $algo")
-            // Bayer: all four options resolve/fall back to PPG → deterministic identical output.
+            // Bayer: all four rawler options resolve/fall back to PPG → deterministic identical output.
             assertTrue(
                 "$algo on Bayer must resolve/fall back to PPG and reproduce the DEFAULT frame",
                 developed.bytes.contentEquals(initialBytes),
             )
         }
+
+        // The RAWTRP half, taken from the catalogue itself rather than by naming the variant, so this
+        // also proves the native `demosaic_candidates()` menu is reachable from Kotlin and that its
+        // ids/algorithm pairing is the one the pipeline dispatches on. Unlike the four above, this
+        // kernel must move pixels: it is a different debayer, not a fallback to PPG.
+        val rawtrpVng4 = RawlerFotlabBridge.demosaicCandidates().first { it.id == "rawtrp:vng4" }
+        step("catalogue", "rawtrp:vng4 -> ${rawtrpVng4.algorithm} ('${rawtrpVng4.label}', ${rawtrpVng4.kind})")
+        StudioEngine.develop(rawtrpVng4.algorithm)
+        val rawtrp = runBlocking {
+            withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame(requireDifferentFrom = initialBytes) }
+        }
+        step(
+            "develop",
+            "${rawtrpVng4.label} -> ${rawtrp.outWidth}x${rawtrp.outHeight} (${rawtrp.bytes.size} bytes), differs from PPG",
+        )
+        assertDevelopedIsColor(rawtrp.bytes, "Sony ILCE-7R ${rawtrpVng4.label}")
+
+        // The exposure block below compares against the as-shot frame, so the algorithm has to go back
+        // to the default first (StudioEngine is a process-wide singleton).
+        StudioEngine.develop(DemosaicAlgorithm.DEFAULT)
+        runBlocking { withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame() } }
 
         // +1 EV doubles linear light before clipping; a meaningful share of (dark) pixels must move,
         // so the PNG cannot stay identical — this is the "redevelop really recomputed" proof.

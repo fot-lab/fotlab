@@ -147,6 +147,42 @@ impl BayerAlgo {
     standard_of(RAWTRP_BAYER_NAMES, self.original_name())
   }
 
+  /// Resolve an upstream method string back to the kernel — the inverse of
+  /// [`Self::original_name`].
+  ///
+  /// This is what lets the binding fold a candidate id back onto something it
+  /// can dispatch: [`candidates`] mints a RAWTRP id as `"rawtrp:"` + the
+  /// upstream method string, so the binding strips the prefix and lands here.
+  /// Keeping the table *here* rather than in the binding means the id mintage
+  /// in [`candidates`] and this reverse map cannot drift apart silently — the
+  /// `algo::tests::original_names_round_trip` test pins the pair.
+  ///
+  /// `None` for a name this crate does not know — the binding treats that as
+  /// "leave the candidate out of the menu" instead of guessing a kernel.
+  #[must_use]
+  pub fn from_original_name(name: &str) -> Option<Self> {
+    Some(match name {
+      "bilinear" => Self::Bilinear,
+      "vng4" => Self::Vng4,
+      "rcd" => Self::Rcd,
+      "ahd" => Self::Ahd,
+      "eahd" => Self::Eahd,
+      "hphd" => Self::Hphd,
+      "amaze" => Self::Amaze,
+      "lmmse" => Self::Lmmse,
+      "igv" => Self::Igv,
+      "dcb" => Self::Dcb,
+      "fast" => Self::Fast,
+      "amaze_bilinear" => Self::AmazeBilinear,
+      "amaze_vng4" => Self::AmazeVng4,
+      "rcd_bilinear" => Self::RcdBilinear,
+      "rcd_vng4" => Self::RcdVng4,
+      "dcb_bilinear" => Self::DcbBilinear,
+      "dcb_vng4" => Self::DcbVng4,
+      _ => return None,
+    })
+  }
+
   /// Whether this hybrid needs `dual_demosaic_RT` rather than a single kernel.
   #[must_use]
   pub fn is_dual(self) -> bool {
@@ -184,6 +220,19 @@ impl XTransAlgo {
   #[must_use]
   pub fn standard_name(self) -> &'static str {
     standard_of(RAWTRP_XTRANS_NAMES, self.original_name())
+  }
+
+  /// As [`BayerAlgo::from_original_name`], for the X-Trans kernels.
+  #[must_use]
+  pub fn from_original_name(name: &str) -> Option<Self> {
+    Some(match name {
+      "one_pass" => Self::OnePass,
+      "three_pass" => Self::ThreePass,
+      "two_pass" => Self::TwoPass,
+      "four_pass" => Self::FourPass,
+      "fast" => Self::Fast,
+      _ => return None,
+    })
   }
 
   /// Whether this variant is the `dual_demosaic_RT` hybrid rather than a single
@@ -319,6 +368,57 @@ mod tests {
 
     for e in RAWLER_NAMES {
       assert!(e.standard.starts_with("RAWLER "), "{} unmapped", e.original);
+    }
+  }
+
+  #[test]
+  fn original_names_round_trip() {
+    // `from_original_name` is the inverse of `original_name` for every variant,
+    // which is what makes `candidates()`'s `"rawtrp:" + original` id recoverable
+    // by the binding without a second table.
+    for algo in [
+      BayerAlgo::Bilinear,
+      BayerAlgo::Vng4,
+      BayerAlgo::Rcd,
+      BayerAlgo::Ahd,
+      BayerAlgo::Eahd,
+      BayerAlgo::Hphd,
+      BayerAlgo::Amaze,
+      BayerAlgo::Lmmse,
+      BayerAlgo::Igv,
+      BayerAlgo::Dcb,
+      BayerAlgo::Fast,
+      BayerAlgo::AmazeBilinear,
+      BayerAlgo::AmazeVng4,
+      BayerAlgo::RcdBilinear,
+      BayerAlgo::RcdVng4,
+      BayerAlgo::DcbBilinear,
+      BayerAlgo::DcbVng4,
+    ] {
+      assert_eq!(BayerAlgo::from_original_name(algo.original_name()), Some(algo), "{algo:?}");
+    }
+    for algo in [XTransAlgo::OnePass, XTransAlgo::ThreePass, XTransAlgo::Fast, XTransAlgo::TwoPass, XTransAlgo::FourPass] {
+      assert_eq!(XTransAlgo::from_original_name(algo.original_name()), Some(algo), "{algo:?}");
+    }
+    assert_eq!(BayerAlgo::from_original_name("nope"), None);
+  }
+
+  /// Every RAWTRP id the menu can show must be recoverable through the
+  /// `rawtrp:` + original-name convention the binding relies on.
+  #[test]
+  fn rawtrp_candidate_ids_are_the_upstream_names() {
+    for c in candidates() {
+      let Some(rest) = c.id.strip_prefix("rawtrp:") else {
+        continue;
+      };
+      // The one exception is X-Trans `fast`, whose id is disambiguated from the
+      // Bayer `fast` by name (`rawtrp:xtrans_fast`) and folded back on lookup.
+      let upstream = if rest == "xtrans_fast" { "fast" } else { rest };
+      let resolved = match c.kind {
+        SensorKind::Bayer => BayerAlgo::from_original_name(upstream).map(BayerAlgo::original_name),
+        SensorKind::XTrans => XTransAlgo::from_original_name(upstream).map(XTransAlgo::original_name),
+      };
+      assert_eq!(resolved, Some(upstream), "{} is not recoverable", c.id);
     }
   }
 

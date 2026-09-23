@@ -15,6 +15,7 @@ import io.github.fotlab.fotlab.media.SniffResult
 import io.github.fotlab.fotlab.media.StubRawDecoder
 import io.github.fotlab.fotlab.media.route
 import io.github.fotlab.fotlab_rawler.DemosaicAlgorithm
+import io.github.fotlab.fotlab_rawler.DemosaicCandidate
 import io.github.fotlab.fotlab_rawler.DevelopParams
 import io.github.fotlab.fotlab_rawler.GradeParams
 import io.github.fotlab.fotlab_rawler.RawlerImageLoaded
@@ -282,6 +283,23 @@ object StudioEngine {
 
     /** The demosaic algorithm retained for the next develop re-render (set when the user picks one). */
     private var currentAlgorithm: DemosaicAlgorithm = DemosaicAlgorithm.DEFAULT
+
+    /**
+     * The demosaic algorithms the DevelopFilm bar offers, in catalogue order.
+     *
+     * Read from the native catalogue instead of a list written in the Composable, so the day a
+     * kernel lands in `rawtrp_demos` the menu already offers it (`FOTLAB-NATIVE-000004` D5).
+     * Each entry carries both its display label and the [DemosaicAlgorithm] to send back, which
+     * is what keeps the UI from needing an id→algorithm table of its own — the list and the
+     * dispatch come from the same place and cannot drift apart.
+     *
+     * Lazy and read once: it enumerates two upstream dictionaries, and the answer cannot change
+     * while the app runs.
+     */
+    private val demosaicCandidatesCache: List<DemosaicCandidate> by lazy { RawlerFotlabBridge.demosaicCandidates() }
+
+    /** The list the DevelopFilm bar renders; see [demosaicCandidatesCache]. */
+    val demosaicCandidates: List<DemosaicCandidate> get() = demosaicCandidatesCache
 
     /** The exposure compensation (in stops) retained for the next develop re-render. */
     private var currentExposureEv: Float = 0.0f

@@ -32,6 +32,12 @@
 //!     Studio's grade bar drives the PNG variants; changing a develop parameter
 //!     (demosaic / exposure / WB) re-renders the sRGB fork above, changing a grade
 //!     parameter (Boost / LOG / LUT) re-renders the graded PNG fork.
+//!   * `demosaic_candidates` — the algorithm menu: the concatenation of rawler's
+//!     own demosaics (`RAWLER …`) and the RawTherapee kernels ported in
+//!     `rawtrp_demos` (`RAWTRP …`), filtered to the ones that are actually wired.
+//!     It is **not** a develop call: it is called once so `StudioScreen` can build
+//!     the dropdown instead of hardcoding it, and each entry carries the
+//!     `DemosaicAlgorithm` the menu sends back (`FOTLAB-NATIVE-000004` D5).
 //!
 //! # Pipeline split (`FOTLAB-FOTRAW-000001`)
 //!
@@ -76,6 +82,7 @@ mod intermediate;
 mod loaded;
 mod wb;
 
+use demosaic::DemosaicAlgorithm;
 use develop::DevelopParams;
 
 /// Error type surfaced to Kotlin over UniFFI.
@@ -162,6 +169,207 @@ pub fn supported_log_spaces() -> Vec<String> {
     let mut spaces = rawalchemy_fotlab::log_spaces();
     spaces.sort();
     spaces
+}
+
+/// Which sensor family a [`DemosaicCandidate`] applies to.
+///
+/// The UI greyed nothing out before this existed; carrying the kind lets the
+/// menu state applicability instead of offering a pick that silently resolves to
+/// something else (`FOTLAB-NATIVE-000004` D3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum DemosaicSensorKind {
+    /// A 2x2-periodic Bayer CFA.
+    Bayer,
+    /// A 6x6 Fujifilm X-Trans CFA.
+    XTrans,
+}
+
+/// One selectable demosaic algorithm, ready to render as a menu entry.
+///
+/// Same shape as `rawtrp_demos::algo::Candidate` plus the transport value, so the
+/// menu needs no id→algorithm table of its own on the Kotlin side — which is what
+/// keeps the list and the dispatch from drifting apart.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct DemosaicCandidate {
+    /// Stable machine identifier, never localised (`rawler:ppg`,
+    /// `rawtrp:vng4`). The menu's key.
+    pub id: String,
+    /// Standard display name (`RAWLER …` / `RAWTRP …`).
+    pub label: String,
+    /// Sensor family this candidate is meant for.
+    pub kind: DemosaicSensorKind,
+    /// What to hand back in `DevelopParams::demosaic_algorithm`.
+    pub algorithm: DemosaicAlgorithm,
+}
+
+/// The demosaic algorithms the menu may offer, in display order.
+///
+/// This is the single source for the Studio dropdown: the concatenation of
+/// rawler's own demosaics and the ported RawTherapee kernels
+/// (`rawtrp_demos::algo::candidates`), each paired with the [`DemosaicAlgorithm`]
+/// that selects it. A kernel that is catalogued but not ported is filtered out
+/// upstream in `rawtrp_demos`, so the menu cannot offer a path that would fail.
+///
+/// Cheap enough to call once at startup, but it does load upstream tables, so the
+/// Kotlin side caches the result rather than calling it per recomposition.
+///
+/// # Panics
+///
+/// It does not: a candidate with no dispatchable variant is skipped rather than
+/// unwrapped. That should never happen — `demosaic_candidates_maps_every_advertised_id_to_a_variant`
+/// fails the test suite if it starts to.
+#[uniffi::export]
+pub fn demosaic_candidates() -> Vec<DemosaicCandidate> {
+    rawtrp_demos::candidates()
+        .iter()
+        .filter_map(|c| match algorithm_for_candidate(c) {
+            Some(algorithm) => Some(DemosaicCandidate {
+                id: c.id.to_string(),
+                label: c.label.to_string(),
+                kind: match c.kind {
+                    rawtrp_demos::SensorKind::Bayer => DemosaicSensorKind::Bayer,
+                    rawtrp_demos::SensorKind::XTrans => DemosaicSensorKind::XTrans,
+                },
+                algorithm,
+            }),
+            None => {
+                log::warn!("demosaic candidate '{}' has no dispatchable variant; leaving it out of the menu", c.id);
+                None
+            }
+        })
+        .collect()
+}
+
+/// Fold a catalogue entry back onto the transport enum.
+///
+/// The RAWTRP half needs no second table: its ids are `rawtrp:` + the upstream
+/// method string, so they go through `BayerAlgo::from_original_name` /
+/// `XTransAlgo::from_original_name` in `rawtrp_demos::algo`, and the paired
+/// `DemosaicAlgorithm::from_rawtrp_bayer` maps the kernel onto its variant.
+///
+/// The two families are told apart by `kind`, **not** by name: `fast` exists on
+/// both sides — Bayer's `fast_demosaic` and X-Trans's `fast_xtrans_interpolate` —
+/// and the X-Trans id is spelled `rawtrp:xtrans_fast` partly so that stays
+/// visible. Resolving by name alone would hand an X-Trans `fast` pick to the
+/// Bayer kernel the moment B3 ports it.
+///
+/// `None` means "no variant to carry this" — today that is the whole X-Trans half,
+/// which has no variants until B4 and whose kernels `IMPLEMENTED_XTRANS` keeps out
+/// of the catalogue entirely.
+fn algorithm_for_candidate(candidate: &rawtrp_demos::Candidate) -> Option<DemosaicAlgorithm> {
+    if let Some(rest) = candidate.id.strip_prefix("rawtrp:") {
+        return match candidate.kind {
+            rawtrp_demos::SensorKind::Bayer => {
+                rawtrp_demos::BayerAlgo::from_original_name(rest).and_then(DemosaicAlgorithm::from_rawtrp_bayer)
+            }
+            // No X-Trans RAWTRP kernel is ported yet (B4) and `DemosaicAlgorithm`
+            // carries no X-Trans RAWTRP variant, so there is nothing to resolve
+            // *to*. Kept as an explicit `None` rather than falling through to the
+            // `rawler:` match below: those ids are matched on their prefix, and an
+            // X-Trans RAWTRP id must never be mistaken for one of them.
+            // `IMPLEMENTED_XTRANS` is empty, so no such candidate is advertised;
+            // `demosaic_candidates_maps_every_advertised_id_to_a_variant` fails the
+            // moment B4 advertises one before adding its variant.
+            rawtrp_demos::SensorKind::XTrans => None,
+        };
+    }
+
+    Some(match candidate.id {
+        "rawler:default" => DemosaicAlgorithm::Default,
+        "rawler:ppg" => DemosaicAlgorithm::Ppg,
+        "rawler:bilinear4" => DemosaicAlgorithm::Bilinear4Channel,
+        "rawler:xtrans_bilinear" => DemosaicAlgorithm::XTransBilinear,
+        _ => return None,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every candidate the catalogue advertises must be dispatchable. The two
+    /// sides are independent — the catalogue is filtered by
+    /// `rawtrp_demos::algo::IMPLEMENTED_*`, this resolver by which variants exist
+    /// — so a kernel that is ported and advertised while its variant is missing
+    /// shows up here rather than as a menu entry that quietly does nothing.
+    #[test]
+    fn demosaic_candidates_maps_every_advertised_id_to_a_variant() {
+        let advertised = rawtrp_demos::candidates();
+        assert!(!advertised.is_empty());
+
+        let unresolved: Vec<&str> = advertised.iter().filter(|c| algorithm_for_candidate(c).is_none()).map(|c| c.id).collect();
+        assert!(unresolved.is_empty(), "advertised but undispatchable: {unresolved:?}");
+
+        // …and the enumeration must actually be reachable, i.e. the resolver has
+        // to know every id the catalogue can mint for the wired families.
+        assert_eq!(demosaic_candidates().len(), advertised.len());
+    }
+
+    /// The rawler four keep their meaning: they were the whole menu before the
+    /// RAWTRP variants were appended, so their ids must still resolve to the
+    /// original variants (`FOTLAB-NATIVE-000004` D5 — appended, never interleaved).
+    #[test]
+    fn the_rawler_four_keep_their_original_variants() {
+        assert_eq!(rawtrp_demos::candidates().iter().filter(|c| c.label.starts_with("RAWLER ")).count(), 4);
+        assert_eq!(algorithm_for_candidate(&candidate("rawler:default")), Some(DemosaicAlgorithm::Default));
+        assert_eq!(algorithm_for_candidate(&candidate("rawler:ppg")), Some(DemosaicAlgorithm::Ppg));
+        assert_eq!(
+            algorithm_for_candidate(&candidate("rawler:bilinear4")),
+            Some(DemosaicAlgorithm::Bilinear4Channel)
+        );
+        assert_eq!(
+            algorithm_for_candidate(&candidate("rawler:xtrans_bilinear")),
+            Some(DemosaicAlgorithm::XTransBilinear)
+        );
+    }
+
+    /// The RAWTRP ids resolve to the appended variants, and the two `fast`s are
+    /// kept apart by `kind` rather than by name.
+    #[test]
+    fn rawtrp_ids_resolve_and_the_two_fasts_stay_apart() {
+        let cases = [
+            ("rawtrp:bilinear", DemosaicAlgorithm::RawtrpBilinear),
+            ("rawtrp:vng4", DemosaicAlgorithm::RawtrpVng4),
+            ("rawtrp:rcd", DemosaicAlgorithm::RawtrpRcd),
+            ("rawtrp:igv", DemosaicAlgorithm::RawtrpIgv),
+            ("rawtrp:lmmse", DemosaicAlgorithm::RawtrpLmmse),
+            ("rawtrp:dcb", DemosaicAlgorithm::RawtrpDcb),
+        ];
+        for (id, expected) in cases {
+            assert_eq!(algorithm_for_candidate(&candidate(id)), Some(expected), "{id}");
+        }
+
+        // Catalogued but unported (`IMPLEMENTED_BAYER` excludes it, so the
+        // catalogue never offers it): the resolver refuses it too — the two guards
+        // agree, which is what makes the "one kernel per change" rule safe.
+        let unported = rawtrp_demos::Candidate {
+            id: "rawtrp:amaze",
+            label: "RAWTRP amaze",
+            kind: rawtrp_demos::SensorKind::Bayer,
+        };
+        assert_eq!(algorithm_for_candidate(&unported), None);
+        assert!(
+            !rawtrp_demos::candidates().iter().any(|c| c.id == "rawtrp:amaze"),
+            "amaze is not ported yet and must not be advertised"
+        );
+
+        // X-Trans `fast` must not be answered with the Bayer kernel of the same
+        // upstream name. (`rawtrp:fast`, the Bayer one, is `SensorKind::Bayer`.)
+        let xtrans_fast = rawtrp_demos::Candidate {
+            id: "rawtrp:xtrans_fast",
+            label: "RAWTRP xtrans_fast",
+            kind: rawtrp_demos::SensorKind::XTrans,
+        };
+        assert_eq!(algorithm_for_candidate(&xtrans_fast), None);
+    }
+
+    /// Build the same catalogue entry the menu would carry, for the id under test.
+    fn candidate(id: &str) -> rawtrp_demos::Candidate {
+        rawtrp_demos::candidates()
+            .into_iter()
+            .find(|c| c.id == id)
+            .unwrap_or_else(|| panic!("'{id}' is not advertised"))
+    }
 }
 
 uniffi::setup_scaffolding!();
