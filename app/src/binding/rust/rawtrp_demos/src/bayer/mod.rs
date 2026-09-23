@@ -5,6 +5,7 @@
 //! each is a free function taking `(&CfaDesc, &Array2D<f32>, …)`, which is the
 //! whole of what the kernels actually touch (`FOTLAB-NATIVE-000004` D2).
 
+pub mod ahd;
 pub mod bilinear;
 pub mod dcb;
 pub mod hphd;

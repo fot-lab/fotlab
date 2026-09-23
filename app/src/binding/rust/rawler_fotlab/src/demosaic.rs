@@ -102,6 +102,8 @@ pub enum DemosaicAlgorithm {
   RawtrpDcb,
   /// `hphd` — High Pass Horizontal/Vertical Direction.
   RawtrpHphd,
+  /// `ahd` — Adaptive Homogeneity-Directed.
+  RawtrpAhd,
 }
 
 impl DemosaicAlgorithm {
@@ -120,6 +122,7 @@ impl DemosaicAlgorithm {
       Self::RawtrpLmmse => rawtrp_demos::BayerAlgo::Lmmse,
       Self::RawtrpDcb => rawtrp_demos::BayerAlgo::Dcb,
       Self::RawtrpHphd => rawtrp_demos::BayerAlgo::Hphd,
+      Self::RawtrpAhd => rawtrp_demos::BayerAlgo::Ahd,
       _ => return None,
     })
   }
@@ -136,6 +139,7 @@ impl DemosaicAlgorithm {
       rawtrp_demos::BayerAlgo::Lmmse => Self::RawtrpLmmse,
       rawtrp_demos::BayerAlgo::Dcb => Self::RawtrpDcb,
       rawtrp_demos::BayerAlgo::Hphd => Self::RawtrpHphd,
+      rawtrp_demos::BayerAlgo::Ahd => Self::RawtrpAhd,
       _ => return None,
     })
   }
@@ -288,6 +292,35 @@ fn run_rawler_algo(chosen: RawlerAlgo, pixels: &PixF32, config: &CFAConfig, roi:
 /// The ROI is the very same `active_area`-or-full-rect the rawler arms get, so
 /// the result is ROI-sized and this stage's output contract is unchanged; Fuji
 /// rotation is applied here exactly as it is on the PPG arm (`FOTLAB-NATIVE-000004` D4).
+/// The camera → normalised-XYZ matrix AHD and EAHD judge homogeneity in.
+///
+/// RawTherapee derives it from `imatrices.rgb_cam`, which is per-image data this
+/// binding is the only place that can reach; `rawler` carries the camera's
+/// `xyz_to_cam` and will invert and normalise it into the same convention (a
+/// neutral triple maps to XYZ (1,1,1)), which is why this is threaded rather
+/// than left at the sRGB default.
+///
+/// It is still guarded, because the inversion is only as good as the tag that fed
+/// it: a camera with no colour matrix — or a degenerate one — can invert to
+/// something non-finite or all-zero, and a Lab plane built from that would make
+/// every pixel equally homogeneous and silently turn AHD into "the mean of both
+/// directions". Falling back to `XYZ_CAM_FROM_SRGB` costs directional accuracy
+/// and nothing else.
+fn xyz_cam_for(image: &RawImage) -> [[f32; 3]; 3] {
+  let m = image.cam_to_xyz_normalized();
+  let mut out = [[0.0f32; 3]; 3];
+  for (row, src) in out.iter_mut().zip(m.iter()) {
+    row.copy_from_slice(&src[..3]);
+  }
+  let usable = out.iter().flatten().all(|v| v.is_finite()) && out.iter().flatten().any(|v| *v != 0.0);
+  if usable {
+    out
+  } else {
+    log::warn!("no usable camera colour matrix for this RAW; AHD/EAHD will assume sRGB");
+    rawtrp_demos::XYZ_CAM_FROM_SRGB
+  }
+}
+
 fn run_rawtrp_bayer(kernel: rawtrp_demos::BayerAlgo, pixels: &PixF32, config: &CFAConfig, roi: Rect, image: &RawImage) -> Intermediate {
   // `effective_algorithm` only routes a three-colour 2x2 Bayer CFA here, so this
   // is `Some` for every request that arrives. It is still handled rather than
@@ -307,7 +340,10 @@ fn run_rawtrp_bayer(kernel: rawtrp_demos::BayerAlgo, pixels: &PixF32, config: &C
   // `lmmse_iterations = 2` (`rtengine/params/raw.cc:87`). Studio has no drawer
   // for these three yet, so a RAWTRP DCB/LMMSE pick runs RT's defaults; this is
   // the single place to inject them once it does (`FOTLAB-NATIVE-000004` D4).
-  let params = rawtrp_demos::BayerParams::default();
+  let mut params = rawtrp_demos::BayerParams::default();
+  // The camera's colour matrix is per-image data, not a knob, so it comes from
+  // the decoded RAW rather than from a default — see `xyz_cam_for`.
+  params.xyz_cam = xyz_cam_for(image);
   let mosaic = mosaic_from_roi(pixels, roi);
 
   match rawtrp_demos::bridge::demosaic_bayer_to_intermediate(kernel, &cfa, &mosaic, &params) {

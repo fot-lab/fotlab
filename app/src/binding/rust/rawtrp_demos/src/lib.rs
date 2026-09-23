@@ -93,11 +93,32 @@ impl Rgb {
   }
 }
 
+/// Camera → normalised-XYZ, for the kernels that judge pixels in CIELab.
+///
+/// Upstream builds this per image as
+/// `xyz_cam[i][j] = Σ_k xyz_rgb[i][k] * imatrices.rgb_cam[k][j] / d65_white[i]`
+/// (`ahd_demosaic_RT.cc:75-82`) from the camera's own colour matrix. This crate
+/// never sees that matrix — it is handed a mosaic and a `CFA` — so the caller
+/// supplies the finished 3x3 and this is what its default means.
+///
+/// The convention the kernels rely on is that a **neutral** (1,1,1) camera
+/// triple maps to XYZ (1,1,1): both upstream's derivation and
+/// `rawler::rawimage::RawImage::cam_to_xyz_normalized()` satisfy it, and it is
+/// what puts white at the top of the `cbrt` table a Lab conversion indexes.
+pub const XYZ_CAM_FROM_SRGB: [[f32; 3]; 3] = [
+  // `xyz_rgb` row 0, divided by `d65_white[0]`.
+  [0.412453 / 0.950456, 0.357580 / 0.950456, 0.180423 / 0.950456],
+  // Row 1; `d65_white[1]` is 1.
+  [0.212671, 0.715160, 0.072169],
+  // Row 2, divided by `d65_white[2]`.
+  [0.019334 / 1.088754, 0.119193 / 1.088754, 0.950227 / 1.088754],
+];
+
 /// Tuning knobs the ported Bayer kernels need, mirroring the RawTherapee
 /// `procparams::RAWParams` fields they read.
 ///
-/// Only DCB, LMMSE and the `dual_demosaic_RT` hybrids read anything; the rest
-/// ignore it.
+/// Only DCB, LMMSE, AHD/EAHD and the `dual_demosaic_RT` hybrids read anything;
+/// the rest ignore it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BayerParams {
   /// `raw.bayersensor.dcb_iterations` — DCB refinement passes.
@@ -113,6 +134,11 @@ pub struct BayerParams {
   pub dual_contrast: f64,
   /// `autoContrast` — derive the blend threshold instead of using the above.
   pub dual_auto_contrast: bool,
+  /// Camera → normalised-XYZ for AHD and EAHD. See [`XYZ_CAM_FROM_SRGB`] for the
+  /// convention and for what the default (the camera's channels *are* sRGB)
+  /// costs. Not an RT `procparams` field — it is per-image data RT reads from
+  /// `imatrices`, threaded here because this crate has no other way to see it.
+  pub xyz_cam: [[f32; 3]; 3],
 }
 
 impl Default for BayerParams {
@@ -122,7 +148,14 @@ impl Default for BayerParams {
     // `dualDemosaicContrast = 0`, `dualDemosaicAutoContrast = true`
     // (`rtengine/params/raw.h`). The contrast value only matters once a hybrid is
     // selected, and 0 means "no blending", which is the conservative default.
-    Self { dcb_iterations: 2, dcb_enhance: true, lmmse_iterations: 2, dual_contrast: 0.0, dual_auto_contrast: false }
+    Self {
+      dcb_iterations: 2,
+      dcb_enhance: true,
+      lmmse_iterations: 2,
+      dual_contrast: 0.0,
+      dual_auto_contrast: false,
+      xyz_cam: XYZ_CAM_FROM_SRGB,
+    }
   }
 }
 
@@ -178,6 +211,10 @@ pub fn demosaic_bayer(algo: BayerAlgo, cfa: &CfaDesc, mosaic: &Array2D<f32>, par
     BayerAlgo::Dcb => bayer::dcb::bayer_dcb_demosaic(cfa, mosaic, params.dcb_iterations, params.dcb_enhance),
     // HPHD takes no parameter upstream.
     BayerAlgo::Hphd => bayer::hphd::bayer_hphd_demosaic(cfa, mosaic),
+    // AHD is the first kernel that needs per-image data rather than a tuning
+    // knob: its homogeneity test is a Lab comparison, so it takes the camera's
+    // colour matrix (`bayer/ahd.rs` explains the convention and the default).
+    BayerAlgo::Ahd => bayer::ahd::bayer_ahd_demosaic(cfa, mosaic, &params.xyz_cam),
     other => Err(Error::UnsupportedAlgo(other.original_name())),
   }
 }
