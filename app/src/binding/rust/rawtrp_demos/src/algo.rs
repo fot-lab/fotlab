@@ -81,7 +81,7 @@ pub const RAWTRP_XTRANS_NAMES: &[AlgoName] = &[
 /// never offer a path that would come back as
 /// [`crate::Error::UnsupportedAlgo`]. Entries are flipped on as each kernel's arm
 /// lands, one kernel per change (`FOTLAB-NATIVE-000004` C6).
-pub const IMPLEMENTED_BAYER: &[&str] = &["bilinear", "vng4", "rcd"];
+pub const IMPLEMENTED_BAYER: &[&str] = &["bilinear", "vng4", "rcd", "igv"];
 
 /// As [`IMPLEMENTED_BAYER`], for the ported X-Trans kernels.
 pub const IMPLEMENTED_XTRANS: &[&str] = &[];

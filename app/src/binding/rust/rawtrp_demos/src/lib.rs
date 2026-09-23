@@ -159,6 +159,10 @@ pub fn demosaic_bayer(algo: BayerAlgo, cfa: &CfaDesc, mosaic: &Array2D<f32>, par
     // because the alternative is a working set of ~6.5 full-resolution planes. It
     // refuses a four-colour CFA, which upstream hands to IGV.
     BayerAlgo::Rcd => bayer::rcd::bayer_rcd_demosaic(cfa, mosaic),
+    // IGV is the kernel `vng4`/`rcd` name as their fallback for a four-colour CFA,
+    // but upstream's IGV indexes `rgb[3]` for one, so it cannot serve as that
+    // fallback either — see `bayer/igv.rs`.
+    BayerAlgo::Igv => bayer::igv::bayer_igv_demosaic(cfa, mosaic),
     other => Err(Error::UnsupportedAlgo(other.original_name())),
   }
 }

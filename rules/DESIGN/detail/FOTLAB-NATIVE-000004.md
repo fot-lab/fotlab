@@ -129,11 +129,11 @@ app/src/binding/rust/rawtrp_demos/
     ├── bayer/
     │   ├── mod.rs             # BayerAlgo 枚举 + 分发
     │   ├── bilinear.rs        # bayer_bilinear_demosaic.cc（56 行）✅ 已落地
-    │   ├── vng4.rs            # vng4_demosaic_RT.cc（410 行）
-    │   ├── rcd.rs             # rcd_demosaic.cc（348）
+    │   ├── vng4.rs            # vng4_demosaic_RT.cc（410 行）✅ 已落地
+    │   ├── rcd.rs             # rcd_demosaic.cc（348）✅ 已落地
+    │   ├── igv.rs             # demosaic_algos.cc:609（IGV，**标量**分支）✅ 已落地
     │   ├── lmmse.rs           # lmmse_demosaic.cc（830）
     │   ├── dcb.rs             # demosaic_algos.cc:1406（DCB）
-    │   ├── igv.rs             # demosaic_algos.cc:218（IGV）
     │   ├── amaze.rs           # amaze_demosaic_RT.cc（1610）
     │   ├── ahd.rs             # ahd_demosaic_RT.cc（235）
     │   ├── eahd.rs            # eahd_demosaic.cc（447）
@@ -238,8 +238,8 @@ rawler Intermediate::ThreeColor  →  develop 后续（calibrate …）不变
 | 批次 | 内容 | 出口标准 |
 | --- | --- | --- |
 | **B0 骨架** ✅ | crate + `CfaDesc`/`Array2D`/`Rgb`/`math`/`border`/`algo`(字典+candidates)/`bridge`(→`Intermediate`) + **bilinear** 内核 + 单测；registrar 为 `rawler_fotlab` 的 path dep | 已落地（本批随 CI 首验编译） |
-| **B1 打通** | **VNG4** 内核 ✅（含四色 CFA 回落）+ `lib.rs::demosaic_bayer` 分发 ✅ + `IMPLEMENTED_BAYER` 放开 ✅；**待做**：`rawler_fotlab::demosaic.rs` 分发 + `demosaic_candidates()` 暴露 + Kotlin 菜单动态化 | 选 `RAWTRP VNG4` 能出图；`DEFAULT` 逐像素不变；UI 候选可见 |
-| **B2 质量层** | **RCD** ✅（内核 + 分发 + 候选）；**待做**：LMMSE、DCB、IGV | 各自单测 + 与 RT golden 数值比对达标 |
+| **B1 打通** | **VNG4** 内核 ✅ + `lib.rs::demosaic_bayer` 分发 ✅ + `IMPLEMENTED_BAYER` 放开 ✅；**待做**：`rawler_fotlab::demosaic.rs` 分发 + `demosaic_candidates()` 暴露 + Kotlin 菜单动态化 | 选 `RAWTRP VNG4` 能出图；`DEFAULT` 逐像素不变；UI 候选可见 |
+| **B2 质量层** | **RCD** ✅、**IGV** ✅（内核 + 分发 + 候选）；**待做**：LMMSE、DCB | 各自单测 + 与 RT golden 数值比对达标 |
 | **B3 高端层** | AMAZE、AHD、EAHD、HPHD（AMAZE 为质量基准，含 SIMD） | 同上 |
 | **B4 X-Trans** | `xtrans_interpolate`(1/3-pass)、`xtrans/fast`、`dual` 混合封装 | X-Trans 图可选；CFA 自检 |
 
@@ -298,3 +298,15 @@ rawler Intermediate::ThreeColor  →  develop 后续（calibrate …）不变
   1. **错在哪**：D6(d) 原写"`FC` 读折叠掩码 ⇒ 永不返回 3 ⇒ 守卫是死代码 ⇒ 四色 CFA（RGBE）会直接跑进去产出垃圾"。实际 `set_prefilters()`（`rawimage.h:50-56`）**仅当 `isBayer() && get_colors() == 3` 才折叠**；四色 CFA 的 `get_colors() != 3` ⇒ `filters` **保持未折叠** ⇒ `FC(i,j)` **确实会返回 3** ⇒ 守卫**命中**并 `return igv_interpolate(W, H)`。`dcraw.cc:5025-5034`（`filters > 1000 && colors == 3` 下的 `four_color_rgb`/`half_size` 分支）同样会把 `colors` 抬到 4 而**不**折叠。错因：把"普通三色 Bayer 的折叠掩码不含 3"（真，但与守卫无关）**推广**成了"任何情况下都不含 3"。
   2. **影响面**：本文件 D6(d)（已就地改正 + 加警示）、`rules/STRUCT/detail/RAWTRP-DECODE-000003.md` 的 §3.3 与 Change History（已追加更正条）、`bayer/vng4.rs`、`bayer/rcd.rs` 的 `//!`、`src/lib.rs` 的 VNG4 分支注释、以及 `.workbuddy/memory/MEMORY.md`。**可观测行为不变**：`has_fourth_colour()`（`get_colors() > 3`）与上游字面判据对 `CfaDesc` 能描述的一切 CFA 等价，四色 CFA 仍被拒（`UnsupportedCfa`）；变的只是**理由** —— 从"复刻上游本意、绕过死代码"改为"复刻上游本意，守卫本来就是活的"。IGV 未移植期间不回落，仍是**已记录的行为缺口**（`bayer/igv.rs` 落地后两处守卫应改为调用它）。
   3. **通则（写在这里以免重犯）**：断言"上游某分支永不触发"必须同时给出**它所测的那个量在该分支下取值的完整推导**，而不是只推导一种输入。守卫类代码尤其危险 —— 一旦判成死代码，就会诱使移植者**删掉**它或**改用别的条件**，两者都在改变可观测行为（本例差一点就把"四色 CFA 回落 IGV"这条真实路径抹掉）。
+- 2026-09-23 — **rev 7：B2 第二个内核 IGV 落地**（`bayer/igv.rs`，`demosaic_algos.cc:609-865`）。11 条结论，均已在源码 `//!` 里交叉引用：
+  1. **同一个文件里有*两份完整实现*，且不是"标量+向量化"关系。** `demosaic_algos.cc` 用 `#if defined(__SSE2__) || defined(RT_SIMDE)`（`:217`）与 `#else`（`:608`）各给一份 `igv_interpolate`；SSE2 那份把工作缓冲重排成半尺寸交织平面（`rgb[2]`、`chr[4]`，`:225-237`），索引体系整体不同。本库移植**标量**分支 —— 这正是我们的目标架构会编译的那一份（aarch64 无 `__SSE2__`；`WITH_SIMDE` 默认 **OFF**，`external/RawTherapee/CMakeLists.txt:203`）。x86-64 桌面构建走 SSE2 分支，两份应只差浮点舍入，但那是**待验证**命题，需要 golden 图 —— 已记入 B2 的出口标准。
+  2. **`epssq` 是 `1e-5`，不是 `1e-10`。** 上游注释仍写 "mod epssq -10f =>-5f"，`-10` 只活在注释里（`:611`）。移植必须读**值**，不是读注释。
+  3. **`calloc` 是承重的 —— 且只对 `chr`/`vdif`/`hdif` 承重。** 第一条对角 chroma pass 读它写出的行**之外**三行，靠近画幅边缘的行根本不会被写；上游让那里的 0 传播进最外圈存活的输出行，再靠 `border_interpolate(…, 8, …)`（`:854`）覆盖画幅。复用未清零的 scratch 会让结果取决于"这块缓冲上一世是谁用的"。`rgb` 同样清零只为保持初始状态一致（它被读到的每个元素此刻都已写过）。
+  4. **`>> 1` 偏移换算是本内核最容易静默写错的一处。** `vdif[(indx - v2) >> 1]`（`v2 = 2 * width`）在**半尺寸**平面里是 `width` 个槽位（跳 2 个打包行），**不是** `width / 2` —— 因为 `>> 1` 作用在整个**差**上。故 `v2`/`v4`/`v6` → `width`/`2 * width`/`3 * width`。写成 `half_w` 编译照样过、切出的形状也"看着对"，只是读到错误的行。（本批初稿即错在此，已修，并留了对照注释。）
+  5. **step 4 与 step 5 必须是两个 pass。** 它们写同两个 chroma 平面的**不同行奇偶**，且各自通过 `±1`/`±3` 行偏移读对方的输出；上游因此把它们拆成两个 `#pragma omp for`（`:729`/`:757`），中间那道屏障是**正确性**要求。把两者合成一个行循环（函数体逐字节相同）会引入竞争。
+  6. **`FC(row, 1)` 与 `FC(row, 0)` 不可互换。** 差分层/绿层/R@B 层的列起点取 `FC(row, 1)`（`:667`/`:699`/`:730`/`:758`），绿点色度层取 `FC(row, 0)`（`:786`/`:809`）。两者都落在"非绿"像素上，但文本不同。
+  7. **⚠️ 更正计划：IGV 并*不能*关闭"四色 CFA 回落"这个缺口。** 此前 B1/B2 记"IGV 落地后两处守卫应改为调用它"。但 `igv_interpolate` 自己声明 `float* rgb[3]`（`:615`）并按 `FC` 载入 `rgb[c]`（`:649-650`）；四色 CFA 下 `FC` **确实**会返回 3（见 rev 6）⇒ `rgb[3]` 越过三元素**指针**数组的末尾、读到栈上下一个槽。也就是说上游这条"回落"本身就不是可用路径。可移植的选项只有两个：原样复现 UB（做不到，也不该做），或拒绝该 CFA。本库拒绝，故 `vng4`/`rcd` 的 `UnsupportedCfa` **就是最终行为**，该缺口**按设计保留**，不再标记为"待 IGV 关闭"。
+  8. **并行分片：7 相中 4 相并行，chroma 四相（4/5/6/7）串行 —— 有界缺口，非疏漏。** 这四相都读**自己写的那个平面**、且在自己拥有的行**之外一到三行**，任何 `par_chunks_mut` 切分都无法安全表达（安全 Rust 不能对同一缓冲的重叠区域同时给出 `&` 与 `&mut`）。两条出路都比收益贵：每通道加一张备用 chroma 平面会把 IGV 从 6 张全分辨率平面推到 8 张（45MP 下 1.44GB，而它本身已需 1.08GB）；`unsafe` 不是本移植使用的工具。**已并行**的是 1.1（载入）、1.2（梯度 + 高阶插值 + 色差）、1.3（IGV 绿通道 + R/B 点色度）、8（内部写出）—— 上游 `#pragma omp for` 的同一粒度，相边界即上游的隐式屏障。**派生修法**（留档）：把两张 chroma 平面按**行奇偶分缓冲**后，step 4 只读偶行缓冲、只写奇行缓冲，读写集合天然不交，即可全并行；或加备用平面做"拷贝—并行写—交换"。
+  9. **两处 `Shape` 拒绝（有意偏离，均因上游此处无保护）。** ① 宽必须为**偶** —— 半尺寸色差平面按 `indx >> 1` 打包时，"一行恰占 `width / 2` 槽位"只在偶宽成立，本库依赖这一点把该平面按行分片；上游无此检查（它会建一个形状不同的半平面继续出图）。真实传感器的 2×2 CFA 两轴均为偶数，故实际不可达。② 需要 `width > 8 && height >= 8` —— `border_interpolate` 的首道只测**左**边界（`j1 > -1`），右侧不留一列会读到行外；上游那处是无保护的 `red[i][j] = …`。两处都在 `bayer/igv.rs` 的 `//!` 与函数文档里写明。
+  10. **`math` 新增/修正四处**（本内核所必需；都是忠实性问题，不是风格）：① `lim` 改为上游的**组合式** `max(low, min(val, high))`（`rt_math.h:90-93`）—— 与区间判断对有限值等价，对 NaN 不同：`min2(NaN, high)` 保留 NaN，`max2(low, NaN)` 回落到 **`low`**；单测 `lim_collapses_a_nan_to_the_low_bound` 钉住。② 新增 `min2`（libstdc++ `std::min` 的 NaN 不对称，与既有 `max2` 镜像）。③ 新增 `median3`：复刻 `rtengine::median(a, b, c)` —— 它经 `std::array` 走 `nth_element`，而 libstdc++ 对 ≤3 元素短路成 `__insertion_sort`，结果即中位数；**分支结构照抄**（含"无界扫描靠前一次失败比较作哨兵"）而非换成三比较器网络，因为含 NaN 时两者不同，单测 `median3_reproduces_upstreams_nan_behaviour` 钉住。④ 新增 `sqr`：上游是**函数**不是宏，`SQR(a + b + c) = (a + b + c)²`。
+  11. **本分支无手写 SIMD 可移**：标量实现里 intrinsics 计数为 0（SSE2 是另一份实现，见 1）。标量 + rayon 即该分支的完整移植，与 RCD 同理。
