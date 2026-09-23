@@ -259,4 +259,42 @@ impl RawlerImageLoaded {
             ))
         })
     }
+
+    /// Auto-exposure metering of the cached decode with rawalchemy's 5-strategy meter, returned
+    /// as an **EV offset in stops**, or `Err` when the meter rejects the mode.
+    ///
+    /// Runs exactly the same `develop_image` (linear ProPhoto-D50, unclamped) the grade fork uses,
+    /// then hands that buffer to [`rawalchemy_fotlab::compute_auto_gain_ev`], which converts
+    /// rawalchemy's linear gain `g` to `log2(g)` stops. Because the buffer is developed with
+    /// `params` — which carry the currently-applied `exposure_ev` — the returned offset is
+    /// *relative to the current image*: the caller is expected to add the recorded applied
+    /// `exposure_ev` to obtain the absolute stop value to show.
+    ///
+    /// Metering never applies anything and does not depend on whether the exposure stage is
+    /// enabled; that decision stays with the caller. Requires the `rawalchemy` feature.
+    #[cfg(feature = "rawalchemy")]
+    pub fn meter_auto_exposure(
+        &self,
+        params: DevelopParams,
+        mode: String,
+        target_gray: Option<f32>,
+    ) -> Result<f32, RawlerFotlabError> {
+        panic::catch_unwind(AssertUnwindSafe(|| {
+            let image = (*self.inner).clone();
+            let dev = develop_image(image, params, WorkingSpace::ProPhotoD50)?;
+            rawalchemy_fotlab::compute_auto_gain_ev(
+                &dev.rgb,
+                dev.width,
+                dev.height,
+                &mode,
+                target_gray,
+            )
+            .map_err(|e| RawlerFotlabError::Decode(format!("auto exposure metering failed: {e}")))
+        }))
+        .unwrap_or_else(|_| {
+            Err(RawlerFotlabError::Decode(
+                "rawler panicked during meter_auto_exposure".to_string(),
+            ))
+        })
+    }
 }

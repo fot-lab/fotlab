@@ -204,6 +204,34 @@ rust::Vec<float> grade(rust::Slice<const float> data,
   return out;
 }
 
+// Standalone auto-exposure metering — the metering half of `grade`, exposed on its own.
+//
+// Same buffer construction as `grade` (row-major interleaved width*height*3 float32), but the
+// result is returned instead of baked into `GradingParams`: the caller decides what to do with
+// the gain (this project converts it to stops via log2 and offers it in the Exposure dialog).
+// `metering.h` is already pulled in above for `grade`; `computeAutoGain` is the same entry point.
+float compute_auto_gain(rust::Slice<const float> data,
+                        uint32_t width,
+                        uint32_t height,
+                        rust::Str mode,
+                        float target_gray) {
+  using namespace rawalchemy;
+
+  const size_t n = static_cast<size_t>(width) * height * 3u;
+  if (data.size() != n) {
+    throw std::runtime_error("compute_auto_gain: input length != width*height*3");
+  }
+
+  ImageBuffer buf(static_cast<int>(width), static_cast<int>(height), 3);
+  std::copy(data.data(), data.data() + static_cast<std::ptrdiff_t>(n), buf.data.begin());
+
+  std::string mm(mode.data(), mode.size());
+  if (!isMeteringModeSupported(mm)) {
+    throw std::runtime_error("compute_auto_gain: unsupported metering mode '" + mm + "'");
+  }
+  return computeAutoGain(buf, mm, target_gray);
+}
+
 // Enumerate the log spaces the grader accepts, as DISPLAY names.
 //
 // Pulled straight out of `kLogSpaceAliases` (see the top of this file) so the

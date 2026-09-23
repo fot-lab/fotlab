@@ -67,3 +67,17 @@ rust::Vec<float> grade(rust::Slice<const float> data,
 /// external/RawAlchemyCpp/include/color_data.h and stay untouched; keep the
 /// table's canonical column in sync with them (14 curves).
 rust::Vec<rust::String> log_spaces();
+
+/// Standalone auto-exposure metering over a linear ProPhoto-D50 RGB buffer.
+///
+/// `data` is the same row-major interleaved `width*height*3` float32 layout as
+/// [`grade`] / `RawlerImageDeveloped.rgb`. Returns rawalchemy's linear gain multiplier
+/// (`computeAutoGain`); the Rust side converts it to an EV offset with `log2(gain)`.
+/// Throws `std::runtime_error` (turned into `Err(cxx::Exception)` by the bridge) on a bad
+/// buffer length or an unsupported metering mode. Unlike [`grade`], this neither modifies
+/// nor re-emits pixels — it only measures.
+float compute_auto_gain(rust::Slice<const float> data,
+                        uint32_t width,
+                        uint32_t height,
+                        rust::Str mode,
+                        float target_gray);

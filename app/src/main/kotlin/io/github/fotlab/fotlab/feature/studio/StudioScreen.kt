@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -155,6 +156,11 @@ fun StudioScreen() {
             }
         }
     }
+
+    // The 5 rawalchemy metering strategies, shown as text buttons in the Exposure dialog. Each
+    // string IS the algorithm name and is exactly the mode key rawalchemy's computeAutoGain
+    // accepts, so the button label and the native meter cannot drift apart.
+    val meteringModes = listOf("average", "center-weighted", "highlight-safe", "hybrid", "matrix")
 
     var showExposureDialog by remember { mutableStateOf(false) }
     var exposureInput by remember { mutableStateOf("") }
@@ -415,6 +421,28 @@ fun StudioScreen() {
                         placeholder = { Text(text = stringResource(id = R.string.studio_exposure_hint)) },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     )
+                    // Metering buttons: each meters the current image with one rawalchemy strategy and
+                    // fills the returned EV into the field once (the user may still edit it). Metering
+                    // only proposes a value — it works regardless of the enable switch and applies
+                    // nothing; OK with the switch ON is what writes it into exposureEv.
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(text = stringResource(id = R.string.studio_exposure_metering))
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row(modifier = Modifier.horizontalScroll(rememberScrollState())) {
+                        meteringModes.forEach { mode ->
+                            TextButton(
+                                onClick = {
+                                    // Metering develops + meters natively — off the main thread so the
+                                    // dialog never blocks; the result lands in the field once it returns.
+                                    scope.launch(Dispatchers.IO) {
+                                        StudioEngine.meterAutoExposure(mode)?.let { exposureInput = it.toString() }
+                                    }
+                                },
+                            ) {
+                                Text(text = mode)
+                            }
+                        }
+                    }
                 }
             },
         )

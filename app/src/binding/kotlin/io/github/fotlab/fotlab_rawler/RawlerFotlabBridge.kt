@@ -105,6 +105,23 @@ object RawlerFotlabBridge {
     ): ByteArray? = runCatching { loaded.developAndGradeToPngAtKelvin(params, kelvin, gradeParams) }.getOrNull()
 
     /**
+     * Auto-exposure metering of a resident [loaded] image with rawalchemy's 5-strategy meter.
+     * [mode] is one of `"average" | "center-weighted" | "highlight-safe" | "hybrid" | "matrix"`.
+     *
+     * Develops the cached decode with [params] into a linear ProPhoto buffer (no re-decode), meters
+     * it, and returns the **EV offset (stops)** that would drive the image to the metering target —
+     * relative to the current develop state, so the caller adds any already-applied exposure to
+     * obtain an absolute value. This only measures; it applies nothing. [targetGray] `null` = the
+     * native default (0.18). Unknown mode / native error / absent library degrades to `null`.
+     */
+    fun meterAutoExposure(
+        loaded: RawlerImageLoaded,
+        params: DevelopParams,
+        mode: String,
+        targetGray: Float?,
+    ): Float? = runCatching { loaded.meterAutoExposure(params, mode, targetGray) }.getOrNull()
+
+    /**
      * Log curves the native grading engine accepts (sorted natively), for the Studio LOG chooser.
      * These are display names — vendor spelled out, curve written the vendor's way, e.g.
      * "FUJIFILM F-Log2 C" — and they are exactly the strings [GradeParams.logSpace] takes back;

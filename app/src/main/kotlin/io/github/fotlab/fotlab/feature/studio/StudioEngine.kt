@@ -665,6 +665,38 @@ object StudioEngine {
         reDevelop()
     }
 
+    /**
+     * Auto-exposure metering with rawalchemy's 5-strategy meter ([mode]), returning the **absolute**
+     * exposure EV the Exposure dialog should show, or `null` when no RAW is resident or the native
+     * meter failed.
+     *
+     * The meter runs on the resident decode developed with the *current* develop params — including
+     * the exposure already applied ([currentExposureEv]) — so the rawalchemy result is an offset
+     * *relative to the image as it stands now*. This method therefore adds the **recorded,
+     * already-applied** exposure ([currentExposureEv], this engine's state — deliberately NOT the
+     * value the user has just typed into the dialog field) to obtain the absolute stop value.
+     *
+     * Metering only *proposes* a value: it applies nothing and is independent of the Exposure stage
+     * switch. The user may still edit the field, and only confirming with the switch ON writes the
+     * value into [DevelopParams.exposureEv] (see [setExposureEv]).
+     */
+    fun meterAutoExposure(mode: String): Float? {
+        val loaded = loadedImage ?: return null
+        val params = DevelopParams(
+            demosaicAlgorithm = currentAlgorithm,
+            exposureEv = currentExposureEv,
+            wb = null,
+            denoiseStrength = currentDenoiseStrength,
+            dehazeStrength = currentDehazeStrength,
+            dehazePercentile = currentDehazePercentile,
+            downsample = downsampleState.value,
+        )
+        // `metered` is the offset relative to the current image; add the recorded applied exposure
+        // so the dialog's field receives an absolute value on the same scale.
+        val metered = RawlerFotlabBridge.meterAutoExposure(loaded, params, mode, null) ?: return null
+        return metered + (currentExposureEv ?: 0f)
+    }
+
     /** The current denoise strength; the UI prefills the Denoise dialog from this. */
     fun currentDenoiseStrength(): Float? = currentDenoiseStrength
 

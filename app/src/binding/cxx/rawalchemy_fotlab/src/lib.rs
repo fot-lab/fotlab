@@ -78,6 +78,18 @@ mod ffi {
         /// be broken by how the parallel grading engine is linked. Iteration order is
         /// unspecified; callers that need a stable order sort the result themselves.
         fn log_spaces() -> Vec<String>;
+
+        /// Standalone auto-exposure metering — rawalchemy's `computeAutoGain` over a linear
+        /// ProPhoto-D50 RGB buffer, returning the **linear gain multiplier** (NOT an EV; the
+        /// caller converts with `log2(gain)`). Deliberately decoupled from [`grade`]: it measures
+        /// only and applies nothing. Throws on a bad buffer length or an unsupported metering mode.
+        fn compute_auto_gain(
+            data: &[f32],
+            width: u32,
+            height: u32,
+            mode: &str,
+            target_gray: f32,
+        ) -> Result<f32>;
     }
 }
 
@@ -169,4 +181,29 @@ pub fn grade(
 /// here: the consuming crate sorts for UI stability.
 pub fn log_spaces() -> Vec<String> {
     ffi::log_spaces()
+}
+
+/// Standalone auto-exposure metering — rawalchemy's `computeAutoGain` over a linear
+/// ProPhoto-D50 RGB buffer, returned as an **EV offset in stops**, not the raw linear gain.
+///
+/// The upstream meter returns a linear *gain multiplier* `g` — the factor that, applied to the
+/// buffer, drives its ProPhoto-luminance average to `target_gray` (default `0.18`). Every
+/// exposure control in this project is expressed as `gain = 2^ev`, so the equivalent stop value
+/// is `ev = log2(g)` — which is what this returns, ready to feed to `DevelopParams.exposure_ev`
+/// (the native stage applies `2^ev` to the mosaic).
+///
+/// `mode` is one of `"average" | "center-weighted" | "highlight-safe" | "hybrid" | "matrix"`.
+/// This is deliberately separate from [`grade`]: it only measures, touches no pixels, and leaves
+/// the decision — whether/how to apply, or to add it to an already-applied exposure — to the
+/// caller. An unknown mode or a mismatched buffer length surfaces as `Err`.
+pub fn compute_auto_gain_ev(
+    data: &[f32],
+    width: u32,
+    height: u32,
+    mode: &str,
+    target_gray: Option<f32>,
+) -> Result<f32, String> {
+    ffi::compute_auto_gain(data, width, height, mode, target_gray.unwrap_or(0.18))
+        .map(|gain| gain.log2())
+        .map_err(|e| e.to_string())
 }
