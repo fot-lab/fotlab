@@ -151,9 +151,9 @@ pub fn demosaic_bayer(algo: BayerAlgo, cfa: &CfaDesc, mosaic: &Array2D<f32>, par
   // algorithm stays out of `algo::candidates` until its arm exists here.
   match algo {
     BayerAlgo::Bilinear => bayer::bilinear::bayer_bilinear_demosaic(cfa, None, mosaic),
-    // VNG4 reads the *unfolded* CFA mask and needs three-colour RGB; it returns
-    // `UnsupportedCfa` for a four-colour CFA, which upstream only *meant* to do
-    // (its `FC(i,j) == 3` guard is dead code — see `bayer/vng4.rs`).
+    // VNG4 reads the *unfolded* CFA mask and needs three-colour RGB, so it
+    // returns `UnsupportedCfa` for a four-colour CFA — the same case upstream
+    // falls back to IGV for (see `bayer/vng4.rs`).
     BayerAlgo::Vng4 => bayer::vng4::bayer_vng4_demosaic(cfa, mosaic),
     // RCD computes inside a 194x194 per-tile scratch — upstream's own tiling, kept
     // because the alternative is a working set of ~6.5 full-resolution planes. It

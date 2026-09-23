@@ -188,8 +188,9 @@ RT 的这些内核是 **dcraw 的直接后代**（`vng4` = dcraw `vng_interpolat
 **(c) 谁读哪张掩码 —— 一个内核里两张都用。** `RawImage::FC`/`ISGREEN`/`ISBLUE`/`ISRED` 读**折叠**掩码（`rawimage.h:268-283`，三值）；但 `vng4_demosaic_RT.cc:62` 有一个**局部** `#define fc(row,col)` 直接读 `prefilters`（**未折叠**，四值）。
 → **应对**：`CfaDesc` 暴露两套方法 —— `fc*`/`is_*`（折叠）与 `fc_pre*`（未折叠），**逐处对照上游、不统一**。vng4 里两者同现：`interpolate_row_redblue` 走 `ISGREEN`/`ISBLUE`（折叠），而 scatter / 第一遍 / VNG 主循环的 `color` 走局部 `fc`（未折叠）。**这是本次移植最容易写错的一处**（初稿即错，已修）。
 
-**(d) VNG4 的四色守卫是死代码。** `vng4_demosaic_RT.cc:67-76` 意图是 `if (FC(i,j) == 3) → 回落 igv_interpolate`，但 `FC` 读折叠掩码，**永远不可能返回 3** → 四色 CFA（RGBE）会直接跑进去产出垃圾。
-→ **应对**：改测上游**本意**的属性 `has_fourth_colour()`（`get_colors() > 3`），**不复制死代码**。⚠️ 反例陷阱：普通 Bayer 的**未折叠**掩码**含 3**，所以绝不能拿 `fc_pre == 3` 当四色判据（单测 `a_normal_bayer_is_not_a_four_colour_cfa` 钉住）。
+**(d) VNG4/RCD 的四色守卫是*活的*，不是死代码。** `vng4_demosaic_RT.cc:67-76` 与 `rcd_demosaic.cc:56-65` 都是 `if (FC(i,j) == 3)` → 回落 `igv_interpolate`。`FC` 读**折叠**掩码 `filters`（`rawimage.h:280-283`），但 `set_prefilters()` **仅当 `isBayer() && get_colors() == 3` 才折叠**（`rawimage.h:50-56`）⇒ **四色 CFA 的 `filters` 保持未折叠、`3` 仍在 ⇒ 守卫命中**。（`dcraw.cc:5025-5034` 的 `four_color_rgb`/`half_size` 分支同样把 `colors` 抬到 4 而不折叠。）也就是说上游对四色 CFA **确实**回落 IGV，并不会"直接跑进去产出垃圾"。
+→ **应对**：本库用 `has_fourth_colour()`（`get_colors() > 3`）表达同一属性 —— 它与上游的字面判据对 `CfaDesc` 能描述的一切 CFA **等价**，语义更直白（"这块 CFA 是不是三色 RGB"）。IGV 未移植期间返回 `UnsupportedCfa`，而非静默出图。⚠️ 反例陷阱仍在：普通 Bayer 的**未折叠**掩码**含 3**，所以绝不能拿 `fc_pre == 3` 当四色判据（单测 `a_normal_bayer_is_not_a_four_colour_cfa` 钉住）。
+⚠️ 本条原写作"守卫是死代码"，**是错的**：错在把"三色 Bayer 的折叠掩码永不含 3"（真，且与守卫无关）当成了"任何情况下都不含 3"。已在 **rev 6** 更正。
 
 **(e) 梯度解析器只吃 ≤2 个梯度位。** 上游一项占 5 个字 + 最多 1 个可选梯度（`ip += 5`，再条件 `ip++`），而 dcraw 会遍历**全部**梯度位。
 → **应对**：机械校验 —— 对四种 Bayer 排布 × 全部 16 个 `(row & 7, col & 1)` 类，**没有任何存活项带 ≥3 个梯度位（0 例）**。故 ≤2 解析是安全的；第三位只在 dcraw 会越读的地方被我们忽略。单测 `no_surviving_term_needs_more_than_two_gradients` 钉住。
@@ -293,3 +294,7 @@ rawler Intermediate::ThreeColor  →  develop 后续（calibrate …）不变
   5. **`intp` 语义再确认**：RT 的 `intp(a,b,c) = a*(b-c)+c`（`rt_math.h:114-122`）是**连续混合**，**不是** dcraw 的 `intp(a,b,c) = a>=0.5 ? b : c` 硬选择。RCD 传的是连续权重 `VH_Disc`/`PQ_Disc`，若按 dcraw 语义移植会得到完全不同的图；本库既有的 `math::intp` 与 RT 逐字一致（`a*(b-c)+c`，求值顺序亦同），RCD 直接复用、无需新增。
   另：**scratch 必须每块清零**（复刻上游 `calloc`）。这不是防御性写法 —— 步骤 4.3 在行 `r` 读 `rgb[c]` 的行 `r-3`，顶部若干行读到的是任何阶段都还没写过的元素，该值会**传播进本块真正写出的行**；上游靠 `calloc` 把它定为 0，复用 scratch 则会变成上一块的残留值（形成静默的"块位置依赖"）。`cfa` 是唯一例外（载入循环重写全部可达元素）；`bufferV`/`bufferH` 上游是栈数组、写后读，同样无需清零。
   另：**RCD 无手写 SIMD**（`rcd_demosaic.cc` 内 `_mm_`/NEON intrinsics 计数为 0），靠 `-ftree-vectorize` 自动向量化 —— 故本内核**没有**可移植的 SIMD 路径，标量 + rayon 即完整移植（对照 Q3）。
+- 2026-09-23 — **rev 6：更正 D6(d) —— vng4/RCD 的四色守卫是*活的*，此前记为"死代码"是错的**。
+  1. **错在哪**：D6(d) 原写"`FC` 读折叠掩码 ⇒ 永不返回 3 ⇒ 守卫是死代码 ⇒ 四色 CFA（RGBE）会直接跑进去产出垃圾"。实际 `set_prefilters()`（`rawimage.h:50-56`）**仅当 `isBayer() && get_colors() == 3` 才折叠**；四色 CFA 的 `get_colors() != 3` ⇒ `filters` **保持未折叠** ⇒ `FC(i,j)` **确实会返回 3** ⇒ 守卫**命中**并 `return igv_interpolate(W, H)`。`dcraw.cc:5025-5034`（`filters > 1000 && colors == 3` 下的 `four_color_rgb`/`half_size` 分支）同样会把 `colors` 抬到 4 而**不**折叠。错因：把"普通三色 Bayer 的折叠掩码不含 3"（真，但与守卫无关）**推广**成了"任何情况下都不含 3"。
+  2. **影响面**：本文件 D6(d)（已就地改正 + 加警示）、`rules/STRUCT/detail/RAWTRP-DECODE-000003.md` 的 §3.3 与 Change History（已追加更正条）、`bayer/vng4.rs`、`bayer/rcd.rs` 的 `//!`、`src/lib.rs` 的 VNG4 分支注释、以及 `.workbuddy/memory/MEMORY.md`。**可观测行为不变**：`has_fourth_colour()`（`get_colors() > 3`）与上游字面判据对 `CfaDesc` 能描述的一切 CFA 等价，四色 CFA 仍被拒（`UnsupportedCfa`）；变的只是**理由** —— 从"复刻上游本意、绕过死代码"改为"复刻上游本意，守卫本来就是活的"。IGV 未移植期间不回落，仍是**已记录的行为缺口**（`bayer/igv.rs` 落地后两处守卫应改为调用它）。
+  3. **通则（写在这里以免重犯）**：断言"上游某分支永不触发"必须同时给出**它所测的那个量在该分支下取值的完整推导**，而不是只推导一种输入。守卫类代码尤其危险 —— 一旦判成死代码，就会诱使移植者**删掉**它或**改用别的条件**，两者都在改变可观测行为（本例差一点就把"四色 CFA 回落 IGV"这条真实路径抹掉）。

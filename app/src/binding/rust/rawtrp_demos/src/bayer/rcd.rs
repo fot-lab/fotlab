@@ -42,14 +42,17 @@
 //! * **No SIMD to port.** `rcd_demosaic.cc` contains no intrinsics at all — it
 //!   relies on `-ftree-vectorize`, i.e. on the same auto-vectorisation the Rust
 //!   compiler is asked for. Nothing hand-written was dropped.
-//! * **The four-colour guard.** Upstream tests `FC(i, j) == 3` on the *folded*
-//!   mask. A genuine four-colour CFA never went through `set_prefilters`'s fold,
-//!   so its `3` survives and the guard fires; upstream then falls back to
-//!   `igv_interpolate`. IGV is not ported yet, so this port returns
-//!   [`Error::UnsupportedCfa`] rather than quietly producing a wrong image. When
-//!   `bayer/igv.rs` lands, this arm should call it — that is a behaviour
-//!   *addition* the port owes upstream, and it is recorded in
-//!   `rules/DESIGN/detail/FOTLAB-NATIVE-000004.md`.
+//! * **The four-colour guard is live — here and in vng4 alike.** Upstream tests
+//!   `FC(i, j) == 3` on the *folded* mask, and `FC` really can return `3`:
+//!   `set_prefilters()` folds only when `isBayer() && get_colors() == 3`
+//!   (`rawimage.h:50-56`), so a sensor with a fourth colour keeps its `3` and the
+//!   guard fires. (So does a Bayer under dcraw's `four_color_rgb` / `half_size`,
+//!   which raises `colors` to 4 before the same test — `dcraw.cc:5025-5034`.)
+//!   Upstream then falls back to `igv_interpolate`. IGV is not ported yet, so this
+//!   port returns [`Error::UnsupportedCfa`], through
+//!   [`CfaDesc::has_fourth_colour`] — which agrees with the literal test for every
+//!   CFA `CfaDesc` can describe. When `bayer/igv.rs` lands, this arm should call
+//!   it: a behaviour *addition* the port owes upstream.
 //!
 //! Everything else — every constant, every loop bound, every parenthesis in a
 //! float expression — is upstream's, transcribed rather than tidied.

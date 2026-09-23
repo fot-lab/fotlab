@@ -58,11 +58,15 @@
 //!   to patch OpenMP chunk boundaries. Green is produced for rows/cols `2..h-2`
 //!   and red/blue for `3..h-3`, with `border_interpolate(…, 3, …)` covering the
 //!   three-pixel frame — exactly the set a single-threaded upstream run covers.
-//! * `vng4` is for three-colour RGB CFAs. Upstream *tries* to enforce that with
-//!   `if (FC(i, j) == 3)`, but `FC` reads the **folded** mask, which by
-//!   construction never returns 3, so the check is dead code and a four-colour
-//!   CFA (RGBE) would sail through and produce garbage. This port tests the
-//!   property upstream meant ([`CfaDesc::has_fourth_colour`]) instead.
+//! * `vng4` is for three-colour RGB CFAs: a sensor with a fourth colour needs a
+//!   four-channel model this kernel does not have. Upstream enforces that with
+//!   `if (FC(i, j) == 3)` (`vng4_demosaic_RT.cc:67-76`) and falls back to
+//!   `igv_interpolate`. That guard **does** fire: `FC` reads the folded mask, and
+//!   `set_prefilters()` folds only when `isBayer() && get_colors() == 3`
+//!   (`rawimage.h:50-56`), so a four-colour CFA keeps its `3`. This port tests the
+//!   same property through [`CfaDesc::has_fourth_colour`], which agrees with the
+//!   literal test for every CFA the type can describe; IGV is not ported yet, so
+//!   it reports the unsupported CFA instead of falling back.
 //! * **The weight is an `int -> float` conversion, not a bit-cast.** Upstream
 //!   writes `*reinterpret_cast<float*>(ip++) = 1 << weight;` — the *lvalue* type
 //!   is `float`, so the int is **converted**, giving exactly `1.0` or `2.0`; the
