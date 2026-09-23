@@ -163,7 +163,7 @@ use std::sync::OnceLock;
 
 use crate::array2d::Array2D;
 use crate::cfa::CfaDesc;
-use crate::math::{abs, clip, lim, max0, median3, median9, sqr, xdiv2f};
+use crate::math::{clip, lim, max0, median3, median9, sqr, xdiv2f};
 use crate::{Error, Rgb};
 
 /// The mosaic-to-`rawData` scale. See the module note: this is `rcd`'s elision
@@ -729,7 +729,16 @@ fn rebuild_from_medians(cfa: &CfaDesc, g: Geom, p0: &mut [f32], p1: &mut [f32], 
     .enumerate()
     .for_each(|(rr, ((q0, q1), q2))| {
       let c0 = cfa.fc(rr, 0);
-      let mut row = Row { q0, q1, q2, q3, q4 };
+      // `rix[3] = qix[3] + rr * cc1`, `rix[4] = qix[4] + rr * cc1` (`:546-547`):
+      // the median planes are read-only here, so this row's slice is borrowed
+      // rather than chunked alongside the three that are written.
+      let mut row = Row {
+        q0,
+        q1,
+        q2,
+        q3: &p3[rr * g.cc1..(rr + 1) * g.cc1],
+        q4: &p4[rr * g.cc1..(rr + 1) * g.cc1],
+      };
 
       // `d` is `c + 3 - (c == 0 ? 0 : 1)` again: channel 0 -> plane 3, else 4.
       let d_of = |c: u32| c + 3 - u32::from(c != 0);
@@ -799,10 +808,13 @@ fn write_out(tone: Tone, cfa: &CfaDesc, mosaic: &Array2D<f32>, g: Geom, out: &mu
         let i = rr * g.cc1 + cc;
         let own = cfa.fc(row, col) as usize;
         let passthrough = clip(src[col] * SCALE) / SCALE;
-        let dst = [r, gr, b];
-        for (ii, d) in dst.into_iter().enumerate() {
-          d[col] = if ii == own { passthrough } else { max0(tone.inverse(MAXVAL * planes[ii][i])) / SCALE };
-        }
+        // Unrolled over the three planes rather than looped with a `[&mut [f32]; 3]`
+        // of reborrows: upstream's three-way branch is per-channel anyway, and this
+        // keeps each plane's mutable borrow to a single index expression.
+        let recon = |ii: usize| max0(tone.inverse(MAXVAL * planes[ii][i])) / SCALE;
+        r[col] = if own == 0 { passthrough } else { recon(0) };
+        gr[col] = if own == 1 { passthrough } else { recon(1) };
+        b[col] = if own == 2 { passthrough } else { recon(2) };
       }
     });
 }

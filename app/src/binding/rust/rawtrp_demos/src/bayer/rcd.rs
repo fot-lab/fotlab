@@ -151,10 +151,13 @@ impl TileScratch {
 
   /// Restore the state a fresh tile starts from — upstream's `calloc`.
   fn reset(&mut self) {
+    // `self.rgb` goes through `iter_mut` rather than three `[0]`/`[1]`/`[2]`
+    // entries in the array below: an indexed element borrow is not tracked
+    // per-index, so the three would alias each other. Distinct fields are fine.
+    for plane in &mut self.rgb {
+      plane.fill(0.0);
+    }
     for b in [
-      &mut self.rgb[0],
-      &mut self.rgb[1],
-      &mut self.rgb[2],
       &mut self.vh_dir,
       &mut self.lpf,
       &mut self.pq_dir,
@@ -443,7 +446,10 @@ fn demosaic_tile(
   // --- step 4.1 (upstream 220-226) ----------------------------------------
   for row in 4..tile_rows.saturating_sub(4) {
     let mut col = 4 + (cfarray[row & 1][0] & 1) as usize;
-    let mut indx = row * TILE_SIZE + col;
+    // `indx` only seeds the three half-resolution cursors; upstream still
+    // advances it in the loop head but never reads it again, so this port keeps
+    // it immutable and drops that dead increment.
+    let indx = row * TILE_SIZE + col;
     let mut indx2 = indx / 2;
     let mut indx3 = (indx - W1 - 1) / 2;
     let mut indx4 = (indx + W1 - 1) / 2;
@@ -452,7 +458,6 @@ fn demosaic_tile(
       let q_stat = max2(EPSSQ, q_cdiff[indx3 + 1] + q_cdiff[indx2] + q_cdiff[indx4]);
       pq_dir[indx2] = p_stat / (p_stat + q_stat);
       col += 2;
-      indx += 2;
       indx2 += 1;
       indx3 += 1;
       indx4 += 1;

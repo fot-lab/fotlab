@@ -67,7 +67,7 @@ use rayon::prelude::*;
 
 use crate::array2d::Array2D;
 use crate::cfa::CfaDesc;
-use crate::math::{abs, intp, lim, max2, min2};
+use crate::math::{abs, intp, lim, max0, max2, min2};
 use crate::{Error, Rgb};
 
 /// `rawData` units per unit of the crate's mosaic, matching `bayer/rcd.rs`.
@@ -816,7 +816,7 @@ pub fn bayer_dcb_demosaic(cfa: &CfaDesc, mosaic: &Array2D<f32>, iterations: i32,
     .zip(out.green.as_mut_slice().par_chunks_mut(band_len))
     .zip(out.blue.as_mut_slice().par_chunks_mut(band_len))
     .enumerate()
-    .for_each(|(tr, ((red, green, blue)))| {
+    .for_each(|(tr, ((red, green), blue))| {
       let mut band = Band { red, green, blue };
       let y0 = tr * TILESIZE;
       let mut t = Tile::new();
