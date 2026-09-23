@@ -100,6 +100,8 @@ pub enum DemosaicAlgorithm {
   RawtrpLmmse,
   /// `dcb` — Directional Cubic-spline Bayer.
   RawtrpDcb,
+  /// `hphd` — High Pass Horizontal/Vertical Direction.
+  RawtrpHphd,
 }
 
 impl DemosaicAlgorithm {
@@ -117,6 +119,7 @@ impl DemosaicAlgorithm {
       Self::RawtrpIgv => rawtrp_demos::BayerAlgo::Igv,
       Self::RawtrpLmmse => rawtrp_demos::BayerAlgo::Lmmse,
       Self::RawtrpDcb => rawtrp_demos::BayerAlgo::Dcb,
+      Self::RawtrpHphd => rawtrp_demos::BayerAlgo::Hphd,
       _ => return None,
     })
   }
@@ -132,6 +135,7 @@ impl DemosaicAlgorithm {
       rawtrp_demos::BayerAlgo::Igv => Self::RawtrpIgv,
       rawtrp_demos::BayerAlgo::Lmmse => Self::RawtrpLmmse,
       rawtrp_demos::BayerAlgo::Dcb => Self::RawtrpDcb,
+      rawtrp_demos::BayerAlgo::Hphd => Self::RawtrpHphd,
       _ => return None,
     })
   }

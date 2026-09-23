@@ -176,6 +176,8 @@ pub fn demosaic_bayer(algo: BayerAlgo, cfa: &CfaDesc, mosaic: &Array2D<f32>, par
     // DCB tiles the frame itself (192-square with a 10-pixel margin, upstream's
     // own geometry) and takes both of its parameters.
     BayerAlgo::Dcb => bayer::dcb::bayer_dcb_demosaic(cfa, mosaic, params.dcb_iterations, params.dcb_enhance),
+    // HPHD takes no parameter upstream.
+    BayerAlgo::Hphd => bayer::hphd::bayer_hphd_demosaic(cfa, mosaic),
     other => Err(Error::UnsupportedAlgo(other.original_name())),
   }
 }

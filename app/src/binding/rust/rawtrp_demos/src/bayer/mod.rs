@@ -7,7 +7,9 @@
 
 pub mod bilinear;
 pub mod dcb;
+pub mod hphd;
 pub mod igv;
+pub mod interp;
 pub mod lmmse;
 pub mod rcd;
 pub mod vng4;
