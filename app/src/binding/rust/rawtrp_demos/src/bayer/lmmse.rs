@@ -616,11 +616,15 @@ fn chroma_at_green_serial(cfa: &CfaDesc, g: Geom, p0: &mut [f32], p1: &[f32], p2
     let mut c = cfa.fc(rr, cc + 1);
     while cc < g.cc1 - 1 {
       let i = rr * g.cc1 + cc;
+      // `p0`/`p2` are the WHOLE plane here, not a row chunk — every index below
+      // is the linear `i`. Writing `ch[cc]` is the one-word slip that turns this
+      // into "store every row's result into row 0": it compiles, and leaves the
+      // interior holding step 3's low-pass differences.
       let ch: &mut [f32] = if c == 0 { p0 } else { p2 };
-      ch[cc] = p1[i] + xdiv2f(ch[i - 1] - p1[i - 1] + ch[i + 1] - p1[i + 1]);
+      ch[i] = p1[i] + xdiv2f(ch[i - 1] - p1[i - 1] + ch[i + 1] - p1[i + 1]);
       c = 2 - c;
       let ch: &mut [f32] = if c == 0 { p0 } else { p2 };
-      ch[cc] = p1[i] + xdiv2f(ch[i - g.w1] - p1[i - g.w1] + ch[i + g.w1] - p1[i + g.w1]);
+      ch[i] = p1[i] + xdiv2f(ch[i - g.w1] - p1[i - g.w1] + ch[i + g.w1] - p1[i + g.w1]);
       c = 2 - c;
       cc += 2;
     }
@@ -640,8 +644,9 @@ fn chroma_at_rb_serial(cfa: &CfaDesc, g: Geom, p0: &mut [f32], p1: &[f32], p2: &
     let c = 2 - cfa.fc(rr, cc);
     while cc < g.cc1 - 1 {
       let i = rr * g.cc1 + cc;
+      // Whole-plane indexing, as in [`chroma_at_green_serial`].
       let ch: &mut [f32] = if c == 0 { p0 } else { p2 };
-      ch[cc] = p1[i]
+      ch[i] = p1[i]
         + 0.25
           * (ch[i - g.w1] - p1[i - g.w1] + ch[i - 1] - p1[i - 1] + ch[i + 1] - p1[i + 1] + ch[i + g.w1] - p1[i + g.w1]);
       cc += 2;
@@ -1183,6 +1188,13 @@ mod tests {
   }
 
   /// Black is a fixed point, in every channel and every iteration setting.
+  ///
+  /// "Fixed point" is *not* bitwise zero once `refinement` runs (`iterations > 4`):
+  /// every value it re-derives carries upstream's `+ 0.5f`, which is half a 16-bit
+  /// LSB in `rawData` units and therefore `0.5 / SCALE` here. A second pass adds
+  /// another to what the first produced. So the assertion above `iterations = 4` is
+  /// a bound of a few LSBs rather than an equality — loose enough not to encode a
+  /// rounding detail, tight enough that any real signal shows up.
   #[test]
   fn black_stays_black() {
     let (w, h) = (32usize, 32usize);
@@ -1190,7 +1202,13 @@ mod tests {
     for iterations in 0..=6 {
       let out = bayer_lmmse_demosaic(&c, &flat(w, h, 0.0), iterations).expect("lmmse");
       for (name, plane) in [("r", &out.red), ("g", &out.green), ("b", &out.blue)] {
-        assert!(plane.as_slice().iter().all(|&x| x == 0.0), "iterations={iterations} {name} not black");
+        for &x in plane.as_slice() {
+          if iterations > 4 {
+            assert!(x >= 0.0 && x < 1e-4, "iterations={iterations} {name} left black: {x}");
+          } else {
+            assert_eq!(x, 0.0, "iterations={iterations} {name} not black");
+          }
+        }
       }
     }
   }

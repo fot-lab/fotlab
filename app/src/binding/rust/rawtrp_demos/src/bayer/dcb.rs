@@ -170,9 +170,12 @@ fn fill_raw(t: &mut Tile, x0: usize, y0: usize, w: usize, h: usize, cfa: &CfaDes
   let l = init_tile_limits(x0, y0, w, h, 0);
 
   for row in l.row_min..l.row_max {
-    let y = y0 - TILEBORDER + row;
+    // `y0 - TILEBORDER + row` in that order panics: upstream is C `int`, where
+    // the intermediate `-TILEBORDER` is fine because `row_min` is raised to
+    // `TILEBORDER` on the first tile row. The sum is the same, so add first.
+    let y = y0 + row - TILEBORDER;
     for col in l.col_min..l.col_max {
-      let x = x0 - TILEBORDER + col;
+      let x = x0 + col - TILEBORDER;
       let indx = row * CACHESIZE + col;
       t.image[indx][cfa.fc(y, x) as usize] = mosaic.row(y)[x] * SCALE;
     }

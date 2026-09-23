@@ -503,7 +503,11 @@ pub fn bayer_igv_demosaic(cfa: &CfaDesc, mosaic: &Array2D<f32>) -> Result<Rgb, E
 
         // Chrominance estimate and green population.
         let chroma = (eg * nv + ng * ev) / (ng + eg);
-        ch[indx] = chroma;
+        // `chr[d][indx]` upstream, where `chr[d]` is a *full-frame* plane — but
+        // `ch` here is this row's chunk of it, so the linear index collapses to
+        // `col`. Writing `indx` is the one-transcription-error version of this
+        // line: it compiles, and panics the moment a frame is wide enough.
+        ch[col] = chroma;
         g_row[col] = rgbc[indx] + SCALE * chroma;
 
         col += 2;
