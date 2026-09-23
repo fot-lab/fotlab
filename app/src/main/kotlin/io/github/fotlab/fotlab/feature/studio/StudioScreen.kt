@@ -22,7 +22,6 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.AddPhotoAlternate
@@ -825,6 +824,18 @@ private fun StudioOpBar?.toggle(target: StudioOpBar): StudioOpBar? =
     if (this == target) null else target
 
 /**
+ * Max height of the scrolling picker menus (Demosaic / LOG): five 48dp menu rows plus Material3's
+ * 8dp top/bottom menu padding = 256dp.
+ *
+ * The cap MUST be applied through [DropdownMenu]'s own `modifier`, never by wrapping the items in
+ * another scrolling `Column`: Material3 already hosts the menu content in a vertically scrolling
+ * Column, and a scrollable child nested inside it is measured with unbounded height constraints,
+ * crashing during layout ("Vertically scrollable component was measured with an infinity maximum
+ * height constraints") before the popup is ever drawn.
+ */
+private val PickerMenuMaxHeight = 256.dp
+
+/**
  * Demosaic algorithm picker (the gradient icon anchors an upward-opening dropdown).
  *
  * The entries come from the native catalogue ([StudioEngine.demosaicCandidates]), not from a list
@@ -846,14 +857,16 @@ private fun DemosaicButton(
                 contentDescription = stringResource(id = R.string.studio_cd_demosaic),
             )
         }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            Column(Modifier.verticalScroll(rememberScrollState()).heightIn(max = 240.dp)) {
-                for (candidate in candidates) {
-                    DropdownMenuItem(
-                        text = { Text(text = demosaicLabel(candidate)) },
-                        onClick = { open = false; onAlgorithmPicked(candidate.algorithm) },
-                    )
-                }
+        DropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false },
+            modifier = Modifier.heightIn(max = PickerMenuMaxHeight),
+        ) {
+            for (candidate in candidates) {
+                DropdownMenuItem(
+                    text = { Text(text = demosaicLabel(candidate)) },
+                    onClick = { open = false; onAlgorithmPicked(candidate.algorithm) },
+                )
             }
         }
     }
@@ -1077,18 +1090,20 @@ private fun LogButton(
                 },
             )
         }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            Column(Modifier.verticalScroll(rememberScrollState()).heightIn(max = 240.dp)) {
+        DropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false },
+            modifier = Modifier.heightIn(max = PickerMenuMaxHeight),
+        ) {
+            DropdownMenuItem(
+                text = { Text(text = none) },
+                onClick = { open = false; onLogSpace(null) },
+            )
+            for (name in logSpaces) {
                 DropdownMenuItem(
-                    text = { Text(text = none) },
-                    onClick = { open = false; onLogSpace(null) },
+                    text = { Text(text = name) },
+                    onClick = { open = false; onLogSpace(name) },
                 )
-                for (name in logSpaces) {
-                    DropdownMenuItem(
-                        text = { Text(text = name) },
-                        onClick = { open = false; onLogSpace(name) },
-                    )
-                }
             }
         }
     }
