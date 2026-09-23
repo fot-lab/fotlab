@@ -16,14 +16,25 @@
 //!   the row's non-green colour (`nonGreen1`), then the other (`nonGreen2`). The
 //!   pointer swap on a blue row is reproduced as a swap of the two output row
 //!   slices.
-//! * Columns are walked in `j, j+1` pairs starting at `2 - (FC(i, 1) & 1)` so the
-//!   pair always **begins on a green pixel** — that is what makes `green[i][j] =
-//!   rawData[i][j]` valid without a special case. The start column is kept exactly.
+//! * Upstream walks columns as `j, j+1` pairs starting at `2 - (FC(i, 1) & 1)` so
+//!   each pair **begins on a green pixel** — which is what makes
+//!   `green[i][j] = rawData[i][j]` valid without a special case. This port walks
+//!   the interior column by column instead; the two branch bodies are upstream's
+//!   `j` and `j + 1` bodies verbatim (same four terms, same summation order), and
+//!   the per-column form also covers column `1` and column `w - 2`, which the pair
+//!   loop skips whenever its start is 2. See the note at the loop.
 //! * `blend` is the `dual_demosaic_RT` blend mask: the result is
 //!   `intp(blend, existing, bilinear)` = `blend*existing + (1-blend)*bilinear`.
 //!   Upstream never calls the kernel without a mask; passing `None` here means an
 //!   all-zero mask, i.e. pure bilinear, which is how the standalone candidate
 //!   uses it (`intp(0, x, y) == y` exactly).
+//! * Upstream has **no border fill at all** — `bayer_bilinear_demosaic` is called
+//!   only by `dual_demosaic_RT` (`dual_demosaic_RT.cc:115`), on top of the base
+//!   algorithm's already-complete planes, so the frame comes from there. A
+//!   standalone kernel would leave rows `0`/`H-1` and columns `0`/`W-1` at zero, so
+//!   this port finishes with `border_interpolate(…, 1, …)`. That is an **addition**,
+//!   not a ported line, and it is why the standalone candidate produces a complete
+//!   image — the interior comes from the loop above, the one-pixel ring from here.
 //! * `#pragma omp parallel for` over rows becomes rayon over rows. Each row
 //!   writes only its own row of the three output planes and reads only
 //!   `rawData`/`blend`, so the split needs no fix-up pass and is bit-identical to
@@ -76,27 +87,41 @@ pub fn bayer_bilinear_demosaic(cfa: &CfaDesc, blend: Option<&Array2D<f32>>, raw:
       let (non_green1, non_green2) =
         if is_blue_row { (&mut *blue_row, &mut *red_row) } else { (&mut *red_row, &mut *blue_row) };
 
-      // Always begin with a green pixel.
-      let mut j = 2 - (cfa.fc(i, 1) & 1) as usize;
-      while j < w - 2 {
-        // ... [j] is a green pixel, [j+1] is the non-green one.
-        green_row[j] = intp(bl(i, j), green_row[j], raw.at(i, j));
-        non_green1[j] = intp(bl(i, j), non_green1[j], (raw.at(i, j - 1) + raw.at(i, j + 1)) * 0.5);
-        non_green2[j] = intp(bl(i, j), non_green2[j], (raw.at(i - 1, j) + raw.at(i + 1, j)) * 0.5);
-
-        green_row[j + 1] = intp(
-          bl(i, j + 1),
-          green_row[j + 1],
-          ((raw.at(i - 1, j + 1) + raw.at(i, j)) + (raw.at(i, j + 2) + raw.at(i + 1, j + 1))) * 0.25,
-        );
-        non_green1[j + 1] = intp(bl(i, j + 1), non_green1[j + 1], raw.at(i, j + 1));
-        non_green2[j + 1] = intp(
-          bl(i, j + 1),
-          non_green2[j + 1],
-          ((raw.at(i - 1, j) + raw.at(i - 1, j + 2)) + (raw.at(i + 1, j) + raw.at(i + 1, j + 2))) * 0.25,
-        );
-
-        j += 2;
+      // Upstream unrolls this as a two-column pair loop that "always begins with
+      // a green pixel" (`j = 2 - (FC(i, 1) & 1)`, step 2, while `j < W - 2`).
+      // Writing it per column is the same arithmetic — the branches below are
+      // upstream's `j` and `j + 1` bodies verbatim, with `j + 1` re-indexed to
+      // `j` (same four terms in the same summation order) — but it also covers
+      // the two halves upstream silently skips: when the start is 2 the pairs
+      // are (2,3), (4,5), …, so column 1 and column `w - 2` are never written.
+      // Upstream gets away with that because `bayer_bilinear_demosaic` is only
+      // ever called by `dual_demosaic_RT` on top of the base algorithm's
+      // already-complete planes (`dual_demosaic_RT.cc:115`), where those
+      // columns keep that algorithm's values. This port exposes the kernel
+      // standalone, so the planes have to come out complete.
+      for j in 1..w - 1 {
+        if cfa.is_green(i, j) {
+          // Green site: keep the sample, average the two non-green colours
+          // horizontally / vertically.
+          green_row[j] = intp(bl(i, j), green_row[j], raw.at(i, j));
+          non_green1[j] = intp(bl(i, j), non_green1[j], (raw.at(i, j - 1) + raw.at(i, j + 1)) * 0.5);
+          non_green2[j] = intp(bl(i, j), non_green2[j], (raw.at(i - 1, j) + raw.at(i + 1, j)) * 0.5);
+        } else {
+          // Non-green site: keep the sample, take green from the four
+          // orthogonal neighbours and the opposite colour from the four
+          // diagonals.
+          non_green1[j] = intp(bl(i, j), non_green1[j], raw.at(i, j));
+          green_row[j] = intp(
+            bl(i, j),
+            green_row[j],
+            ((raw.at(i - 1, j) + raw.at(i, j - 1)) + (raw.at(i, j + 1) + raw.at(i + 1, j))) * 0.25,
+          );
+          non_green2[j] = intp(
+            bl(i, j),
+            non_green2[j],
+            ((raw.at(i - 1, j - 1) + raw.at(i - 1, j + 1)) + (raw.at(i + 1, j - 1) + raw.at(i + 1, j + 1))) * 0.25,
+          );
+        }
       }
     });
 

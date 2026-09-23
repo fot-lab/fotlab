@@ -237,7 +237,7 @@ rawler Intermediate::ThreeColor  →  develop 后续（calibrate …）不变
 | 批次 | 内容 | 出口标准 |
 | --- | --- | --- |
 | **B0 骨架** ✅ | crate + `CfaDesc`/`Array2D`/`Rgb`/`math`/`border`/`algo`(字典+candidates)/`bridge`(→`Intermediate`) + **bilinear** 内核 + 单测；registrar 为 `rawler_fotlab` 的 path dep | 已落地（本批随 CI 首验编译） |
-| **B1 打通** | **VNG4** 内核（含 padding 处理四色 CFA 回落）+ `demosaic.rs` 分发 + `demosaic_candidates()` 暴露 + Kotlin 菜单动态化 | 选 `RAWTRP VNG4` 能出图；`DEFAULT` 逐像素不变；UI 候选可见 |
+| **B1 打通** | **VNG4** 内核（含四色 CFA 回落）+ `demosaic.rs` 分发 + `demosaic_candidates()` 暴露 + Kotlin 菜单动态化 | 选 `RAWTRP VNG4` 能出图；`DEFAULT` 逐像素不变；UI 候选可见 |
 | **B2 质量层** | RCD、LMMSE、DCB、IGV | 各自单测 + 与 RT golden 数值比对达标 |
 | **B3 高端层** | AMAZE、AHD、EAHD、HPHD（AMAZE 为质量基准，含 SIMD） | 同上 |
 | **B4 X-Trans** | `xtrans_interpolate`(1/3-pass)、`xtrans/fast`、`dual` 混合封装 | X-Trans 图可选；CFA 自检 |
@@ -280,3 +280,8 @@ rawler Intermediate::ThreeColor  →  develop 后续（calibrate …）不变
   2. 新增 **D6 — dcraw 参照语义调查结论（a–j）**，每条给出应对：(a) Bayer 是**四色** `0/1/2/3 = R/G1/B/G2`（RGGB 原始 `0xb4b4b4b4`）；(b) `set_prefilters()` 折叠 G2→G1 得 `0x94949494`；(c) `FC`/`ISGREEN`/`ISBLUE` 读**折叠**掩码，而 vng4 局部 `fc` 宏读**未折叠** `prefilters` —— **一个内核里两张掩码同现**（初稿即错在此，已修）；(d) vng4 的 `if (FC==3)` 四色守卫是**死代码**（折叠掩码永不返回 3），改测 `has_fourth_colour()`；(e) 梯度解析器只吃 ≤2 个梯度位，机械校验"无存活项带 ≥3 位"（0 例）故安全；(f) `TERMS`/`CHOOD` 与 dcraw 逐字节相同；(g) 存活项数恒为 **32**（四种排布 × 16 类全 32），最坏 209 字 < 上游 320 字预算；(h) 权重是 **int→float 转换**（`1.0`/`2.0`）而**非** bit-cast —— 误读会得 ~1e-45 非规格化数、阈值塌成 0；(i) 无 `-ffast-math` ⇒ `0*(1/0)=NaN`，需 `max0` 复刻 `std::max(0.f,NaN)=0.f`；(j) 首遍只读邻居**原生**通道 ⇒ 可拆"先 scatter 后插值"两相、省略 `firstRow/lastRow`。
   3. 新增 **D7 — 三层解耦落点与数据流图**（①输入解析 ②算法层 ③输出解析／`bridge.rs` 为唯一 `use rawler` 处）；CFA 适配只发生在 ①，单向无状态。
   4. 落地进度：`bayer/vng4.rs` 内核已按 (a)–(j) 完成（含 (c) 的掩码修正、(d) 的守卫替换、(h)/(i) 的数值处理），术语表与解析器已机械校验；校验脚本留档 `log/vng4_termcount.py`。
+- 2026-09-23 — **rev 4：首次真正跑到单测（新增 CI 单测 job）+ 两处修正**。
+  1. **补 CI 单测 job**：原先 CI 只有 `cargo ndk build`，而它**不编译** `#[cfg(test)]` —— 也就是说内核单测从未被编译过，更没跑过（正是 `rules/ACTION.md` 记的"CI 转绿 ≠ 用例跑了"）。`build_rust.yaml` 新增独立 `unit-tests` job（host 目标、`cargo test --manifest-path app/src/binding/rust/rawtrp_demos/Cargo.toml`），与 native 构建并行、不拖慢它。首次运行即 17 passed / 2 failed：**整个 crate（含测试）编译通过**，且暴露了两个真问题（下）。
+  2. **bilinear 内核补全（真问题）**：上游 `bayer_bilinear_demosaic` 的列循环是 `j = 2 - (FC(i,1) & 1)` 起、步长 2、`while j < W-2`，当起点为 2 时配对是 (2,3),(4,5)…，**列 `1` 与列 `W-2` 永不写入**。上游之所以没事，是因为它**只**被 `dual_demosaic_RT`（`dual_demosaic_RT.cc:115`）在**已填满**的基础算法平面上调用，那两列保留基础算法的值。本库把 bilinear 当**独立**候选暴露，必须输出完整图，故改为**逐列**遍历 `1..W-1`（两个分支体是上游 `j`/`j+1` 体原样、同四项同求和顺序，逐列形式天然补齐那两列）。另：上游**根本没有** border 填充，本库补 `border_interpolate(…, 1, …)` 属**新增**而非移植行 —— 两条都写进 `bayer/bilinear.rs` 的 `//! Fidelity notes`。
+  3. **ramp 测试的前提修正**：`border_interpolate` 用的是**带裁剪**的邻域均值，且左右边测试故意不对称，因此**不**保线性斜坡（(0,0) 的绿 = `(ramp(0,1)+ramp(1,0))/2 = 0.2575` ≠ 0.25）。线性 ramp 断言据此收敛到"纯内核输出"的内部矩形（行 `3..h-4`、列 `3..w-4`）。
+  4. 记录：vng4 的偏移**全部在界内**（VNG 窗口恰等于最大表偏移 ±2），**无需 padding** —— 原 B1 行里"含 padding 处理"的说法已删。

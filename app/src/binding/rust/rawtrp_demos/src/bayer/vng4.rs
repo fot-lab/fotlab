@@ -603,7 +603,7 @@ mod tests {
   }
 
   /// A mosaic that is an exact linear ramp must come back as that same ramp on
-  /// all three planes, frame ring included.
+  /// all three planes, over the whole interior.
   ///
   /// This is the strongest end-to-end check available without a golden image:
   /// every weighted mean in the first pass reproduces a linear function exactly
@@ -612,6 +612,14 @@ mod tests {
   /// mis-indexes a neighbour, picks the wrong channel, or drops a shading weight
   /// lands outside tolerance. The flat-field test above cannot catch most of
   /// those, because every candidate value there is equal.
+  ///
+  /// The frame ring is deliberately excluded. `border_interpolate` fills it with
+  /// a **clamped** mean over the in-bounds neighbours, and its edge tests are
+  /// intentionally asymmetric, so it does not reproduce a ramp: green at (0, 0)
+  /// comes out as `(ramp(0, 1) + ramp(1, 0)) / 2 = 0.2575`, not `0.25`. Red and
+  /// blue are pure kernel output for rows `3..h-4` and columns `3..w-4`, and
+  /// green's VNG window is wider still, so that rectangle is the region where
+  /// every plane is untouched by the border pass.
   #[test]
   fn linear_ramp_is_reproduced_exactly() {
     let (w, h) = (16usize, 16usize);
@@ -626,8 +634,8 @@ mod tests {
     }
 
     let rgb = bayer_vng4_demosaic(&cfa, &raw).expect("demosaic");
-    for i in 0..h {
-      for j in 0..w {
+    for i in 3..h - 3 {
+      for j in 3..w - 3 {
         let want = ramp(i, j);
         for (name, plane) in [("R", &rgb.red), ("G", &rgb.green), ("B", &rgb.blue)] {
           let got = plane.at(i, j);
