@@ -491,14 +491,16 @@ mod tests {
     assert_eq!(rgb.green.at(10, 11), 1.0);
   }
 
-  /// A bilinear surface is *not* a fixed point, so the kernel must actually move
+  /// A curved surface is *not* a fixed point, so the kernel must actually move
   /// pixels — otherwise the two tests above would pass for a kernel that just
-  /// copies the mosaic.
+  /// copies the mosaic. The surface must curve along the sampling grid: HPHD
+  /// averages the two neighbours along the smoother axis, which reproduces
+  /// anything linear in that axis exactly, so `i * j` alone never moves.
   #[test]
   fn a_curved_surface_is_not_the_identity() {
     let cfa = CfaDesc::bayer_from_2x2([[0, 1], [1, 2]]);
     let (w, h) = (24usize, 24usize);
-    let raw = surface(w, h, |i, j| 0.2 + 0.0008 * (i * j) as f32);
+    let raw = surface(w, h, |i, j| 0.2 + 0.0008 * (i * i + j * j) as f32);
     let rgb = bayer_hphd_demosaic(&cfa, &raw).expect("demosaic");
 
     let moved = (4..h - 4)

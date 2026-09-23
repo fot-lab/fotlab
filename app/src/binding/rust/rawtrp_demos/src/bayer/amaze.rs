@@ -297,7 +297,7 @@ pub fn bayer_amaze_demosaic(cfa: &CfaDesc, mosaic: &Array2D<f32>) -> Result<Rgb,
 
   // Split each plane into one mutable slice per band. The bands are contiguous
   // and cover the frame exactly, so this is a plain sequence of `split_at_mut`s.
-  let sizes: Vec<usize> = bands.iter().map(|&(top, lo, hi_row)| (hi_row - lo) * w).collect();
+  let sizes: Vec<usize> = bands.iter().map(|&(_, lo, hi_row)| (hi_row - lo) * w).collect();
   let red_parts = split_slices(out.red.as_mut_slice(), &sizes);
   let green_parts = split_slices(out.green.as_mut_slice(), &sizes);
   let blue_parts = split_slices(out.blue.as_mut_slice(), &sizes);
@@ -385,7 +385,14 @@ fn run_tile(
   }
 
   if rrmax < rr1 {
-    for rr in 0..16 {
+    // Upstream loops a fixed 16 rows here; when the tile is clipped by the
+    // frame (`rr1 < TS`) that writes past the tile into the *next* buffer of
+    // its single big allocation, which the kernel then overwrites before
+    // reading. With per-plane arrays those writes would be real overflows, so
+    // the loop is clamped to the rows the tile actually owns — every row the
+    // kernel reads is filled either way.
+    let rows = (rr1 - rrmax).min(16);
+    for rr in 0..rows {
       let row = hi - rr - 2;
       for cc in ccmin..ccmax {
         let i = ((rrmax + rr) * TS + cc) as usize;
@@ -409,9 +416,12 @@ fn run_tile(
   }
 
   if ccmax < cc1 {
+    // Same clamp as the lower-border block: the fixed 16 columns only stay
+    // inside the tile when it is not clipped by the frame's right edge.
+    let cols = (cc1 - ccmax).min(16);
     for rr in rrmin..rrmax {
       let row = top + rr;
-      for cc in 0..16 {
+      for cc in 0..cols {
         let i = (rr * TS + ccmax + cc) as usize;
         let v = mosaic.at(row as usize, (wi - cc - 2) as usize);
         t.cfa[i] = v;
@@ -432,8 +442,10 @@ fn run_tile(
     }
   }
   if rrmax < rr1 && ccmax < cc1 {
-    for rr in 0..16 {
-      for cc in 0..16 {
+    let rows = (rr1 - rrmax).min(16);
+    let cols = (cc1 - ccmax).min(16);
+    for rr in 0..rows {
+      for cc in 0..cols {
         let i = ((rrmax + rr) * TS + ccmax + cc) as usize;
         let v = mosaic.at((hi - rr - 2) as usize, (wi - cc - 2) as usize);
         t.cfa[i] = v;
@@ -442,8 +454,9 @@ fn run_tile(
     }
   }
   if rrmin > 0 && ccmax < cc1 {
+    let cols = (cc1 - ccmax).min(16);
     for rr in 0..16 {
-      for cc in 0..16 {
+      for cc in 0..cols {
         let i = (rr * TS + ccmax + cc) as usize;
         let v = mosaic.at((32 - rr) as usize, (wi - cc - 2) as usize);
         t.cfa[i] = v;
@@ -458,7 +471,8 @@ fn run_tile(
     // because the window origin is always (0, 0), so the two are the same
     // expression. Kept as `32 - cc` rather than "fixed", because a port that
     // silently differs from upstream here is worse than one that documents it.
-    for rr in 0..16 {
+    let rows = (rr1 - rrmax).min(16);
+    for rr in 0..rows {
       for cc in 0..16 {
         let i = ((rrmax + rr) * TS + cc) as usize;
         let v = mosaic.at((hi - rr - 2) as usize, (32 - cc) as usize);
@@ -647,7 +661,7 @@ fn run_tile(
 
   // ---- adaptive weights for the green interpolation (`amaze:741-784`)
   for rr in 6..rr1 - 6 {
-    let mut cc = 6 + (cfa.fc_i(rr, 2) & 1);
+    let mut cc = 6 + (cfa.fc_i(rr, 2) & 1) as i32;
     while cc < cc1 - 6 {
       let indx = (rr * TS + cc) as usize;
       let uave = t.vcd[indx] + t.vcd[indx - V1 as usize] + t.vcd[indx - V2 as usize] + t.vcd[indx - V3 as usize];
@@ -705,7 +719,7 @@ fn run_tile(
 
   // ---- precompute the Nyquist test (`amaze:803-858`)
   for rr in 6..rr1 - 6 {
-    let mut cc = 6 + (cfa.fc_i(rr, 2) & 1);
+    let mut cc = 6 + (cfa.fc_i(rr, 2) & 1) as i32;
     while cc < cc1 - 6 {
       let indx = (rr * TS + cc) as usize;
       t.nyqutest[(indx >> 1) as usize] = (GAUSS_ODD[0] * t.cddiffsq[indx]
@@ -766,7 +780,7 @@ fn run_tile(
   let mut nyendcol = 0;
 
   for rr in 6..rr1 - 6 {
-    let mut cc = 6 + (cfa.fc_i(rr, 2) & 1);
+    let mut cc = 6 + (cfa.fc_i(rr, 2) & 1) as i32;
     while cc < cc1 - 6 {
       let indx = (rr * TS + cc) as usize;
       if t.nyqutest[(indx >> 1) as usize] > 0.0 {
@@ -797,7 +811,7 @@ fn run_tile(
     // "if most of your neighbours are named Nyquist, it's likely that you're
     // one too, or not" (`amaze:918-924`)
     for rr in nystartrow..nyendrow {
-      let mut indx = rr * TS + nystartcol + (cfa.fc_i(rr, 2) & 1);
+      let mut indx = rr * TS + nystartcol + (cfa.fc_i(rr, 2) & 1) as i32;
       while indx < rr * TS + nyendcol {
         let nyquisttemp = t.nyquist[(indx - V2) as usize >> 1] as u32
           + t.nyquist[(indx - M1) as usize >> 1] as u32
@@ -815,7 +829,7 @@ fn run_tile(
 
     // area interpolation in the Nyquist regions (`amaze:932-967`)
     for rr in nystartrow..nyendrow {
-      let mut indx = rr * TS + nystartcol + (cfa.fc_i(rr, 2) & 1);
+      let mut indx = rr * TS + nystartcol + (cfa.fc_i(rr, 2) & 1) as i32;
       while indx < rr * TS + nyendcol {
         if t.nyquist2[indx as usize >> 1] != 0 {
           let mut sumcfa = 0.0_f32;
@@ -859,7 +873,7 @@ fn run_tile(
 
   // ---- populate green at the red/blue sites (`amaze:972-988`)
   for rr in 8..rr1 - 8 {
-    let mut cc = 8 + (cfa.fc_i(rr, 2) & 1);
+    let mut cc = 8 + (cfa.fc_i(rr, 2) & 1) as i32;
     while cc < cc1 - 8 {
       let indx = (rr * TS + cc) as usize;
       let pair = (indx as i32 >> 1) as usize;
@@ -894,7 +908,7 @@ fn run_tile(
   // ---- refine the Nyquist areas from the green curvature (`amaze:994-1013`)
   if do_nyquist {
     for rr in nystartrow..nyendrow {
-      let mut indx = rr * TS + nystartcol + (cfa.fc_i(rr, 2) & 1);
+      let mut indx = rr * TS + nystartcol + (cfa.fc_i(rr, 2) & 1) as i32;
       while indx < rr * TS + nyendcol {
         let pair = (indx >> 1) as usize;
         if t.nyquist2[pair] != 0 {
@@ -971,7 +985,7 @@ fn run_tile(
 
   // ---- diagonal interpolation correction (`amaze:1139-1218`)
   for rr in 8..rr1 - 8 {
-    let mut cc = 8 + (cfa.fc_i(rr, 2) & 1);
+    let mut cc = 8 + (cfa.fc_i(rr, 2) & 1) as i32;
     while cc < cc1 - 8 {
       let indx = (rr * TS + cc) as usize;
       let indx1 = (indx as i32 >> 1) as usize;
@@ -1079,7 +1093,7 @@ fn run_tile(
 
   // ---- interpolated R+B (`amaze:1241-1251`)
   for rr in 10..rr1 - 10 {
-    let mut cc = 10 + (cfa.fc_i(rr, 2) & 1);
+    let mut cc = 10 + (cfa.fc_i(rr, 2) & 1) as i32;
     while cc < cc1 - 10 {
       let indx = (rr * TS + cc) as usize;
       let indx1 = (indx as i32 >> 1) as usize;
@@ -1101,7 +1115,7 @@ fn run_tile(
 
   // ---- green again, this time from the interpolated R+B (`amaze:1312-1388`)
   for rr in 12..rr1 - 12 {
-    let mut cc = 12 + (cfa.fc_i(rr, 2) & 1);
+    let mut cc = 12 + (cfa.fc_i(rr, 2) & 1) as i32;
     while cc < cc1 - 12 {
       let indx = (rr * TS + cc) as usize;
       let indx1 = (indx as i32 >> 1) as usize;
@@ -1195,7 +1209,7 @@ fn run_tile(
 
   // ---- fancy chrominance interpolation (`amaze:1426-1436`)
   for rr in 14..rr1 - 14 {
-    let mut cc = 14 + (cfa.fc_i(rr, 2) & 1);
+    let mut cc = 14 + (cfa.fc_i(rr, 2) & 1) as i32;
     // `c = 1 - fc / 2`: dcraw codes R = 0 and B = 2, so `c` is **1 at a red site
     // and 0 at a blue one** — it names the plane this site does *not* sample. A
     // red site's own difference is G-R (`dgrb0`), so it refines `dgrb1` (G-B),
@@ -1277,7 +1291,11 @@ fn run_tile(
         indx += 1;
         col += 1;
       }
-      if cc1 & 1 != 0 {
+      // The odd-`cc1` tail pixel can sit past the frame's right edge when the
+      // tile is clipped there (`col >= wi`). Upstream writes it anyway — the
+      // spill lands in the next row's first column and is overwritten by that
+      // row's own pass — so dropping it here is output-identical.
+      if cc1 & 1 != 0 && col < wi {
         let p = (((indx - V1) >> 1) as usize, ((indx + 1) >> 1) as usize, ((indx - 1) >> 1) as usize, ((indx + V1) >> 1) as usize);
         let temp = 1.0 / (t.hvwt[p.0] + 2.0 - t.hvwt[p.1] - t.hvwt[p.2] + t.hvwt[p.3]);
         let g = t.rgbgreen[indx as usize];
@@ -1304,7 +1322,9 @@ fn run_tile(
         indx += 1;
         col += 1;
       }
-      if cc1 & 1 != 0 {
+      // See the sibling tail above: the tail pixel can sit past the frame's
+      // right edge for a clipped tile, and dropping it is output-identical.
+      if cc1 & 1 != 0 && col < wi {
         let g = t.rgbgreen[indx as usize];
         out.set_red(row, col, g - t.dgrb0[(indx >> 1) as usize]);
         out.set_blue(row, col, g - t.dgrb1[(indx >> 1) as usize]);

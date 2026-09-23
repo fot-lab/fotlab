@@ -135,7 +135,7 @@ fn plane_haze_floors(
                 }
             }
             for (col, &v) in row_px.iter().enumerate() {
-                if let Some((ax, _ay, aw, ah)) = active {
+                if let Some((ax, ay, aw, ah)) = active {
                     if col < ax || col >= ax + aw || row >= ay + ah {
                         continue;
                     }

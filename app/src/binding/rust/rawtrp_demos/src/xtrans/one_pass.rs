@@ -163,16 +163,65 @@ pub fn xtrans_one_pass_demosaic(cfa: &CfaDesc, raw: &Array2D<f32>) -> Result<Rgb
   let tops: Vec<usize> = (3..h.saturating_sub(19)).step_by(STEP).collect();
   let lefts: Vec<usize> = (3..w.saturating_sub(19)).step_by(STEP).collect();
 
-  // Bands over tile rows; tiles sequential within a band.
-  let bands: Vec<Vec<(usize, usize)>> = tops
-    .iter()
-    .map(|&top| lefts.iter().map(|&left| (top, left)).collect())
-    .collect();
-
   let ts = TS;
   let tsh = TSH;
 
-  bands.into_par_iter().for_each(|tiles| {
+  // Bands over tile rows; tiles sequential within a band.
+  //
+  // Each band also records the frame rows its final-averaging step writes —
+  // tile-relative `row` runs `[MIN(top, 8), mrow2 - 8)` and maps to frame row
+  // `row + top` (`xtrans_demosaic.cc:912-947`; `mrow2` depends on `top` alone,
+  // so it is the same for every tile of the band). The last band is always an
+  // edge band, so its range ends at `h - 6` — the border pass overwrites
+  // `[h - 11, h)` afterwards anyway.
+  let bands: Vec<(Vec<(usize, usize)>, usize, usize)> = tops
+    .iter()
+    .map(|&top| {
+      let mrow = (top + ts).min(h - 3);
+      let mrow2 = if h - top < ts + 4 { h - top + 2 } else { mrow - top };
+      let tiles: Vec<(usize, usize)> = lefts.iter().map(|&left| (top, left)).collect();
+      let lo = top + top.min(8);
+      let hi = top + mrow2 - 8;
+      (tiles, lo, hi)
+    })
+    .collect();
+
+  // Split each plane into one mutable slice per band. The bands' written row
+  // ranges are contiguous — band k+1 starts exactly where band k ends — so a
+  // running split over the whole plane partitions it; the leading border rows
+  // ride in the first band's slice and the trailing ones in the last band's,
+  // both left untouched here (the border pass fills them at the end). Each
+  // band records `row0`, the frame row its slice *starts* at — that is the
+  // running partition boundary, not `lo` (the first band's slice begins at
+  // row 0).
+  let mut sizes: Vec<usize> = Vec::with_capacity(bands.len());
+  let mut prev = 0usize;
+  let bands: Vec<(Vec<(usize, usize)>, usize, usize)> = bands
+    .into_iter()
+    .map(|(tiles, _lo, hi)| {
+      let hi = hi.max(prev).min(h);
+      sizes.push((hi - prev) * w);
+      let row0 = prev;
+      prev = hi;
+      (tiles, row0, hi)
+    })
+    .collect();
+  if let Some(last) = sizes.last_mut() {
+    // The trailing border rows (`[hi_last, h)`) ride in the last band's
+    // slice — appended, not substituted: the pushed size above is the band's
+    // own written rows.
+    *last += (h - prev) * w;
+  }
+  let red_parts = split_slices(out.red.as_mut_slice(), &sizes);
+  let green_parts = split_slices(out.green.as_mut_slice(), &sizes);
+  let blue_parts = split_slices(out.blue.as_mut_slice(), &sizes);
+
+  red_parts
+    .into_par_iter()
+    .zip(green_parts)
+    .zip(blue_parts)
+    .zip(bands)
+    .for_each(|(((red, green), blue), (tiles, row0, _))| {
     // Per-band scratch (upstream: one malloc per OpenMP thread).
     let mut gminmax = vec![(f32::MAX, 0.0f32); ts * tsh];
     let mut rgb = vec![0.0f32; 4 * ts * ts * 3];
@@ -542,9 +591,7 @@ pub fn xtrans_one_pass_demosaic(cfa: &CfaDesc, raw: &Array2D<f32>) -> Result<Rgb
       // (upstream 912-947). `ndir == 4`, so the diagonal-pairing loop that
       // zeroes weaker directions for the 3-pass kernel does not run.
       for row in top.min(8)..mrow2.saturating_sub(8) {
-        let r_row = out.red.row_mut(row + top);
-        let g_row = out.green.row_mut(row + top);
-        let b_row = out.blue.row_mut(row + top);
+        let rowbase = (row + top - row0) * w;
         for col in left.min(8)..mcol2.saturating_sub(8) {
           let maxval = homosummax[row * ts + col];
           let mut avg = [0.0f32; 4];
@@ -557,9 +604,9 @@ pub fn xtrans_one_pass_demosaic(cfa: &CfaDesc, raw: &Array2D<f32>) -> Result<Rgb
               avg[3] += 1.0;
             }
           }
-          r_row[col + left] = max0(avg[0] / avg[3]);
-          g_row[col + left] = max0(avg[1] / avg[3]);
-          b_row[col + left] = max0(avg[2] / avg[3]);
+          red[rowbase + col + left] = max0(avg[0] / avg[3]);
+          green[rowbase + col + left] = max0(avg[1] / avg[3]);
+          blue[rowbase + col + left] = max0(avg[2] / avg[3]);
         }
       }
     }
@@ -568,6 +615,19 @@ pub fn xtrans_one_pass_demosaic(cfa: &CfaDesc, raw: &Array2D<f32>) -> Result<Rgb
   // One-pass frames take an 11-pixel border (upstream 966).
   xtrans_border_interpolate(cfa, raw, &mut out, 11);
   Ok(out)
+}
+
+/// Split `s` into consecutive pieces of the given lengths (the same helper
+/// `bayer/amaze.rs` uses for its row bands).
+fn split_slices<'a>(s: &'a mut [f32], sizes: &[usize]) -> Vec<&'a mut [f32]> {
+  let mut out = Vec::with_capacity(sizes.len());
+  let mut rest = s;
+  for &n in sizes {
+    let (head, tail) = rest.split_at_mut(n);
+    out.push(head);
+    rest = tail;
+  }
+  out
 }
 
 /// The near/far axis choice of the R-for-blue pass: the far pair wins only

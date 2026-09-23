@@ -56,8 +56,10 @@ fn fill_pixel(cfa: &CfaDesc, raw: &Array2D<f32>, out: &mut Rgb, row: usize, col:
   for y in y_lo..=y_hi {
     for x in x_lo..=x_hi {
       // `v`/`h` in upstream track the kernel row/column; the clamped loop
-      // makes `y - row + 1` / `x - col + 1` their exact values.
-      let wt = WEIGHT[y - row + 1][x - col + 1];
+      // makes `y + 1 - row` / `x + 1 - col` their exact values. (`y + 1`,
+      // not `y - row + 1`: `y` can be `row - 1`, and the usize subtraction
+      // must not happen before the `+ 1`.)
+      let wt = WEIGHT[y + 1 - row][x + 1 - col];
       let f = cfa.xtrans_color(y, x) as usize;
       sum[f] += raw.at(y, x) * wt;
       sum[f + 3] += wt;

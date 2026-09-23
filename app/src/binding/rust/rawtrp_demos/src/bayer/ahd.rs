@@ -505,7 +505,10 @@ mod tests {
   }
 
   /// A curved surface is *not* a fixed point, which is what keeps the two tests
-  /// above from passing for a kernel that just copies the mosaic.
+  /// above from passing for a kernel that just copies the mosaic. The surface
+  /// must curve along the *sampling grid*: AHD's second-difference correction
+  /// annihilates anything bilinear in `(x, y)`, so `x * y` alone is reproduced
+  /// to rounding error and would make the "must move" premise false.
   #[test]
   fn a_curved_surface_is_not_a_fixed_point() {
     let (w, h) = (32usize, 32usize);
@@ -515,7 +518,7 @@ mod tests {
       for j in 0..w {
         let x = j as f32 / w as f32;
         let y = i as f32 / h as f32;
-        raw.set(i, j, 0.2 + 0.5 * x * y);
+        raw.set(i, j, 0.2 + 0.5 * x * y * (x + y));
       }
     }
     let out = bayer_ahd_demosaic(&c, &raw, &XYZ_CAM_FROM_SRGB).expect("ahd");
@@ -543,7 +546,7 @@ mod tests {
     for (name, plane) in [("r", &out.red), ("g", &out.green), ("b", &out.blue)] {
       for &v in plane.as_slice() {
         assert!(v.is_finite(), "{name} produced {v}");
-        assert!((0.0..=1.0).contains(v), "{name} out of range: {v}");
+        assert!((0.0..=1.0).contains(&v), "{name} out of range: {v}");
       }
     }
   }

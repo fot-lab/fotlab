@@ -166,21 +166,62 @@ pub fn bayer_fast_demosaic(cfa: &CfaDesc, raw: &Array2D<f32>) -> Result<Rgb, Err
   // and every buffer position a pass reads was written earlier in the *same*
   // tile, so reuse across tiles needs no clearing (upstream relies on the
   // same fact for its per-thread buffers).
-  let bands: Vec<Vec<(i32, i32, i32, i32)>> = tops
+  //
+  // Each band also records the frame rows it writes out — `[top + 2, bottom
+  // - 2)`, the same for every tile of the band — so the output planes can be
+  // split into one mutable slice per band (a parallel unit owns its rows).
+  let bands: Vec<(Vec<(i32, i32, i32, i32)>, usize, usize)> = tops
     .iter()
     .map(|&top| {
       let bottom = (top + TS).min(h as i32 - BORD + 2);
-      lefts
+      let tiles = lefts
         .iter()
         .map(|&left| {
           let right = (left + TS).min(w as i32 - BORD + 2);
           (top, left, bottom, right)
         })
-        .collect()
+        .collect();
+      let lo = (top + 2).max(0) as usize;
+      let hi = (bottom.max(2) as usize).min(h).saturating_sub(2);
+      (tiles, lo, hi)
     })
     .collect();
 
-  bands.into_par_iter().for_each(|tiles| {
+  // Split each plane into one mutable slice per band. The bands' written row
+  // ranges are contiguous — band k+1 starts exactly where band k ends — so a
+  // running split over the whole plane partitions it; the leading border rows
+  // ride in the first band's slice and the trailing ones in the last band's,
+  // both left untouched here (the border pass already filled them). Each band
+  // records `row0`, the frame row its slice *starts* at — that is the running
+  // partition boundary, not `lo` (the first band's slice begins at row 0).
+  let mut sizes: Vec<usize> = Vec::with_capacity(bands.len());
+  let mut prev = 0usize;
+  let bands: Vec<(Vec<(i32, i32, i32, i32)>, usize, usize)> = bands
+    .into_iter()
+    .map(|(tiles, _lo, hi)| {
+      let hi = hi.max(prev).min(h);
+      sizes.push((hi - prev) * w);
+      let row0 = prev;
+      prev = hi;
+      (tiles, row0, hi)
+    })
+    .collect();
+  if let Some(last) = sizes.last_mut() {
+    // The trailing border rows (`[hi_last, h)`) ride in the last band's
+    // slice — appended, not substituted: the pushed size above is the band's
+    // own written rows.
+    *last += (h - prev) * w;
+  }
+  let red_parts = split_slices(out.red.as_mut_slice(), &sizes);
+  let green_parts = split_slices(out.green.as_mut_slice(), &sizes);
+  let blue_parts = split_slices(out.blue.as_mut_slice(), &sizes);
+
+  red_parts
+    .into_par_iter()
+    .zip(green_parts)
+    .zip(blue_parts)
+    .zip(bands)
+    .for_each(|(((red, green), blue), (tiles, row0, _))| {
     let ts = TS as usize;
     let mut greentile = vec![0.0f32; ts * ts];
     let mut redtile = vec![0.0f32; ts * ts];
@@ -236,7 +277,7 @@ pub fn bayer_fast_demosaic(cfa: &CfaDesc, raw: &Array2D<f32>) -> Result<Rgb, Err
         let cc0 = ((cfa.fc(i as usize, 2) & 1) + 1) as usize;
         // The first R/B site of the row: red sites get blue interpolated
         // (the diagonals of a red site are all blue sites) and vice versa.
-        let site_is_red = cfa.fc(i as usize, (left as usize + cc0)) == 0;
+        let site_is_red = cfa.fc(i as usize, left as usize + cc0) == 0;
         let mut cc = cc0;
         let mut j = left + cc0 as i32;
         while j < right - 1 {
@@ -288,17 +329,31 @@ pub fn bayer_fast_demosaic(cfa: &CfaDesc, raw: &Array2D<f32>) -> Result<Rgb, Err
       // Write-out, clamped at zero (`fast_demo.cc:446-472`).
       for i in top + 2..bottom - 2 {
         let rr = (i - top) as usize;
+        let rowbase = (i as usize - row0) * w;
         for j in left + 2..right - 2 {
           let cc = (j - left) as usize;
-          out.red.row_mut(i as usize)[j as usize] = max0(redtile[rr * ts + cc]);
-          out.green.row_mut(i as usize)[j as usize] = max0(greentile[rr * ts + cc]);
-          out.blue.row_mut(i as usize)[j as usize] = max0(bluetile[rr * ts + cc]);
+          red[rowbase + j as usize] = max0(redtile[rr * ts + cc]);
+          green[rowbase + j as usize] = max0(greentile[rr * ts + cc]);
+          blue[rowbase + j as usize] = max0(bluetile[rr * ts + cc]);
         }
       }
     }
   });
 
   Ok(out)
+}
+
+/// Split `s` into consecutive pieces of the given lengths (the same helper
+/// `amaze.rs` uses for its row bands).
+fn split_slices<'a>(s: &'a mut [f32], sizes: &[usize]) -> Vec<&'a mut [f32]> {
+  let mut out = Vec::with_capacity(sizes.len());
+  let mut rest = s;
+  for &n in sizes {
+    let (head, tail) = rest.split_at_mut(n);
+    out.push(head);
+    rest = tail;
+  }
+  out
 }
 
 #[cfg(test)]
