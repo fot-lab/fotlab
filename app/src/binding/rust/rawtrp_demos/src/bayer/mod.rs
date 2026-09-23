@@ -6,3 +6,4 @@
 //! whole of what the kernels actually touch (`FOTLAB-NATIVE-000004` D2).
 
 pub mod bilinear;
+pub mod vng4;

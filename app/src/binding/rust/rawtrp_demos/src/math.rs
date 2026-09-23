@@ -82,6 +82,25 @@ pub const fn clip(a: f32) -> f32 {
   lim(a, 0.0, MAXVAL)
 }
 
+/// `std::max(0.f, x)` — the non-negativity clamp the kernels apply to every
+/// difference-based estimate.
+///
+/// Spelled out rather than using `f32::max` so the NaN case is explicit and
+/// pinned by a test: libstdc++'s `std::max(0.f, NaN)` is
+/// `0.f < NaN ? NaN : 0.f`, i.e. **`0.0`** — and a NaN can legitimately arrive
+/// here (e.g. `vng4`'s neighbour average divides by `num`, which may be 0).
+/// Using `f32::max` would happen to agree, but relying on that coincidence in a
+/// numerics kernel would be careless.
+#[inline(always)]
+#[must_use]
+pub const fn max0(x: f32) -> f32 {
+  if x > 0.0 {
+    x
+  } else {
+    0.0
+  }
+}
+
 /// `std::abs` for a bare `f32` (upstream calls `std::fabs`).
 #[inline(always)]
 #[must_use]
@@ -111,5 +130,15 @@ mod tests {
     assert_eq!(lim01(-3.0), 0.0);
     assert_eq!(clip(70000.0), MAXVAL);
     assert_eq!(sgn(-0.5), -1.0);
+  }
+
+  /// `max0` must swallow NaN into `0.0`, like libstdc++'s `std::max(0.f, NaN)`.
+  #[test]
+  fn max0_clamps_and_swallows_nan() {
+    assert_eq!(max0(0.5), 0.5);
+    assert_eq!(max0(-1.0), 0.0);
+    assert_eq!(max0(0.0), 0.0);
+    assert_eq!(max0(f32::NAN), 0.0, "a NaN estimate must not poison the pixel");
+    assert_eq!(max0(f32::INFINITY), f32::INFINITY);
   }
 }

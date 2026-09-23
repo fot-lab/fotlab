@@ -305,3 +305,48 @@ jobs:
           path: native-artifacts/
           retention-days: 7
           if-no-files-found: error
+
+  # Host unit tests for the first-party algorithm crate.
+  #
+  # Why this exists: `cargo ndk build` in `build` above does NOT compile
+  # `#[cfg(test)]` modules, so without this job the ported kernels' unit tests
+  # would never be compiled — let alone run — and a green native build would say
+  # nothing at all about them (`rules/ACTION.md`, "green CI != tests ran").
+  #
+  # Runs on the host triple, so no NDK/SDK setup is needed: the kernels are pure
+  # Rust and their only path dependency, rawler, builds for any target. Kept as a
+  # separate job so it neither slows nor serialises the .so build, and so a test
+  # failure is reported as its own item rather than as a native build failure.
+  unit-tests:
+    name: Unit tests (rawtrp_demos, host)
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          submodules: ${{ inputs.submodules && 'recursive' || 'false' }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Resolve dnglab submodule SHA
+        run: echo "DNGLAB_SHA=$(git -C external/dnglab rev-parse HEAD)" >> "$GITHUB_ENV"
+        shell: bash
+
+      # Same volatile-key rationale as the native job: rawler is a path dep under
+      # external/, so its artifacts move with the dnglab submodule SHA.
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/src/binding/rust/rawtrp_demos -> target
+          cache-all-crates: true
+          env-vars: DNGLAB_SHA
+
+      # `rawtrp_demos` is its own workspace (a sibling of rawler_fotlab, not a
+      # member of it), hence `--manifest-path` rather than `-p`.
+      - name: Test rawtrp_demos
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path app/src/binding/rust/rawtrp_demos/Cargo.toml
+        shell: bash
