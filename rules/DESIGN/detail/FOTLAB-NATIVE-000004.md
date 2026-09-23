@@ -237,8 +237,8 @@ rawler Intermediate::ThreeColor  →  develop 后续（calibrate …）不变
 | 批次 | 内容 | 出口标准 |
 | --- | --- | --- |
 | **B0 骨架** ✅ | crate + `CfaDesc`/`Array2D`/`Rgb`/`math`/`border`/`algo`(字典+candidates)/`bridge`(→`Intermediate`) + **bilinear** 内核 + 单测；registrar 为 `rawler_fotlab` 的 path dep | 已落地（本批随 CI 首验编译） |
-| **B1 打通** | **VNG4** 内核（含四色 CFA 回落）+ `demosaic.rs` 分发 + `demosaic_candidates()` 暴露 + Kotlin 菜单动态化 | 选 `RAWTRP VNG4` 能出图；`DEFAULT` 逐像素不变；UI 候选可见 |
-| **B2 质量层** | RCD、LMMSE、DCB、IGV | 各自单测 + 与 RT golden 数值比对达标 |
+| **B1 打通** | **VNG4** 内核 ✅（含四色 CFA 回落）+ `lib.rs::demosaic_bayer` 分发 ✅ + `IMPLEMENTED_BAYER` 放开 ✅；**待做**：`rawler_fotlab::demosaic.rs` 分发 + `demosaic_candidates()` 暴露 + Kotlin 菜单动态化 | 选 `RAWTRP VNG4` 能出图；`DEFAULT` 逐像素不变；UI 候选可见 |
+| **B2 质量层** | **RCD** ✅（内核 + 分发 + 候选）；**待做**：LMMSE、DCB、IGV | 各自单测 + 与 RT golden 数值比对达标 |
 | **B3 高端层** | AMAZE、AHD、EAHD、HPHD（AMAZE 为质量基准，含 SIMD） | 同上 |
 | **B4 X-Trans** | `xtrans_interpolate`(1/3-pass)、`xtrans/fast`、`dual` 混合封装 | X-Trans 图可选；CFA 自检 |
 
@@ -285,3 +285,11 @@ rawler Intermediate::ThreeColor  →  develop 后续（calibrate …）不变
   2. **bilinear 内核补全（真问题）**：上游 `bayer_bilinear_demosaic` 的列循环是 `j = 2 - (FC(i,1) & 1)` 起、步长 2、`while j < W-2`，当起点为 2 时配对是 (2,3),(4,5)…，**列 `1` 与列 `W-2` 永不写入**。上游之所以没事，是因为它**只**被 `dual_demosaic_RT`（`dual_demosaic_RT.cc:115`）在**已填满**的基础算法平面上调用，那两列保留基础算法的值。本库把 bilinear 当**独立**候选暴露，必须输出完整图，故改为**逐列**遍历 `1..W-1`（两个分支体是上游 `j`/`j+1` 体原样、同四项同求和顺序，逐列形式天然补齐那两列）。另：上游**根本没有** border 填充，本库补 `border_interpolate(…, 1, …)` 属**新增**而非移植行 —— 两条都写进 `bayer/bilinear.rs` 的 `//! Fidelity notes`。
   3. **ramp 测试的前提修正**：`border_interpolate` 用的是**带裁剪**的邻域均值，且左右边测试故意不对称，因此**不**保线性斜坡（(0,0) 的绿 = `(ramp(0,1)+ramp(1,0))/2 = 0.2575` ≠ 0.25）。线性 ramp 断言据此收敛到"纯内核输出"的内部矩形（行 `3..h-4`、列 `3..w-4`）。
   4. 记录：vng4 的偏移**全部在界内**（VNG 窗口恰等于最大表偏移 ±2），**无需 padding** —— 原 B1 行里"含 padding 处理"的说法已删。
+- 2026-09-23 — **rev 5：B2 首个内核 RCD 落地**（`bayer/rcd.rs`）。移植中确认的 5 条结论，均已在源码 `//!` 里交叉引用：
+  1. **数值域可精确省略**：上游载入 `LIM01(rawData / 65536)`、写出 `rgb * 65536`，即它**内部就在 [0,1] 域**运算。本库 mosaic 已是归一化值，两侧换算**同时省略** —— 因 65536 = 2^16 为精确幂次，故内核仍在**上游同一个数值域**里跑，`eps=1e-5`/`epssq=1e-10` 的相对含义不变；且内部与 `border_interpolate`（直接读 `raw`）**单位一致**，不会出现"内部 ×65536、边界不乘"的错位。这是**必须**成对省略的一处，单边省略即静默错图。
+  2. **RCD 的分块是内存约束、不是 cache 技巧**：逐像素工作集 ≈ 6.5 张全分辨率 `f32` 平面（`cfa`+`rgb[3]`+`VH_Dir`+`lpf`/`PQ_Dir`+`P/Q_CDiff_Hpf`），45MP 下 > 1.1GB。故**保留**上游 194×194/步进 176/边距 9 的分块，峰值内存降到 O(tile²×线程数)。
+  3. **`tileBorder == rcdBorder == 9`**（`rcd_demosaic.cc:81-82`）⇒ 上游四处 `(tr == 0) ? rcdBorder : tileBorder` 三元式**全是恒等**，写区就是"块内缩 9"。移植按此简化并留档，不改语义。
+  4. **并行分片点 = 块行**：上游 `omp for collapse(2)` 按**块**并行；本库按**块行**分片 —— 一个块行独占输出行 `[rowStart+9, rowEnd-9)`，这些区间**两两不交且首尾相接**（`tile_row_bands` + 单测钉死），因此每个 rayon 任务拿到的是真实 `&mut` 切片，**无需 unsafe**、也无需"自己证明不相交"。块内保持串行，与上游粒度一致。
+  5. **`intp` 语义再确认**：RT 的 `intp(a,b,c) = a*(b-c)+c`（`rt_math.h:114-122`）是**连续混合**，**不是** dcraw 的 `intp(a,b,c) = a>=0.5 ? b : c` 硬选择。RCD 传的是连续权重 `VH_Disc`/`PQ_Disc`，若按 dcraw 语义移植会得到完全不同的图；本库既有的 `math::intp` 与 RT 逐字一致（`a*(b-c)+c`，求值顺序亦同），RCD 直接复用、无需新增。
+  另：**scratch 必须每块清零**（复刻上游 `calloc`）。这不是防御性写法 —— 步骤 4.3 在行 `r` 读 `rgb[c]` 的行 `r-3`，顶部若干行读到的是任何阶段都还没写过的元素，该值会**传播进本块真正写出的行**；上游靠 `calloc` 把它定为 0，复用 scratch 则会变成上一块的残留值（形成静默的"块位置依赖"）。`cfa` 是唯一例外（载入循环重写全部可达元素）；`bufferV`/`bufferH` 上游是栈数组、写后读，同样无需清零。
+  另：**RCD 无手写 SIMD**（`rcd_demosaic.cc` 内 `_mm_`/NEON intrinsics 计数为 0），靠 `-ftree-vectorize` 自动向量化 —— 故本内核**没有**可移植的 SIMD 路径，标量 + rayon 即完整移植（对照 Q3）。

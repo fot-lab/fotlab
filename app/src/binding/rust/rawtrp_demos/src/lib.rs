@@ -155,6 +155,10 @@ pub fn demosaic_bayer(algo: BayerAlgo, cfa: &CfaDesc, mosaic: &Array2D<f32>, par
     // `UnsupportedCfa` for a four-colour CFA, which upstream only *meant* to do
     // (its `FC(i,j) == 3` guard is dead code — see `bayer/vng4.rs`).
     BayerAlgo::Vng4 => bayer::vng4::bayer_vng4_demosaic(cfa, mosaic),
+    // RCD computes inside a 194x194 per-tile scratch — upstream's own tiling, kept
+    // because the alternative is a working set of ~6.5 full-resolution planes. It
+    // refuses a four-colour CFA, which upstream hands to IGV.
+    BayerAlgo::Rcd => bayer::rcd::bayer_rcd_demosaic(cfa, mosaic),
     other => Err(Error::UnsupportedAlgo(other.original_name())),
   }
 }

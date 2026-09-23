@@ -101,6 +101,23 @@ pub const fn max0(x: f32) -> f32 {
   }
 }
 
+/// `std::max(a, b)` as libstdc++ computes it: `a < b ? b : a`.
+///
+/// Spelled out for the same reason as [`max0`]: the `a < b` test is false for a
+/// NaN `b`, so a NaN **second** argument yields `a` instead of propagating. The
+/// kernels lean on that when they floor a statistic — `rcd`'s
+/// `std::max(epssq, ...)` must yield `epssq` rather than `NaN` if a colour
+/// difference high pass ever evaluates to `NaN`.
+#[inline(always)]
+#[must_use]
+pub const fn max2(a: f32, b: f32) -> f32 {
+  if a < b {
+    b
+  } else {
+    a
+  }
+}
+
 /// `std::abs` for a bare `f32` (upstream calls `std::fabs`).
 #[inline(always)]
 #[must_use]
@@ -140,5 +157,16 @@ mod tests {
     assert_eq!(max0(0.0), 0.0);
     assert_eq!(max0(f32::NAN), 0.0, "a NaN estimate must not poison the pixel");
     assert_eq!(max0(f32::INFINITY), f32::INFINITY);
+  }
+
+  /// `max2` must reproduce `std::max`'s asymmetry: a NaN **second** argument
+  /// yields the first, which is what keeps the kernels' `max(epssq, …)` floors
+  /// finite; a NaN first argument propagates, exactly as `std::max` does.
+  #[test]
+  fn max2_keeps_the_first_operand_for_a_nan_second() {
+    assert_eq!(max2(1.0, 2.0), 2.0);
+    assert_eq!(max2(2.0, 1.0), 2.0);
+    assert_eq!(max2(1.0, f32::NAN), 1.0);
+    assert!(max2(f32::NAN, 1.0).is_nan());
   }
 }
