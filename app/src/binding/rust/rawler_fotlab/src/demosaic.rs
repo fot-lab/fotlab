@@ -109,6 +109,11 @@ pub enum DemosaicAlgorithm {
   /// leaves `"ahd"` out and the UI never offers the id. Nothing here changes when
   /// it is wired back up (`FOTLAB-NATIVE-000004` rev 12).
   RawtrpAhd,
+  /// `amaze` — Aliasing Minimization and Zipper Elimination.
+  ///
+  /// Advertised: unlike AHD/EAHD it reads no camera colour matrix, only the
+  /// scalar `1 / initialGain` highlight threshold (`FOTLAB-NATIVE-000004` rev 12).
+  RawtrpAmaze,
 }
 
 impl DemosaicAlgorithm {
@@ -128,6 +133,7 @@ impl DemosaicAlgorithm {
       Self::RawtrpDcb => rawtrp_demos::BayerAlgo::Dcb,
       Self::RawtrpHphd => rawtrp_demos::BayerAlgo::Hphd,
       Self::RawtrpAhd => rawtrp_demos::BayerAlgo::Ahd,
+      Self::RawtrpAmaze => rawtrp_demos::BayerAlgo::Amaze,
       _ => return None,
     })
   }
@@ -145,6 +151,7 @@ impl DemosaicAlgorithm {
       rawtrp_demos::BayerAlgo::Dcb => Self::RawtrpDcb,
       rawtrp_demos::BayerAlgo::Hphd => Self::RawtrpHphd,
       rawtrp_demos::BayerAlgo::Ahd => Self::RawtrpAhd,
+      rawtrp_demos::BayerAlgo::Amaze => Self::RawtrpAmaze,
       _ => return None,
     })
   }

@@ -134,7 +134,7 @@ app/src/binding/rust/rawtrp_demos/
     │   ├── igv.rs             # demosaic_algos.cc:609（IGV，**标量**分支）✅ 已落地
     │   ├── lmmse.rs           # lmmse_demosaic.cc（830）✅ 已落地
     │   ├── dcb.rs             # demosaic_algos.cc:963-1548（DCB，13 个函数）✅ 已落地
-    │   ├── amaze.rs           # amaze_demosaic_RT.cc（1610）
+    │   ├── amaze.rs           # amaze_demosaic_RT.cc（1610）✅ 已落地（标量分支，rev 13）
     │   ├── ahd.rs             # ahd_demosaic_RT.cc（235）✅ 已移植（⚠️ 需相机色彩矩阵 ⇒ 刻意不接线/不广告，rev 12）
     │   ├── eahd.rs            # eahd_demosaic.cc（447）— 需相机色彩矩阵，本轮不做（rev 12）
     │   ├── hphd.rs            # hphd_demosaic_RT.cc（364）✅ 已落地
@@ -264,7 +264,7 @@ rawler Intermediate::ThreeColor  →  develop 后续（calibrate …）不变
 | **B0 骨架** ✅ | crate + `CfaDesc`/`Array2D`/`Rgb`/`math`/`border`/`algo`(字典+candidates)/`bridge`(→`Intermediate`) + **bilinear** 内核 + 单测；registrar 为 `rawler_fotlab` 的 path dep | 已落地（本批随 CI 首验编译） |
 | **B1 打通** ✅ | **VNG4** 内核 ✅ + `lib.rs::demosaic_bayer` 分发 ✅ + `IMPLEMENTED_BAYER` 放开 ✅；**打通三件套全部落地**（提交 `52be623`）：`rawler_fotlab::demosaic.rs` 分发（`Algo::{Rawler,RawtrpBayer}` 双生产者）✅ + `demosaic_candidates()` UniFFI 暴露 ✅ + Kotlin 菜单动态化（去掉硬编码列表）✅ | 选 `RAWTRP vng4` 能出图：`everyDemosaicMenuOptionRedevelopsOnBayerAndExposureRecomputes` 现从**候选目录**取 `rawtrp:vng4` 端到端 develop 一次并断言"出图、满幅、彩色、与 PPG **不同**"；`DEFAULT` 逐像素不变（`cfa_default_algo` 分支顺序未动 + 四个 rawler 选项仍断言与 DEFAULT 逐字节相同）；UI 候选可见（菜单由目录驱动） |
 | **B2 质量层** | **RCD** ✅、**IGV** ✅、**LMMSE** ✅、**DCB** ✅ —— 四个内核 + 分发 + 候选全部落地 | 单测均已落地；**与 RT golden 数值比对仍待做**（Q1），故 B2 的出口标准只算完成一半 |
-| **B3 高端层** | AMAZE、AHD、EAHD、HPHD（AMAZE 为质量基准，含 SIMD）—— **HPHD** ✅ 落地并接线；**AHD** ✅ 已移植但**刻意不接线**（需相机色彩矩阵，见 rev 12）；**EAHD 不纳入本轮移植范围**（同因：需矩阵）；剩 AMAZE | 同上 |
+| **B3 高端层** | AMAZE、AHD、EAHD、HPHD（AMAZE 为质量基准，含 SIMD）—— **HPHD** ✅ 落地并接线；**AHD** ✅ 已移植但**刻意不接线**（需相机色彩矩阵，见 rev 12）；**EAHD 不纳入本轮移植范围**（同因：需矩阵）；**AMAZE** ✅ 落地并接线（rev 13，标量分支） | 同上 |
 | **B4 X-Trans** | `xtrans_interpolate`(1/3-pass)、`xtrans/fast`、`dual` 混合封装 | X-Trans 图可选；CFA 自检 |
 
 ## Constraints
@@ -391,3 +391,14 @@ rawler Intermediate::ThreeColor  →  develop 后续（calibrate …）不变
   3. **判定成本极低但不能省**：一次跨目录 grep（`rgb_cam|xyz_cam|cam_xyz|Color::RGB2Lab|cbrt`）就能把整份内核清单分成两类。顺带查明 X-Trans 是**分叉**的 —— `xtrans_demosaic.cc:217-226` 无条件算 `xyz_cam`，但只有 `:656` 的 `if(useCieLab)`（3-pass 路径）用它 ⇒ **1-pass 与 `fast_xtrans` 无此依赖**，`three_pass` 有。`fast_demo.cc`、`dual_demosaic_RT.cc`、`bayer_bilinear_demosaic.cc` 均无命中。这条决定了 B4 也要按同一判据切一刀，而不是一刀切地做或不做 X-Trans。
   4. **"`cbrt`"是识别这类内核的第二个指纹**：需要矩阵的通常是"在 Lab 里比像素"的那些，而 Lab 转换必然伴随一张 `cbrt` 表（`ahd:51`、`xtrans:43`、`dcraw:5067`、`eahd` 经 `color.cc`）。单独看 `cbrt` 会误报（`color.cc` 自身），单独看矩阵列表会漏掉走 wb/gain 的内核，二者合看足够。
   5. **停放不丢账：接通时的工作量已经付过了。** AHD 的 `xyz_cam` 线程（rev 11 的守卫 + rawler `cam_to_xyz_normalized()` 取值 + 非有限/全零回落）全部保留，将来要接通只需两步：把 `"ahd"` 加回白名单、并决定矩阵取 rawler 的归一化结果还是自算 sRGB 约定 —— **不再有 port 工作量**。⚠️ 停放期的语义：UI 看不见 AHD，但 Rust 调用方仍可直接以 `BayerAlgo::Ahd` 取用它（crate 的能力面没缩小，只有候选目录缩小）。
+
+- 2026-09-23 — **rev 13：AMAZE 落地并接线（B3 收官）**。`bayer/amaze.rs` 全新文件 + `algo.rs`/`lib.rs`/`rawler_fotlab/src/demosaic.rs` 各一臂。要点：
+
+  1. **移植的是上游标量（`#else`）分支，不是 SSE 分支**。两者是同一算法但不是同一浮点：SSE 路径对 `cddiffsq` 在所有像素写入，标量路径只在红/蓝位写入（`amaze:681` 在非绿分支内）；色差方差的恒等式也不同（`3Σx²-(Σx)²` vs Σ(xᵢ-xⱼ)²）。选标量的理由与 LMMSE（rev 8）相同：上游在非 SSE 目标上编译的就是它。SIMD（NEON）按 D1 的时间表另行补，标量分支就是校验基准。
+  2. **`initialGain` 是 AMAZE 唯一的逐图像输入**（rev 12 结论），本 crate 看不见白平衡增益 ⇒ `clip_pt = 1.0`、`clip_pt8 = 0.8`（即 `initialGain = 1`）。这与 rev 11 AHD 的 `xyz_cam` 不同类：`initialGain` 只影响**过饱和抑制阈值**的松紧，且我们的 mosaic 是"已缩放未增曝"的 0..1，增益本就未施加。
+  3. **并行按"行带"而非全网格**：上游 `collapse(2)` + 每**线程**一份 scratch；全网格并行需每 tile ~2MB（27 份 buffer），改按行带 `par_iter`（带内 tile 串行、带间并行），每带一份 `Tile`。输出三平面按带 `split_slices`，`Out` 借用切片写回，行号经 `row0 = max(top+16, 0)` 平移 —— 带覆盖 [0, H) 连续无缝。
+  4. **一个差点被"顺手改错"的下标**（绿自 R+B pass，`amaze:1322-1325`）：`rbint[indx1 ± v1]` 的 `indx1` **已经是半分辨率下标**（`indx >> 1`），不是"全分辨率下标再 >>1"。SSE 路径（`:1267-1293`）同形，两边互证。已在该处留注释警告。
+  5. **上游一处无害笔误被如实保留**：右下角块 `rawData[winy + height - rr - 2][winy + 32 - cc]`（`amaze:345`）列下标用了 `winy`，三个兄弟块用 `winx`。本 crate 窗口原点恒为 (0,0)，两者相同 ⇒ 按 `32 - cc` 原样保留并加注，不做"顺手修复"。
+  6. **`xmul2f`/`xdivf` 进 `math.rs`**（sleef.h 位技巧：指数加减代替乘除），AMAZE 四分平均用 `xdivf(v, 2)`。对 ±inf/NaN 的行为与 `*0.5` 不同（指数 tricks 不处理特殊值），有单测钉住两种有限往返与两种发散。
+  7. **边界自足，无需尾部 `border_interpolate`**：tile 以 16 像素镜像边框自覆盖，这也是上游 `border < 4` 分支从不为 AMAZE 触发的原因（上游函数尾部那句 `border_interpolate` 只保护实验性的小 `ts`）。单测含"边框像素也被填"的断言。
+  8. **接线四处同步**（沿用 B1 的清单）：`bayer/mod.rs` 声明 + `IMPLEMENTED_BAYER` 放开 `"amaze"` + `BayerAlgo::Amaze`（早已在目录里）分发臂 + `DemosaicAlgorithm::RawtrpAmaze` 两个映射臂。守卫单测两侧都过 ⇒ 菜单出现 `RAWTRP amaze` 且可派发。Kotlin 零改动（`demosaicLabel` 按 id 映射四个 rawler 项、其余回落目录 label）。

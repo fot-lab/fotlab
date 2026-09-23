@@ -88,7 +88,7 @@ pub const RAWTRP_XTRANS_NAMES: &[AlgoName] = &[
 /// crate has no source for by itself (`FOTLAB-NATIVE-000004` rev 12). Both stay
 /// out of the menu until that thread is settled; adding the name back to this
 /// list is all it takes to wire one up.
-pub const IMPLEMENTED_BAYER: &[&str] = &["bilinear", "vng4", "rcd", "igv", "lmmse", "dcb", "hphd"];
+pub const IMPLEMENTED_BAYER: &[&str] = &["bilinear", "vng4", "rcd", "igv", "lmmse", "dcb", "hphd", "amaze"];
 
 /// As [`IMPLEMENTED_BAYER`], for the ported X-Trans kernels.
 pub const IMPLEMENTED_XTRANS: &[&str] = &[];

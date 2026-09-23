@@ -188,6 +188,42 @@ pub fn xdiv2f(d: f32) -> f32 {
   }
 }
 
+/// `xmul2f(d)` (`sleef.h:1266-1276`) — `xdiv2f`'s inverse: double a `float` by
+/// *incrementing* its exponent field.
+///
+/// Same reasoning as [`xdiv2f`]. AMAZE is why the crate needs it: the kernel
+/// compares `xmul2f(v)` against the raw sample in several "is the interpolation
+/// out of gamut" tests (`amaze_demosaic_RT.cc:1194`, `:1203`, `:1361`…), so both
+/// directions of the pair have to behave the way upstream's do.
+#[inline(always)]
+#[must_use]
+pub fn xmul2f(d: f32) -> f32 {
+  let bits = d.to_bits() as i32;
+  if bits & 0x7FFF_FFFF != 0 {
+    f32::from_bits(bits.wrapping_add(1 << 23) as u32)
+  } else {
+    d
+  }
+}
+
+/// `xdivf(d, n)` (`sleef.h:1290-1300`) — divide by `2^n` by subtracting `n` from
+/// the exponent field.
+///
+/// `xdiv2f(d)` is `xdivf(d, 1)`; the guard and the wrapping subtraction behave
+/// exactly as documented there. AMAZE calls it as `xdivf(a + b + c + d, 2)` —
+/// i.e. a *quarter*, not a half — to average four colour-difference weights
+/// (`amaze_demosaic_RT.cc:976`, `:1244`).
+#[inline(always)]
+#[must_use]
+pub fn xdivf(d: f32, n: i32) -> f32 {
+  let bits = d.to_bits() as i32;
+  if bits & 0x7FFF_FFFF != 0 {
+    f32::from_bits(bits.wrapping_sub(n << 23) as u32)
+  } else {
+    d
+  }
+}
+
 /// `rtengine::median(a, b, c)` — the three-argument overload.
 ///
 /// The variadic wrapper (`median.h:6240-6244`) forwards to
@@ -414,6 +450,29 @@ mod tests {
     assert_eq!(max0(0.0), 0.0);
     assert_eq!(max0(f32::NAN), 0.0, "a NaN estimate must not poison the pixel");
     assert_eq!(max0(f32::INFINITY), f32::INFINITY);
+  }
+
+  /// `xmul2f` / `xdivf` are exact powers of two for finite inputs, so they agree
+  /// with the multiplication — but they are *bit* tricks, so the non-finite
+  /// inputs are where they must differ. That is the whole point of copying them.
+  #[test]
+  fn the_exponent_tricks_round_trip_and_diverge_on_non_finite() {
+    for v in [1.0_f32, 0.5, 0.1, -3.25, 65535.0] {
+      assert_eq!(xmul2f(v), v * 2.0, "{v}");
+      assert_eq!(xdiv2f(v), v * 0.5, "{v}");
+      assert_eq!(xdivf(v, 1), xdiv2f(v), "{v}");
+      assert_eq!(xdivf(v, 2), v * 0.25, "{v}");
+      // exact round trip — the reason both directions use the same trick
+      assert_eq!(xdiv2f(xmul2f(v)), v, "{v}");
+    }
+
+    // zero keeps its sign and is left alone (the guard skips it)
+    assert_eq!(xmul2f(0.0), 0.0);
+    assert_eq!(xdivf(-0.0, 2), -0.0);
+
+    // the divergence: `xdivf` on an infinity/NaN is finite, `x * 0.25` is not
+    assert_eq!(xdivf(f32::INFINITY, 2), f32::from_bits(0x7E80_0000));
+    assert!(xdivf(f32::NAN, 2).is_finite());
   }
 
   /// `max2` must reproduce `std::max`'s asymmetry: a NaN **second** argument

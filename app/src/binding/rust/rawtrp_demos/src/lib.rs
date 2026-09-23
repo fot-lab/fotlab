@@ -211,6 +211,10 @@ pub fn demosaic_bayer(algo: BayerAlgo, cfa: &CfaDesc, mosaic: &Array2D<f32>, par
     BayerAlgo::Dcb => bayer::dcb::bayer_dcb_demosaic(cfa, mosaic, params.dcb_iterations, params.dcb_enhance),
     // HPHD takes no parameter upstream.
     BayerAlgo::Hphd => bayer::hphd::bayer_hphd_demosaic(cfa, mosaic),
+    // AMAZE is the longest kernel in the catalogue and the only one that tiles
+    // the frame with its own 16-pixel mirrored border, so it needs no border
+    // pass afterwards; it takes no parameter (`bayer/amaze.rs`).
+    BayerAlgo::Amaze => bayer::amaze::bayer_amaze_demosaic(cfa, mosaic),
     // AHD is the first kernel that needs per-image data rather than a tuning
     // knob: its homogeneity test is a Lab comparison, so it takes the camera's
     // colour matrix (`bayer/ahd.rs` explains the convention and the default).
