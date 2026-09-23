@@ -158,57 +158,126 @@ pub const fn sqr(x: f32) -> f32 {
   x * x
 }
 
+/// `xdiv2f(d)` (`sleef.h:1278-1288`) — halve a `float` by decrementing its
+/// exponent field.
+///
+/// Transcribed as the bit trick it is rather than as `d * 0.5`, because the two
+/// disagree on the inputs the trick was never meant for. The guard is
+/// `intval & 0x7FFFFFFF` on the *bit pattern*, so: an infinity becomes
+/// `0x7F000000` ≈ 1.7e38 instead of staying infinite, a NaN loses an exponent
+/// and comes back **finite**, and a denormal corrupts. Only zero is
+/// special-cased — and the guard is skipped for `+0.0` and `-0.0` alike, so the
+/// function is sign-preserving on zero (which `d * 0.5` also is, but for a
+/// different reason).
+///
+/// No caller in this crate reaches the divergent cases — `lmmse` passes sums of
+/// three `[0, 1]`-domain values — but the function is short and the whole point
+/// of it is the bit manipulation, so it is copied rather than paraphrased.
+///
+/// The subtraction wraps in two's complement. `intval -= 1 << 23` is signed
+/// overflow, hence UB in the standard, but a plain wrap on every compiler
+/// RawTherapee ships with; Rust makes the wrap explicit.
+#[inline(always)]
+#[must_use]
+pub fn xdiv2f(d: f32) -> f32 {
+  let bits = d.to_bits() as i32;
+  if bits & 0x7FFF_FFFF != 0 {
+    f32::from_bits(bits.wrapping_sub(1 << 23) as u32)
+  } else {
+    d
+  }
+}
+
 /// `rtengine::median(a, b, c)` — the three-argument overload.
 ///
-/// Upstream's variadic wrapper (`median.h:6241-6244`) builds a
-/// `std::array<float, 3>` and calls the array overload, which does
-/// `std::nth_element(array.begin(), array.begin() + 1, array.end())` and returns
-/// element `1` (`median.h:35-40`). libstdc++ short-circuits `nth_element` to
-/// `__insertion_sort` for a range of three or fewer elements
-/// (`if (__last - __first > 3)`), so the array ends up **fully sorted** and the
-/// answer is the ordinary middle value.
+/// The variadic wrapper (`median.h:6240-6244`) forwards to
+/// `median(std::array<T, 3>{a, b, c})`. Two templates are then viable — the
+/// generic `median(std::array<T, N>)` (`median.h:41-51`, `nth_element`-based) and
+/// the dedicated `median(std::array<T, 3>)` (`median.h:53-57`) — and partial
+/// ordering picks the **second**, because `std::array<T, 3>` is more specialized
+/// than `std::array<T, N>`. So the three-argument call is this network:
 ///
-/// The branch structure below is that insertion sort, kept rather than replaced
-/// by a three-comparator sorting network, because the two disagree once a NaN is
-/// involved and every comparison upstream makes is a `<`. In particular the
-/// network's `if b < a { swap(a, b) }` steps would move a NaN differently from
-/// `__unguarded_linear_insert`'s single `while (val < *next)` scan.
+/// ```text
+/// max(min(a, b), min(c, max(a, b)))
+/// ```
 ///
-/// The scan is safe without a bound check: `__unguarded_linear_insert` is only
-/// reached when `val < v[0]` was **false** (that is the test that routed us into
-/// the `else`), and `val == v[i]` is untouched at that point, so the loop must
-/// stop at `next == 0` at the latest. Upstream relies on exactly that sentinel;
-/// here the worst case is a panic instead of the read below the array that C++'s
-/// unguarded scan would perform.
+/// ⚠️ This was ported wrong once: an earlier revision reproduced the *generic*
+/// overload's libstdc++ `nth_element`-shortcut-to-insertion-sort path, on the
+/// reading that the wrapper "calls the array overload". It does — the specialized
+/// one. The two agree for finite inputs (both yield the middle value) and differ
+/// as soon as a NaN is involved, which is why nothing caught it: this is exactly
+/// the "same answer on the inputs you happened to test" failure mode.
+///
+/// Every comparison goes through [`min2`]/[`max2`] rather than
+/// `f32::min`/`f32::max` so a NaN moves exactly as it does under
+/// `std::min`/`std::max` (a NaN *first* operand survives `min`, a NaN *second*
+/// operand survives `max`); see the tests for the three NaN cases, which pin the
+/// asymmetry.
 #[inline]
 #[must_use]
 pub fn median3(a: f32, b: f32, c: f32) -> f32 {
-  let mut v = [a, b, c];
+  max2(min2(a, b), min2(c, max2(a, b)))
+}
 
-  for i in 1..v.len() {
-    if v[i] < v[0] {
-      // `__insertion_sort`'s front-insert path: rotate `v[..=i]` right by one.
-      let val = v[i];
-      let mut j = i;
-      while j > 0 {
-        v[j] = v[j - 1];
-        j -= 1;
-      }
-      v[0] = val;
-    } else {
-      let val = v[i];
-      let mut last = i;
-      let mut next = i - 1;
-      while val < v[next] {
-        v[last] = v[next];
-        last = next;
-        next -= 1;
-      }
-      v[last] = val;
-    }
-  }
+/// `rtengine::median` for nine samples — the 9-element selection network of
+/// `median.h:174-215`.
+///
+/// Transcribed comparison for comparison, and deliberately **not** replaced by a
+/// sort or a tidier network. Upstream's header credits
+/// <http://ndevilla.free.fr/median/median.pdf> via Flössie and Ingo Weyrich, and
+/// the sequence of `min`/`max` pairs *is* the algorithm — reordering them is not
+/// a refactor. Every comparison goes through [`min2`]/[`max2`] rather than
+/// `f32::min`/`f32::max` so that a NaN propagates exactly as upstream's
+/// `std::min`/`std::max` make it (a NaN **second** operand is swallowed, a NaN
+/// first is kept) — see [`min2`] for why that asymmetry is load-bearing here.
+///
+/// The result for nine finite samples is the usual middle value; the network is
+/// only guaranteed to *place* the median, which is all the kernel needs.
+#[inline]
+#[must_use]
+pub fn median9(a: [f32; 9]) -> f32 {
+  let mut v = a;
+  let mut tmp;
 
-  v[1]
+  tmp = min2(v[1], v[2]);
+  v[2] = max2(v[1], v[2]);
+  v[1] = tmp;
+  tmp = min2(v[4], v[5]);
+  v[5] = max2(v[4], v[5]);
+  v[4] = tmp;
+  tmp = min2(v[7], v[8]);
+  v[8] = max2(v[7], v[8]);
+  v[7] = tmp;
+  tmp = min2(v[0], v[1]);
+  v[1] = max2(v[0], v[1]);
+  v[0] = tmp;
+  tmp = min2(v[3], v[4]);
+  v[4] = max2(v[3], v[4]);
+  v[3] = tmp;
+  tmp = min2(v[6], v[7]);
+  v[7] = max2(v[6], v[7]);
+  v[6] = tmp;
+  tmp = min2(v[1], v[2]);
+  v[2] = max2(v[1], v[2]);
+  v[1] = tmp;
+  tmp = min2(v[4], v[5]);
+  v[5] = max2(v[4], v[5]);
+  v[4] = tmp;
+  tmp = min2(v[7], v[8]);
+  v[8] = max2(v[7], v[8]);
+  v[7] = tmp;
+  v[3] = max2(v[0], v[3]);
+  v[5] = min2(v[5], v[8]);
+  v[7] = max2(v[4], tmp);
+  tmp = min2(v[4], tmp);
+  v[6] = max2(v[3], v[6]);
+  v[4] = max2(v[1], tmp);
+  v[2] = min2(v[2], v[5]);
+  v[4] = min2(v[4], v[7]);
+  tmp = min2(v[4], v[2]);
+  v[2] = max2(v[4], v[2]);
+  v[4] = max2(v[6], tmp);
+  min2(v[4], v[2])
 }
 
 #[cfg(test)]
@@ -245,6 +314,23 @@ mod tests {
     assert_eq!(sqr(1.0 + 2.0 + 3.0), 36.0, "SQR(a + b + c) is (a + b + c)^2");
   }
 
+  /// `xdiv2f` halves for the values the kernels pass it, and by a *bit trick*
+  /// for the rest: the infinities, the NaNs and the denormals do not behave like
+  /// `* 0.5`, which is exactly why it is transcribed rather than simplified.
+  #[test]
+  fn xdiv2f_decrements_the_exponent() {
+    assert_eq!(xdiv2f(0.0), 0.0);
+    assert_eq!(xdiv2f(-0.0), -0.0, "the guard is skipped for both zeros");
+    assert_eq!(xdiv2f(1.0), 0.5);
+    assert_eq!(xdiv2f(-3.0), -1.5);
+    assert_eq!(xdiv2f(1e-30), 5e-31);
+
+    // Not `inf / 2 == inf`: the exponent field is decremented whatever it was.
+    assert_eq!(xdiv2f(f32::INFINITY), f32::from_bits(0x7F00_0000));
+    assert_eq!(xdiv2f(f32::NEG_INFINITY), f32::from_bits(0xFF00_0000));
+    assert!(xdiv2f(f32::NAN).is_finite(), "a NaN loses an exponent and comes back finite");
+  }
+
   #[test]
   fn median3_returns_the_middle_value() {
     for (a, b, c) in [(3.0, 1.0, 2.0), (1.0, 2.0, 3.0), (3.0, 2.0, 1.0), (2.0, 2.0, 5.0), (-1.0, -9.0, 4.0)] {
@@ -254,16 +340,54 @@ mod tests {
     }
   }
 
-  /// Upstream's three-argument `median` is `nth_element` reduced to an insertion
-  /// sort, so its behaviour for a NaN argument is whatever `val < *next` says —
-  /// **not** a designed rule. These two cases pin that we reproduced it rather
-  /// than substituting a tidier median (a NaN in the middle propagates; a NaN
-  /// first makes every later comparison false and leaves the finite middle).
+  /// Upstream's three-argument `median` is the `std::array<T, 3>` network
+  /// `max(min(a, b), min(c, max(a, b)))`, so its behaviour for a NaN argument is
+  /// whatever `std::min`/`std::max`'s single `<` test says — **not** a designed
+  /// rule. These three cases pin the asymmetry: a NaN *first* argument survives
+  /// `min`, so it reaches the outer `max` as its first operand and is returned; a
+  /// NaN *second* argument loses every comparison it takes part in, so the answer
+  /// is the finite middle value.
+  ///
+  /// They also pin the correction: an earlier revision modelled the *generic*
+  /// `median(std::array<T, N>)` overload instead (insertion sort over three
+  /// elements), which returns `2.0`, `3.0` and `NaN` respectively for these same
+  /// three calls. Both implementations pass the finite test above, which is why
+  /// they are spelled out separately here.
   #[test]
   fn median3_reproduces_upstreams_nan_behaviour() {
-    assert_eq!(median3(f32::NAN, 2.0, 3.0), 2.0);
-    assert_eq!(median3(3.0, 2.0, f32::NAN), 3.0);
-    assert!(median3(2.0, f32::NAN, 3.0).is_nan());
+    assert!(median3(f32::NAN, 2.0, 3.0).is_nan(), "a NaN first operand survives min and reaches max");
+    assert_eq!(median3(3.0, 2.0, f32::NAN), 2.0);
+    assert_eq!(median3(2.0, f32::NAN, 3.0), 2.0);
+  }
+
+  /// The nine-sample network must return the middle value for finite input —
+  /// and, being a selection network rather than a sort, the two infinities that
+  /// an unclamped colour difference can produce must still land on the same
+  /// answer a full sort would give.
+  #[test]
+  fn median9_is_the_middle_of_nine() {
+    let cases: [[f32; 9]; 5] = [
+      [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0],
+      [9.0, 8.0, 7.0, 6.0, 5.0, 4.0, 3.0, 2.0, 1.0],
+      [5.0, 1.0, 9.0, 3.0, 7.0, 2.0, 8.0, 4.0, 6.0],
+      [0.0; 9],
+      [f32::NEG_INFINITY, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, f32::INFINITY],
+    ];
+    for a in cases {
+      let mut sorted = a;
+      sorted.sort_by(f32::total_cmp);
+      assert_eq!(median9(a), sorted[4], "median9({a:?})");
+    }
+  }
+
+  /// Repeated values are the case a naive network gets wrong: the network must
+  /// still agree with the sort when the median is one of many duplicates.
+  #[test]
+  fn median9_handles_duplicates() {
+    let a = [2.0, 2.0, 2.0, 2.0, 2.0, 7.0, 9.0, 1.0, 3.0];
+    let mut sorted = a;
+    sorted.sort_by(f32::total_cmp);
+    assert_eq!(median9(a), sorted[4]);
   }
 
   #[test]

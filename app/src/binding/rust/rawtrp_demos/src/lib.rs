@@ -96,13 +96,19 @@ impl Rgb {
 /// Tuning knobs the ported Bayer kernels need, mirroring the RawTherapee
 /// `procparams::RAWParams` fields they read.
 ///
-/// Only DCB and the `dual_demosaic_RT` hybrids read anything; the rest ignore it.
+/// Only DCB, LMMSE and the `dual_demosaic_RT` hybrids read anything; the rest
+/// ignore it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BayerParams {
   /// `raw.bayersensor.dcb_iterations` — DCB refinement passes.
   pub dcb_iterations: i32,
   /// `raw.bayersensor.dcb_enhance` — DCB post-processing.
   pub dcb_enhance: bool,
+  /// `raw.bayersensor.lmmse_iterations` — LMMSE's median/refinement passes.
+  /// Upstream's GUI offers `0..=6` and defaults to `2`; values `7` and `8` are
+  /// still honoured (`bayer/lmmse.rs` documents what they do), and anything
+  /// else falls off the end of the state machine.
+  pub lmmse_iterations: i32,
   /// `dualDemosaicContrast` — 0 means "base algorithm only" (the RT default).
   pub dual_contrast: f64,
   /// `autoContrast` — derive the blend threshold instead of using the above.
@@ -112,10 +118,11 @@ pub struct BayerParams {
 impl Default for BayerParams {
   fn default() -> Self {
     // Upstream defaults: `dcb_iterations = 2`, `dcb_enhance = true`,
+    // `lmmse_iterations = 2` (`rtengine/params/raw.cc:87`),
     // `dualDemosaicContrast = 0`, `dualDemosaicAutoContrast = true`
     // (`rtengine/params/raw.h`). The contrast value only matters once a hybrid is
     // selected, and 0 means "no blending", which is the conservative default.
-    Self { dcb_iterations: 2, dcb_enhance: true, dual_contrast: 0.0, dual_auto_contrast: false }
+    Self { dcb_iterations: 2, dcb_enhance: true, lmmse_iterations: 2, dual_contrast: 0.0, dual_auto_contrast: false }
   }
 }
 
@@ -163,6 +170,10 @@ pub fn demosaic_bayer(algo: BayerAlgo, cfa: &CfaDesc, mosaic: &Array2D<f32>, par
     // but upstream's IGV indexes `rgb[3]` for one, so it cannot serve as that
     // fallback either — see `bayer/igv.rs`.
     BayerAlgo::Igv => bayer::igv::bayer_igv_demosaic(cfa, mosaic),
+    // LMMSE works in a different numeric domain from the other kernels (its tone
+    // curve is indexed in `rawData` units), and it is the only one that takes a
+    // parameter — upstream's `lmmse_iterations`.
+    BayerAlgo::Lmmse => bayer::lmmse::bayer_lmmse_demosaic(cfa, mosaic, params.lmmse_iterations),
     other => Err(Error::UnsupportedAlgo(other.original_name())),
   }
 }
