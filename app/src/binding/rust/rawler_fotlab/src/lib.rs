@@ -248,32 +248,32 @@ pub fn demosaic_candidates() -> Vec<DemosaicCandidate> {
 /// The RAWTRP half needs no second table: its ids are `rawtrp:` + the upstream
 /// method string, so they go through `BayerAlgo::from_original_name` /
 /// `XTransAlgo::from_original_name` in `rawtrp_demos::algo`, and the paired
-/// `DemosaicAlgorithm::from_rawtrp_bayer` maps the kernel onto its variant.
+/// `DemosaicAlgorithm::from_rawtrp_bayer` / `from_rawtrp_xtrans` map the kernel
+/// onto its variant.
 ///
 /// The two families are told apart by `kind`, **not** by name: `fast` exists on
 /// both sides — Bayer's `fast_demosaic` and X-Trans's `fast_xtrans_interpolate` —
 /// and the X-Trans id is spelled `rawtrp:xtrans_fast` partly so that stays
 /// visible. Resolving by name alone would hand an X-Trans `fast` pick to the
-/// Bayer kernel the moment B3 ports it.
+/// Bayer kernel.
 ///
-/// `None` means "no variant to carry this" — today that is the whole X-Trans half,
-/// which has no variants until B4 and whose kernels `IMPLEMENTED_XTRANS` keeps out
-/// of the catalogue entirely.
+/// `None` means "no variant to carry this" — a catalogued but unported kernel
+/// (`IMPLEMENTED_*` keeps those out of the menu, and this guard test
+/// double-checks the pairing).
 fn algorithm_for_candidate(candidate: &rawtrp_demos::Candidate) -> Option<DemosaicAlgorithm> {
     if let Some(rest) = candidate.id.strip_prefix("rawtrp:") {
         return match candidate.kind {
             rawtrp_demos::SensorKind::Bayer => {
                 rawtrp_demos::BayerAlgo::from_original_name(rest).and_then(DemosaicAlgorithm::from_rawtrp_bayer)
             }
-            // No X-Trans RAWTRP kernel is ported yet (B4) and `DemosaicAlgorithm`
-            // carries no X-Trans RAWTRP variant, so there is nothing to resolve
-            // *to*. Kept as an explicit `None` rather than falling through to the
-            // `rawler:` match below: those ids are matched on their prefix, and an
-            // X-Trans RAWTRP id must never be mistaken for one of them.
-            // `IMPLEMENTED_XTRANS` is empty, so no such candidate is advertised;
-            // `demosaic_candidates_maps_every_advertised_id_to_a_variant` fails the
-            // moment B4 advertises one before adding its variant.
-            rawtrp_demos::SensorKind::XTrans => None,
+            // The two families are told apart by `kind`, never by name: `fast`
+            // exists on both sides (Bayer's `fast_demosaic` and X-Trans's
+            // `fast_xtrans_interpolate`), and the X-Trans id is spelled
+            // `rawtrp:xtrans_fast` so the split stays visible in the id.
+            rawtrp_demos::SensorKind::XTrans => {
+                let original = if rest == "xtrans_fast" { "fast" } else { rest };
+                rawtrp_demos::XTransAlgo::from_original_name(original).and_then(DemosaicAlgorithm::from_rawtrp_xtrans)
+            }
         };
     }
 
@@ -337,33 +337,39 @@ mod tests {
             ("rawtrp:igv", DemosaicAlgorithm::RawtrpIgv),
             ("rawtrp:lmmse", DemosaicAlgorithm::RawtrpLmmse),
             ("rawtrp:dcb", DemosaicAlgorithm::RawtrpDcb),
+            ("rawtrp:hphd", DemosaicAlgorithm::RawtrpHphd),
+            ("rawtrp:amaze", DemosaicAlgorithm::RawtrpAmaze),
+            ("rawtrp:fast", DemosaicAlgorithm::RawtrpFast),
+            ("rawtrp:one_pass", DemosaicAlgorithm::RawtrpXTransOnePass),
         ];
         for (id, expected) in cases {
             assert_eq!(algorithm_for_candidate(&candidate(id)), Some(expected), "{id}");
         }
 
-        // Catalogued but unported (`IMPLEMENTED_BAYER` excludes it, so the
+        // Catalogued but unported (`IMPLEMENTED_*` excludes it, so the
         // catalogue never offers it): the resolver refuses it too — the two guards
         // agree, which is what makes the "one kernel per change" rule safe.
-        let unported = rawtrp_demos::Candidate {
-            id: "rawtrp:amaze",
-            label: "RAWTRP amaze",
+        // EAHD is parked on the colour-matrix criterion, `three_pass` on the
+        // same one for X-Trans (`FOTLAB-NATIVE-000004` rev 12).
+        let parked = rawtrp_demos::Candidate {
+            id: "rawtrp:eahd",
+            label: "RAWTRP eahd",
             kind: rawtrp_demos::SensorKind::Bayer,
         };
-        assert_eq!(algorithm_for_candidate(&unported), None);
+        assert_eq!(algorithm_for_candidate(&parked), None);
         assert!(
-            !rawtrp_demos::candidates().iter().any(|c| c.id == "rawtrp:amaze"),
-            "amaze is not ported yet and must not be advertised"
+            !rawtrp_demos::candidates().iter().any(|c| c.id == "rawtrp:eahd"),
+            "eahd is parked and must not be advertised"
         );
 
-        // X-Trans `fast` must not be answered with the Bayer kernel of the same
-        // upstream name. (`rawtrp:fast`, the Bayer one, is `SensorKind::Bayer`.)
-        let xtrans_fast = rawtrp_demos::Candidate {
-            id: "rawtrp:xtrans_fast",
-            label: "RAWTRP xtrans_fast",
-            kind: rawtrp_demos::SensorKind::XTrans,
-        };
-        assert_eq!(algorithm_for_candidate(&xtrans_fast), None);
+        // The two `fast`s: the Bayer one is `SensorKind::Bayer`, and X-Trans
+        // `fast` must not be answered with it — it resolves to its own variant.
+        let bayer_fast = candidate("rawtrp:fast");
+        assert_eq!(bayer_fast.kind, rawtrp_demos::SensorKind::Bayer);
+        assert_eq!(algorithm_for_candidate(&bayer_fast), Some(DemosaicAlgorithm::RawtrpFast));
+        let xtrans_fast = candidate("rawtrp:xtrans_fast");
+        assert_eq!(xtrans_fast.kind, rawtrp_demos::SensorKind::XTrans);
+        assert_eq!(algorithm_for_candidate(&xtrans_fast), Some(DemosaicAlgorithm::RawtrpXTransFast));
     }
 
     /// Build the same catalogue entry the menu would carry, for the id under test.

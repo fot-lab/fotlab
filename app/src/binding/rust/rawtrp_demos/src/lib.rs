@@ -36,6 +36,7 @@ pub mod border;
 pub mod bridge;
 pub mod cfa;
 pub mod math;
+pub mod xtrans;
 
 pub use algo::{candidates, BayerAlgo, Candidate, SensorKind, XTransAlgo};
 pub use array2d::Array2D;
@@ -215,6 +216,12 @@ pub fn demosaic_bayer(algo: BayerAlgo, cfa: &CfaDesc, mosaic: &Array2D<f32>, par
     // the frame with its own 16-pixel mirrored border, so it needs no border
     // pass afterwards; it takes no parameter (`bayer/amaze.rs`).
     BayerAlgo::Amaze => bayer::amaze::bayer_amaze_demosaic(cfa, mosaic),
+    // FAST is the speed floor of the catalogue: a gradient-weighted green pass
+    // plus two colour-difference passes over 224-square tiles. It reads no
+    // per-image data and no parameter; the only absolute constant it carries
+    // (the `clip_pt` highlight guard) is 4.0 in the mosaic's 0..1 domain
+    // (`bayer/fast.rs`).
+    BayerAlgo::Fast => bayer::fast::bayer_fast_demosaic(cfa, mosaic),
     // AHD is the first kernel that needs per-image data rather than a tuning
     // knob: its homogeneity test is a Lab comparison, so it takes the camera's
     // colour matrix (`bayer/ahd.rs` explains the convention and the default).
@@ -237,6 +244,20 @@ pub fn demosaic_xtrans(algo: XTransAlgo, cfa: &CfaDesc, mosaic: &Array2D<f32>, p
   if w < 4 || h < 4 {
     return Err(Error::Shape(format!("mosaic too small: {w}x{h}")));
   }
-  let _ = params;
-  Err(Error::UnsupportedAlgo(algo.original_name()))
+  match algo {
+    // Markesteijn 1-pass: the full homogeneity-directed kernel on four
+    // directions, with the YPbPr difference statistic that needs no camera
+    // colour matrix (`xtrans/one_pass.rs`).
+    XTransAlgo::OnePass => xtrans::one_pass::xtrans_one_pass_demosaic(cfa, mosaic),
+    // Fast X-Trans: one weighted cross-kernel pass (`xtrans/fast.rs`).
+    XTransAlgo::Fast => xtrans::fast::xtrans_fast_demosaic(cfa, mosaic),
+    // three_pass needs the CIELab statistic, hence the camera colour matrix
+    // (rev 12); two_pass/four_pass are dual_demosaic_RT hybrids that also
+    // need the blend-mask machinery. Catalogued, parked — the dispatcher
+    // never hands them out while `IMPLEMENTED_XTRANS` omits them.
+    other => {
+      let _ = params;
+      Err(Error::UnsupportedAlgo(other.original_name()))
+    }
+  }
 }

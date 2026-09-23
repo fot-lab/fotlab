@@ -9,6 +9,7 @@ pub mod ahd;
 pub mod amaze;
 pub mod bilinear;
 pub mod dcb;
+pub mod fast;
 pub mod hphd;
 pub mod igv;
 pub mod interp;

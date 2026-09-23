@@ -264,8 +264,8 @@ rawler Intermediate::ThreeColor  →  develop 后续（calibrate …）不变
 | **B0 骨架** ✅ | crate + `CfaDesc`/`Array2D`/`Rgb`/`math`/`border`/`algo`(字典+candidates)/`bridge`(→`Intermediate`) + **bilinear** 内核 + 单测；registrar 为 `rawler_fotlab` 的 path dep | 已落地（本批随 CI 首验编译） |
 | **B1 打通** ✅ | **VNG4** 内核 ✅ + `lib.rs::demosaic_bayer` 分发 ✅ + `IMPLEMENTED_BAYER` 放开 ✅；**打通三件套全部落地**（提交 `52be623`）：`rawler_fotlab::demosaic.rs` 分发（`Algo::{Rawler,RawtrpBayer}` 双生产者）✅ + `demosaic_candidates()` UniFFI 暴露 ✅ + Kotlin 菜单动态化（去掉硬编码列表）✅ | 选 `RAWTRP vng4` 能出图：`everyDemosaicMenuOptionRedevelopsOnBayerAndExposureRecomputes` 现从**候选目录**取 `rawtrp:vng4` 端到端 develop 一次并断言"出图、满幅、彩色、与 PPG **不同**"；`DEFAULT` 逐像素不变（`cfa_default_algo` 分支顺序未动 + 四个 rawler 选项仍断言与 DEFAULT 逐字节相同）；UI 候选可见（菜单由目录驱动） |
 | **B2 质量层** | **RCD** ✅、**IGV** ✅、**LMMSE** ✅、**DCB** ✅ —— 四个内核 + 分发 + 候选全部落地 | 单测均已落地；**与 RT golden 数值比对仍待做**（Q1），故 B2 的出口标准只算完成一半 |
-| **B3 高端层** | AMAZE、AHD、EAHD、HPHD（AMAZE 为质量基准，含 SIMD）—— **HPHD** ✅ 落地并接线；**AHD** ✅ 已移植但**刻意不接线**（需相机色彩矩阵，见 rev 12）；**EAHD 不纳入本轮移植范围**（同因：需矩阵）；**AMAZE** ✅ 落地并接线（rev 13，标量分支） | 同上 |
-| **B4 X-Trans** | `xtrans_interpolate`(1/3-pass)、`xtrans/fast`、`dual` 混合封装 | X-Trans 图可选；CFA 自检 |
+| **B3 高端层** | AMAZE、AHD、EAHD、HPHD、fast（AMAZE 为质量基准，含 SIMD）—— **HPHD** ✅ 落地并接线；**AHD** ✅ 已移植但**刻意不接线**（需相机色彩矩阵，见 rev 12）；**EAHD 不纳入本轮移植范围**（同因：需矩阵）；**AMAZE** ✅ 落地并接线（rev 13，标量分支）；**fast** ✅ 落地并接线（rev 14） | 同上 |
+| **B4 X-Trans** | `xtrans_interpolate`(1/3-pass)、`xtrans/fast`、`dual` 混合封装 —— **one_pass** ✅ 落地并接线（rev 14，`useCieLab=false` 路径）；**fast** ✅ 落地并接线（rev 14）；**three_pass/four_pass 停放**（需矩阵 / dual 机器，rev 12 判据 + rev 14） | X-Trans 图可选；CFA 自检 |
 
 ## Constraints
 
@@ -402,3 +402,15 @@ rawler Intermediate::ThreeColor  →  develop 后续（calibrate …）不变
   6. **`xmul2f`/`xdivf` 进 `math.rs`**（sleef.h 位技巧：指数加减代替乘除），AMAZE 四分平均用 `xdivf(v, 2)`。对 ±inf/NaN 的行为与 `*0.5` 不同（指数 tricks 不处理特殊值），有单测钉住两种有限往返与两种发散。
   7. **边界自足，无需尾部 `border_interpolate`**：tile 以 16 像素镜像边框自覆盖，这也是上游 `border < 4` 分支从不为 AMAZE 触发的原因（上游函数尾部那句 `border_interpolate` 只保护实验性的小 `ts`）。单测含"边框像素也被填"的断言。
   8. **接线四处同步**（沿用 B1 的清单）：`bayer/mod.rs` 声明 + `IMPLEMENTED_BAYER` 放开 `"amaze"` + `BayerAlgo::Amaze`（早已在目录里）分发臂 + `DemosaicAlgorithm::RawtrpAmaze` 两个映射臂。守卫单测两侧都过 ⇒ 菜单出现 `RAWTRP amaze` 且可派发。Kotlin 零改动（`demosaicLabel` 按 id 映射四个 rawler 项、其余回落目录 label）。
+
+- 2026-09-23 — **rev 14：Bayer `fast` + X-Trans `one_pass`/`fast` 落地并接线（B3 补遗 + B4 无矩阵半场收官）**。新文件 `bayer/fast.rs`、`xtrans/{mod,border,one_pass,fast}.rs`；`IMPLEMENTED_BAYER` 放开 `"fast"`、`IMPLEMENTED_XTRANS` 放开 `{"one_pass","fast"}`；binding 侧 `RawtrpFast`/`RawtrpXTransOnePass`/`RawtrpXTransFast` 三变体 + `Algo::RawtrpXTrans` 生产者 + `xtrans_cfa_desc()`（6×6 按 ROI 相位平移，同 `bayer_cfa_desc` 的理由）。要点：
+
+  1. **Bayer fast（`fast_demo.cc`，标量分支）**：border=5 三段式 + TS=224 tile 三 pass。`clip_pt = 4*65535*initialGain` 在 0..1 域、`initialGain=1` 下恰为 **4.0**，只进饱和抑制 `min(clip_pt, Σ对角)`。无 eps 地板 ⇒ 严格一次齐次，平场是**精确**不动点（与 AMAZE 的 O(eps) 相反）。tile 直读全帧 ⇒ ±3 采样由 `top/left ≥ 3`、`bottom/right ≤ H-3` 保证不越界；tile 覆盖 [3,H-3) 与 border 联合无缝全覆盖（含 23×17 这类单 tile 小帧，有专测）。
+  2. **X-Trans 1-pass**：`xtrans_interpolate(1, false)` 全量移植 —— allhex 六边形表（保留为 (h,v) 对，上游 `allhex[0]`=h+v·width / `allhex[1]`=h+v·ts 只差步长）、sgrow/sgcol 孤立绿锚点（标准矩阵在 (2,2)，有专测）、绿四方向插值（hexmod 交替 + `c^1` 平面交换）、孤立绿 R/B、R↔B 互插、2×2 绿块填充、YPbPr(BT.2020) 方差 → 同向 3×3 计数 → 5×5 滑窗同质和 → 取最同质方向平均；尾部 `xtransborder_interpolate(11)`。
+  3. **上游怪癖如实保留**（都有注释）：① 1-pass 的 2×2 绿块填充只覆盖前两方向平面（`d < ndir; d += 2` 对 ndir=4 只走两步）——同质度统计几乎不会在那里选中后两平面，故不可见；② 相邻非绿列共享 `(col-left)>>1` 槽位时，min/max 用前者的六边形算、后者用自己的六边形读 —— 上界只求合理；③ 3-pass 的 `homo`/`homosum` 复用未初始化内存、边界 tile 扩展后读到未写行 —— 本移植清零（这些读只影响最终被 border 覆盖的输出，确定性反而更强）；④ border 的"跳到 W-border"在 W < 2·border 时倒退死循环 —— 改为显式跳过内部矩形（上游能终止处逐像素一致）。
+  4. **`isgreen` 是 %3 周期**（`xtrans[row%3][col%3]&1`），不是 %6 —— X-Trans 的绿/非绿布局 3-周期、R/B 指派不是；有专测钉住标准矩阵的这一性质。`fcol` = `CfaDesc::xtrans_color`（%6，与上游逐字一致）。Q2（6×6 朝向）在移植层面闭合：`rawler` 的 6×6 与上游同源（都出自 dcraw/LibRaw 行主序），binding 侧 `xtrans_cfa_desc` 按 ROI 原点平移后语义即与 `xtrans/bilinear.rs:73` 一致；真机样张验证仍属 decode 侧课题（RAWTRP-DECODE-000003 Q1）。
+  5. **X-Trans fast**：`fast_xtrans_interpolate` 全量移植（border(1) 先行 + 行并行的加权 3×3 一次成像；孤立绿/非孤立绿的权重归一 `*1.3333333`）。两内核均无绝对常数 ⇒ 严格一次齐次，平场精确不动点。
+  6. **停放 vs 未移植**：`three_pass`/`four_pass` 停放（`useCieLab` 需矩阵，rev 12 判据；four_pass 还是 dual 混合）；`two_pass` 同属 dual 机器，与 Bayer 六个 dual 混合一起等 `buildBlendMask`+`RGB2L` 那套共享件。目录/分发两侧守卫照旧钉住。
+  7. **`fast` 双义拆分**：Bayer `fast` 与 X-Trans `fast` 同名 —— 候选 id 分别是 `rawtrp:fast` / `rawtrp:xtrans_fast`，`algorithm_for_candidate` 按 `SensorKind` 分流后把后者折回 `fast` 再查 `XTransAlgo::from_original_name`；binding 守卫测试两条都断言。
+  8. **修掉上一批的一处守卫测试欠账**：AMAZE 接线（rev 13）漏更新 `rawler_fotlab/src/lib.rs` 的 `rawtrp_ids_resolve_and_the_two_fasts_stay_apart` —— 它仍断言 `rawtrp:amaze` 未接线（该测试在 0c36279 后必然红）。本批把它更新为"已接线集合 + 停放集合（以 eahd 为例）+ 双 fast 分流"三段断言。
+  9. **访问模式与值无关 ⇒ 平场大帧即覆盖全部寻址**：X-Trans 的 allhex/下标只依赖（矩阵、几何），1-pass 测试用 410×403 平场（tile 原点 3/101/199/297 覆尽 mod 3 相位类）+ 斜坡 + 小帧（仅 border 路径）三档；若上游矩阵真会越界，CI 会以 panic 形式显式暴露而非静默。

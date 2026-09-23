@@ -88,10 +88,17 @@ pub const RAWTRP_XTRANS_NAMES: &[AlgoName] = &[
 /// crate has no source for by itself (`FOTLAB-NATIVE-000004` rev 12). Both stay
 /// out of the menu until that thread is settled; adding the name back to this
 /// list is all it takes to wire one up.
-pub const IMPLEMENTED_BAYER: &[&str] = &["bilinear", "vng4", "rcd", "igv", "lmmse", "dcb", "hphd", "amaze"];
+pub const IMPLEMENTED_BAYER: &[&str] = &["bilinear", "vng4", "rcd", "igv", "lmmse", "dcb", "hphd", "amaze", "fast"];
 
 /// As [`IMPLEMENTED_BAYER`], for the ported X-Trans kernels.
-pub const IMPLEMENTED_XTRANS: &[&str] = &[];
+///
+/// `three_pass`/`four_pass` are parked, not missing: their `useCieLab`
+/// homogeneity statistic needs the camera colour matrix
+/// (`xtrans_demosaic.cc:656`), the same criterion that parks AHD/EAHD
+/// (`FOTLAB-NATIVE-000004` rev 12). `two_pass`/`four_pass` are additionally
+/// `dual_demosaic_RT` hybrids, which need the blend-mask machinery the Bayer
+/// hybrids are waiting for.
+pub const IMPLEMENTED_XTRANS: &[&str] = &["one_pass", "fast"];
 
 /// Look a standard name up in a dictionary by its original name.
 fn standard_of(dict: &'static [AlgoName], original: &str) -> &'static str {

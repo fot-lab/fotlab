@@ -114,6 +114,12 @@ pub enum DemosaicAlgorithm {
   /// Advertised: unlike AHD/EAHD it reads no camera colour matrix, only the
   /// scalar `1 / initialGain` highlight threshold (`FOTLAB-NATIVE-000004` rev 12).
   RawtrpAmaze,
+  /// `fast` — Emil Martinec's fast Bayer demosaic.
+  RawtrpFast,
+  /// X-Trans Markesteijn 1-pass (`xtrans_interpolate(1, false)`).
+  RawtrpXTransOnePass,
+  /// X-Trans fast (`fast_xtrans_interpolate`).
+  RawtrpXTransFast,
 }
 
 impl DemosaicAlgorithm {
@@ -134,6 +140,20 @@ impl DemosaicAlgorithm {
       Self::RawtrpHphd => rawtrp_demos::BayerAlgo::Hphd,
       Self::RawtrpAhd => rawtrp_demos::BayerAlgo::Ahd,
       Self::RawtrpAmaze => rawtrp_demos::BayerAlgo::Amaze,
+      Self::RawtrpFast => rawtrp_demos::BayerAlgo::Fast,
+      _ => return None,
+    })
+  }
+
+  /// The RAWTRP X-Trans kernel this variant selects, or `None` for the rest.
+  ///
+  /// As [`Self::rawtrp_bayer`]: `three_pass`/`four_pass` stay parked (colour
+  /// matrix; rev 12) and the dual hybrids stay unported, so they have no
+  /// variant and can never be selected.
+  fn rawtrp_xtrans(self) -> Option<rawtrp_demos::XTransAlgo> {
+    Some(match self {
+      Self::RawtrpXTransOnePass => rawtrp_demos::XTransAlgo::OnePass,
+      Self::RawtrpXTransFast => rawtrp_demos::XTransAlgo::Fast,
       _ => return None,
     })
   }
@@ -152,6 +172,16 @@ impl DemosaicAlgorithm {
       rawtrp_demos::BayerAlgo::Hphd => Self::RawtrpHphd,
       rawtrp_demos::BayerAlgo::Ahd => Self::RawtrpAhd,
       rawtrp_demos::BayerAlgo::Amaze => Self::RawtrpAmaze,
+      rawtrp_demos::BayerAlgo::Fast => Self::RawtrpFast,
+      _ => return None,
+    })
+  }
+
+  /// As [`Self::from_rawtrp_bayer`], for the X-Trans half.
+  pub(crate) fn from_rawtrp_xtrans(algo: rawtrp_demos::XTransAlgo) -> Option<Self> {
+    Some(match algo {
+      rawtrp_demos::XTransAlgo::OnePass => Self::RawtrpXTransOnePass,
+      rawtrp_demos::XTransAlgo::Fast => Self::RawtrpXTransFast,
       _ => return None,
     })
   }
@@ -173,18 +203,20 @@ enum RawlerAlgo {
 
 /// Internal algorithm selection after CFA compatibility is resolved.
 ///
-/// The two variants are two *different kinds of producer*, not two settings of
-/// one: `Rawler` arms are `Demosaic` impls that take a `Pix2D` + `CFA` + ROI,
-/// while [`Algo::RawtrpBayer`] is a kernel ported in `rawtrp_demos` that takes
-/// an `Array2D` + `CfaDesc` and brings its own border handling. Keeping them
+/// The variants are *different kinds of producer*, not settings of one:
+/// `Rawler` arms are `Demosaic` impls that take a `Pix2D` + `CFA` + ROI, while
+/// the `Rawtrp*` arms are kernels ported in `rawtrp_demos` that take
+/// an `Array2D` + `CfaDesc` and bring their own border handling. Keeping them
 /// apart is what makes the RAWTRP fallback total: [`cfa_default_algo`] can only
 /// return a `RawlerAlgo`, so the "degrade to the CFA default" path has no
 /// unreachable case to paper over.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Algo {
   Rawler(RawlerAlgo),
-  /// A kernel ported in `rawtrp_demos` (`FOTLAB-NATIVE-000004`).
+  /// A Bayer kernel ported in `rawtrp_demos` (`FOTLAB-NATIVE-000004`).
   RawtrpBayer(rawtrp_demos::BayerAlgo),
+  /// An X-Trans kernel ported in `rawtrp_demos` (`FOTLAB-NATIVE-000004` B4).
+  RawtrpXTrans(rawtrp_demos::XTransAlgo),
 }
 
 /// Debayer the scaled mosaic into a colour intermediate, applying the selected
@@ -252,6 +284,7 @@ pub(crate) fn demosaic(
       let next = match chosen {
         Algo::Rawler(rawler) => run_rawler_algo(rawler, pixels, config, roi, image),
         Algo::RawtrpBayer(kernel) => run_rawtrp_bayer(kernel, pixels, config, roi, image),
+        Algo::RawtrpXTrans(kernel) => run_rawtrp_xtrans(kernel, pixels, config, roi, image),
       };
       return Ok(next);
     }
@@ -374,6 +407,63 @@ fn run_rawtrp_bayer(kernel: rawtrp_demos::BayerAlgo, pixels: &PixF32, config: &C
   }
 }
 
+/// Build the `CfaDesc` for an X-Trans 6x6 CFA **as seen from `roi`**, or `None`
+/// when the pattern is not a 6x6 R/G/B X-Trans tile.
+///
+/// The `shift` matters for exactly the same reason as in [`bayer_cfa_desc`]:
+/// the kernels ask `CfaDesc::xtrans_color(row, col)` about the mosaic's origin,
+/// so the 6x6 must be the one at the ROI's top-left. (X-Trans sensors are
+/// typically full-frame ROIs, but an active area is not required to start on a
+/// multiple of 6, and rawler's own X-Trans demosaic shifts the same way,
+/// `xtrans/bilinear.rs:73`.)
+fn xtrans_cfa_desc(cfa: &CFA, roi: Rect) -> Option<rawtrp_demos::CfaDesc> {
+  if cfa.width != 6 || cfa.height != 6 {
+    return None;
+  }
+
+  let shifted = cfa.shift(roi.p.x, roi.p.y);
+  let mut pattern = [[0u8; 6]; 6];
+  for (row, line) in pattern.iter_mut().enumerate() {
+    for (col, cell) in line.iter_mut().enumerate() {
+      let color = shifted.color_at(row, col);
+      if color > 2 {
+        return None;
+      }
+      *cell = color as u8;
+    }
+  }
+
+  Some(rawtrp_demos::CfaDesc::xtrans_from_6x6(pattern))
+}
+
+/// Run an X-Trans kernel ported in `rawtrp_demos` over `roi` — the X-Trans
+/// mirror of [`run_rawtrp_bayer`] (same ROI materialisation, same Fuji
+/// rotation, same degrade-not-fail contract).
+fn run_rawtrp_xtrans(kernel: rawtrp_demos::XTransAlgo, pixels: &PixF32, config: &CFAConfig, roi: Rect, image: &RawImage) -> Intermediate {
+  let Some(cfa) = xtrans_cfa_desc(&config.cfa, roi) else {
+    log::warn!(
+      "RAWTRP {} needs a 6x6 R/G/B X-Trans CFA, but '{}' has none; using the CFA default instead",
+      kernel.original_name(),
+      config.cfa.name
+    );
+    return run_rawler_algo(cfa_default_algo(config), pixels, config, roi, image);
+  };
+
+  // Neither ported X-Trans kernel reads a parameter yet (`dual_contrast`
+  // belongs to the two_pass/four_pass hybrids, which are not ported).
+  let params = rawtrp_demos::XTransParams::default();
+  let mosaic = mosaic_from_roi(pixels, roi);
+
+  match rawtrp_demos::bridge::demosaic_xtrans_to_intermediate(kernel, &cfa, &mosaic, &params) {
+    Ok(Intermediate::ThreeColor(rgb)) => Intermediate::ThreeColor(fuji_rotate_if_needed(rgb, image)),
+    Ok(other) => other,
+    Err(e) => {
+      log::warn!("RAWTRP {} failed ({e}); using the CFA default instead", kernel.original_name());
+      run_rawler_algo(cfa_default_algo(config), pixels, config, roi, image)
+    }
+  }
+}
+
 /// Materialise the `roi` of the scaled mosaic as the `Array2D<f32>` the ported
 /// kernels take.
 ///
@@ -481,17 +571,28 @@ fn effective_algorithm(config: &CFAConfig, algo: DemosaicAlgorithm) -> Algo {
         Algo::Rawler(RawlerAlgo::Ppg)
       }
     }
-    // RAWTRP kernels are RawTherapee's Bayer debayers: a three-colour 2x2 CFA is
-    // their whole input contract. Upstream RT falls back to IGV on a four-colour
-    // CFA, but its IGV indexes `rgb[3]` for one — that fallback is not a usable
-    // path and our port refuses the CFA instead (`rawtrp_demos::algo`,
-    // `FOTLAB-NATIVE-000004` rev 7 item 7). So a four-colour CFA, an X-Trans
-    // sensor, or a catalogued-but-unported kernel all resolve to the CFA default
-    // — the same treatment an incompatible rawler pick gets.
-    other => match other.rawtrp_bayer() {
-      Some(kernel) if is_bayer && !four_color => Algo::RawtrpBayer(kernel),
-      Some(_) | None => Algo::Rawler(cfa_default_algo(config)),
-    },
+    // RAWTRP Bayer kernels are RawTherapee's Bayer debayers: a three-colour
+    // 2x2 CFA is their whole input contract. Upstream RT falls back to IGV on
+    // a four-colour CFA, but its IGV indexes `rgb[3]` for one — that fallback
+    // is not a usable path and our port refuses the CFA instead
+    // (`rawtrp_demos::algo`, `FOTLAB-NATIVE-000004` rev 7 item 7). The RAWTRP
+    // X-Trans kernels mirror this with their 6x6 contract. So a mismatched
+    // CFA, the wrong sensor family, or a catalogued-but-unported kernel all
+    // resolve to the CFA default — the same treatment an incompatible rawler
+    // pick gets.
+    other => {
+      if let Some(kernel) = other.rawtrp_bayer() {
+        if is_bayer && !four_color {
+          return Algo::RawtrpBayer(kernel);
+        }
+      }
+      if let Some(kernel) = other.rawtrp_xtrans() {
+        if is_xtrans {
+          return Algo::RawtrpXTrans(kernel);
+        }
+      }
+      Algo::Rawler(cfa_default_algo(config))
+    }
   }
 }
 
