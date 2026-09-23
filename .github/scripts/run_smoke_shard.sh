@@ -28,7 +28,40 @@ if [ "$NEED_RAW" = "true" ]; then
   # (Not /sdcard/Android/data/<pkg>: a directory created by `adb shell mkdir` is owned
   # by `shell`, so the app cannot traverse it and the files are invisible to it.)
   adb shell mkdir -p /sdcard/Pictures/rawdb
-  adb push raw-samples/. /sdcard/Pictures/rawdb/
+  # A failed snapshot load (`default_boot`) forces a cold boot, and a push that
+  # races the FUSE/sdcardfs mount dies with "remote couldn't create file:
+  # Operation not permitted" — seen for one sample per run, a different one
+  # each time. `adb push` of a directory keeps going on a copy error and the
+  # driver never looks at its exit code, so the missing files only surfaced
+  # minutes later as "was not indexed into MediaStore" assertion failures
+  # naming the wrong layer. Push file-by-file, verify each landed, retry the
+  # stragglers, and fail fast here if the storage is genuinely not writable.
+  adb wait-for-device
+  boot_polls=0
+  while [ "$boot_polls" -lt 24 ]; do
+    [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ] && break
+    sleep 5
+    boot_polls=$((boot_polls + 1))
+  done
+  for f in raw-samples/*; do
+    name="$(basename "$f")"
+    attempt=0
+    while [ "$attempt" -lt 3 ]; do
+      # `adb push` returns non-zero when any copy fails, and `adb shell`
+      # propagates the remote `test`'s exit code — both checked together so a
+      # silently dropped file cannot sneak through.
+      if adb push "$f" /sdcard/Pictures/rawdb/ \
+         && adb shell "test -f '/sdcard/Pictures/rawdb/$name'"; then
+        break
+      fi
+      attempt=$((attempt + 1))
+      [ "$attempt" -lt 3 ] && sleep 15
+    done
+    if [ "$attempt" -ge 3 ]; then
+      echo "::error::[push] $name did not land on /sdcard/Pictures/rawdb after 3 attempts — emulator storage is not writable. Failing the shard here rather than as MediaStore assertion failures later."
+      exit 1
+    fi
+  done
   adb shell ls -l /sdcard/Pictures/rawdb
 fi
 
