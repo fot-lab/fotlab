@@ -10,6 +10,15 @@
 //! 3. `exposure_ev` — linear gain `2^exposure_ev` on the **single-channel** scaled
 //!    mosaic, *before* demosaic (one mul per photosite instead of per output
 //!    channel; demosaic is linear so the result is identical)
+//! 3a. `denoise_strength` — optional pre-demosaic denoise of the scaled mosaic
+//!     (`denoise.rs`); `None` = identity. A RawTherapee-style **CFA impulse
+//!     denoise** (hot/dead-pixel / salt-and-pepper removal): each photosite is
+//!     tested against the range of its same-colour neighbours and pulled toward
+//!     their median when it is an isolated spike. Gated to 2×2-periodic CFAs —
+//!     X-Trans (6×6) is skipped so the parity grouping never compares mismatched
+//!     colours.
+//! 3b. `dehaze_strength`  — optional pre-demosaic dehaze of the scaled mosaic
+//!     (`dehaze.rs`); `None` = identity (histogram-floor haze-lift baseline).
 //! 4. `demosaic`    — selectable debayer + Fuji rotate + active-area crop (ROI). When
 //!    `downsample` is set this stage runs rawler's **superpixel** debayer instead: same
 //!    input (the exposed mosaic), same slot, but the result is quarter-resolution. The
@@ -36,12 +45,15 @@ use std::panic::{self, AssertUnwindSafe};
 
 use rayon::prelude::*;
 
-use rawler::rawimage::RawImageData;
+use rawler::rawimage::{RawImageData, RawPhotometricInterpretation};
 use rawler::RawImage;
 
 use crate::calibrate::{calibrate, WorkingSpace};
 use crate::decode::decode_to_rawimage;
+use crate::dehaze::dehaze;
 use crate::demosaic::{demosaic, DemosaicAlgorithm};
+use crate::denoise::denoise;
+use crate::exposure::apply_exposure;
 use crate::RawlerFotlabError;
 
 /// The product of the develop pipeline: a linear RGB image (no gamma applied).
@@ -93,6 +105,19 @@ pub struct DevelopParams {
   /// Optional white-balance multipliers (RGBE order). `None` → rawler's as-shot
   /// `wb_coeffs`.
   pub wb: Option<Vec<f32>>,
+  /// Denoise strength for the pre-demosaic mosaic denoise stage (`denoise.rs`), in
+  /// the exposure slot. `None` = skip (identity); `0` also collapses to identity.
+  /// A RawTherapee-style CFA impulse denoise (hot/dead-pixel removal): `strength`
+  /// is a *sensitivity multiplier* on the detection threshold (`≈1.0` = mild,
+  /// higher = more aggressive). Supplied from Kotlin when the Studio denoise
+  /// control is enabled. Non-2×2-periodic CFAs (e.g. X-Trans) skip the stage.
+  #[uniffi(default = None)]
+  pub denoise_strength: Option<f32>,
+  /// Dehaze strength (0..1) for the pre-demosaic mosaic dehaze stage (`dehaze.rs`),
+  /// in the exposure slot. `None` = skip (identity). Supplied from Kotlin when the
+  /// Studio dehaze control is enabled; 0 also collapses to identity.
+  #[uniffi(default = None)]
+  pub dehaze_strength: Option<f32>,
 }
 
 /// Grading parameters supplied by Kotlin for [`develop_and_grade`].
@@ -252,24 +277,23 @@ pub(crate) fn develop_image(
   // read (CFA/photometric, color matrix, wb, active/crop areas).
   let mut pixels = take_scaled_pixels(&mut image)?;
 
-  // Apply exposure compensation as a linear gain `2^exposure_ev` (the linear
-  // `exp_scale`) to the *single-channel* scaled mosaic, BEFORE demosaic. This is
-  // one multiply per photosite (N) instead of per output channel (3N/4N) after
-  // demosaic, and is mathematically identical because demosaic is linear and the
-  // gain is uniform across channels. `None` → unity gain (as-shot); `Some(0.0)`
-  // also collapses to unity, so the no-compensation path pays nothing — matching
-  // rawler's `RawDevelop::default()` (dnglab's DNG thumbnail pipeline).
-  let ev_scale = params.exposure_ev.map_or(1.0, |ev| 2f32.powf(ev));
-  if ev_scale != 1.0 {
-    // One multiply per photosite, no cross-element dependency: chunked so a rayon task
-    // processes a whole slice instead of a single float (`OPTIMZ-PERFRM-000007`). A raw
-    // `par_iter_mut` here would be dominated by per-element scheduling overhead.
-    pixels.par_chunks_mut(64 * 1024).for_each(|chunk| {
-      for p in chunk {
-        *p *= ev_scale;
-      }
-    });
-  }
+  // Exposure → Denoise → Dehaze: the pre-demosaic mosaic stages, composed as pure
+  // functions (`exposure.rs` / `denoise.rs` / `dehaze.rs`). Each consumes the
+  // mosaic buffer and returns it; `None` (or a zero strength) is the identity, so
+  // an unconfigured stage is free. Exposure applies the `2^exposure_ev` linear
+  // gain; the spatial stages then clean the mosaic. Exposure runs first because the
+  // gain is channel-uniform and linear, so it commutes with demosaic.
+  let pixels = apply_exposure(pixels, params.exposure_ev);
+  // Impulse denoise only makes sense on a 2×2-periodic CFA: the per-plane parity
+  // grouping compares each photosite against same-colour neighbours. X-Trans
+  // (6×6) is not 2×2-periodic, so skip it there (identity) — matching
+  // `bayer_cfa_desc`'s `cfa.width == 2 && cfa.height == 2` predicate.
+  let pixels = if is_2x2_cfa(&image) {
+    denoise(pixels, image.width, image.height, params.denoise_strength)
+  } else {
+    pixels
+  };
+  let pixels = dehaze(pixels, image.width, image.height, params.dehaze_strength);
 
   // Demosaic stage — its ROI is already active_area, exactly like rawler's
   // Demosaic + FujiRotate + CropActiveArea steps. `params.downsample` picks the superpixel
@@ -306,6 +330,16 @@ fn take_scaled_pixels(image: &mut RawImage) -> Result<Vec<f32>, RawlerFotlabErro
     RawImageData::Integer(_) => Err(RawlerFotlabError::Decode(
       "scaled RawImage pixels are not f32 — apply_scaling contract changed".to_string(),
     )),
+  }
+}
+
+/// Whether `image`'s mosaic is a 2×2-periodic CFA (the only geometry the
+/// per-plane impulse denoise understands). X-Trans (6×6) and pre-coloured
+/// (non-CFA) input return `false`, so the denoise stage is skipped there.
+fn is_2x2_cfa(image: &RawImage) -> bool {
+  match &image.photometric {
+    RawPhotometricInterpretation::Cfa(config) => config.cfa.width == 2 && config.cfa.height == 2,
+    _ => false,
   }
 }
 
