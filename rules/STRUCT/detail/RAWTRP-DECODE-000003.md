@@ -120,6 +120,30 @@ dcraw `FC` bit: `shift = (((row << 1) & 14) + (col & 1)) << 1`. For the 2×2 til
 
 Sum = `0x4 + 0x10 + 0x80 = 0x94`, replicated across the 32-bit word → **`filters = 0x94949494`**. A generic encoder loops the 4 tile positions and ORs `color << shift`.
 
+### 3.3 A Bayer CFA has FOUR colour levels — and TWO masks must cross the bridge
+
+This is the most easily-misread part of the whole contract, and it fails **silently**: a bridge that carries only the folded mask renders `vng4` wrong without any error.
+
+- **Four levels, not three.** dcraw's colour code is `0/1/2/3 = R/G1/B/G2` (`dcraw.cc:173`) — the **two greens are distinct levels**. RGGB's *original* mask is therefore `0xb4b4b4b4`, which RT spells out as `// R G1 B G2` (`rawimage.cc:1373`; the `0x94949494` of §3.2 is that value *after* folding). `ri->get_colors()` is a **different** property — how many colours the *sensor* reports: `3` for a normal Bayer, `4` for an RGBE-style CFA (`dcraw.cc:11065-11067`).
+- **`set_prefilters()` folds G2 into G1** (`rawimage.h:50-56`), but only when `isBayer() && get_colors() == 3`:
+
+  ```
+  prefilters = filters;                            // keep the 4-colour original
+  filters &= ~((filters & 0x55555555) << 1);       // 3 -> 1
+  ```
+
+  → RGGB `0xb4b4b4b4` → **`0x94949494`**.
+- **Which mask each accessor reads — and both occur inside one kernel:**
+
+| Accessor | Mask | Values | Used by |
+| --- | --- | --- | --- |
+| `RawImage::FC` / `ISGREEN` / `ISBLUE` / `ISRED` (`rawimage.h:268-283`) | `filters` — **folded** | 3 | `border_interpolate`, `bayer_bilinear_demosaic`, `igv`, `dcb`, `vng4`'s `interpolate_row_redblue` |
+| local `#define fc(row,col)` (`vng4_demosaic_RT.cc:62`) | `prefilters` — **unfolded** | 4 | `vng4`'s scatter, first pass, and VNG main loop |
+
+  The unfolded mask is what makes channel `3` a *valid green* in `vng4`: `color & 1` tests "this pixel samples a green", `color ^= 2` swaps G1/G2, and `pix[ip[0] + 3]` / `pix[ip[0] + 1] + pix[ip[0] + 3]` read both greens.
+- **Consequence for the bridge**: rawler's `CFA` is **single-green, three-valued** (`color_at → 0/1/2`); the RT kernel contract is **dual-green, four-valued, with two masks**. The mapping is therefore a **semantic** conversion, not a format copy — the adapter must rebuild the four-level original from the 2×2 tile (odd-row green → `G2 = 3`), then apply the fold, producing **both** `filters` and `prefilters`. Implementation: `rules/DESIGN/detail/FOTLAB-NATIVE-000004.md` R10 / D6 / D7.
+- **A dead guard worth knowing**: `vng4_demosaic_RT.cc:67-76` intends to fall back to `igv_interpolate` for a four-colour CFA via `if (FC(i, j) == 3)`, but `FC` reads the *folded* mask and can never return `3`, so the check never fires and an RGBE CFA would sail through. The property upstream *meant* is `get_colors() > 3`. ⚠️ Note a normal Bayer's *unfolded* mask **does** contain `3`, so `fc_pre == 3` is not a valid four-colour test either.
+
 ## 4. Integration notes (research-level, no action taken)
 
 1. **Coordinates / ROI** — rawler has already cropped to `active_area` (`develop.rs` ROI is `active_area`, see `:234` and the `crop_default` block at `:285`). RT kernels eat the full frame + a window. Bridge either passes `(0,0,W,H)` and self-fills borders, or crops to `active_area` before demosaic. Keep one convention.
@@ -142,3 +166,4 @@ Sum = `0x4 + 0x10 + 0x80 = 0x94`, replicated across the 32-bit word → **`filte
 ## Change History
 
 - 2026-09-19 — RawTherapee demosaic **kernel I/O contract** + **rawler→RT data bridge** (array + CFA). Confirmed the kernel *body* reads a single-channel row-major `const array2D<float>& rawData` (0..1 linear float; `rawimagesource.h:86`) and writes `array2D<float>& red/green/blue` (`rawimagesource.h:94-97`); CFA is taken from `this->FC()` via either a 32-bit `filters` mask (Bayer, dcraw bit-extract `rawimage.h:282`) or `int xtrans[6][6]` (X-Trans, `rawimage.h:298`) — never a parameter. Split kernels into two flavours: explicit-`rawData`-param (`amaze` `:281`, `lmmse` `:280`, `vng4` `:278`, `fast_xtrans` `:305`) are re-hostable as-is; `this->rawData` readers (`rcd` `:286`, `igv` `:279`, `dcb` `:284`, `ahd` `:285`, `eahd` `:276`, `hphd` `:277`, `fast` `:283`) need the `rawData` param added (the one edit a re-host requires, deliberately not shipped as a patch here). Noted `array2D` copy drops `ARRAY2D_BYREFERENCE` (`array2d.h:147`). Confirmed `rawl::RawImage` (`rawler/src/rawimage.rs:202-261`) provides `data` (`Integer`/`Float`, `W*H*cpp`, `cpp==1` Bayer), `photometric::Cfa(CFAConfig{cfa})`, `width/height/cpp`, `blacklevel/whitelevel`, `active_area/crop_area`; `CFA` (`cfa.rs:167` `color_at→0/1/2`, 2×2 or 6×6). The single required transform is `RawImage::apply_scaling` (`rawimage.rs:519`) → 0..1 f32, already exposed by `take_scaled_pixels` (`rawler_fotlab/src/develop.rs:259`). Gave the field-to-field bridge table and a minimal re-hosted signature `demosaic(const array2D<float>&, const CfaDesc&, array2D<float>&, &, &)`, plus the worked RGGB→`0x94949494` `filters` encoding. Filed as `RAWTRP-DECODE-000003`; row appended to `rules/STRUCT/index.md`.
+- 2026-09-23 — Added **§3.3: a Bayer CFA has FOUR colour levels, and TWO masks must cross the bridge.** Corrects §1.2/§3.2, which presented `FC` as returning `0/1/2` and gave only the folded `0x94949494`. Recorded that dcraw's code is `0/1/2/3 = R/G1/B/G2` (`dcraw.cc:173`), so RGGB's **original** mask is `0xb4b4b4b4` ("R G1 B G2", `rawimage.cc:1373`) and `set_prefilters()` (`rawimage.h:50-56`, guarded by `isBayer() && get_colors()==3`) folds G2→G1 to produce `filters = 0x94949494` while keeping the original in `prefilters`. Documented that `FC`/`ISGREEN`/`ISBLUE`/`ISRED` (`rawimage.h:268-283`) read the **folded** 3-valued mask whereas `vng4`'s local `#define fc(row,col)` (`vng4_demosaic_RT.cc:62`) reads the **unfolded** 4-valued `prefilters` — **both appear inside `vng4`** (`interpolate_row_redblue` folded, VNG `color` unfolded), which is what makes channel `3` a valid green there. Flagged that rawler's `CFA` is single-green/3-valued, so the bridge is a **semantic** conversion (rebuild the 4-level original from the 2×2 tile, then fold, emitting both masks), not a format copy — carrying only the folded mask renders `vng4` silently wrong. Also noted `vng4`'s four-colour guard (`vng4_demosaic_RT.cc:67-76`, `if (FC(i,j)==3) → igv`) is **dead code** since the folded mask never returns `3`; the intended property is `get_colors() > 3`, and `fc_pre == 3` is *not* a valid substitute because a normal Bayer's unfolded mask contains `3`. Implementation cross-ref: `rules/DESIGN/detail/FOTLAB-NATIVE-000004.md` R10 / D6 / D7.

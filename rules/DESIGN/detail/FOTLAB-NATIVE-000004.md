@@ -88,6 +88,28 @@
 - `MONO`/`NONE` 非插值路径不需要移植（rawler 侧已能表达）。
 - `green_equil` / `cfa_linedn`（pre-demosaic 辅助）不在本工程主体，另行决定。
 
+### R10 — 三层解耦：输入解析 / 输出解析 / 算法文件，以及 CFA 适配层
+
+移植库必须**与 rawler 的具体类型解耦**，只依赖「数组 + CFA」这一最小语义，才能被任何管线接入（`RAWTRP-DECODE-000003` §3.1）。因此三层各自独立，跨层接口全部是本库自有类型：
+
+1. **输入解析层**（`cfa.rs` + `array2d.rs`）—— 外部管线（rawler，或将来的其它 loader）负责把它的 mosaic 与 CFA **翻译**成我们的 `Array2D<f32>` + `CfaDesc`。内核层**永远看不到** `rawl::RawImage` / `rawl::CFA` / `CFAConfig` 等任何外部类型。
+2. **输出解析层**（`bridge.rs`）—— 内核只产出 `Rgb`（三个 split-planar `Vec<f32>`）；转成 rawler `Intermediate::ThreeColor` 是**唯一**一处外部耦合，且集中在**单个文件**里。
+3. **算法层**（`bayer/*.rs`、`xtrans/*.rs`）—— **一个算法一个 `.rs`**，彼此不互相 `use`，只共享 crate 内基础设施（`cfa`/`array2d`/`math`/`border`）。新增算法 = 新增一个文件 + 目录 `mod.rs`/`algo.rs` 各挂一行 + `IMPLEMENTED_*` 放开一项，**不改动任何既有内核**。
+
+**CFA 适配层（关键）**：rawler 的 CFA 与 rawtrp/dcraw 的 CFA **不是同一个表示**，差异是**语义性的、不是格式性的**，必须显式转换，不能因为"2×2 tile 长得差不多"就直接传：
+
+| | rawler `CFA` | rawtrp / RT / dcraw `CfaDesc` |
+| --- | --- | --- |
+| 颜色码 | `0=R, 1=G, 2=B` —— **单绿** | `0=R, 1=G1, 2=B, 3=G2` —— **双绿**（`dcraw.cc:173`） |
+| Bayer 载体 | 2×2 tile（`color_at(r,c)`） | 32-bit dcraw 掩码，且**两张**：`prefilters`（未折叠）+ `filters`（折叠后） |
+| X-Trans 载体 | 6×6 tile | `xtrans[6][6]` |
+| 绿通道语义 | 一个 G | `G1`/`G2` 两个电平，`color & 1` 判绿、`color ^= 2` 互换 |
+
+- 转换入口：`CfaDesc::bayer_from_2x2(tile)` / `xtrans_from_6x6(tile)`，内部按 dcraw 格点展开并**同时**产出两张掩码 —— `prefilters` 保留 G1/G2 之分，`filters` 复刻 `set_prefilters()` 的 `3→1` 折叠（D6(b)）。
+- **为什么必须双绿**：`vng4` 等内核读**未折叠**掩码，靠 `color == 3` 识别第二个绿通道。若把 rawler 的"单绿"当 RT 掩码直接喂进去，channel 3 恒为空 → 内核**静默退化**成错误图像（不 panic、不报错）。这就是"rawler CFA ≠ rawtrp CFA 必须加一层适配"的**具体后果**。
+- 适配层**单向、无状态、无副作用**：**不**改 rawler（C1）、**不**改 RT（C2），只在边界做一次表示转换。
+- 这样"继承自 dcraw 的灵活性"（四色 CFA、双绿、未折叠语义）与"与 rawler 管线的兼容性"（下游只看到三色 `Intermediate`）**同时成立**。落点与数据流见 D7。
+
 ## Design
 
 ### D1 — crate 布局
@@ -153,6 +175,61 @@ candidates() = RAWLER_NAMES ⧺ RAWTRP_BAYER_NAMES ⧺ RAWTRP_XTRANS_NAMES   // 
 - 新增 UniFFI 函数 `demosaic_candidates() -> Vec<DemosaicCandidate{ id, label, kind }>`；`StudioScreen.kt` 的菜单由它动态构建（去掉硬编码 `DemosaicButton` 列表）。
 - `StudioEngine.currentAlgorithm` 的默认仍是 `DEFAULT`。
 
+### D6 — dcraw 参照语义调查结论（移植依据与应对）
+
+RT 的这些内核是 **dcraw 的直接后代**（`vng4` = dcraw `vng_interpolate`，`dcraw.c:4422`），因此**必须按 dcraw 的语义读**，否则会得到"能编译、能出图、但数值错"的移植。以下结论均已对源码**机械核对**（表格 diff / 脚本复现上游过滤条件），是移植的**权威参照**；每条都给出我们的应对，并已落进 `bayer/vng4.rs` 的文件头 `//! Fidelity notes`。
+
+**(a) Bayer CFA 是四色，不是三色。** dcraw 的颜色码是 `0/1/2/3 = R/G1/B/G2`（`dcraw.cc:173`）—— **两个绿是不同电平**。RGGB 的**原始**掩码是 `0xb4b4b4b4`，RT 自己注明 `// R G1 B G2`（`rawimage.cc:1373`）。`ri->get_colors()` 才是"传感器几个色"（Bayer 恒为 **3**，RGBE 类四色 CFA 才 >3）——**与"未折叠掩码里有没有 3"是两回事**。
+→ **应对**：`CfaDesc` 加 `colors: u8`；`bayer_from_2x2` 按"奇数行绿 = G2"构造原始掩码，再折叠；`has_fourth_colour() = colors > 3`。
+
+**(b) `set_prefilters()` 把 G2 折进 G1。** `rawimage.h:50-56`：`prefilters = filters; filters &= ~((filters & 0x55555555) << 1);` → RGGB `0xb4b4b4b4` → `0x94949494`（仅当 `isBayer() && get_colors()==3`）。
+→ **应对**：`fold_prefilters()` 逐位复刻该行（幂等）；`CfaDesc` **两张掩码都存**。单测对四种 Bayer 排布 pin 住折叠结果 = dcraw 常数：`0x94949494`(RGGB) / `0x16161616`(BGGR) / `0x61616161`(GRBG) / `0x49494949`(GBRG)。
+
+**(c) 谁读哪张掩码 —— 一个内核里两张都用。** `RawImage::FC`/`ISGREEN`/`ISBLUE`/`ISRED` 读**折叠**掩码（`rawimage.h:268-283`，三值）；但 `vng4_demosaic_RT.cc:62` 有一个**局部** `#define fc(row,col)` 直接读 `prefilters`（**未折叠**，四值）。
+→ **应对**：`CfaDesc` 暴露两套方法 —— `fc*`/`is_*`（折叠）与 `fc_pre*`（未折叠），**逐处对照上游、不统一**。vng4 里两者同现：`interpolate_row_redblue` 走 `ISGREEN`/`ISBLUE`（折叠），而 scatter / 第一遍 / VNG 主循环的 `color` 走局部 `fc`（未折叠）。**这是本次移植最容易写错的一处**（初稿即错，已修）。
+
+**(d) VNG4 的四色守卫是死代码。** `vng4_demosaic_RT.cc:67-76` 意图是 `if (FC(i,j) == 3) → 回落 igv_interpolate`，但 `FC` 读折叠掩码，**永远不可能返回 3** → 四色 CFA（RGBE）会直接跑进去产出垃圾。
+→ **应对**：改测上游**本意**的属性 `has_fourth_colour()`（`get_colors() > 3`），**不复制死代码**。⚠️ 反例陷阱：普通 Bayer 的**未折叠**掩码**含 3**，所以绝不能拿 `fc_pre == 3` 当四色判据（单测 `a_normal_bayer_is_not_a_four_colour_cfa` 钉住）。
+
+**(e) 梯度解析器只吃 ≤2 个梯度位。** 上游一项占 5 个字 + 最多 1 个可选梯度（`ip += 5`，再条件 `ip++`），而 dcraw 会遍历**全部**梯度位。
+→ **应对**：机械校验 —— 对四种 Bayer 排布 × 全部 16 个 `(row & 7, col & 1)` 类，**没有任何存活项带 ≥3 个梯度位（0 例）**。故 ≤2 解析是安全的；第三位只在 dcraw 会越读的地方被我们忽略。单测 `no_surviving_term_needs_more_than_two_gradients` 钉住。
+
+**(f) 常量表与 dcraw 逐字节相同。** `TERMS`(64×6) 与 `CHOOD`(8×2) 与 dcraw 一致（机械 diff 通过）。
+→ **应对**：**原样转录，不改一个数字**。
+
+**(g) 存活项数恒为 32。** 16 个类在四种排布下**全部**是 32 项（脚本复现上游的过滤条件得 `counts=[32]×16`）。上游给每类 `1280 B = 320 int32` 预算，最坏消耗 `32×6 + 8×2 + 1 = 209` 字，**不会溢出**。
+→ **应对**：`assert_eq!(code.terms.len(), 32)`。项数是移植正确性的**直接探针**：CFA 电平映射一错，存活项数立刻偏移。（脚本留档 `log/vng4_termcount.py`。）
+
+**(h) 权重是 int→float 转换，不是位重解释。** 上游写 `*reinterpret_cast<float*>(ip++) = 1 << weight;` —— 左值类型是 `float`，故走 **int→float 转换**（结果 `1.0` 或 `2.0`）；SSE 注释"省掉 int→float 转换"指的是**读回**时按 float 直读。
+→ **应对**：`weight: (1i32 << weight) as f32`。**若误解为 bit-cast**，权重变成 ~1e-45 的非规格化数，阈值 `thold` 随之塌成 0，VNG 平均只剩极少邻居、图像退化成近似最近邻 —— 一个"不报错但明显错"的陷阱，已写进文件头。
+
+**(i) 没有 `-ffast-math`，NaN 必须显式处理。** RT 用 `RTENGINE_CXX_FLAGS="-ftree-vectorize"`（**无** fast-math），故 `0*(1/0) = NaN` 真实可能：VNG 邻居平均除以 `num`，而 `num` 可为 0。
+→ **应对**：`math::max0(x)` 显式复刻 libstdc++ 的 `std::max(0.f, NaN) = 0.f`（**不**依赖 `f32::max` 的巧合），单测钉住 NaN→0。
+
+**(j) 首遍"读邻居原生通道"，故可拆相。** 上游把 scatter 与线性插值放进同一行循环做软件流水，并配 `firstRow`/`lastRow` 补算以掩盖分块竞态。但第一遍**只读**邻居的**原生**通道、**只写**当前像素的三个**非原生**通道，二者**不相交**。
+→ **应对**：拆成"先全量 scatter、再全量线性插值"两相（均 `par_chunks_mut`），并**省略** `firstRow`/`lastRow`：结果与单线程上游逐位相同，且天然行并行（落进 R4 的"能拆相就拆"纪律）。
+
+### D7 — 三层解耦的落点与 CFA 适配器（数据流）
+
+```
+外部管线（rawler / 将来的其它 loader）
+        │  ① 输入解析（唯一外部表示 → 本库表示的转换点）
+        │     mosaic → Array2D<f32>；rawler CFA(2×2/6×6, 三色) → CfaDesc(双掩码, 四色)
+        ▼
+CfaDesc + Array2D<f32>          ← 本库自有类型；内核层只认这两个
+        │  ② 算法层：bayer/<algo>.rs │ xtrans/<algo>.rs（一算法一文件，互不 use）
+        ▼
+Rgb { red, green, blue }        ← 本库自有类型
+        │  ③ 输出解析（唯一外部耦合点，集中在 bridge.rs）
+        ▼
+rawler Intermediate::ThreeColor  →  develop 后续（calibrate …）不变
+```
+
+- **① 输入解析点**：`CfaDesc::bayer_from_2x2([[u8;2];2])` / `xtrans_from_6x6([[u8;6];6])`。rawler 侧只提供 `cfa.color_at(r,c)`（三色）→ 双绿、未折叠语义在**本函数内部**补齐。新接一条管线（DNG tile、别的 loader）时只需再写一个**同形状**构造函数：内核层与输出层**零改动**。
+- **② 算法层**：目录 `bayer/`、`xtrans/` **仅用于消歧同名算法**（`bayer/fast.rs` vs `xtrans/fast.rs`）；`algo.rs` 持三张解耦字典。新增内核 = 新文件 + `mod` 一行 + `IMPLEMENTED_*` 放开一项。
+- **③ 输出解析点**：`bridge.rs` 是**唯一** `use rawler` 的文件；换输出目标只替换这一个文件，`Rgb` 与内核不动。
+- **边界纪律**：CFA 适配**只发生在 ①**，且单向、无状态、无副作用 —— 内核内部一律按 dcraw **四色**语义工作；折回三色视图由内核自己用 `fc()` 完成（`border_interpolate`/`bilinear`/`igv`/`dcb` 读**折叠**掩码，天然三色）。
+
 ## Phases（分步实施）
 
 每批**一次到位**：rayon（对齐上游 OpenMP 分片点）+ 该内核上游有的 SIMD + 逐段语义比对 + 单测。批次只划分**内核覆盖面**，不划分"先标量后加速"。
@@ -198,3 +275,8 @@ candidates() = RAWLER_NAMES ⧺ RAWTRP_BAYER_NAMES ⧺ RAWTRP_XTRANS_NAMES   // 
   3. 枚举形态：**扩展原 `DemosaicAlgorithm`，以列表拼接并入 RT 变体**（不新开并行枚举）。
   4. SIMD 时机：**rayon + SIMD 本次一步到位**，取消原 P4"标量先行、SIMD 延后"。
   另确立名称解耦规范：标准候选名 RT 侧前缀 `"RAWTRP "`、rawler 侧前缀 `"RAWLER "`；两侧各用字典映射，`candidates()` 为两列表拼接（新增 R5/D3）。B0 已落地（crate 骨架 + 共享设施 + bilinear 内核）。
+- 2026-09-23 — **rev 3：补入 dcraw 参照语义调查结论 + 三层解耦与 CFA 适配层**（人工指令；dcraw 结论作为移植的权威参照）。
+  1. 新增 **R10 — 三层解耦（输入解析 / 输出解析 / 算法文件）+ CFA 适配层**：库只依赖「数组 + CFA」，内核层不见任何 rawler 类型；**rawler CFA（单绿、2×2/6×6 tile）≠ rawtrp CFA（双绿 G1/G2、两张 dcraw 掩码）**，差异是**语义性**的，必须显式转换（`bayer_from_2x2`/`xtrans_from_6x6`），否则 vng4 类内核 channel 3 恒空、**静默**退化。
+  2. 新增 **D6 — dcraw 参照语义调查结论（a–j）**，每条给出应对：(a) Bayer 是**四色** `0/1/2/3 = R/G1/B/G2`（RGGB 原始 `0xb4b4b4b4`）；(b) `set_prefilters()` 折叠 G2→G1 得 `0x94949494`；(c) `FC`/`ISGREEN`/`ISBLUE` 读**折叠**掩码，而 vng4 局部 `fc` 宏读**未折叠** `prefilters` —— **一个内核里两张掩码同现**（初稿即错在此，已修）；(d) vng4 的 `if (FC==3)` 四色守卫是**死代码**（折叠掩码永不返回 3），改测 `has_fourth_colour()`；(e) 梯度解析器只吃 ≤2 个梯度位，机械校验"无存活项带 ≥3 位"（0 例）故安全；(f) `TERMS`/`CHOOD` 与 dcraw 逐字节相同；(g) 存活项数恒为 **32**（四种排布 × 16 类全 32），最坏 209 字 < 上游 320 字预算；(h) 权重是 **int→float 转换**（`1.0`/`2.0`）而**非** bit-cast —— 误读会得 ~1e-45 非规格化数、阈值塌成 0；(i) 无 `-ffast-math` ⇒ `0*(1/0)=NaN`，需 `max0` 复刻 `std::max(0.f,NaN)=0.f`；(j) 首遍只读邻居**原生**通道 ⇒ 可拆"先 scatter 后插值"两相、省略 `firstRow/lastRow`。
+  3. 新增 **D7 — 三层解耦落点与数据流图**（①输入解析 ②算法层 ③输出解析／`bridge.rs` 为唯一 `use rawler` 处）；CFA 适配只发生在 ①，单向无状态。
+  4. 落地进度：`bayer/vng4.rs` 内核已按 (a)–(j) 完成（含 (c) 的掩码修正、(d) 的守卫替换、(h)/(i) 的数值处理），术语表与解析器已机械校验；校验脚本留档 `log/vng4_termcount.py`。
