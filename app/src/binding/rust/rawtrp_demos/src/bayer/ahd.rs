@@ -9,6 +9,13 @@
 //! direction whose 3x3 neighbourhood is the most homogeneous; on a tie it emits
 //! the mean of the two. The 5-pixel frame comes from `border_interpolate`.
 //!
+//! **Not advertised to the UI.** AHD is ported and dispatchable through
+//! `crate::demosaic_bayer`, but its homogeneity judgement runs in CIELab, so it
+//! needs the camera's own colour matrix — per-image data this crate has no source
+//! for by itself. `algo::IMPLEMENTED_BAYER` therefore omits `"ahd"`, which is what
+//! keeps it off the menu; add the name back there to wire it up
+//! (`FOTLAB-NATIVE-000004` rev 12).
+//!
 //! ## Fidelity notes
 //!
 //! * **The kernel stays in the mosaic's own 0..1 domain, and the Lab conversion

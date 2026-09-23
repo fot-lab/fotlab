@@ -103,6 +103,11 @@ pub enum DemosaicAlgorithm {
   /// `hphd` — High Pass Horizontal/Vertical Direction.
   RawtrpHphd,
   /// `ahd` — Adaptive Homogeneity-Directed.
+  ///
+  /// Ported and dispatchable, but intentionally not advertised: the kernel needs
+  /// the camera's colour matrix, so `rawtrp_demos::algo::IMPLEMENTED_BAYER`
+  /// leaves `"ahd"` out and the UI never offers the id. Nothing here changes when
+  /// it is wired back up (`FOTLAB-NATIVE-000004` rev 12).
   RawtrpAhd,
 }
 

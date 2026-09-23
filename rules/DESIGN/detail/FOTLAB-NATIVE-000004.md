@@ -135,8 +135,8 @@ app/src/binding/rust/rawtrp_demos/
     │   ├── lmmse.rs           # lmmse_demosaic.cc（830）✅ 已落地
     │   ├── dcb.rs             # demosaic_algos.cc:963-1548（DCB，13 个函数）✅ 已落地
     │   ├── amaze.rs           # amaze_demosaic_RT.cc（1610）
-    │   ├── ahd.rs             # ahd_demosaic_RT.cc（235）✅ 已落地
-    │   ├── eahd.rs            # eahd_demosaic.cc（447）
+    │   ├── ahd.rs             # ahd_demosaic_RT.cc（235）✅ 已移植（⚠️ 需相机色彩矩阵 ⇒ 刻意不接线/不广告，rev 12）
+    │   ├── eahd.rs            # eahd_demosaic.cc（447）— 需相机色彩矩阵，本轮不做（rev 12）
     │   ├── hphd.rs            # hphd_demosaic_RT.cc（364）✅ 已落地
     │   └── fast.rs            # fast_demo.cc（498）
     ├── xtrans/
@@ -264,7 +264,7 @@ rawler Intermediate::ThreeColor  →  develop 后续（calibrate …）不变
 | **B0 骨架** ✅ | crate + `CfaDesc`/`Array2D`/`Rgb`/`math`/`border`/`algo`(字典+candidates)/`bridge`(→`Intermediate`) + **bilinear** 内核 + 单测；registrar 为 `rawler_fotlab` 的 path dep | 已落地（本批随 CI 首验编译） |
 | **B1 打通** ✅ | **VNG4** 内核 ✅ + `lib.rs::demosaic_bayer` 分发 ✅ + `IMPLEMENTED_BAYER` 放开 ✅；**打通三件套全部落地**（提交 `52be623`）：`rawler_fotlab::demosaic.rs` 分发（`Algo::{Rawler,RawtrpBayer}` 双生产者）✅ + `demosaic_candidates()` UniFFI 暴露 ✅ + Kotlin 菜单动态化（去掉硬编码列表）✅ | 选 `RAWTRP vng4` 能出图：`everyDemosaicMenuOptionRedevelopsOnBayerAndExposureRecomputes` 现从**候选目录**取 `rawtrp:vng4` 端到端 develop 一次并断言"出图、满幅、彩色、与 PPG **不同**"；`DEFAULT` 逐像素不变（`cfa_default_algo` 分支顺序未动 + 四个 rawler 选项仍断言与 DEFAULT 逐字节相同）；UI 候选可见（菜单由目录驱动） |
 | **B2 质量层** | **RCD** ✅、**IGV** ✅、**LMMSE** ✅、**DCB** ✅ —— 四个内核 + 分发 + 候选全部落地 | 单测均已落地；**与 RT golden 数值比对仍待做**（Q1），故 B2 的出口标准只算完成一半 |
-| **B3 高端层** | AMAZE、AHD、EAHD、HPHD（AMAZE 为质量基准，含 SIMD）—— **HPHD** ✅、**AHD** ✅ 已落地；剩 AMAZE、EAHD | 同上 |
+| **B3 高端层** | AMAZE、AHD、EAHD、HPHD（AMAZE 为质量基准，含 SIMD）—— **HPHD** ✅ 落地并接线；**AHD** ✅ 已移植但**刻意不接线**（需相机色彩矩阵，见 rev 12）；**EAHD 不纳入本轮移植范围**（同因：需矩阵）；剩 AMAZE | 同上 |
 | **B4 X-Trans** | `xtrans_interpolate`(1/3-pass)、`xtrans/fast`、`dual` 混合封装 | X-Trans 图可选；CFA 自检 |
 
 ## Constraints
@@ -383,3 +383,11 @@ rawler Intermediate::ThreeColor  →  develop 后续（calibrate …）不变
   6. **单测策略**：平场是不动点（四种旋转、含边框全帧）；**线性斜坡必须在内部精确还原** —— 内核的估计都是"样本 + 二阶差分校正"，二阶差分**精确湮灭平面**，故任意 CFA 奇偶错、列偏移、`cng` 取错行都会让某项混入两个颜色从而使恒等式失效；这是平场测不出来的。再断言**曲面不是不动点**，使前两条无法靠"抄马赛克"通过。另直接钉住 `cbrt` 表与"中性三元组 → XYZ (1,1,1)"约定（后者是把白点送到 LUT 顶端的原因）。
 
   （HPHD 本身的结论见 rev 11 之前并入的同批提交 `6a97f72`：5 阶高通幅值选向、垂直 pass 串行、水平 pass 复用缓冲复刻上游"不重新清零"、`interpolate_row_rb_mul_pp` 提取到 `bayer/interp.rs` 供 EAHD 共用。）
+
+- 2026-09-23 — **rev 12：按"是否需要相机色彩矩阵"重划移植范围（人工指令）**。回答两个具体问题时查出的事实 + 据此做的范围调整：
+
+  1. **EAHD 需要矩阵，AMAZE 不需要 —— 结论直接来自上游源码，不是推断。** `eahd_demosaic.cc:224-234` 用 `imatrices.rgb_cam` 拼出 `wp[3][3]`（sRGB→XYZ 三行系数 × 相机矩阵），`:256-291` 再 `Color::RGB2Lab(…, wp, W)` 把**逐像素**的水平/垂直插值结果转成 Lab 来算"均匀度" —— 矩阵**在判别式里**，不是装饰。反之 `amaze_demosaic_RT.cc` 全文对 `rgb_cam`/`xyz_cam`/`Color::` 的命中数为 **0**，它只用到 `clip_pt = 1.0 / initialGain`（`:67`）这一个**标量**（RT 的整体初始增益，`clip_pt8` 同源于此），与"每幅图像的相机元数据"无关 ⇒ AMAZE 留在范围内。
+  2. **因此本轮范围 =「不要矩阵的内核」**：EAHD **不纳入**（宣布除外即可，本来就未开工）；已移植的 **AHD 保留代码但停止接线** —— `IMPLEMENTED_BAYER` 去掉 `"ahd"`，UI 菜单不再出现该项，`rawtrp_demos` 的枚举/分发臂/`rawler_fotlab` 的变体**一行未删**（恢复只需把名字加回那个白名单）。这是"已移植但被停放"这一新状态的首例：**port 与 advertise 是两个开关**（rev 11 之前二者合一，隐含"移植完就等于上线"）。
+  3. **判定成本极低但不能省**：一次跨目录 grep（`rgb_cam|xyz_cam|cam_xyz|Color::RGB2Lab|cbrt`）就能把整份内核清单分成两类。顺带查明 X-Trans 是**分叉**的 —— `xtrans_demosaic.cc:217-226` 无条件算 `xyz_cam`，但只有 `:656` 的 `if(useCieLab)`（3-pass 路径）用它 ⇒ **1-pass 与 `fast_xtrans` 无此依赖**，`three_pass` 有。`fast_demo.cc`、`dual_demosaic_RT.cc`、`bayer_bilinear_demosaic.cc` 均无命中。这条决定了 B4 也要按同一判据切一刀，而不是一刀切地做或不做 X-Trans。
+  4. **"`cbrt`"是识别这类内核的第二个指纹**：需要矩阵的通常是"在 Lab 里比像素"的那些，而 Lab 转换必然伴随一张 `cbrt` 表（`ahd:51`、`xtrans:43`、`dcraw:5067`、`eahd` 经 `color.cc`）。单独看 `cbrt` 会误报（`color.cc` 自身），单独看矩阵列表会漏掉走 wb/gain 的内核，二者合看足够。
+  5. **停放不丢账：接通时的工作量已经付过了。** AHD 的 `xyz_cam` 线程（rev 11 的守卫 + rawler `cam_to_xyz_normalized()` 取值 + 非有限/全零回落）全部保留，将来要接通只需两步：把 `"ahd"` 加回白名单、并决定矩阵取 rawler 的归一化结果还是自算 sRGB 约定 —— **不再有 port 工作量**。⚠️ 停放期的语义：UI 看不见 AHD，但 Rust 调用方仍可直接以 `BayerAlgo::Ahd` 取用它（crate 的能力面没缩小，只有候选目录缩小）。

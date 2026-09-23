@@ -214,6 +214,8 @@ pub fn demosaic_bayer(algo: BayerAlgo, cfa: &CfaDesc, mosaic: &Array2D<f32>, par
     // AHD is the first kernel that needs per-image data rather than a tuning
     // knob: its homogeneity test is a Lab comparison, so it takes the camera's
     // colour matrix (`bayer/ahd.rs` explains the convention and the default).
+    // The arm works, but `algo::IMPLEMENTED_BAYER` deliberately omits `"ahd"`, so
+    // nothing UI-facing reaches it yet (`FOTLAB-NATIVE-000004` rev 12).
     BayerAlgo::Ahd => bayer::ahd::bayer_ahd_demosaic(cfa, mosaic, &params.xyz_cam),
     other => Err(Error::UnsupportedAlgo(other.original_name())),
   }

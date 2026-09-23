@@ -81,7 +81,14 @@ pub const RAWTRP_XTRANS_NAMES: &[AlgoName] = &[
 /// never offer a path that would come back as
 /// [`crate::Error::UnsupportedAlgo`]. Entries are flipped on as each kernel's arm
 /// lands, one kernel per change (`FOTLAB-NATIVE-000004` C6).
-pub const IMPLEMENTED_BAYER: &[&str] = &["bilinear", "vng4", "rcd", "igv", "lmmse", "dcb", "hphd", "ahd"];
+///
+/// **Ported is not the same as advertised.** `"ahd"` is absent even though
+/// `bayer/ahd.rs` is ported and dispatchable: AHD — like EAHD, its Lab-judging
+/// sibling — needs the *camera's own* colour matrix, which is per-image data this
+/// crate has no source for by itself (`FOTLAB-NATIVE-000004` rev 12). Both stay
+/// out of the menu until that thread is settled; adding the name back to this
+/// list is all it takes to wire one up.
+pub const IMPLEMENTED_BAYER: &[&str] = &["bilinear", "vng4", "rcd", "igv", "lmmse", "dcb", "hphd"];
 
 /// As [`IMPLEMENTED_BAYER`], for the ported X-Trans kernels.
 pub const IMPLEMENTED_XTRANS: &[&str] = &[];
@@ -436,5 +443,20 @@ mod tests {
     let n = ids.len();
     ids.dedup();
     assert_eq!(ids.len(), n, "duplicate candidate id");
+  }
+
+  /// The Lab-judging kernels are ported but deliberately *not* advertised: their
+  /// homogeneity test needs the camera's own colour matrix, per-image data this
+  /// crate cannot see by itself (`FOTLAB-NATIVE-000004` rev 12). `IMPLEMENTED_BAYER`
+  /// is the only thing keeping them off the menu, so pin that they stay out there
+  /// rather than being quietly re-advertised by a later kernel landing.
+  #[test]
+  fn colour_matrix_kernels_are_parked_not_advertised() {
+    for name in ["ahd", "eahd"] {
+      assert!(BayerAlgo::from_original_name(name).is_some(), "{name} is not catalogued");
+      assert!(!IMPLEMENTED_BAYER.contains(&name), "{name}: needs a camera colour matrix, keep it out of IMPLEMENTED_BAYER");
+      let advertised: Vec<&str> = candidates().iter().filter_map(|c| c.id.strip_prefix("rawtrp:")).collect();
+      assert!(!advertised.contains(&name), "rawtrp:{name} reached the menu");
+    }
   }
 }
