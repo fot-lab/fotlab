@@ -155,12 +155,18 @@ RT 内核实为 `RawImageSource` 成员，读 `prefilters`(CFA 掩码)/`W`/`H`/`
 ### D3 — 名称与候选层（`algo.rs`）
 
 ```
-RAWLER_NAMES        : [(original, standard)]   // Ppg→"RAWLER PPG"、Bilinear4→"RAWLER Bilinear4"…
-RAWTRP_BAYER_NAMES  : [(original, standard)]   // bilinear→"RAWTRP Bilinear"、vng4→"RAWTRP VNG4"…
-RAWTRP_XTRANS_NAMES : [(original, standard)]   // fast→"RAWTRP X-Trans Fast"…
+RAWLER_NAMES        : [(original, standard)]   // Default→"RAWLER Default"、Ppg→"RAWLER Ppg"…
+RAWTRP_BAYER_NAMES  : [(original, standard)]   // bilinear→"RAWTRP bilinear"、vng4→"RAWTRP vng4"…
+RAWTRP_XTRANS_NAMES : [(original, standard)]   // one_pass→"RAWTRP one_pass"、fast→"RAWTRP xtrans_fast"…
 candidates() = RAWLER_NAMES ⧺ RAWTRP_BAYER_NAMES ⧺ RAWTRP_XTRANS_NAMES   // 仅已实现项
 ```
-`Candidate { id, label, kind }`：`id` 是稳定机器串（如 `rawtrp:bayer_vng4`），`label` 是上表标准名，`kind` ∈ {Bayer, XTrans} 供 UI 按当前传感器灰化。
+`Candidate { id, label, kind }`：`id` 是稳定机器串，`label` 是上表标准名，`kind` ∈ {Bayer, XTrans} 供 UI 按当前传感器灰化。
+
+⚠️ **本节的示例名与落地实现有两处出入，以实现为准**（`rawtrp_demos/src/algo.rs`，B1 时复核）：
+- **id 是 `rawtrp:` + 上游方法串**（`rawtrp:vng4`、`rawtrp:dcb`），**不是** 早期的 `rawtrp:bayer_vng4` —— 因为族别已由 `kind` 表达，id 里再嵌一层是冗余的；X-Trans 的 `fast` 是唯一例外（`rawtrp:xtrans_fast`，避免与 Bayer 的 `rawtrp:fast` 撞名）。
+- **标准名不做首字母大写**：`RAWTRP vng4` / `RAWTRP dcb`，因为它们**就是上游方法串**（`Method` 的 UI 标识符），保持原样才能与 RT 侧文档/日志逐字对上；`RAWTRP xtrans_fast` 同理（避免与 Bayer `fast` 混淆而额外加的前缀）。
+
+这两个 id 约定是**承载性的**，不是风格：`rawler_fotlab` 侧靠"`rawtrp:` 前缀 + `BayerAlgo::from_original_name`"把候选折回变体（见 D5），若此处改成内嵌族别的形式，两侧的拼装与解析就会失配（单测 `rawtrp_candidate_ids_are_the_upstream_names` / `original_names_round_trip` 钉住）。
 
 ### D4 — 与 `develop.rs` 的集成
 
@@ -169,11 +175,29 @@ candidates() = RAWLER_NAMES ⧺ RAWTRP_BAYER_NAMES ⧺ RAWTRP_XTRANS_NAMES   // 
 - `downsample` 开关优先于算法选择（不变）：quarter-res 仍走 rawler superpixel；RT 算法仅在 full-res 路径。
 - 失败（不支持的 CFA）→ 回落到 CFA 默认（沿用 `effective_algorithm` 的既有回落 + 日志）。
 
+**B1 落地后补充（实现即契约，`rawler_fotlab/src/demosaic.rs`）**：
+
+1. **两种生产者是两种类型，不是同一枚举的两种取值。** `Algo` 拆成 `Rawler(RawlerAlgo)` 与 `RawtrpBayer(BayerAlgo)`：rawler 的臂是 `Demosaic` trait 实现（吃 `Pix2D` + `CFA` + `ROI`），移植内核吃 `Array2D<f32>` + `CfaDesc` 并自带边界处理，二者无共同入口。拆开的直接收益：`cfa_default_algo()` 的返回类型只能是 `RawlerAlgo` ⇒ "回落"这条路径**在类型上就是完备的**，不需要 `unreachable!()` 兜底。
+2. **CFA 必须按 ROI 原点平移**（`bayer_cfa_desc` 内 `cfa.shift(roi.p.x, roi.p.y)`）。内核问 `CfaDesc::fc(row, col)` 问的是**马赛克原点**的颜色，所以图案必须是 `active_area` 左上角那一份。rawler 每个解马赛克都做同一步（`ppg.rs:46`/`superpixel.rs:40`/`xtrans/bilinear.rs:73`）；漏掉会在**任何奇数偏移**的 active area 上把红蓝对调 —— 一个"看着正常、其实是错的"故障，不是崩溃。
+3. **马赛克只物化 ROI，不是整幅**（`mosaic_from_roi`）。这样输出尺寸与 rawler 各臂一致 ⇒ calibrate / crop_default 完全不变，也**看不出**是哪个生产者写的。
+4. **Fuji 旋转在 RAWTRP 臂上照做**（与 PPG 臂同一调用）。RT 内核不含几何，旋转属本阶段职责（D4 首段）。
+5. **CFA 不满足（四色/RGBE、X-Trans 6×6）或内核返回 `Err` ⇒ 回落 CFA 默认并 `log::warn!`**，而不是让 develop 失败。上游 RT 在四色 CFA 下回落到 IGV，但其 IGV 是 `float* rgb[3]` + 按 `FC` 锁 `rgb[c]`（`demosaic_algos.cc:615-650`），四色下 `c` 会取到 3 ⇒ 那条"回落"本身不是可用路径（rev 7 第 7 条），故本库拒绝该 CFA。日志是本库**新增**的（`rawler_fotlab` 此前无任何日志设施；`log = "0.4"`，与 rawler 同 major 共用同一 logger）。⚠️ 这意味着"回落"在用户侧**静默**：选 RAWTRP 却拿到 CFA 默认，只有日志能看出来 —— UI 按 `kind` 灰化尚未做（见 D5 末条）。
+6. **RT 的三个调参项暂用上游默认**：`rawtrp_demos::BayerParams::default()`（`dcb_iterations = 2`、`dcb_enhance = true`、`lmmse_iterations = 2`，`rtengine/params/raw.cc:87`）。Studio 尚无对应抽屉，且给 `DevelopParams` 加字段会打断现有 Kotlin 构造点；注入点已收敛到 `run_rawtrp_bayer` 一处，做抽屉时只改那里。**这不算"未完成"**：RT 自己打开 DCB/LMMSE 用的就是这组值。
+
 ### D5 — 与 Kotlin 的集成
 
 - 扩展 `DemosaicAlgorithm`（列表拼接并入 RT 变体）；`DemosaicParams`/`RawlerFotlabDecoder`/`StudioEngine` 透传不变。
 - 新增 UniFFI 函数 `demosaic_candidates() -> Vec<DemosaicCandidate{ id, label, kind }>`；`StudioScreen.kt` 的菜单由它动态构建（去掉硬编码 `DemosaicButton` 列表）。
 - `StudioEngine.currentAlgorithm` 的默认仍是 `DEFAULT`。
+
+**B1 落地后补充（实现即契约）**：
+
+1. `DemosaicCandidate` 比原计划**多一个字段** `algorithm: DemosaicAlgorithm` —— 菜单直接把这一项发回去即可，Kotlin 侧**不需要**自己的 id→算法表。这是"菜单与分发不会漂移"的实现手段：两者同源于 `rawtrp_demos::algo::candidates()`。
+2. **枚举按"一个内核一个变体"追加**（`RawtrpBilinear`/`RawtrpVng4`/`RawtrpRcd`/`RawtrpIgv`/`RawtrpLmmse`/`RawtrpDcb`），全部排在 rawler 四个**之后** ⇒ 已有选择语义不变。B3/B4 只需继续追加。守卫单测 `demosaic_candidates_maps_every_advertised_id_to_a_variant`：**已放开却无变体**的候选会让它失败（两侧判据独立：目录看 `IMPLEMENTED_*`，解析看变体是否存在）。
+3. **`kind` 的消歧作用是承载性的**：两侧都有 `fast`（Bayer `fast_demosaic` / X-Trans `fast_xtrans_interpolate`），解析**按 `kind` 而不是按名字**。只按名字解析的话，B3 一放开 Bayer `fast`，`rawtrp:xtrans_fast` 就会被派给 Bayer 内核 —— 单测 `rawtrp_ids_resolve_and_the_two_fasts_stay_apart` 钉住。
+4. **标签保留了本地化**：菜单**列表**来自原生目录，但四个 rawler 项的文案仍取 string resource，其余回落到目录自带的 `label`（`RAWTRP vng4`）。即"新内核立刻出现在菜单里，只是还没有译文"，而不是"要么加字符串资源、要么不显示"。`demosaicLabel()` 是唯一的映射点。
+5. `StudioEngine.demosaicCandidates` 是 `by lazy` 的进程级缓存（枚举两张上游字典，运行期不会变）。
+6. **仍未做**：按 `kind` 对当前传感器**灰化**。要灰化需要把"当前图的传感器族"跨 FFI 送上来（`supports_downsample` 那种形状），B1 未纳入范围；当前表现是"选了不适用项 → 静默回落到 CFA 默认 + 日志"（见 D4-5）。⚠️ 这是已知的 UX 缺口，不是遗漏的 bug。
 
 ### D6 — dcraw 参照语义调查结论（移植依据与应对）
 
@@ -238,7 +262,7 @@ rawler Intermediate::ThreeColor  →  develop 后续（calibrate …）不变
 | 批次 | 内容 | 出口标准 |
 | --- | --- | --- |
 | **B0 骨架** ✅ | crate + `CfaDesc`/`Array2D`/`Rgb`/`math`/`border`/`algo`(字典+candidates)/`bridge`(→`Intermediate`) + **bilinear** 内核 + 单测；registrar 为 `rawler_fotlab` 的 path dep | 已落地（本批随 CI 首验编译） |
-| **B1 打通** | **VNG4** 内核 ✅ + `lib.rs::demosaic_bayer` 分发 ✅ + `IMPLEMENTED_BAYER` 放开 ✅；**待做**：`rawler_fotlab::demosaic.rs` 分发 + `demosaic_candidates()` 暴露 + Kotlin 菜单动态化 | 选 `RAWTRP VNG4` 能出图；`DEFAULT` 逐像素不变；UI 候选可见 |
+| **B1 打通** ✅ | **VNG4** 内核 ✅ + `lib.rs::demosaic_bayer` 分发 ✅ + `IMPLEMENTED_BAYER` 放开 ✅；**打通三件套全部落地**（提交 `52be623`）：`rawler_fotlab::demosaic.rs` 分发（`Algo::{Rawler,RawtrpBayer}` 双生产者）✅ + `demosaic_candidates()` UniFFI 暴露 ✅ + Kotlin 菜单动态化（去掉硬编码列表）✅ | 选 `RAWTRP vng4` 能出图：`everyDemosaicMenuOptionRedevelopsOnBayerAndExposureRecomputes` 现从**候选目录**取 `rawtrp:vng4` 端到端 develop 一次并断言"出图、满幅、彩色、与 PPG **不同**"；`DEFAULT` 逐像素不变（`cfa_default_algo` 分支顺序未动 + 四个 rawler 选项仍断言与 DEFAULT 逐字节相同）；UI 候选可见（菜单由目录驱动） |
 | **B2 质量层** | **RCD** ✅、**IGV** ✅、**LMMSE** ✅、**DCB** ✅ —— 四个内核 + 分发 + 候选全部落地 | 单测均已落地；**与 RT golden 数值比对仍待做**（Q1），故 B2 的出口标准只算完成一半 |
 | **B3 高端层** | AMAZE、AHD、EAHD、HPHD（AMAZE 为质量基准，含 SIMD） | 同上 |
 | **B4 X-Trans** | `xtrans_interpolate`(1/3-pass)、`xtrans/fast`、`dual` 混合封装 | X-Trans 图可选；CFA 自检 |
@@ -337,3 +361,14 @@ rawler Intermediate::ThreeColor  →  develop 后续（calibrate …）不变
   10. **并行粒度：上游只在 tile 循环上并行**（`:1423` 的 `omp parallel` + `:1437` 的 `omp for schedule(dynamic) nowait`，外加 `:1543` 一个进度计数器 atomic），**所有 helper 都是串行**。本库按 **tile 行**分片（tile 之间互不依赖 ⇒ 粒度等价），tile 内保持串行 —— 与上游同一粒度，且完全在安全 Rust 内。**这是"上游并行 ≠ 本库并行"的第四例**（RCD 块行 / IGV chroma 四相 / LMMSE 步骤 6-7 / DCB tile 行），四例模式一致：**凡上游靠"类别不相交"或"任务天然独立"而并行的地方，本库优先找*结构上可切分*的维度**，找不到就留在有界串行并留档。
   11. **`iterations <= 0` 走同一条路**（上游 `for (int i = iterations; i > 0; i--)`），GUI 默认 `dcb_iterations = 2`、`dcb_enhance = true`。`dcb_enhance` 切换的是**最后一级**（`dcb_color` ↔ `dcb_refinement` + `dcb_color_full`），不是装饰开关 —— 单测 `enhance_is_not_a_no_op` 与 `zero_and_negative_iterations_take_the_same_path` 分别钉住两端。
   另：DCB 的 `tile_row_bands`/`Tile` 结构与 RCD 同族但更简单（无收尾补边、无 `tileBorder != kernelBorder` 的三元式），`Tile::clear()` **每块 tile 都清零**（复刻上游每块 `memset`，因为外层零环会被 `fill_border` 的邻域和读到）；单测用**分段常数马赛克**（红站 0.2 / 绿站 0.5 / 蓝站 0.8）作 DCB 的**不动点**做精度断言 —— 该输入下所有 pass 只在**同一通道内部**做差或加权，故四种 Bayer 排布都应**精确**重建（1e-4 容差），任何奇偶/通道接反都会立刻失败。**golden 数值比对仍未做，B2 出口标准只完成一半。**
+- 2026-09-23 — **rev 10：B1 打通完成（移植内核第一次从 App 可达）**（提交 `52be623`；改动面 `rawler_fotlab/src/demosaic.rs` + `src/lib.rs` + `Cargo.toml`、`rawtrp_demos/src/algo.rs`、Kotlin `StudioEngine.kt`/`StudioScreen.kt`、`RawRoutingTest.kt`）。9 条结论，D3/D4/D5 已就地补写：
+
+  1. **先有"两种生产者"这个类型区分，才有干净的回落。** `Algo` 从扁平五臂改为 `Rawler(RawlerAlgo)` + `RawtrpBayer(BayerAlgo)`，两个 runner 分开。这不是为了整洁：回落路径 `cfa_default_algo()` 的返回类型是 `RawlerAlgo`，于是"移植内核失败 → 回落到 CFA 默认"在**类型上**不可能回到移植内核，`unreachable!()` 没有存在必要。扁平写法要么写 `unreachable!()`（跨 FFI 的 panic），要么把内核塞进 rawler 的 trait —— 后者是伪装，两者都不是好选择。
+  2. **CFA 平移（`shift(roi.p.x, roi.p.y)`）是本批最安静、后果最重的点。** 内核问的是"马赛克原点的颜色"，而 ROI 不是整幅。漏掉不会崩、不会报错，只在**奇数偏移**的 active area 上把红蓝对调。这正是 rev 3 R10 里"CFA 差异是语义性的、必须显式转换"的第二个实例（第一个是 G1/G2 双绿）。
+  3. **输入物化只到 ROI**（而不是整帧再裁），因此输出尺寸与 rawler 各臂逐一相同 ⇒ calibrate/crop_default 零改动，本阶段的三条生产者对下游仍不可见（R2/R3 不变）。**代价是 ROI 的一次拷贝**（`w*h*4` 字节）；这是 RAWTRP 路径唯一新增的分配，与内核自身缓冲和色彩中间态相比可忽略。
+  4. **"回落"是静默的，只有日志能看见。** `rawler_fotlab` 此前**没有任何日志设施**，本批为它引入 `log = "0.4"`（与 rawler 同 major，指同一 logger）。这是本库**新增**的可观测性，不是上游行为的移植。⚠️ 仍然：选了 RAWTRP 却拿到 CFA 默认的图，用户界面**看不出来** —— D5 末条记的 `kind` 灰化是补齐它的方式，未纳入 B1。
+  5. **`DemosaicAlgorithm` 追加 6 个变体，排在 rawler 四个之后**，落实 rev 2 第 3 条"列表拼接并入"。附带发现：**D3 的 id 示例与标准名写法与实现不一致**（文档写 `rawtrp:bayer_vng4` / `RAWTRP VNG4`，实现是 `rawtrp:vng4` / `RAWTRP vng4`）。已就地更正 D3 并说明理由：族别由 `kind` 表达（id 内嵌冗余），标准名保持上游方法串原样以便与 RT 文档逐字对照。**这是文档漂移，不是代码错误** —— 但漂移的代价是"按文档写两侧解析"会立刻失配，故补了单测钉住。
+  6. **id→内核的解析只留一张表。** 新增 `BayerAlgo::from_original_name` / `XTransAlgo::from_original_name`（含往返单测），`rawler_fotlab` 只做"剥 `rawtrp:` 前缀 → 查表 → 折回变体"，不再维护第二份名字表。rev 3 的"三层解耦"因此多了一条**纵向**约束：名字的唯一来源是 `algo.rs`。
+  7. **`kind` 消歧 `fast` 是必须的，不是防御性的。** 两侧都有 `fast`，只按名字解析会在 B3 放开 Bayer `fast` 的那次改动里**静默**把 `rawtrp:xtrans_fast` 派给 Bayer 内核（同名字、跨传感器）。已在代码注释与单测里各钉一次。
+  8. **instrumented 测试的前提随本批失效，已改写。** `everyDemosaicMenuOptionRedevelopsOnBayerAndExposureRecomputes` 原文断言"**每个**菜单项都与 DEFAULT 帧逐字节相同"——这在四项全部回落 PPG 时成立，现在不成立（RAWTRP 项跑自己的内核）。改为两个契约：四个 rawler 项维持逐字节相等（钉住 CFA 解析与回落），**并从候选目录取 `rawtrp:vng4` 端到端 develop 一次**，断言"出图、满幅、彩色、与 PPG **不同**"—— 这正是 B1 的出口标准"选 RAWTRP vng4 能出图"。取目录而非硬编码变体，使该用例同时验证 `demosaic_candidates()` 在 Kotlin 侧可达、且 id/algorithm 配对就是分发所用的那一对。**只跑一个内核**：每个额外选项都是一次 36MP 全幅 develop，其余内核由 crate 单测与本批的解析/目录单测覆盖。
+  9. **本批未做**：RT 三个调参项（DCB iterations/enhance、LMMSE iterations）走 `BayerParams::default()`（D4-6）；`kind` 灰化（D5-6）。**且 B2 的 golden 数值比对仍挂在 Q1 下** —— 也就是说 `rawtrp:vng4` 端到端"出图"现在有了证据，"数值与 RT 一致"仍然**没有**。
