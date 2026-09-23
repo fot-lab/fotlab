@@ -296,7 +296,7 @@ object StudioEngine {
      * Lazy and read once: it enumerates two upstream dictionaries, and the answer cannot change
      * while the app runs.
      */
-    private val demosaicCandidatesCache: List<DemosaicCandidate> by lazy { RawlerFotlabBridge.demosaicCandidates() }
+    private val demosaicCandidatesCache: List<DemosaicCandidate> by lazy { RawlerFotlabBridge.demosaicAlgorithms() }
 
     /** The list the DevelopFilm bar renders; see [demosaicCandidatesCache]. */
     val demosaicCandidates: List<DemosaicCandidate> get() = demosaicCandidatesCache

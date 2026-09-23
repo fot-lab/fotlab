@@ -114,4 +114,22 @@ object RawlerFotlabBridge {
      */
     fun supportedGradeLogSpaces(): List<String> =
         runCatching { supportedLogSpaces().toList() }.getOrDefault(emptyList())
+
+    /**
+     * The demosaic algorithms the Studio dropdown may offer, in display order: rawler's own
+     * debayers (`RAWLER …`) followed by the RawTherapee kernels ported in `rawtrp_demos`
+     * (`RAWTRP …`), each carrying the [DemosaicAlgorithm] the menu sends back
+     * (`FOTLAB-NATIVE-000004` D5). Not a develop call — it only enumerates, so it is cheap
+     * enough to read once and cache.
+     *
+     * Named `demosaicAlgorithms` rather than `demosaicCandidates` for the reason this facade
+     * renames everything: the generated binding *is* a top-level `demosaicCandidates()` in this
+     * same package, and a member of the same name would shadow it and recurse forever.
+     *
+     * Empty when the library is absent. The menu then renders with no entries instead of
+     * crashing the screen — the same degradation every call here gets, and the right one,
+     * because the list is data rather than a promise the app can keep without the `.so`.
+     */
+    fun demosaicAlgorithms(): List<DemosaicCandidate> =
+        runCatching { demosaicCandidates() }.getOrDefault(emptyList())
 }

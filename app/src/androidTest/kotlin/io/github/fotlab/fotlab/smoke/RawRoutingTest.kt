@@ -466,7 +466,7 @@ class RawRoutingTest {
         // also proves the native `demosaic_candidates()` menu is reachable from Kotlin and that its
         // ids/algorithm pairing is the one the pipeline dispatches on. Unlike the four above, this
         // kernel must move pixels: it is a different debayer, not a fallback to PPG.
-        val rawtrpVng4 = RawlerFotlabBridge.demosaicCandidates().first { it.id == "rawtrp:vng4" }
+        val rawtrpVng4 = RawlerFotlabBridge.demosaicAlgorithms().first { it.id == "rawtrp:vng4" }
         step("catalogue", "rawtrp:vng4 -> ${rawtrpVng4.algorithm} ('${rawtrpVng4.label}', ${rawtrpVng4.kind})")
         StudioEngine.develop(rawtrpVng4.algorithm)
         val rawtrp = runBlocking {
