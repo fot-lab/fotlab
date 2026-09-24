@@ -491,7 +491,7 @@ fn mosaic_from_roi(pixels: &PixF32, roi: Rect) -> rawtrp_demos::Array2D<f32> {
 /// the one at the ROI's top-left, not the sensor's. Every rawler demosaic does
 /// the same shift; dropping it silently swaps the red and blue planes on any
 /// odd-offset active area — a "looks fine, is wrong" failure rather than a crash.
-fn bayer_cfa_desc(cfa: &CFA, roi: Rect) -> Option<rawtrp_demos::CfaDesc> {
+pub(crate) fn bayer_cfa_desc(cfa: &CFA, roi: Rect) -> Option<rawtrp_demos::CfaDesc> {
   if cfa.width != 2 || cfa.height != 2 {
     return None;
   }

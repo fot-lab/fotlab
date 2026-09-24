@@ -104,6 +104,12 @@
     <string name="studio_denoise_bm3d_label">BM3D（协作滤波）</string>
     <string name="studio_denoise_bm3d_hint">灵敏度倍率，0.0 – 4.0（0 关闭）</string>
     <string name="studio_dehaze_title">去雾</string>
+    <string name="studio_cd_lca">LCA（色差校正）</string>
+    <string name="studio_label_lca">LCA</string>
+    <string name="studio_ca_title">LCA（色差校正）</string>
+    <string name="studio_ca_auto_label">自动拟合</string>
+    <string name="studio_ca_red_hint">红色径向强度（0 关闭）</string>
+    <string name="studio_ca_blue_hint">蓝色径向强度（0 关闭）</string>
     <string name="studio_dehaze_strength_hint">强度 0.0 – 1.0（0 关闭）</string>
     <string name="studio_dehaze_percentile_hint">雾底百分位 / 引导模式软掩膜上限，0.0 – 1.0（默认 0.01）</string>
     <string name="studio_dehaze_radius_dark_hint">暗通道窗半径（子栅格像素，默认 8）</string>

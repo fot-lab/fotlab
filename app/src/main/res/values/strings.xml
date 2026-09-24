@@ -81,6 +81,7 @@
     <string name="studio_cd_whitebalance">White balance</string>
     <string name="studio_cd_denoise">Denoise</string>
     <string name="studio_cd_dehaze">Dehaze</string>
+    <string name="studio_cd_lca">LCA (chromatic aberration)</string>
     <string name="studio_cd_develop_film">Develop film tools</string>
     <string name="studio_cd_tune_image">Tune image</string>
     <string name="studio_cd_style_filter">Style filter</string>
@@ -94,6 +95,11 @@
     <string name="studio_label_whitebalance">WB</string>
     <string name="studio_label_denoise">Denoise</string>
     <string name="studio_label_dehaze">Dehaze</string>
+    <string name="studio_label_lca">LCA</string>
+    <string name="studio_ca_title">LCA (chromatic aberration)</string>
+    <string name="studio_ca_auto_label">Auto-fit</string>
+    <string name="studio_ca_red_hint">Red radial strength (0 = off)</string>
+    <string name="studio_ca_blue_hint">Blue radial strength (0 = off)</string>
     <string name="studio_label_log">LOG</string>
     <string name="studio_label_lut">LUT</string>
     <string name="studio_exposure_title">Exposure (EV)</string>

@@ -22,7 +22,10 @@
 //!     then lifted and contrast-restored per pixel, blended back by
 //!     `dehaze_strength`. Runs on the *normalised* mosaic because it bins a 0..1
 //!     histogram — a positive EV would push values >1.0 into the top bin.
-//! 3b. `exposure_ev` — linear gain `2^exposure_ev` on the **single-channel** scaled
+//! 3b. `ca` — optional pre-demosaic chromatic-aberration correction (`ca.rs`,
+//!     the `rawtrp_correct` port of RawTherapee's `CA_correct_RT`); `None` =
+//!     identity. Bayer-only; runs after dehaze, before exposure.
+//! 3c. `exposure_ev` — linear gain `2^exposure_ev` on the **single-channel** scaled
 //!     mosaic, *before* demosaic (one mul per photosite instead of per output
 //!     channel; demosaic is linear so the result is identical). Applied **last**
 //!     among the mosaic stages, after denoise and dehaze have cleaned the
@@ -56,6 +59,7 @@ use rayon::prelude::*;
 use rawler::rawimage::{RawImageData, RawPhotometricInterpretation};
 use rawler::RawImage;
 
+use crate::ca::{correct_ca, CaSettings};
 use crate::calibrate::{calibrate, WorkingSpace};
 use crate::decode::decode_to_rawimage;
 use crate::dehaze::dehaze;
@@ -170,6 +174,15 @@ pub struct DevelopParams {
   /// field. Supplied from Kotlin when the Studio dehaze control is enabled.
   #[uniffi(default = None)]
   pub dehaze_radius_guide: Option<i32>,
+  /// Chromatic-aberration correction settings (the Studio LCA stage), applied
+  /// **before** exposure on the full-frame scaled mosaic, after dehaze — the
+  /// port of RawTherapee's `CA_correct_RT` (`rawtrp_correct` crate,
+  /// `rules/REVIEW/detail/FOTLAB-RAWLER-000011.md`). `None` = the stage is off
+  /// (identity; the default). Auto mode measures the residual-CA polynomial
+  /// per render; manual mode uses the radial red/blue strengths. Only 2×2
+  /// Bayer CFAs are supported — other CFAs degrade to the uncorrected mosaic.
+  #[uniffi(default = None)]
+  pub ca: Option<CaSettings>,
 }
 
 /// Grading parameters supplied by Kotlin for [`develop_and_grade`].
@@ -375,6 +388,11 @@ pub(crate) fn develop_image(
     params.dehaze_radius_dark,
     params.dehaze_radius_guide,
   );
+  // CA correction: pre-demosaic radial CA on the full-frame mosaic (after
+  // dehaze, before exposure — like the other neighbour-quality stages it wants
+  // the normalised source values). `None` is the identity; non-Bayer CFAs and
+  // kernel failures degrade to the uncorrected mosaic (see `ca.rs`).
+  let pixels = correct_ca(pixels, image.width, image.height, params.ca.as_ref(), cfa);
   // Exposure last: the `2^exposure_ev` linear gain on the cleaned, normalised
   // mosaic. Channel-uniform and linear, so it commutes with demosaic.
   let pixels = apply_exposure(pixels, params.exposure_ev);

@@ -70,3 +70,4 @@ rawalchemy_fotlab = { path = "../../cxx/rawalchemy_fotlab", optional = true }
 # pipeline downstream of demosaic does not change
 # (rules/DESIGN/detail/FOTLAB-NATIVE-000004.md).
 rawtrp_demos = { path = "../rawtrp_demos" }
+rawtrp_correct = { path = "../rawtrp_correct" }

@@ -16,6 +16,7 @@ import io.github.fotlab.fotlab.media.StubRawDecoder
 import io.github.fotlab.fotlab.media.route
 import io.github.fotlab.fotlab_rawler.DemosaicAlgorithm
 import io.github.fotlab.fotlab_rawler.DemosaicCandidate
+import io.github.fotlab.fotlab_rawler.CaSettings
 import io.github.fotlab.fotlab_rawler.DevelopParams
 import io.github.fotlab.fotlab_rawler.GradeParams
 import io.github.fotlab.fotlab_rawler.RawlerImageLoaded
@@ -203,6 +204,7 @@ object StudioEngine {
             dehazeCeiling = currentDehazePercentile,
             dehazeRadiusDark = currentDehazeRadiusDark,
             dehazeRadiusGuide = currentDehazeRadiusGuide,
+            ca = currentCa,
                         downsample = downsampleState.value,
                     ),
                 ) ?: return StudioRenderResult.Unsupported
@@ -494,6 +496,7 @@ object StudioEngine {
             dehazeCeiling = currentDehazePercentile,
             dehazeRadiusDark = currentDehazeRadiusDark,
             dehazeRadiusGuide = currentDehazeRadiusGuide,
+            ca = currentCa,
             // The grade fork develops through the same pipeline, so it honours the switch too —
             // grading a quarter-resolution frame is simply grading fewer pixels.
             downsample = downsampleState.value,
@@ -710,6 +713,7 @@ object StudioEngine {
             dehazeCeiling = currentDehazePercentile,
             dehazeRadiusDark = currentDehazeRadiusDark,
             dehazeRadiusGuide = currentDehazeRadiusGuide,
+            ca = currentCa,
             downsample = downsampleState.value,
         )
         // `metered` is the offset relative to the current image; add the recorded applied exposure
@@ -736,6 +740,12 @@ object StudioEngine {
     /** The current dehaze guided-filter radius; the UI prefills the Dehaze dialog from this. */
     fun currentDehazeRadiusGuide(): Int? = currentDehazeRadiusGuide
 
+    /** The CA-correction settings retained for the next develop re-render; null = off. */
+    private var currentCa: CaSettings? = null
+
+    /** The current CA settings; the UI prefills the LCA dialog from this. */
+    fun currentCa(): CaSettings? = currentCa
+
     /**
      * Re-develop the current RAW with a denoise [strength] (sensitivity multiplier on the detection
      * threshold) entered from the Studio Denoise dialog, keeping the current demosaic algorithm,
@@ -760,6 +770,17 @@ object StudioEngine {
         currentDehazePercentile = percentile
         currentDehazeRadiusDark = radiusDark
         currentDehazeRadiusGuide = radiusGuide
+        reDevelop()
+    }
+
+    /**
+     * Re-develop the current RAW with [ca] chromatic-aberration settings entered from the Studio
+     * LCA dialog, keeping the current demosaic algorithm, exposure, white balance, denoise and
+     * dehaze. `null` (the dialog switch OFF) is the identity — [DevelopParams.ca] is `None`, so the
+     * stage is skipped. The canvas is re-rendered from the re-developed PNG.
+     */
+    fun setCa(ca: CaSettings?) {
+        currentCa = ca
         reDevelop()
     }
 
@@ -805,6 +826,7 @@ object StudioEngine {
             dehazeCeiling = currentDehazePercentile,
             dehazeRadiusDark = currentDehazeRadiusDark,
             dehazeRadiusGuide = currentDehazeRadiusGuide,
+            ca = currentCa,
                         downsample = downsample,
                     ),
                     wbKelvin,
@@ -823,6 +845,7 @@ object StudioEngine {
             dehazeCeiling = currentDehazePercentile,
             dehazeRadiusDark = currentDehazeRadiusDark,
             dehazeRadiusGuide = currentDehazeRadiusGuide,
+            ca = currentCa,
                         downsample = downsample,
                     ),
                 )

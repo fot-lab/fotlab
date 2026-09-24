@@ -74,6 +74,7 @@ use rawler::decoders::RawDecodeParams;
 use rawler::rawsource::RawSource;
 
 mod bound;
+mod ca;
 mod calibrate;
 mod cfa;
 mod decode;

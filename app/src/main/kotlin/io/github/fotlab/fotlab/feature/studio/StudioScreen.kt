@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.Theaters
 import androidx.compose.material.icons.filled.Tonality
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Air
+import androidx.compose.material.icons.filled.ClosedCaption
 import androidx.compose.material.icons.filled.Grain
 import androidx.compose.material.icons.filled.WbAuto
 import androidx.compose.material3.DropdownMenu
@@ -87,6 +88,7 @@ import io.github.fotlab.fotlab.ui.icons.MovieEdit
 import io.github.fotlab.fotlab.ui.operation.HorizontalOperationBar
 import io.github.fotlab.fotlab.ui.operation.OperationalButton
 import io.github.fotlab.fotlab.ui.rememberZoomState
+import io.github.fotlab.fotlab_rawler.CaSettings
 import io.github.fotlab.fotlab_rawler.DemosaicAlgorithm
 import io.github.fotlab.fotlab_rawler.DemosaicCandidate
 import kotlinx.coroutines.Dispatchers
@@ -197,6 +199,15 @@ fun StudioScreen() {
     var dehazePercentileInput by remember { mutableStateOf("") }
     var dehazeRadiusDarkInput by remember { mutableStateOf("") }
     var dehazeRadiusGuideInput by remember { mutableStateOf("") }
+
+    // LCA (chromatic-aberration correction) dialog state (opened by the DevelopFilm bar LCA icon,
+    // the ClosedCaption glyph). Auto mode fits the residual-CA polynomial natively; otherwise the
+    // manual radial red/blue strengths apply.
+    var showCaDialog by remember { mutableStateOf(false) }
+    var caEnabled by remember { mutableStateOf(false) }
+    var caAuto by remember { mutableStateOf(true) }
+    var caRedInput by remember { mutableStateOf("") }
+    var caBlueInput by remember { mutableStateOf("") }
 
     // Per-stage enable toggles for the develop dialogs. The switch has priority over the numeric
     // value: OFF skips the stage regardless of the field (the engine writes `null`, the native stage
@@ -352,6 +363,20 @@ fun StudioScreen() {
                                 dehazeRadiusGuideInput = StudioEngine.currentDehazeRadiusGuide()?.toString() ?: ""
                                 showDehazeDialog = true
                             },
+                            onCa = {
+                                StudioEngine.currentCa()?.let { ca ->
+                                    caEnabled = true
+                                    caAuto = ca.auto
+                                    caRedInput = ca.red.toString()
+                                    caBlueInput = ca.blue.toString()
+                                } ?: run {
+                                    caEnabled = false
+                                    caAuto = true
+                                    caRedInput = ""
+                                    caBlueInput = ""
+                                }
+                                showCaDialog = true
+                            },
                             onExposure = {
                                 exposureEnabled = StudioEngine.currentExposureEv() != null
                                 exposureInput = StudioEngine.currentExposureEv()?.toString() ?: ""
@@ -401,6 +426,77 @@ fun StudioScreen() {
             },
             title = { Text(text = stringResource(id = R.string.studio_unsupported_title)) },
             text = { Text(text = stringResource(id = R.string.studio_unsupported_format)) },
+        )
+    }
+
+    // LCA dialog: the enable switch has priority over the parameters — when OFF the stage is
+    // skipped (ca = null → native identity) regardless of the fields; when ON, auto mode fits the
+    // residual-CA polynomial on the native side and the manual red/blue radial strengths are
+    // ignored. OK is always enabled: auto mode needs no numbers, and an empty manual field parses
+    // to 0 (= no shift for that channel).
+    if (showCaDialog) {
+        AlertDialog(
+            onDismissRequest = { showCaDialog = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (caEnabled) {
+                            StudioEngine.setCa(
+                                CaSettings(
+                                    auto = caAuto,
+                                    red = caRedInput.toFloatOrNull() ?: 0f,
+                                    blue = caBlueInput.toFloatOrNull() ?: 0f,
+                                    avoidColourshift = false,
+                                ),
+                            )
+                        } else {
+                            StudioEngine.setCa(null)
+                        }
+                        showCaDialog = false
+                    },
+                ) {
+                    Text(text = stringResource(id = R.string.common_action_ok))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCaDialog = false }) {
+                    Text(text = stringResource(id = R.string.common_action_cancel))
+                }
+            },
+            title = { Text(text = stringResource(id = R.string.studio_ca_title)) },
+            text = {
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(text = stringResource(id = R.string.studio_enable_stage))
+                        Spacer(modifier = Modifier.weight(1f))
+                        Switch(checked = caEnabled, onCheckedChange = { caEnabled = it })
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(text = stringResource(id = R.string.studio_ca_auto_label))
+                        Spacer(modifier = Modifier.weight(1f))
+                        Switch(checked = caAuto, onCheckedChange = { caAuto = it }, enabled = caEnabled)
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    TextField(
+                        value = caRedInput,
+                        onValueChange = { caRedInput = it },
+                        enabled = caEnabled && !caAuto,
+                        singleLine = true,
+                        placeholder = { Text(text = stringResource(id = R.string.studio_ca_red_hint)) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    TextField(
+                        value = caBlueInput,
+                        onValueChange = { caBlueInput = it },
+                        enabled = caEnabled && !caAuto,
+                        singleLine = true,
+                        placeholder = { Text(text = stringResource(id = R.string.studio_ca_blue_hint)) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    )
+                }
+            },
         )
     }
 
@@ -1016,6 +1112,24 @@ private fun DehazeButton(
 }
 
 /**
+ * LCA (chromatic-aberration correction) parameter entry of the develop bar.
+ * The ClosedCaption glyph stands for Color Correction here; the caption reads
+ * LCA in every locale.
+ */
+@Composable
+private fun CaButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    IconButton(onClick = onClick, modifier = modifier) {
+        Icon(
+            imageVector = Icons.Filled.ClosedCaption,
+            contentDescription = stringResource(id = R.string.studio_cd_lca),
+        )
+    }
+}
+
+/**
  * Contrast parameter of the boost group. Primary tint while configured. Opens
  * [BoostParameterDialog]; the boost switch itself is derived (either parameter configured).
  */
@@ -1231,6 +1345,7 @@ private fun StudioOperationBarDevelopFilm(
     onAlgorithmPicked: (DemosaicAlgorithm) -> Unit,
     onDenoise: () -> Unit,
     onDehaze: () -> Unit,
+    onCa: () -> Unit,
     onExposure: () -> Unit,
     onWhiteBalance: () -> Unit,
     modifier: Modifier = Modifier,
@@ -1238,6 +1353,10 @@ private fun StudioOperationBarDevelopFilm(
     HorizontalOperationBar(
         modifier = modifier,
         items = listOf(
+            OperationalButton(
+                id = "ca",
+                label = stringResource(id = R.string.studio_label_lca),
+            ) { CaButton(onCa) },
             OperationalButton(
                 id = "denoise",
                 label = stringResource(id = R.string.studio_label_denoise),
