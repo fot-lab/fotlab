@@ -146,14 +146,17 @@ pub(crate) fn dehaze(
         }
     }
 
-    // Apply the cleared value, blended by strength.
-    // (`active` was already consumed by `plane_haze_floors` for the global floor.)
-    for (idx, p) in pixels.iter_mut().enumerate() {
-        let h = hfield[idx];
-        let denom = (1.0 - h).max(1e-6);
-        let cleared = ((*p - h) / denom).max(0.0);
-        *p = *p * (1.0 - strength) + cleared * strength;
-    }
+    // Apply the cleared value, blended by strength. Per-pixel and order-free, so
+    // parallelised with rayon over the full-resolution buffer (`OPTIMZ-PERFRM-000007`).
+    pixels
+        .par_iter_mut()
+        .enumerate()
+        .for_each(|(idx, p)| {
+            let h = hfield[idx];
+            let denom = (1.0 - h).max(1e-6);
+            let cleared = ((*p - h) / denom).max(0.0);
+            *p = *p * (1.0 - strength) + cleared * strength;
+        });
     pixels
 }
 
@@ -248,34 +251,44 @@ pub(crate) fn guided_filter(
 
     let mut corr_i = vec![0.0f32; n];
     let mut corr_ip = vec![0.0f32; n];
-    for k in 0..n {
-        corr_i[k] = guide[k] * guide[k];
-        corr_ip[k] = guide[k] * src[k];
-    }
+    corr_i
+        .par_iter_mut()
+        .zip(corr_ip.par_iter_mut())
+        .enumerate()
+        .for_each(|(k, (ci, cip))| {
+            let g = guide[k];
+            *ci = g * g;
+            *cip = g * src[k];
+        });
     let mean_ii = box_mean(&corr_i, w, h, radius);
     let mean_ip = box_mean(&corr_ip, w, h, radius);
 
     let mut a = vec![0.0f32; n];
     let mut b = vec![0.0f32; n];
-    for k in 0..n {
-        let var_i = mean_ii[k] - mean_i[k] * mean_i[k];
-        let cov_ip = mean_ip[k] - mean_i[k] * mean_p[k];
-        a[k] = cov_ip / (var_i + eps);
-        b[k] = mean_p[k] - a[k] * mean_i[k];
-    }
+    a.par_iter_mut()
+        .zip(b.par_iter_mut())
+        .enumerate()
+        .for_each(|(k, (ak, bk))| {
+            let var_i = mean_ii[k] - mean_i[k] * mean_i[k];
+            let cov_ip = mean_ip[k] - mean_i[k] * mean_p[k];
+            *ak = cov_ip / (var_i + eps);
+            *bk = mean_p[k] - *ak * mean_i[k];
+        });
 
     let mean_a = box_mean(&a, w, h, radius);
     let mean_b = box_mean(&b, w, h, radius);
 
     let mut out = vec![0.0f32; n];
-    for k in 0..n {
-        out[k] = mean_a[k] * guide[k] + mean_b[k];
-    }
+    out.par_iter_mut().enumerate().for_each(|(k, ok)| {
+        *ok = mean_a[k] * guide[k] + mean_b[k];
+    });
     out
 }
 
 /// Separable box mean with window radius `radius` (window = `2*radius + 1`),
-/// implemented with running sums (O(N)).
+/// implemented with running sums (O(N)). Both axes are parallelised with rayon:
+/// each row/column is independent, so the horizontal pass runs per-row and the
+/// vertical pass per-column, each with distinct output indices (`OPTIMZ-PERFRM-000007`).
 fn box_mean(src: &[f32], w: usize, h: usize, radius: usize) -> Vec<f32> {
     let n = w * h;
     if n == 0 {
@@ -283,47 +296,63 @@ fn box_mean(src: &[f32], w: usize, h: usize, radius: usize) -> Vec<f32> {
     }
     let r = radius.max(1).min((w.max(h) / 2).saturating_add(1));
 
-    // Horizontal pass.
+    // Horizontal pass: each row is independent -> parallel over rows.
     let mut tmp = vec![0.0f32; n];
-    for y in 0..h {
-        let row = y * w;
-        let mut acc = 0.0f32;
-        let mut q = 0usize; // left edge of the window (exclusive)
-        for x in 0..w {
-            acc += src[row + x];
-            while q < x.saturating_sub(r) + 1 {
-                acc -= src[row + q];
-                q += 1;
+    tmp.par_chunks_mut(w)
+        .zip(src.par_chunks(w))
+        .for_each(|(tmp_row, srow)| {
+            let mut acc = 0.0f32;
+            let mut q = 0usize; // left edge of the window (exclusive)
+            for x in 0..w {
+                acc += srow[x];
+                while q < x.saturating_sub(r) + 1 {
+                    acc -= srow[q];
+                    q += 1;
+                }
+                let l = x.saturating_sub(r);
+                let rr = (x + r).min(w - 1);
+                let cnt = (rr - l + 1) as f32;
+                tmp_row[x] = acc / cnt;
             }
-            let l = x.saturating_sub(r);
-            let rr = (x + r).min(w - 1);
-            let cnt = (rr - l + 1) as f32;
-            tmp[row + x] = acc / cnt;
-        }
-    }
+        });
 
-    // Vertical pass.
+    // Vertical pass: each column is independent. Compute every column in parallel
+    // (reads `tmp` at stride `w`, no aliasing), then scatter back per-row in parallel.
     let mut out = vec![0.0f32; n];
-    for x in 0..w {
-        let mut acc = 0.0f32;
-        let mut q = 0usize;
-        for y in 0..h {
-            acc += tmp[y * w + x];
-            while q < y.saturating_sub(r) + 1 {
-                acc -= tmp[q * w + x];
-                q += 1;
+    let cols: Vec<Vec<f32>> = (0..w)
+        .into_par_iter()
+        .map(|x| {
+            let mut col = vec![0.0f32; h];
+            let mut acc = 0.0f32;
+            let mut q = 0usize;
+            for y in 0..h {
+                acc += tmp[y * w + x];
+                while q < y.saturating_sub(r) + 1 {
+                    acc -= tmp[q * w + x];
+                    q += 1;
+                }
+                let l = y.saturating_sub(r);
+                let rr = (y + r).min(h - 1);
+                let cnt = (rr - l + 1) as f32;
+                col[y] = acc / cnt;
             }
-            let l = y.saturating_sub(r);
-            let rr = (y + r).min(h - 1);
-            let cnt = (rr - l + 1) as f32;
-            out[y * w + x] = acc / cnt;
-        }
-    }
+            col
+        })
+        .collect();
+    out.par_chunks_mut(w)
+        .enumerate()
+        .for_each(|(y, out_row)| {
+            for x in 0..w {
+                out_row[x] = cols[x][y];
+            }
+        });
     out
 }
 
 /// Separable box minimum over window radius `radius` (centred). Implemented with
-/// a monotonic deque (O(N)) via forward+backward passes on each axis.
+/// a monotonic deque (O(N)) via forward+backward passes on each axis. Both axes
+/// are parallelised with rayon: each row/column is independent with distinct
+/// output indices (`OPTIMZ-PERFRM-000007`).
 fn box_min(src: &[f32], w: usize, h: usize, radius: usize) -> Vec<f32> {
     let n = w * h;
     if n == 0 {
@@ -335,95 +364,111 @@ fn box_min(src: &[f32], w: usize, h: usize, radius: usize) -> Vec<f32> {
     let mut bwd = vec![0.0f32; n];
 
     // Horizontal: fwd[x] = min over [0, x+r], bwd[x] = min over [x-r, w-1];
-    // combined min covers the centred window [x-r, x+r].
-    for y in 0..h {
-        let row = y * w;
-        let mut dq: VecDeque<(usize, f32)> = VecDeque::new();
-        for x in 0..w {
-            while let Some(&(idx, _)) = dq.front() {
-                if idx + r < x {
-                    dq.pop_front();
-                } else {
-                    break;
+    // combined min covers the centred window [x-r, x+r]. Each row is independent.
+    fwd.par_chunks_mut(w)
+        .zip(bwd.par_chunks_mut(w))
+        .zip(src.par_chunks(w))
+        .for_each(|((fwd_row, bwd_row), srow)| {
+            let mut dq: VecDeque<(usize, f32)> = VecDeque::new();
+            for x in 0..w {
+                while let Some(&(idx, _)) = dq.front() {
+                    if idx + r < x {
+                        dq.pop_front();
+                    } else {
+                        break;
+                    }
                 }
-            }
-            while let Some(&(_, v)) = dq.back() {
-                if v >= src[row + x] {
-                    dq.pop_back();
-                } else {
-                    break;
+                while let Some(&(_, v)) = dq.back() {
+                    if v >= srow[x] {
+                        dq.pop_back();
+                    } else {
+                        break;
+                    }
                 }
+                dq.push_back((x, srow[x]));
+                fwd_row[x] = dq.front().unwrap().1;
             }
-            dq.push_back((x, src[row + x]));
-            fwd[row + x] = dq.front().unwrap().1;
-        }
-        let mut dq: VecDeque<(usize, f32)> = VecDeque::new();
-        for x in (0..w).rev() {
-            while let Some(&(idx, _)) = dq.front() {
-                if idx > x + r {
-                    dq.pop_front();
-                } else {
-                    break;
+            let mut dq: VecDeque<(usize, f32)> = VecDeque::new();
+            for x in (0..w).rev() {
+                while let Some(&(idx, _)) = dq.front() {
+                    if idx > x + r {
+                        dq.pop_front();
+                    } else {
+                        break;
+                    }
                 }
-            }
-            while let Some(&(_, v)) = dq.back() {
-                if v >= src[row + x] {
-                    dq.pop_back();
-                } else {
-                    break;
+                while let Some(&(_, v)) = dq.back() {
+                    if v >= srow[x] {
+                        dq.pop_back();
+                    } else {
+                        break;
+                    }
                 }
+                dq.push_back((x, srow[x]));
+                bwd_row[x] = dq.front().unwrap().1;
             }
-            dq.push_back((x, src[row + x]));
-            bwd[row + x] = dq.front().unwrap().1;
-        }
-        for x in 0..w {
-            fwd[row + x] = fwd[row + x].min(bwd[row + x]);
-        }
-    }
+            for x in 0..w {
+                fwd_row[x] = fwd_row[x].min(bwd_row[x]);
+            }
+        });
 
-    // Vertical, same scheme, reading from `fwd` and writing the result.
+    // Vertical, same scheme, reading from `fwd`. Each column is independent, so
+    // gather every column in parallel (stride `w`, no aliasing) then scatter.
     let mut out = vec![0.0f32; n];
-    for x in 0..w {
-        let mut dq: VecDeque<(usize, f32)> = VecDeque::new();
-        for y in 0..h {
-            let idx = y * w + x;
-            while let Some(&(iy, _)) = dq.front() {
-                if iy + r < y {
-                    dq.pop_front();
-                } else {
-                    break;
+    let cols: Vec<Vec<f32>> = (0..w)
+        .into_par_iter()
+        .map(|x| {
+            let mut bwd_col = vec![0.0f32; h];
+            let mut dq: VecDeque<(usize, f32)> = VecDeque::new();
+            for y in 0..h {
+                let v = fwd[y * w + x];
+                while let Some(&(iy, _)) = dq.front() {
+                    if iy + r < y {
+                        dq.pop_front();
+                    } else {
+                        break;
+                    }
                 }
-            }
-            while let Some(&(_, v)) = dq.back() {
-                if v >= fwd[idx] {
-                    dq.pop_back();
-                } else {
-                    break;
+                while let Some(&(_, vv)) = dq.back() {
+                    if vv >= v {
+                        dq.pop_back();
+                    } else {
+                        break;
+                    }
                 }
+                dq.push_back((y, v));
+                bwd_col[y] = dq.front().unwrap().1;
             }
-            dq.push_back((y, fwd[idx]));
-            bwd[idx] = dq.front().unwrap().1;
-        }
-        let mut dq: VecDeque<(usize, f32)> = VecDeque::new();
-        for y in (0..h).rev() {
-            let idx = y * w + x;
-            while let Some(&(iy, _)) = dq.front() {
-                if iy > y + r {
-                    dq.pop_front();
-                } else {
-                    break;
+            let mut dq: VecDeque<(usize, f32)> = VecDeque::new();
+            let mut col = vec![0.0f32; h];
+            for y in (0..h).rev() {
+                let v = fwd[y * w + x];
+                while let Some(&(iy, _)) = dq.front() {
+                    if iy > y + r {
+                        dq.pop_front();
+                    } else {
+                        break;
+                    }
                 }
-            }
-            while let Some(&(_, v)) = dq.back() {
-                if v >= fwd[idx] {
-                    dq.pop_back();
-                } else {
-                    break;
+                while let Some(&(_, vv)) = dq.back() {
+                    if vv >= v {
+                        dq.pop_back();
+                    } else {
+                        break;
+                    }
                 }
+                dq.push_back((y, v));
+                col[y] = dq.front().unwrap().1.min(bwd_col[y]);
             }
-            dq.push_back((y, fwd[idx]));
-            out[idx] = dq.front().unwrap().1.min(bwd[idx]);
-        }
-    }
+            col
+        })
+        .collect();
+    out.par_chunks_mut(w)
+        .enumerate()
+        .for_each(|(y, out_row)| {
+            for x in 0..w {
+                out_row[x] = cols[x][y];
+            }
+        });
     out
 }
