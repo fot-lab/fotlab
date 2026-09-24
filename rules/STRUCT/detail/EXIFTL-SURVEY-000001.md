@@ -191,6 +191,55 @@ ExifTool 是纯 Perl 程序，Android（ART/Dalvik，Kotlin/Java）无内置 Per
 - Q2 — 引入 GPL 许可组件对 `LICENSE.md` 的影响评估。**TBD**
 - Q3 — 是否需要裁剪 `lib/` 中无关厂商模块以减小体积（若走进程调用路线）？**TBD**
 
+## 附：DCP / LCP 如何被解码为 XML（调研补充，2026-09-24）
+
+用户问题：当前 exiftool 如何将 **DCP**、**LCP** 解码为 XML？结论：**DCP 有完整内置支持；LCP 无原生支持，exiftool
+只能看到其 ZIP 容器外壳**。两文件的「转 XML」都依赖命令行 `-X`（`-xmlFormat`，RDF/XML 输出）。
+
+### 1. 统一机制：`-X` 输出（RDF/XML 序列化）
+不论何种文件，所谓「解码为 XML」= 抽取标签后由 `exiftool` 脚本序列化为 RDF/XML：
+- 脚本将 `-X` 置 `$xml=1`（`exiftool` 第 1379 行 `($a eq 'xmlformat')`）；
+- 输出头/尾为 `<?xml ...?>` + `<rdf:RDF ...>` / `</rdf:RDF>`（第 1637–1639 行）；
+- 每个文件一个 `<rdf:Description rdf:about='...' xmlns:et=... xmlns:<grp>=...>`（第 2646–2671 行）；
+- 值经 `CleanXML` → `Image::ExifTool::XMP::EscapeXML`（第 3716–3725 行）转义，列表用 `FormatXML`（第 3753 行）。
+即：**XML 是抽取结果的展示格式，而非文件自身的固有结构**。
+
+### 2. DCP（DNG Camera Profile）—— 完整支持
+- **格式**：DCP 本质是一个 **TIFF/DNG** 文件。ExifTool 识别：
+  - 后缀表 `DCP => ['TIFF', 'DNG Camera Profile']`（`ExifTool.pm` 第 283 行）；
+  - 魔数判定：`ProcessTIFF` 中 `identifier == 0x4352`（'CR'）→ `fileType = 'DCP'`（第 8674 行）。
+- **解码路径**：走 TIFF 处理器（`Exif::ProcessExif`/`ProcessTIFF`），读取 DNG IFD：
+  - 色彩矩阵 / 前向矩阵 / 缩减矩阵、色调曲线、HSL 表、基准曝光等 DNG 专属标签（`DNG.pm`）；
+  - 内嵌 XMP（命名空间 `crlcp`=`http://ns.adobe.com/camera-raw-embedded-lens-profile/1.0/` 与
+    `stCamera`=`http://ns.adobe.com/photoshop/1.0/camera-profile`，`XMP.pm` 第 132–133、1368–1384 行）中的
+    内嵌镜头剖面（`PerspectiveModel`/`VignetteModel` 等结构）；
+  - 若有 ICC_Profile 一并解析（`ICC_Profile.pm`）。
+- **结果**：`exiftool -X file.dcp` 可完整输出相机剖面全部参数到 RDF/XML。
+
+### 3. LCP（Adobe Lens Profile）—— 无原生支持
+- **格式**：LCP 是一个 **ZIP（PK）归档**，内部含一个 Adobe 镜头剖面 XML（及预览图）。
+- **无专用处理器**：全仓检索 `LCP`/`lens profile` 命中的都是「图像内嵌的 XMP `LensProfile*` 标签」
+  （`XMP.pm` 的 `crlcp`/`stCamera` 命名空间，第 134–1384、1603–1811 行等），**没有任何针对 `.lcp` 文件类型的
+  handler**；README 文件类型清单中亦无 LCP。
+- **实际解码路径**：因以 `PK\x03\x04` 开头，ExifTool 将其当**普通 ZIP** 路由到 `ProcessZIP`（`ZIP.pm` 第 524 行）：
+  - 借助 `Archive::Zip`（需额外安装，否则仅警告「Install Archive::Zip…」）读取成员；
+  - 仅对特定容器做深解：**OOXML**（DOCX/PPTX/XLSX）、**EIP**（Capture One）、**iWork**、**ODF/IDML/EPUB**
+    （会抽取内嵌 XMP，第 592–712 行）；
+  - **无 LCP / Adobe 镜头剖面分支**，于是落到通用分支（第 716 行起）：仅通过 `HandleMember` 列出
+    `ZipFileName`/`ZipCompressedSize`/`ZipUncompressedSize`/`ZipCRC` 与 ZIP 注释，**不解析内部镜头剖面 XML 内容**。
+- **结论**：`exiftool -X file.lcp` 只会给出 ZIP 容器外壳元数据，**不会**解码镜头剖面参数。要拿到 LCP 的 XML，
+  需先 `unzip` 解包、直接读取其中 XML（该 XML 已是 Adobe 镜头剖面格式）；exiftool 本身不做该专用解析。
+  （可选：用 `-config` 自定义 ZIP 的 ProcessProc，调用 `Archive::Zip` 抽取内部 XML 再喂给 XMP 解析器，但非内置。）
+
+### 4. 对比小结
+| 维度 | DCP | LCP |
+| --- | --- | --- |
+| 容器 | TIFF/DNG（魔数 0x4352） | ZIP（PK） |
+| 专用 handler | 有（TIFF/DNG + XMP） | 无 |
+| `-X` 可解码内容 | 完整相机剖面参数 | 仅 ZIP 容器外壳（成员名/大小） |
+| 内部剖面数据位置 | DNG IFD + 内嵌 XMP | 内部 XML（exiftool 不解析） |
+| 取得剖面 XML 方法 | `exiftool -X file.dcp` | 解包 LCP 后读取内部 XML |
+
 ## Change History
 
 - 2026-09-08 — 初始调研稿。梳理 `external/exiftool`（ExifTool 13.59）的目录结构、核心架构（引擎 + 标签表 +
@@ -200,3 +249,6 @@ ExifTool 是纯 Perl 程序，Android（ART/Dalvik，Kotlin/Java）无内置 Per
   （perl-cross + NDK 交叉编译 perl 为 `.so`、`ProcessBuilder` 调用，覆盖 4 种 ABI）、`vdzhos-dh/ExifToolForAndroid`
   （简化解压到 files 目录，32 位 PIE/API 21+）、Termux/CCTools/SL4A、JNI 内嵌四类方案，并引用 perlandroid 官方
   交叉编译约束（需类 Unix 主机、早期 ABI）；补充体积与 GPL 许可影响。同步将「与本项目关系」集成路径指向该节。
+- 2026-09-24 — 补充「DCP / LCP 如何被解码为 XML」：DCP 为 TIFF/DNG（魔数 0x4352），由 TIFF/DNG+XMP 模块完整解析、
+  `-X` 输出 RDF/XML；LCP 为 ZIP 容器，**无原生 handler**，exiftool 仅经 `ProcessZIP` 列出 ZIP 外壳元数据
+  （`ZipFileName` 等），不解析内部镜头剖面 XML，需解包后直读。已附对比小结表。

@@ -1,0 +1,37 @@
+[package]
+name = "rawtrp_correct"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "First-party pure-Rust port of RawTherapee's CFA-mosaic chromatic-aberration correction (CA_correct_RT), rayon-parallel"
+
+# First-party native algorithm crate, sibling of `rawtrp_demos` under
+# app/src/binding/rust/. Consumed by `rawler_fotlab` as a *path* dependency
+# (FOTLAB-NATIVE-000004 R4 — upstream is read-only).
+#
+# Pure Rust: no C++, no `librtengine`, no git submodule. The RawTherapee
+# sources under external/RawTherapee are the *reference* for the port and are
+# never compiled or modified (rules/DESIGN/detail/FOTLAB-NATIVE-000004.md).
+# RawTherapee is GPL-3.0 and this project is GPL-3.0, so the port is
+# licence-compatible; every ported file keeps its upstream attribution.
+#
+# Not part of the dnglab Cargo workspace (that workspace is upstream and
+# read-only); this is a standalone workspace whose third-party source is reached
+# through the path dependency below.
+
+[lib]
+name = "rawtrp_correct"
+crate-type = ["rlib"]
+path = "src/lib.rs"
+
+[dependencies]
+# Reuse the exact contract the demosaic kernels already established:
+# `Array2D<f32>` + `CfaDesc` (rules/STRUCT/detail/RAWTRP-DECODE-000003.md §3.1).
+rawtrp_demos = { path = "../rawtrp_demos" }
+# Data parallelism, replacing RawTherapee's `#pragma omp` at the same sharding
+# points (rayon, pinned to the same major as rawtrp_demos / rawler so the whole
+# process shares one rayon pool — OPTIMZ-PERFRM-000007).
+rayon = "1"
+
+[dev-dependencies]
+# (unit tests use std only)
