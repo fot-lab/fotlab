@@ -156,10 +156,18 @@ fun StudioScreen() {
         }
     }
 
-    // The 5 rawalchemy metering strategies, shown as text buttons in the Exposure dialog. Each
+    // The 5 rawalchemy metering strategies, shown as icon buttons in the Exposure dialog. Each
     // string IS the algorithm name and is exactly the mode key rawalchemy's computeAutoGain
-    // accepts, so the button label and the native meter cannot drift apart.
-    val meteringModes = listOf("average", "center-weighted", "highlight-safe", "hybrid", "matrix")
+    // accepts, so the icon and the native meter cannot drift apart. The icon is the brand-new
+    // CustomMaterialStyleIcons glyph for that strategy; the mode key drives metering, the icon is
+    // only its visual label.
+    val meteringModes = listOf(
+        "average" to CustomMaterialStyleIcons.Filled.MeteringMatrixAverage,
+        "center-weighted" to CustomMaterialStyleIcons.Filled.MeteringCenterWeighted,
+        "highlight-safe" to CustomMaterialStyleIcons.Filled.MeteringCenterAsterisk,
+        "hybrid" to CustomMaterialStyleIcons.Filled.MeteringCenterAsteriskMatrix,
+        "matrix" to CustomMaterialStyleIcons.Filled.MeteringMatrixSpot,
+    )
 
     var showExposureDialog by remember { mutableStateOf(false) }
     var exposureInput by remember { mutableStateOf("") }
@@ -428,8 +436,8 @@ fun StudioScreen() {
                     Text(text = stringResource(id = R.string.studio_exposure_metering))
                     Spacer(modifier = Modifier.height(4.dp))
                     Row(modifier = Modifier.horizontalScroll(rememberScrollState())) {
-                        meteringModes.forEach { mode ->
-                            TextButton(
+                        meteringModes.forEach { (mode, icon) ->
+                            IconButton(
                                 onClick = {
                                     // Metering develops + meters natively — off the main thread so the
                                     // dialog never blocks; the result lands in the field once it returns.
@@ -438,7 +446,10 @@ fun StudioScreen() {
                                     }
                                 },
                             ) {
-                                Text(text = mode)
+                                Icon(
+                                    imageVector = icon,
+                                    contentDescription = mode,
+                                )
                             }
                         }
                     }
