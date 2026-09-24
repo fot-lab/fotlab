@@ -171,6 +171,9 @@ fun StudioScreen() {
 
     var showExposureDialog by remember { mutableStateOf(false) }
     var exposureInput by remember { mutableStateOf("") }
+    // True while a metering button's native auto-exposure pass is in flight; the label above the
+    // metering buttons swaps to "Calculating…" for this duration and reverts once it returns.
+    var isMetering by remember { mutableStateOf(false) }
 
     var showWhiteBalanceDialog by remember { mutableStateOf(false) }
     var whiteBalanceInput by remember { mutableStateOf("") }
@@ -433,7 +436,7 @@ fun StudioScreen() {
                     // only proposes a value — it works regardless of the enable switch and applies
                     // nothing; OK with the switch ON is what writes it into exposureEv.
                     Spacer(modifier = Modifier.height(12.dp))
-                    Text(text = stringResource(id = R.string.studio_exposure_metering))
+                    Text(text = stringResource(id = if (isMetering) R.string.studio_exposure_metering_calculating else R.string.studio_exposure_metering))
                     Spacer(modifier = Modifier.height(4.dp))
                     Row(modifier = Modifier.horizontalScroll(rememberScrollState())) {
                         meteringModes.forEach { (mode, icon) ->
@@ -441,8 +444,11 @@ fun StudioScreen() {
                                 onClick = {
                                     // Metering develops + meters natively — off the main thread so the
                                     // dialog never blocks; the result lands in the field once it returns.
+                                    isMetering = true
                                     scope.launch(Dispatchers.IO) {
-                                        StudioEngine.meterAutoExposure(mode)?.let { exposureInput = it.toString() }
+                                        val ev = StudioEngine.meterAutoExposure(mode)
+                                        isMetering = false
+                                        ev?.let { exposureInput = it.toString() }
                                     }
                                 },
                             ) {
