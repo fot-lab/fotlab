@@ -104,6 +104,8 @@
     <string name="studio_wb_hint">Color temperature (K), e.g. 5500</string>
     <string name="studio_denoise_title">Denoise strength</string>
     <string name="studio_denoise_hint">Sensitivity ×, 0.0 – 8.0 (0 = off)</string>
+    <string name="studio_denoise_bm3d_label">BM3D (collaborative)</string>
+    <string name="studio_denoise_bm3d_hint">Sensitivity ×, 0.0 – 4.0 (0 = off)</string>
     <string name="studio_dehaze_title">Dehaze</string>
     <string name="studio_dehaze_strength_hint">Strength 0.0 – 1.0 (0 = off)</string>
     <string name="studio_dehaze_percentile_hint">Haze-floor percentile 0.0 – 1.0 (default 0.01)</string>

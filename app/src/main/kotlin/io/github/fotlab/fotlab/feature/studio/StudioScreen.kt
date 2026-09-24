@@ -182,6 +182,7 @@ fun StudioScreen() {
     // sensitivity multiplier is written into the develop params and re-develops the canvas.
     var showDenoiseDialog by remember { mutableStateOf(false) }
     var denoiseInput by remember { mutableStateOf("") }
+    var denoiseBm3dInput by remember { mutableStateOf("") }
 
     // Dehaze dialog state (opened by the DevelopFilm bar Dehaze icon). The stage needs both the
     // strength (0..1 blend) and the haze-floor percentile (0..1) to take effect, so both are entered
@@ -198,6 +199,7 @@ fun StudioScreen() {
     // its dialog opens.
     var exposureEnabled by remember { mutableStateOf(false) }
     var denoiseEnabled by remember { mutableStateOf(false) }
+    var denoiseBm3dEnabled by remember { mutableStateOf(false) }
     var dehazeEnabled by remember { mutableStateOf(false) }
 
     // Which HorizontalOperationBar is docked in the former grade-bar slot (above the fun bar).
@@ -333,6 +335,8 @@ fun StudioScreen() {
                             onDenoise = {
                                 denoiseEnabled = StudioEngine.currentDenoiseStrength() != null
                                 denoiseInput = StudioEngine.currentDenoiseStrength()?.toString() ?: ""
+                                denoiseBm3dEnabled = StudioEngine.currentDenoiseBm3dStrength() != null
+                                denoiseBm3dInput = StudioEngine.currentDenoiseBm3dStrength()?.toString() ?: ""
                                 showDenoiseDialog = true
                             },
                             onDehaze = {
@@ -514,9 +518,13 @@ fun StudioScreen() {
             onDismissRequest = { showDenoiseDialog = false },
             confirmButton = {
                 TextButton(
-                    enabled = !denoiseEnabled || denoiseInput.toFloatOrNull() != null,
+                    enabled = (!denoiseEnabled || denoiseInput.toFloatOrNull() != null) &&
+                        (!denoiseBm3dEnabled || denoiseBm3dInput.toFloatOrNull() != null),
                     onClick = {
-                        StudioEngine.setDenoiseStrength(if (denoiseEnabled) denoiseInput.toFloatOrNull() else null)
+                        StudioEngine.setDenoise(
+                            if (denoiseEnabled) denoiseInput.toFloatOrNull() else null,
+                            if (denoiseBm3dEnabled) denoiseBm3dInput.toFloatOrNull() else null,
+                        )
                         showDenoiseDialog = false
                     },
                 ) {
@@ -543,6 +551,21 @@ fun StudioScreen() {
                         enabled = denoiseEnabled,
                         singleLine = true,
                         placeholder = { Text(text = stringResource(id = R.string.studio_denoise_hint)) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(text = stringResource(id = R.string.studio_denoise_bm3d_label))
+                        Spacer(modifier = Modifier.weight(1f))
+                        Switch(checked = denoiseBm3dEnabled, onCheckedChange = { denoiseBm3dEnabled = it })
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    TextField(
+                        value = denoiseBm3dInput,
+                        onValueChange = { denoiseBm3dInput = it },
+                        enabled = denoiseBm3dEnabled,
+                        singleLine = true,
+                        placeholder = { Text(text = stringResource(id = R.string.studio_denoise_bm3d_hint)) },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     )
                 }

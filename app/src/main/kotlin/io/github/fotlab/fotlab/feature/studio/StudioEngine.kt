@@ -197,6 +197,7 @@ object StudioEngine {
                         exposureEv = null,
                         wb = null,
                         denoiseStrength = currentDenoiseStrength,
+                        denoiseBm3dStrength = currentDenoiseBm3dStrength,
                         dehazeStrength = currentDehazeStrength,
                         dehazePercentile = currentDehazePercentile,
             dehazeRadiusDark = currentDehazeRadiusDark,
@@ -318,6 +319,9 @@ object StudioEngine {
 
     /** The denoise strength (sensitivity multiplier) retained for the next develop re-render; null = off. */
     private var currentDenoiseStrength: Float? = null
+
+    /** The BM3D-CFA denoise strength (collaborative-filter sensitivity) retained for the next develop re-render; null = off. */
+    private var currentDenoiseBm3dStrength: Float? = null
 
     /** The dehaze strength (0..1 blend) retained for the next develop re-render; null = off. */
     private var currentDehazeStrength: Float? = null
@@ -483,6 +487,7 @@ object StudioEngine {
             exposureEv = currentExposureEv,
             wb = null,
             denoiseStrength = currentDenoiseStrength,
+                        denoiseBm3dStrength = currentDenoiseBm3dStrength,
             dehazeStrength = currentDehazeStrength,
             dehazePercentile = currentDehazePercentile,
             dehazeRadiusDark = currentDehazeRadiusDark,
@@ -697,6 +702,7 @@ object StudioEngine {
             exposureEv = currentExposureEv,
             wb = null,
             denoiseStrength = currentDenoiseStrength,
+                        denoiseBm3dStrength = currentDenoiseBm3dStrength,
             dehazeStrength = currentDehazeStrength,
             dehazePercentile = currentDehazePercentile,
             dehazeRadiusDark = currentDehazeRadiusDark,
@@ -711,6 +717,9 @@ object StudioEngine {
 
     /** The current denoise strength; the UI prefills the Denoise dialog from this. */
     fun currentDenoiseStrength(): Float? = currentDenoiseStrength
+
+    /** The current BM3D-CFA denoise strength; the UI prefills the Denoise dialog from this. */
+    fun currentDenoiseBm3dStrength(): Float? = currentDenoiseBm3dStrength
 
     /** The current dehaze strength; the UI prefills the Dehaze dialog from this. */
     fun currentDehazeStrength(): Float? = currentDehazeStrength
@@ -730,8 +739,9 @@ object StudioEngine {
      * exposure, white balance and dehaze. `null` (or 0) is the identity — [DevelopParams.denoiseStrength]
      * is `None`/0, so the stage is skipped; the canvas is re-rendered from the re-developed PNG.
      */
-    fun setDenoiseStrength(strength: Float?) {
-        currentDenoiseStrength = strength
+    fun setDenoise(impulse: Float?, bm3d: Float?) {
+        currentDenoiseStrength = impulse
+        currentDenoiseBm3dStrength = bm3d
         reDevelop()
     }
 
@@ -786,6 +796,7 @@ object StudioEngine {
                         exposureEv = exposureEv,
                         wb = null,
                         denoiseStrength = currentDenoiseStrength,
+                        denoiseBm3dStrength = currentDenoiseBm3dStrength,
                         dehazeStrength = currentDehazeStrength,
                         dehazePercentile = currentDehazePercentile,
             dehazeRadiusDark = currentDehazeRadiusDark,
@@ -802,6 +813,7 @@ object StudioEngine {
                         exposureEv = exposureEv,
                         wb = null,
                         denoiseStrength = currentDenoiseStrength,
+                        denoiseBm3dStrength = currentDenoiseBm3dStrength,
                         dehazeStrength = currentDehazeStrength,
                         dehazePercentile = currentDehazePercentile,
             dehazeRadiusDark = currentDehazeRadiusDark,
