@@ -75,8 +75,10 @@ use rawler::rawsource::RawSource;
 
 mod bound;
 mod calibrate;
+mod cfa;
 mod decode;
 mod dehaze;
+mod dehaze_guided_filter;
 mod demosaic;
 mod denoise;
 mod denoise_bm3d_cfa;

@@ -147,6 +147,17 @@ pub struct DevelopParams {
   /// (`0.01`). Supplied from Kotlin when the Studio dehaze control is enabled.
   #[uniffi(default = None)]
   pub dehaze_percentile: Option<f32>,
+  /// Dehaze guided-filter dark-channel box radius (sub-lattice pixels). `None` →
+  /// the engine default (8). Larger = smoother, lower-frequency haze field from
+  /// the dark channel; smaller = tighter to local haze boundaries. Supplied from
+  /// Kotlin when the Studio dehaze control is enabled.
+  #[uniffi(default = None)]
+  pub dehaze_radius_dark: Option<i32>,
+  /// Dehaze guided-filter window radius (sub-lattice pixels). `None` → the engine
+  /// default (8). Controls the edge-aware smoothing extent of the spatial haze
+  /// field. Supplied from Kotlin when the Studio dehaze control is enabled.
+  #[uniffi(default = None)]
+  pub dehaze_radius_guide: Option<i32>,
 }
 
 /// Grading parameters supplied by Kotlin for [`develop_and_grade`].
@@ -348,6 +359,8 @@ pub(crate) fn develop_image(
     params.dehaze_percentile,
     cfa,
     image.active_area.map(|r| (r.p.x, r.p.y, r.d.w, r.d.h)),
+    params.dehaze_radius_dark,
+    params.dehaze_radius_guide,
   );
   // Exposure last: the `2^exposure_ev` linear gain on the cleaned, normalised
   // mosaic. Channel-uniform and linear, so it commutes with demosaic.

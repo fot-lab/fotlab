@@ -199,6 +199,8 @@ object StudioEngine {
                         denoiseStrength = currentDenoiseStrength,
                         dehazeStrength = currentDehazeStrength,
                         dehazePercentile = currentDehazePercentile,
+            dehazeRadiusDark = currentDehazeRadiusDark,
+            dehazeRadiusGuide = currentDehazeRadiusGuide,
                         downsample = downsampleState.value,
                     ),
                 ) ?: return StudioRenderResult.Unsupported
@@ -322,6 +324,12 @@ object StudioEngine {
 
     /** The dehaze haze-floor percentile (0..1) retained for the next develop re-render; null = default (0.01). */
     private var currentDehazePercentile: Float? = null
+
+    /** The dehaze guided-filter dark-channel box radius (sub-lattice px); null = engine default (8). */
+    private var currentDehazeRadiusDark: Int? = null
+
+    /** The dehaze guided-filter window radius (sub-lattice px); null = engine default (8). */
+    private var currentDehazeRadiusGuide: Int? = null
 
     /**
      * The RAW decoded once and held resident as a UniFFI handle; null when no raw file is loaded.
@@ -477,6 +485,8 @@ object StudioEngine {
             denoiseStrength = currentDenoiseStrength,
             dehazeStrength = currentDehazeStrength,
             dehazePercentile = currentDehazePercentile,
+            dehazeRadiusDark = currentDehazeRadiusDark,
+            dehazeRadiusGuide = currentDehazeRadiusGuide,
             // The grade fork develops through the same pipeline, so it honours the switch too —
             // grading a quarter-resolution frame is simply grading fewer pixels.
             downsample = downsampleState.value,
@@ -689,6 +699,8 @@ object StudioEngine {
             denoiseStrength = currentDenoiseStrength,
             dehazeStrength = currentDehazeStrength,
             dehazePercentile = currentDehazePercentile,
+            dehazeRadiusDark = currentDehazeRadiusDark,
+            dehazeRadiusGuide = currentDehazeRadiusGuide,
             downsample = downsampleState.value,
         )
         // `metered` is the offset relative to the current image; add the recorded applied exposure
@@ -705,6 +717,12 @@ object StudioEngine {
 
     /** The current dehaze percentile; the UI prefills the Dehaze dialog from this. */
     fun currentDehazePercentile(): Float? = currentDehazePercentile
+
+    /** The current dehaze dark-channel radius; the UI prefills the Dehaze dialog from this. */
+    fun currentDehazeRadiusDark(): Int? = currentDehazeRadiusDark
+
+    /** The current dehaze guided-filter radius; the UI prefills the Dehaze dialog from this. */
+    fun currentDehazeRadiusGuide(): Int? = currentDehazeRadiusGuide
 
     /**
      * Re-develop the current RAW with a denoise [strength] (sensitivity multiplier on the detection
@@ -724,9 +742,11 @@ object StudioEngine {
      * `None`/0 makes the whole dehaze an identity, so the blend must be set alongside the percentile.
      * The canvas is re-rendered from the re-developed PNG.
      */
-    fun setDehaze(strength: Float?, percentile: Float?) {
+    fun setDehaze(strength: Float?, percentile: Float?, radiusDark: Int?, radiusGuide: Int?) {
         currentDehazeStrength = strength
         currentDehazePercentile = percentile
+        currentDehazeRadiusDark = radiusDark
+        currentDehazeRadiusGuide = radiusGuide
         reDevelop()
     }
 
@@ -768,6 +788,8 @@ object StudioEngine {
                         denoiseStrength = currentDenoiseStrength,
                         dehazeStrength = currentDehazeStrength,
                         dehazePercentile = currentDehazePercentile,
+            dehazeRadiusDark = currentDehazeRadiusDark,
+            dehazeRadiusGuide = currentDehazeRadiusGuide,
                         downsample = downsample,
                     ),
                     wbKelvin,
@@ -782,6 +804,8 @@ object StudioEngine {
                         denoiseStrength = currentDenoiseStrength,
                         dehazeStrength = currentDehazeStrength,
                         dehazePercentile = currentDehazePercentile,
+            dehazeRadiusDark = currentDehazeRadiusDark,
+            dehazeRadiusGuide = currentDehazeRadiusGuide,
                         downsample = downsample,
                     ),
                 )

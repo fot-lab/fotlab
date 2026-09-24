@@ -189,6 +189,8 @@ fun StudioScreen() {
     var showDehazeDialog by remember { mutableStateOf(false) }
     var dehazeStrengthInput by remember { mutableStateOf("") }
     var dehazePercentileInput by remember { mutableStateOf("") }
+    var dehazeRadiusDarkInput by remember { mutableStateOf("") }
+    var dehazeRadiusGuideInput by remember { mutableStateOf("") }
 
     // Per-stage enable toggles for the develop dialogs. The switch has priority over the numeric
     // value: OFF skips the stage regardless of the field (the engine writes `null`, the native stage
@@ -337,6 +339,8 @@ fun StudioScreen() {
                                 dehazeEnabled = StudioEngine.currentDehazeStrength() != null
                                 dehazeStrengthInput = StudioEngine.currentDehazeStrength()?.toString() ?: ""
                                 dehazePercentileInput = StudioEngine.currentDehazePercentile()?.toString() ?: ""
+                                dehazeRadiusDarkInput = StudioEngine.currentDehazeRadiusDark()?.toString() ?: ""
+                                dehazeRadiusGuideInput = StudioEngine.currentDehazeRadiusGuide()?.toString() ?: ""
                                 showDehazeDialog = true
                             },
                             onExposure = {
@@ -562,9 +566,11 @@ fun StudioScreen() {
                             StudioEngine.setDehaze(
                                 dehazeStrengthInput.toFloatOrNull(),
                                 dehazePercentileInput.toFloatOrNull(),
+                                dehazeRadiusDarkInput.toIntOrNull(),
+                                dehazeRadiusGuideInput.toIntOrNull(),
                             )
                         } else {
-                            StudioEngine.setDehaze(null, null)
+                            StudioEngine.setDehaze(null, null, null, null)
                         }
                         showDehazeDialog = false
                     },
@@ -602,6 +608,24 @@ fun StudioScreen() {
                         singleLine = true,
                         placeholder = { Text(text = stringResource(id = R.string.studio_dehaze_percentile_hint)) },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    TextField(
+                        value = dehazeRadiusDarkInput,
+                        onValueChange = { dehazeRadiusDarkInput = it },
+                        enabled = dehazeEnabled,
+                        singleLine = true,
+                        placeholder = { Text(text = stringResource(id = R.string.studio_dehaze_radius_dark_hint)) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    TextField(
+                        value = dehazeRadiusGuideInput,
+                        onValueChange = { dehazeRadiusGuideInput = it },
+                        enabled = dehazeEnabled,
+                        singleLine = true,
+                        placeholder = { Text(text = stringResource(id = R.string.studio_dehaze_radius_guide_hint)) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     )
                 }
             },
