@@ -78,6 +78,11 @@ import io.github.fotlab.fotlab.feature.library.LibraryCore
 import io.github.fotlab.fotlab.feature.studio.StudioRenderResult
 import io.github.fotlab.fotlab.ui.ZoomableAsyncImage
 import io.github.fotlab.fotlab.ui.icons.CustomMaterialStyleIcons
+import io.github.fotlab.fotlab.ui.icons.MeteringCenterAsterisk
+import io.github.fotlab.fotlab.ui.icons.MeteringCenterAsteriskMatrix
+import io.github.fotlab.fotlab.ui.icons.MeteringCenterWeighted
+import io.github.fotlab.fotlab.ui.icons.MeteringMatrixAverage
+import io.github.fotlab.fotlab.ui.icons.MeteringMatrixSpot
 import io.github.fotlab.fotlab.ui.icons.MovieEdit
 import io.github.fotlab.fotlab.ui.operation.HorizontalOperationBar
 import io.github.fotlab.fotlab.ui.operation.OperationalButton
