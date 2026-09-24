@@ -21,7 +21,7 @@
 //! (`AutoCaFailed`) all `log::warn!` and pass the pixels through unchanged.
 
 use rawler::imgop::{Dim2, Point, Rect};
-use rawler::CFA;
+use rawler::rawimage::CFAConfig;
 
 use crate::demosaic::bayer_cfa_desc;
 
@@ -56,7 +56,7 @@ pub(crate) fn correct_ca(
   width: usize,
   height: usize,
   settings: Option<&CaSettings>,
-  cfa: Option<&CFA>,
+  cfa: Option<&CFAConfig>,
 ) -> Vec<f32> {
   let Some(settings) = settings else {
     return pixels; // switch OFF: identity, free
