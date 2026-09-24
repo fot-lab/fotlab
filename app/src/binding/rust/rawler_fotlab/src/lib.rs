@@ -79,6 +79,8 @@ mod decode;
 mod dehaze;
 mod demosaic;
 mod denoise;
+mod denoise_bm3d_cfa;
+mod denoise_impulse;
 mod develop;
 mod exposure;
 mod intermediate;

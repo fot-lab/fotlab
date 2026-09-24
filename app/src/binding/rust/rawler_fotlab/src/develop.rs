@@ -7,11 +7,13 @@
 //!
 //! 1. `decode`      — `rawler::decode` → rawler `RawImage`
 //! 2. rescale       — black/white-level scaling into 0..1 float (rawler)
-//! 3. `denoise_strength` — optional pre-demosaic denoise of the scaled mosaic
-//!     (`denoise.rs`); `None` = identity. A RawTherapee-style **CFA impulse
-//!     denoise** (hot/dead-pixel / salt-and-pepper removal): each photosite is
-//!     tested against the range of its same-colour neighbours and pulled toward
-//!     their median when it is an isolated spike. Colour-aware on **every** CFA
+//! 3. `denoise_strength` / `denoise_bm3d_strength` — two composed pre-demosaic
+//!     mosaic denoise sub-stages (`denoise.rs` orchestrates them, in order):
+//!     (a) a RawTherapee-style **CFA impulse denoise** (hot/dead-pixel /
+//!     salt-and-pepper removal) driven by `denoise_strength`, then (b) a
+//!     from-scratch **BM3D-CFA collaborative filter** on the raw mosaic driven
+//!     by `denoise_bm3d_strength`. Both are `None` = identity; each photosite is
+//!     handled on the normalised 0..1 mosaic, colour-aware on **every** CFA
 //!     (2×2 Bayer, 6×6 X-Trans, four-colour, monochrome).
 //! 3a. `dehaze_strength` / `dehaze_percentile` — optional pre-demosaic dehaze of
 //!     the scaled mosaic (`dehaze.rs`); `None` = identity. The haze floor is
@@ -111,15 +113,26 @@ pub struct DevelopParams {
   /// Optional white-balance multipliers (RGBE order). `None` → rawler's as-shot
   /// `wb_coeffs`.
   pub wb: Option<Vec<f32>>,
-  /// Denoise strength for the pre-demosaic mosaic denoise stage (`denoise.rs`),
-  /// applied **before** exposure on the normalised 0..1 mosaic. `None` = skip
-  /// (identity); `0` also collapses to identity.
-  /// A RawTherapee-style CFA impulse denoise (hot/dead-pixel removal): `strength`
-  /// is a *sensitivity multiplier* on the detection threshold (`≈1.0` = mild,
-  /// higher = more aggressive). Supplied from Kotlin when the Studio denoise
-  /// control is enabled. Non-2×2-periodic CFAs (e.g. X-Trans) skip the stage.
+  /// Impulse denoise strength for the **impulse** sub-stage of the pre-demosaic
+  /// mosaic denoise (`denoise_impulse.rs`), applied **before** exposure on the
+  /// normalised 0..1 mosaic. `None` = skip (identity); `0` also collapses to
+  /// identity. A RawTherapee-style CFA impulse denoise (hot/dead-pixel /
+  /// salt-and-pepper removal): `strength` is a *sensitivity multiplier* on the
+  /// detection threshold (`≈1.0` = mild, higher = more aggressive). Supplied from
+  /// Kotlin when the Studio denoise impulse control is enabled. Non-2×2-periodic
+  /// CFAs (e.g. X-Trans) are handled (per-colour grouping), not skipped.
   #[uniffi(default = None)]
   pub denoise_strength: Option<f32>,
+  /// BM3D-CFA denoise strength for the **BM3D** sub-stage of the pre-demosaic
+  /// mosaic denoise (`denoise_bm3d_cfa.rs`), applied **before** exposure on the
+  /// normalised 0..1 mosaic, *after* the impulse sub-stage. `None` = skip
+  /// (identity); `0` also collapses to identity. A from-scratch BM3D-style
+  /// collaborative filter that runs directly on the CFA mosaic
+  /// (`sigma = 0.02 · strength`); higher strength = more aggressive Gaussian /
+  /// shot-noise reduction. Supplied from Kotlin when the Studio BM3D denoise
+  /// control is enabled.
+  #[uniffi(default = None)]
+  pub denoise_bm3d_strength: Option<f32>,
   /// Dehaze strength (0..1) for the pre-demosaic mosaic dehaze stage (`dehaze.rs`),
   /// applied **before** exposure on the normalised 0..1 mosaic. `None` = skip
   /// (identity). Supplied from Kotlin when the Studio dehaze control is enabled; 0
@@ -310,13 +323,17 @@ pub(crate) fn develop_image(
     RawPhotometricInterpretation::Cfa(config) => Some(config),
     _ => None,
   };
-  // Impulse denoise: RT-style CFA hot/dead-pixel removal, generalised to any CFA
-  // (per-colour neighbour grouping, range test + soft knee) — see `denoise.rs`.
+  // Denoise (pre-demosaic mosaic): orchestrates two composed sub-stages in order
+  // — (1) RT-style CFA impulse / hot-dead-pixel removal on `denoise_strength`,
+  // then (2) BM3D-CFA collaborative filtering on the raw mosaic on
+  // `denoise_bm3d_strength`. Each is independently `None`/zero = identity, so
+  // enabling either alone is free. See `denoise.rs`.
   let pixels = denoise(
     pixels,
     image.width,
     image.height,
     params.denoise_strength,
+    params.denoise_bm3d_strength,
     cfa,
   );
   // Dehaze: separate haze floor per CFA colour plane, as a configurable
