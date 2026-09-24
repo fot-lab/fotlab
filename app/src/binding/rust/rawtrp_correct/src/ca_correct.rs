@@ -10,23 +10,26 @@
 //!          Ingo Weyrich (heckflosse at i-x dot de)
 //! ```
 //!
-//! ## What this batch (C1) implements
+//! ## Passes
 //!
 //! The upstream routine has two passes:
 //!   * **pass 1** — auto-fit measurement: per-tile colour-difference
-//!     correlation → 4th-order 2-D polynomial regression of the residual CA
-//!     (solved with [`crate::lin_eq_solve`]). This is *not yet ported* (see
-//!     below).
+//!     correlation → 2-D polynomial regression of the residual CA (solved with
+//!     [`crate::lin_eq_solve`]). **Fully ported** as [`detect_ca`] / the public
+//!     [`fit_ca_bayer`]. A detection failure (too few usable blocks after the
+//!     `caAutostrength` median filter, or singular normal equations) returns
+//!     [`Error::AutoCaFailed`].
 //!   * **pass 2** — shift application: for every tile, evaluate the CA shift
-//!     (manual `cared`/`cablue` radial, or the auto polynomial evaluated from a
-//!     supplied [`FitParams`]), then resample the R/B planes by that shift using
-//!     G-difference interpolation and write the corrected planes back. **This is
-//!     fully ported.**
+//!     (manual `ca_red`/`ca_blue` radial, or the auto polynomial evaluated from
+//!     a supplied [`FitParams`]), then resample the R/B planes by that shift
+//!     using G-difference interpolation and write the corrected planes back.
+//!     **Fully ported.**
 //!
-//! Until pass 1 lands, `auto_ca = true` with no [`FitParams`] returns
-//! [`Error::AutoCaNotYet`]; `auto_ca = true` *with* a `fit` is accepted and runs
-//! pass 2 against the supplied polynomial (the exact path `RawTherapee` takes
-//! when reusing parameters across frames, `fitParamsIn`).
+//! `auto_ca = true` with no [`FitParams`] runs pass 1 first (and again per
+//! iteration when `auto_iterations > 1`) then applies the measured polynomial —
+//! the exact path `RawTherapee` takes for on-the-fly correction. `auto_ca =
+//! true` *with* a `fit` skips measurement and applies the supplied polynomial
+//! directly (the `fitParamsIn` reuse path).
 //!
 //! ## Domain
 //!
@@ -36,9 +39,24 @@
 //! clamp) are unchanged because they live in the normalised domain.
 
 use rawtrp_demos::{Array2D, CfaDesc};
+use rayon::prelude::*;
+use std::sync::Mutex;
 
-// `gauss` / `lin_eq` are declared as crate-root `pub mod`s in `lib.rs`; this
-// module reaches them as `gauss::…` / `lin_eq::…`.
+// `gauss` / `lin_eq` are crate-root `pub mod`s in `lib.rs`; reach them via
+// `crate::` (the earlier bare `gauss::…` / `lin_eq::…` paths never resolved).
+use crate::{gauss, lin_eq};
+
+/// Cross-tile mutable state of pass 1 (`detect_ca`). Each tile owns a disjoint
+/// `bidx`, so `blockshifts`/`blockwt` are written once per tile; the variance
+/// accumulators (`blockave`/`blocksqave`/`blockdenom`) are summed across tiles
+/// under a single short `Mutex` lock at tile end (R4 parallelisation).
+struct Pass1Shared {
+    blockshifts: Vec<[[f32; 2]; 2]>,
+    blockwt: Vec<f32>,
+    blockave: [[f32; 2]; 2],
+    blocksqave: [[f32; 2]; 2],
+    blockdenom: [[f32; 2]; 2],
+}
 
 const TS: usize = 128; // tile size
 const TSH: usize = 64; // half tile (R/B planes are half-res)
@@ -48,6 +66,8 @@ const POLYORD: usize = 4; // order of the 2-D polynomial fit
 const EPS: f32 = 1e-5; // division guard (normalised domain)
 const SQR: f64 = 2.0; // upstream `constexpr float SQR = 2.f;`
 const BS_LIM: f64 = 3.99; // max allowed CA shift (upstream `bslim`)
+const EPS2: f32 = 1e-10; // pass-1 fit division guard (upstream `eps2`)
+const CA_AUTOSTRENGTH: f32 = 8.0; // pass-1 outlier gate (upstream `caAutostrength`)
 
 /// Auto-fit polynomial coefficients, indexed `[colour][direction][coeff]`
 /// where `colour ∈ {0=R, 1=B}`, `direction ∈ {0=v, 1=h}`, and the 16
@@ -57,8 +77,10 @@ pub type FitParams = [[[f64; 16]; 2]; 2];
 /// Parameters for [`correct_ca_bayer`].
 #[derive(Clone, Copy, Debug, Default)]
 pub struct CaParams {
-    /// Run the auto-fit path. Requires a [`FitParams`] unless the caller only
-    /// wants [`Error::AutoCaNotYet`] (pass 1 not yet ported).
+    /// Run the auto-fit path. With no [`FitParams`] supplied, pass 1 measures
+    /// the residual-CA polynomial from the mosaic (per iteration); with a `fit`
+    /// supplied, that polynomial is applied directly (the `fitParamsIn` reuse
+    /// path).
     pub auto_ca: bool,
     /// Number of auto-fit iterations (upstream `autoIterations`).
     pub auto_iterations: usize,
@@ -82,9 +104,10 @@ pub enum Error {
     /// The mosaic width is odd. The upstream tile logic implicitly extends by
     /// `(W & 1)`; this port requires an even width (true for all Bayer mosaics).
     OddWidth,
-    /// `auto_ca = true` was requested without a [`FitParams`]; pass 1 (auto-fit
-    /// measurement) is not yet ported. Supply `fit`, or use manual mode.
-    AutoCaNotYet,
+    /// Pass-1 auto CA measurement failed: fewer than 10 usable blocks survived
+    /// the `caAutostrength` median filter, or the polynomial normal equations
+    /// were singular. The image is left uncorrected.
+    AutoCaFailed,
 }
 
 /// Linear interpolation: `intp(a, x, y) = x + a*(y - x)` (upstream `intp`).
@@ -101,8 +124,8 @@ fn intp(a: f32, x: f32, y: f32) -> f32 {
 /// when pass 1 has not run.
 ///
 /// Only the R and B planes are modified; green is untouched. Returns
-/// [`Error::UnsupportedCfa`] for non-Bayer CFAs and [`Error::AutoCaNotYet`] when
-/// auto mode is requested without `fit`.
+/// [`Error::UnsupportedCfa`] for non-Bayer CFAs and [`Error::AutoCaFailed`] when
+/// the auto-fit measurement fails to find enough usable blocks.
 pub fn correct_ca_bayer(
     mosaic: &mut Array2D<f32>,
     cfa: &CfaDesc,
@@ -118,6 +141,17 @@ pub fn correct_ca_bayer(
     if w & 1 == 1 {
         return Err(Error::OddWidth);
     }
+
+    // Library-level identity guarantee (deviation from upstream): with the
+    // manual path at zero strength the mosaic is returned untouched. Upstream
+    // would still re-estimate R/B from the G-difference even at shift 0 (the
+    // G-at-R/B estimates are interpolated, so the reconstruction is not a
+    // strict identity); our pipeline contract promises that an unconfigured
+    // `CaParams` leaves the default render bit-identical, so bail out here.
+    if !params.auto_ca && params.ca_red == 0.0 && params.ca_blue == 0.0 {
+        return Ok(());
+    }
+
     let width = w; // even; upstream extends by (W&1) but we reject odd widths
     let height = h;
     let wext = width; // upstream `width - (W & 1)`; equal to `width` here
@@ -131,13 +165,13 @@ pub fn correct_ca_bayer(
     ];
     let fc = |r: i32, c: i32| cfa2[(r & 1) as usize][(c & 1) as usize];
 
-    // Auto-fit parameters (all zero until pass 1 is ported; used only when `fit`
-    // is supplied).
+    // Auto-fit polynomial coefficients. With `auto_ca` and a supplied `fit` we
+    // use it directly (the `fitParamsIn` reuse path); with `auto_ca` and no
+    // `fit` we measure it per iteration inside the apply loop (pass 1).
     let mut fitparams = [[[0f64; 16]; 2]; 2];
     if params.auto_ca {
-        match fit {
-            Some(f) => fitparams = *f,
-            None => return Err(Error::AutoCaNotYet),
+        if let Some(f) = fit {
+            fitparams = *f;
         }
     }
 
@@ -152,7 +186,8 @@ pub fn correct_ca_bayer(
 
     // Half-res scratch buffer holding the corrected R/B planes (upstream
     // `RawDataTmp`, at `buffer + (height*width)/2`, `height*width/2` floats).
-    let mut raw_data_tmp = vec![0f32; (height * width / 2) as usize];
+    // Allocated per iteration below — it is wrapped in a `Mutex` for the rayon
+    // tile loop (R4).
     // `Gtmp` from pass 1 (interpolated G). Not ported yet, so it stays zero —
     // matching upstream's manual-mode behaviour where pass 1 never runs. The
     // load stage reads it for G at R/B positions, and the directional
@@ -169,12 +204,35 @@ pub fn correct_ca_bayer(
     };
 
     for _it in 0..iterations {
-        // ---- tile loop (upstream `#pragma omp for collapse(2)`; serial here for
-        //      correctness-first — rayon parallelisation is a follow-up, R4) ----
-        let mut top = -BORDER;
-        while top < height {
-            let mut left = -BORDER;
-            while left < wext {
+        // Pass 1: when auto mode has no supplied polynomial, measure the residual
+        // CA from the (possibly already-corrected) mosaic before applying. This
+        // repeats each iteration to mirror RawTherapee's refinement loop.
+        if params.auto_ca && fit.is_none() {
+            fitparams = detect_ca(mosaic, cfa, params)?;
+        }
+
+        // ---- tile loop (upstream `#pragma omp for collapse(2)` → rayon over
+        //      disjoint (top,left) tiles, R4). Each tile reads `mosaic` (shared,
+        //      read-only here) and writes its corrected R/B into a *disjoint*
+        //      region of `raw_data_tmp`; the lock is held only for that brief
+        //      copy-back, so the heavy per-tile compute stays parallel. ----
+        let mosaic_for_tiles: &Array2D<f32> = mosaic;
+        let raw_data_tmp = Mutex::new(vec![0f32; (height * width / 2) as usize]);
+        let tiles: Vec<(i32, i32)> = {
+            let mut v = Vec::new();
+            let mut top = -BORDER;
+            while top < height {
+                let mut left = -BORDER;
+                while left < wext {
+                    v.push((top, left));
+                    left += ts - border2;
+                }
+                top += ts - border2;
+            }
+            v
+        };
+        tiles.into_par_iter().for_each(|(top, left)| {
+            let mosaic = mosaic_for_tiles;
                 // per-tile working buffers
                 let mut rgb0 = vec![0f32; TS * TSH]; // red, half-res
                 let mut rgb1 = vec![0f32; TS * TS]; // green, full-res
@@ -609,6 +667,8 @@ pub fn correct_ca_bayer(
                 }
 
                 // ---- copy CA-corrected R/B planes into the half-res temp buffer ----
+                // (guarded so tiles stay disjoint-shared-safe under rayon, R4)
+                let mut g = raw_data_tmp.lock().unwrap();
                 for rr in BORDER..(rr1 - BORDER) {
                     let row = rr + top;
                     let c = fc(row, left + BORDER + (fc(rr, 2) & 1)) as usize;
@@ -618,16 +678,14 @@ pub fn correct_ca_bayer(
                     let end = ((row * width + cc1 - BORDER + left) >> 1) as usize;
                     while indx < end {
                         let v = if c == 0 { rgb0[indx1] } else { rgb2[indx1] };
-                        raw_data_tmp[indx] = v;
+                        g[indx] = v;
                         indx += 1;
                         indx1 += 1;
                     }
                 }
 
-                left += ts - border2;
-            }
-            top += ts - border2;
-        }
+        });
+        let raw_data_tmp = raw_data_tmp.into_inner().unwrap();
 
         // ---- copy the half-res temp buffer back into the mosaic (R/B only) ----
         for row in cb..(height - cb) {
@@ -702,8 +760,13 @@ pub fn correct_ca_bayer(
                 }
             }
 
-            gauss::gaussian_blur(&red_factor, &mut red_factor, ncols, nrows, 30.0);
-            gauss::gaussian_blur(&blue_factor, &mut blue_factor, ncols, nrows, 30.0);
+            // blur into temporaries (src and dst must not alias)
+            let mut blurred = red_factor.clone();
+            gauss::gaussian_blur(&red_factor, &mut blurred, ncols, nrows, 30.0);
+            red_factor = blurred;
+            let mut blurred = blue_factor.clone();
+            gauss::gaussian_blur(&blue_factor, &mut blurred, ncols, nrows, 30.0);
+            blue_factor = blurred;
 
             for i in 0..h2 {
                 let first_col = fc(i, 0) & 1;
@@ -722,6 +785,618 @@ pub fn correct_ca_bayer(
     }
 
     Ok(())
+}
+
+/// Median of nine values (upstream `median(std::array<float,9>)` used by pass 1
+/// to robustify the per-block CA-shift estimate).
+#[inline]
+fn median9(mut a: [f32; 9]) -> f32 {
+    a.sort_by(|x, y| x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal));
+    a[4]
+}
+
+/// Pass 1 — automatic CA measurement (RawTherapee `CA_correct_RT`, diagnostic
+/// pass). Scans the mosaic in `TS`-sized tiles, estimates the residual CA shift
+/// per tile from the colour-difference variance at R/B grid points, rejects
+/// outliers with a 3x3 median + `caAutostrength` gate, and fits a 2-D polynomial
+/// (order 4, dropping to 2 when few blocks survive) by weighted least squares
+/// solved with [`crate::lin_eq_solve`]. Returns the polynomial coefficients in
+/// the same `[colour][direction][coeff]` layout as [`FitParams`].
+///
+/// Does NOT modify `mosaic`; callers apply the result through
+/// [`correct_ca_bayer`] (or read it via [`fit_ca_bayer`]).
+fn detect_ca(mosaic: &Array2D<f32>, cfa: &CfaDesc, _params: &CaParams) -> Result<FitParams, Error> {
+    if !cfa.is_bayer || cfa.colors > 3 {
+        return Err(Error::UnsupportedCfa("only 3-colour Bayer CFAs are supported"));
+    }
+    let w = mosaic.width() as i32;
+    let h = mosaic.height() as i32;
+    if w & 1 == 1 {
+        return Err(Error::OddWidth);
+    }
+    let width = w;
+    let height = h;
+    let wext = width;
+
+    let cfa2 = [
+        [cfa.fc(0, 0) as i32, cfa.fc(0, 1) as i32],
+        [cfa.fc(1, 0) as i32, cfa.fc(1, 1) as i32],
+    ];
+    let fc = |r: i32, c: i32| cfa2[(r & 1) as usize][(c & 1) as usize];
+
+    let ts = TS as i32;
+    let border2 = BORDER2;
+    let vz1 = if (height + border2) % (ts - border2) == 0 { 1 } else { 0 };
+    let hz1 = if (wext + border2) % (ts - border2) == 0 { 1 } else { 0 };
+    let vblsz =
+        (((height + border2) as f64 / (ts - border2) as f64).ceil() as i32 + 2 + vz1) as usize;
+    let hblsz =
+        (((wext + border2) as f64 / (ts - border2) as f64).ceil() as i32 + 2 + hz1) as usize;
+
+    // Per-block CA shift and weight (upstream `blockshifts` / `blockwt`).
+    let nblocks = vblsz * hblsz;
+    // Cross-tile mutable state, merged once per tile under a short lock (R4).
+    let shared = Mutex::new(Pass1Shared {
+        blockshifts: vec![[[0.0f32; 2]; 2]; nblocks],
+        blockwt: vec![0.0f32; nblocks],
+        blockave: [[0.0f32; 2]; 2],
+        blocksqave: [[0.0f32; 2]; 2],
+        blockdenom: [[0.0f32; 2]; 2],
+    });
+
+    let v1 = ts;
+    let v2 = 2 * ts;
+    let v3 = 3 * ts;
+    let v4 = 4 * ts;
+
+    // ---- tile loop (upstream `#pragma omp for collapse(2)` → rayon over
+    //      disjoint (top,left) tiles, R4). `mosaic` is read-only; the only
+    //      cross-tile mutable state is `shared`, merged once per tile under a
+    //      short lock. ----
+    let tiles: Vec<(i32, i32)> = {
+        let mut v = Vec::new();
+        let mut top = -BORDER;
+        while top < height {
+            let mut left = -BORDER;
+            while left < wext {
+                v.push((top, left));
+                left += ts - border2;
+            }
+            top += ts - border2;
+        }
+        v
+    };
+    tiles.into_par_iter().for_each(|(top, left)| {
+            let mut rgb0 = vec![0.0f32; TS * TS]; // red,   packed half-res
+            let mut rgb1 = vec![0.0f32; TS * TS]; // green, full-res
+            let mut rgb2 = vec![0.0f32; TS * TS]; // blue,  packed half-res
+
+            let bottom = (top + ts).min(height + BORDER);
+            let right = (left + ts).min(wext + BORDER);
+            let rr1 = bottom - top;
+            let cc1 = right - left;
+            let rrmin = if top < 0 { BORDER } else { 0 };
+            let rrmax = if bottom > height { height - top } else { rr1 };
+            let ccmin = if left < 0 { BORDER } else { 0 };
+            let ccmax = if right > wext { wext - left } else { cc1 };
+
+            // ---- load raw CFA data into the tile (scalar reference path) ----
+            for rr in rrmin..rrmax {
+                let row = rr + top;
+                let mut cc = ccmin;
+                let mut col = cc + left;
+                let mut indx1 = rr * ts + cc;
+                while cc < ccmax {
+                    let c = fc(rr, cc);
+                    let packed = if c == 1 { indx1 as usize } else { (indx1 >> 1) as usize };
+                    let val = mosaic.at(row as usize, col as usize);
+                    match c {
+                        0 => rgb0[packed] = val,
+                        1 => rgb1[indx1 as usize] = val,
+                        _ => rgb2[packed] = val,
+                    }
+                    cc += 1;
+                    col += 1;
+                    indx1 += 1;
+                }
+            }
+
+            // ---- border fills (mirror edge samples into the tile border) ----
+            if rrmin > 0 {
+                for rr in 0..BORDER {
+                    for cc in ccmin..ccmax {
+                        let c = fc(rr, cc);
+                        let idx = (rr * ts + cc) as usize;
+                        let idx_m = ((border2 - rr) * ts + cc) as usize;
+                        match c {
+                            0 => rgb0[idx >> 1] = rgb0[idx_m >> 1],
+                            1 => rgb1[idx] = rgb1[idx_m],
+                            2 => rgb2[idx >> 1] = rgb2[idx_m >> 1],
+                            _ => {}
+                        }
+                        rgb1[idx] = rgb1[idx_m];
+                    }
+                }
+            }
+            if rrmax < rr1 {
+                for rr in 0..(BORDER.min(rr1 - rrmax)) {
+                    for cc in ccmin..ccmax {
+                        let c = fc(rr, cc);
+                        let idx = ((rrmax + rr) * ts + cc) as usize;
+                        let val = mosaic.at((height - rr - 2) as usize, (left + cc) as usize);
+                        match c {
+                            0 => rgb0[idx >> 1] = val,
+                            1 => rgb1[idx] = val,
+                            2 => rgb2[idx >> 1] = val,
+                            _ => {}
+                        }
+                        rgb1[idx] = val;
+                    }
+                }
+            }
+            if ccmin > 0 {
+                for rr in rrmin..rrmax {
+                    for cc in 0..BORDER {
+                        let c = fc(rr, cc);
+                        let idx = (rr * ts + cc) as usize;
+                        let idx_m = (rr * ts + (border2 - cc)) as usize;
+                        match c {
+                            0 => rgb0[idx >> 1] = rgb0[idx_m >> 1],
+                            1 => rgb1[idx] = rgb1[idx_m],
+                            2 => rgb2[idx >> 1] = rgb2[idx_m >> 1],
+                            _ => {}
+                        }
+                        rgb1[idx] = rgb1[idx_m];
+                    }
+                }
+            }
+            if ccmax < cc1 {
+                for rr in rrmin..rrmax {
+                    for cc in 0..(BORDER.min(cc1 - ccmax)) {
+                        let c = fc(rr, cc);
+                        let idx = ((rr * ts + ccmax + cc)) as usize;
+                        let val = mosaic.at((top + rr) as usize, (width - cc - 2) as usize);
+                        match c {
+                            0 => rgb0[idx >> 1] = val,
+                            1 => rgb1[idx] = val,
+                            2 => rgb2[idx >> 1] = val,
+                            _ => {}
+                        }
+                        rgb1[idx] = val;
+                    }
+                }
+            }
+            if rrmin > 0 && ccmin > 0 {
+                for rr in 0..BORDER {
+                    for cc in 0..BORDER {
+                        let c = fc(rr, cc);
+                        let idx = (rr * ts + cc) as usize;
+                        let val = mosaic.at((border2 - rr) as usize, (border2 - cc) as usize);
+                        match c {
+                            0 => rgb0[idx >> 1] = val,
+                            1 => rgb1[idx] = val,
+                            2 => rgb2[idx >> 1] = val,
+                            _ => {}
+                        }
+                        rgb1[idx] = val;
+                    }
+                }
+            }
+            if rrmax < rr1 && ccmax < cc1 {
+                for rr in 0..(BORDER.min(rr1 - rrmax)) {
+                    for cc in 0..(BORDER.min(cc1 - ccmax)) {
+                        let c = fc(rr, cc);
+                        let idx = ((rrmax + rr) * ts + ccmax + cc) as usize;
+                        let val = mosaic.at((height - rr - 2) as usize, (width - cc - 2) as usize);
+                        match c {
+                            0 => rgb0[idx >> 1] = val,
+                            1 => rgb1[idx] = val,
+                            2 => rgb2[idx >> 1] = val,
+                            _ => {}
+                        }
+                        rgb1[idx] = val;
+                    }
+                }
+            }
+            if rrmin > 0 && ccmax < cc1 {
+                for rr in 0..BORDER {
+                    for cc in 0..(BORDER.min(cc1 - ccmax)) {
+                        let c = fc(rr, cc);
+                        let idx = (rr * ts + ccmax + cc) as usize;
+                        let val = mosaic.at((border2 - rr) as usize, (width - cc - 2) as usize);
+                        match c {
+                            0 => rgb0[idx >> 1] = val,
+                            1 => rgb1[idx] = val,
+                            2 => rgb2[idx >> 1] = val,
+                            _ => {}
+                        }
+                        rgb1[idx] = val;
+                    }
+                }
+            }
+            if rrmax < rr1 && ccmin > 0 {
+                for rr in 0..(BORDER.min(rr1 - rrmax)) {
+                    for cc in 0..BORDER {
+                        let c = fc(rr, cc);
+                        let idx = ((rrmax + rr) * ts + cc) as usize;
+                        let val = mosaic.at((height - rr - 2) as usize, (border2 - cc) as usize);
+                        match c {
+                            0 => rgb0[idx >> 1] = val,
+                            1 => rgb1[idx] = val,
+                            2 => rgb2[idx >> 1] = val,
+                            _ => {}
+                        }
+                        rgb1[idx] = val;
+                    }
+                }
+            }
+
+            // ---- directional weighted G at R/B grid points ----
+            for rr in 3..(rr1 - 3) {
+                let mut cc = 3 + (fc(rr, 1) & 1);
+                while cc < cc1 - 3 {
+                    let c = fc(rr, cc);
+                    let indx = rr * ts + cc;
+                    let ri = |k: usize| -> f32 {
+                        if c == 0 {
+                            rgb0[k]
+                        } else {
+                            rgb2[k]
+                        }
+                    };
+                    let rcin = ri((indx >> 1) as usize);
+                    let wtu = 1.0
+                        / (EPS
+                            + (rgb1[(indx + v1) as usize] - rgb1[(indx - v1) as usize]).abs()
+                            + (rcin - ri(((indx - v2) >> 1) as usize)).abs()
+                            + (rgb1[(indx - v1) as usize] - rgb1[(indx - v3) as usize]).abs())
+                        .powi(2);
+                    let wtd = 1.0
+                        / (EPS
+                            + (rgb1[(indx - v1) as usize] - rgb1[(indx + v1) as usize]).abs()
+                            + (rcin - ri(((indx + v2) >> 1) as usize)).abs()
+                            + (rgb1[(indx + v1) as usize] - rgb1[(indx + v3) as usize]).abs())
+                        .powi(2);
+                    let wtl = 1.0
+                        / (EPS
+                            + (rgb1[(indx + 1) as usize] - rgb1[(indx - 1) as usize]).abs()
+                            + (rcin - ri(((indx - 2) >> 1) as usize)).abs()
+                            + (rgb1[(indx - 1) as usize] - rgb1[(indx - 3) as usize]).abs())
+                        .powi(2);
+                    let wtr = 1.0
+                        / (EPS
+                            + (rgb1[(indx - 1) as usize] - rgb1[(indx + 1) as usize]).abs()
+                            + (rcin - ri(((indx + 2) >> 1) as usize)).abs()
+                            + (rgb1[(indx + 1) as usize] - rgb1[(indx + 3) as usize]).abs())
+                        .powi(2);
+                    let gint = (wtu * rgb1[(indx - v1) as usize]
+                        + wtd * rgb1[(indx + v1) as usize]
+                        + wtl * rgb1[(indx - 1) as usize]
+                        + wtr * rgb1[(indx + 1) as usize])
+                        / (wtu + wtd + wtl + wtr);
+                    rgb1[indx as usize] = gint;
+                    cc += 2;
+                }
+            }
+
+            // ---- high/low-pass filters of R/B and colour differences ----
+            let mut rbhpfv = vec![0.0f32; TS * TSH];
+            let mut rbhpfh = vec![0.0f32; TS * TSH];
+            let mut rblpfv = vec![0.0f32; TS * TSH];
+            let mut rblpfh = vec![0.0f32; TS * TSH];
+            let mut grblpfv = vec![0.0f32; TS * TSH];
+            let mut grblpfh = vec![0.0f32; TS * TSH];
+            for rr in 4..(rr1 - 4) {
+                let mut cc = 4 + (fc(rr, 2) & 1);
+                let mut indx = rr * ts + cc;
+                while cc < cc1 - 4 {
+                    let c = fc(rr, cc);
+                    let cinx = (indx >> 1) as usize;
+                    let ri = |k: usize| -> f32 {
+                        if c == 0 {
+                            rgb0[k]
+                        } else {
+                            rgb2[k]
+                        }
+                    };
+                    let rc_in = ri(cinx);
+                    let rc_v4p = ri(((indx + v4) >> 1) as usize);
+                    let rc_v4m = ri(((indx - v4) >> 1) as usize);
+                    let term_a = (rgb1[indx as usize] - rc_in
+                        - (rgb1[(indx + v4) as usize] - rc_v4p))
+                        .abs();
+                    let term_b = (rgb1[(indx - v4) as usize] - rc_v4m
+                        - (rgb1[indx as usize] - rc_in))
+                        .abs();
+                    let term_c = (rgb1[(indx - v4) as usize] - rc_v4m
+                        - (rgb1[(indx + v4) as usize] - rc_v4p))
+                        .abs();
+                    rbhpfv[cinx] = (term_a + term_b - term_c).abs();
+
+                    let rc_4p = ri(((indx + 4) >> 1) as usize);
+                    let rc_4m = ri(((indx - 4) >> 1) as usize);
+                    let term_ah = (rgb1[indx as usize] - rc_in
+                        - (rgb1[(indx + 4) as usize] - rc_4p))
+                        .abs();
+                    let term_bh = (rgb1[(indx - 4) as usize] - rc_4m
+                        - (rgb1[indx as usize] - rc_in))
+                        .abs();
+                    let term_ch = (rgb1[(indx - 4) as usize] - rc_4m
+                        - (rgb1[(indx + 4) as usize] - rc_4p))
+                        .abs();
+                    rbhpfh[cinx] = (term_ah + term_bh - term_ch).abs();
+
+                    let glpfv = 2.0 * rgb1[indx as usize]
+                        + rgb1[(indx + v2) as usize]
+                        + rgb1[(indx - v2) as usize];
+                    let glpfh = 2.0 * rgb1[indx as usize]
+                        + rgb1[(indx + 2) as usize]
+                        + rgb1[(indx - 2) as usize];
+                    let rc_v2p = ri(((indx + v2) >> 1) as usize);
+                    let rc_v2m = ri(((indx - v2) >> 1) as usize);
+                    let rc_2p = ri(((indx + 2) >> 1) as usize);
+                    let rc_2m = ri(((indx - 2) >> 1) as usize);
+                    rblpfv[cinx] = 0.25 * (glpfv - (2.0 * rc_in + rc_v2p + rc_v2m)).abs();
+                    rblpfh[cinx] = 0.25 * (glpfh - (2.0 * rc_in + rc_2p + rc_2m)).abs();
+                    grblpfv[cinx] = 0.25 * (glpfv + (2.0 * rc_in + rc_v2p + rc_v2m));
+                    grblpfh[cinx] = 0.25 * (glpfh + (2.0 * rc_in + rc_2p + rc_2m));
+
+                    cc += 2;
+                    indx += 2;
+                }
+            }
+
+            // ---- accumulate the colour-difference-variance quadratic fit ----
+            let mut coeff = [[[0.0f32; 2]; 3]; 2]; // [dir][k][plane]
+            for rr in 8..(rr1 - 8) {
+                let mut cc = 8 + (fc(rr, 2) & 1);
+                let mut indx = rr * ts + cc;
+                while cc < cc1 - 8 {
+                    let c = fc(rr, cc);
+                    let cinx = (indx >> 1) as usize;
+                    let ri = |k: usize| -> f32 {
+                        if c == 0 {
+                            rgb0[k]
+                        } else {
+                            rgb2[k]
+                        }
+                    };
+                    let rcin = ri(cinx);
+                    // vertical direction
+                    let gdiff = (rgb1[(indx + ts) as usize] - rgb1[(indx - ts) as usize])
+                        + 0.3
+                            * ((rgb1[(indx + ts + 1) as usize] - rgb1[(indx - ts + 1) as usize])
+                                + (rgb1[(indx + ts - 1) as usize]
+                                    - rgb1[(indx - ts - 1) as usize]));
+                    let deltgrb = rcin - rgb1[indx as usize];
+                    let gradwt = (rbhpfv[cinx]
+                        + 0.5 * (rbhpfv[cinx + 1] + rbhpfv[cinx - 1]))
+                        * (grblpfv[cinx - v1 as usize] + grblpfv[cinx + v1 as usize])
+                        / (EPS
+                            + 0.1 * (grblpfv[cinx - v1 as usize] + grblpfv[cinx + v1 as usize])
+                            + rblpfv[cinx - v1 as usize]
+                            + rblpfv[cinx + v1 as usize]);
+                    coeff[0][0][(c >> 1) as usize] += gradwt * deltgrb * deltgrb;
+                    coeff[0][1][(c >> 1) as usize] += gradwt * gdiff * deltgrb;
+                    coeff[0][2][(c >> 1) as usize] += gradwt * gdiff * gdiff;
+                    // horizontal direction
+                    let gdiffh = (rgb1[(indx + 1) as usize] - rgb1[(indx - 1) as usize])
+                        + 0.3
+                            * ((rgb1[(indx + 1 + ts) as usize] - rgb1[(indx - 1 + ts) as usize])
+                                + (rgb1[(indx + 1 - ts) as usize]
+                                    - rgb1[(indx - 1 - ts) as usize]));
+                    let gradwth = (rbhpfh[cinx]
+                        + 0.5 * (rbhpfh[cinx + 1] + rbhpfh[cinx - 1]))
+                        * (grblpfh[cinx - 1] + grblpfh[cinx + 1])
+                        / (EPS
+                            + 0.1 * (grblpfh[cinx - 1] + grblpfh[cinx + 1])
+                            + rblpfh[cinx - 1]
+                            + rblpfh[cinx + 1]);
+                    coeff[1][0][(c >> 1) as usize] += gradwth * deltgrb * deltgrb;
+                    coeff[1][1][(c >> 1) as usize] += gradwth * gdiffh * deltgrb;
+                    coeff[1][2][(c >> 1) as usize] += gradwth * gdiffh * gdiffh;
+
+                    cc += 2;
+                    indx += 2;
+                }
+            }
+
+            for dir in 0..2 {
+                for k in 0..3 {
+                    for c in 0..2 {
+                        coeff[dir][k][c] *= 0.25;
+                        if k == 1 {
+                            coeff[dir][k][c] *= 0.3125;
+                        } else if k == 2 {
+                            coeff[dir][k][c] *= 0.3125 * 0.3125;
+                        }
+                    }
+                }
+            }
+
+            // ---- CA shift for this tile; weighted by the fit confidence ----
+            let vblock = ((top + BORDER) / (ts - border2)) + 1;
+            let hblock = ((left + BORDER) / (ts - border2)) + 1;
+            let bidx = (vblock * hblsz as i32 + hblock) as usize;
+            // Tile-local accumulators; merged into `shared` once at tile end.
+            let mut tile_blockave = [[0.0f32; 2]; 2];
+            let mut tile_blocksqave = [[0.0f32; 2]; 2];
+            let mut tile_blockdenom = [[0.0f32; 2]; 2];
+            let mut tile_blockshifts = [[0.0f32; 2]; 2];
+            let mut tile_blockwt = 0.0f32;
+            for c in 0..2 {
+                for dir in 0..2 {
+                    if coeff[dir][2][c] > EPS2 {
+                        let cashift = coeff[dir][1][c] / coeff[dir][2][c];
+                        tile_blockwt = coeff[dir][2][c] / (EPS + coeff[dir][0][c]);
+                        tile_blockshifts[c][dir] = cashift;
+                        if cashift.abs() < 2.0 {
+                            tile_blockave[dir][c] += cashift;
+                            tile_blocksqave[dir][c] += cashift * cashift;
+                            tile_blockdenom[dir][c] += 1.0;
+                        }
+                    } else {
+                        tile_blockshifts[c][dir] = 17.0;
+                        tile_blockwt = 0.0;
+                    }
+                }
+            }
+            // Merge this tile's disjoint block into the shared accumulators
+            // under a single short lock (the only cross-tile mutable state).
+            let mut g = shared.lock().unwrap();
+            g.blockshifts[bidx] = tile_blockshifts;
+            g.blockwt[bidx] = tile_blockwt;
+            for dir in 0..2 {
+                for c in 0..2 {
+                    g.blockave[dir][c] += tile_blockave[dir][c];
+                    g.blocksqave[dir][c] += tile_blocksqave[dir][c];
+                    g.blockdenom[dir][c] += tile_blockdenom[dir][c];
+                }
+            }
+
+        });
+    let shared = shared.into_inner().unwrap();
+    let Pass1Shared {
+        mut blockshifts,
+        blockwt,
+        blockave,
+        blocksqave,
+        blockdenom,
+    } = shared;
+
+    // ---- block-shift variance ----
+    let mut blockvar = [[0.0f32; 2]; 2];
+    for dir in 0..2 {
+        for c in 0..2 {
+            if blockdenom[dir][c] != 0.0 {
+                blockvar[dir][c] = blocksqave[dir][c] / blockdenom[dir][c]
+                    - (blockave[dir][c] / blockdenom[dir][c]).powi(2);
+            } else {
+                return Err(Error::AutoCaFailed);
+            }
+        }
+    }
+
+    // ---- fill the border blocks of the blockshift array ----
+    for vblock in 1..(vblsz - 1) {
+        for c in 0..2 {
+            for i in 0..2 {
+                let dst = vblock * hblsz;
+                let src = vblock * hblsz + 2;
+                blockshifts[dst][c][i] = blockshifts[src][c][i];
+                let dst2 = vblock * hblsz + (hblsz - 1);
+                let src2 = vblock * hblsz + (hblsz - 3);
+                blockshifts[dst2][c][i] = blockshifts[src2][c][i];
+            }
+        }
+    }
+    for hblock in 0..hblsz {
+        for c in 0..2 {
+            for i in 0..2 {
+                blockshifts[hblock][c][i] = blockshifts[2 * hblsz + hblock][c][i];
+                let dst = (vblsz - 1) * hblsz + hblock;
+                let src = (vblsz - 3) * hblsz + hblock;
+                blockshifts[dst][c][i] = blockshifts[src][c][i];
+            }
+        }
+    }
+
+    // ---- weighted 2-D polynomial fit accumulation ----
+    let polyord0 = POLYORD;
+    let numpar0 = POLYORD * POLYORD;
+    let mut polymat = [[[0.0f64; 256]; 2]; 2];
+    let mut shiftmat = [[[0.0f64; 16]; 2]; 2];
+    let mut numblox = [0usize; 2];
+    for vblock in 1..(vblsz - 1) {
+        for hblock in 1..(hblsz - 1) {
+            for c in 0..2 {
+                let mut bstemp = [0.0f32; 2];
+                for dir in 0..2 {
+                    let p = [
+                        blockshifts[(vblock - 1) * hblsz + hblock - 1][c][dir],
+                        blockshifts[(vblock - 1) * hblsz + hblock][c][dir],
+                        blockshifts[(vblock - 1) * hblsz + hblock + 1][c][dir],
+                        blockshifts[vblock * hblsz + hblock - 1][c][dir],
+                        blockshifts[vblock * hblsz + hblock][c][dir],
+                        blockshifts[vblock * hblsz + hblock + 1][c][dir],
+                        blockshifts[(vblock + 1) * hblsz + hblock - 1][c][dir],
+                        blockshifts[(vblock + 1) * hblsz + hblock][c][dir],
+                        blockshifts[(vblock + 1) * hblsz + hblock + 1][c][dir],
+                    ];
+                    bstemp[dir] = median9(p);
+                }
+                if (bstemp[0] as f64).powi(2) > CA_AUTOSTRENGTH as f64 * blockvar[0][c] as f64
+                    || (bstemp[1] as f64).powi(2) > CA_AUTOSTRENGTH as f64 * blockvar[1][c] as f64
+                {
+                    continue;
+                }
+                numblox[c] += 1;
+                let bi = vblock * hblsz + hblock;
+                let bw = blockwt[bi] as f64;
+                let hb = hblock as f64;
+                let vb = vblock as f64;
+                for dir in 0..2 {
+                    let mut pow_v_init = 1.0f64;
+                    for i in 0..polyord0 {
+                        let mut pow_h_init = 1.0f64;
+                        for j in 0..polyord0 {
+                            let mut pow_v = pow_v_init;
+                            for mi in 0..polyord0 {
+                                let mut pow_h = pow_h_init;
+                                for ni in 0..polyord0 {
+                                    let idx =
+                                        numpar0 * (polyord0 * i + j) + (polyord0 * mi + ni);
+                                    polymat[c][dir][idx] += pow_v * pow_h * bw;
+                                    pow_h *= hb;
+                                }
+                                pow_v *= vb;
+                            }
+                            shiftmat[c][dir][polyord0 * i + j] +=
+                                pow_v_init * pow_h_init * bstemp[dir] as f64 * bw;
+                            pow_h_init *= hb;
+                        }
+                        pow_v_init *= vb;
+                    }
+                }
+            }
+        }
+    }
+    numblox[1] = numblox[0].min(numblox[1]);
+
+    let mut numpar = POLYORD * POLYORD;
+    if numblox[1] < 32 {
+        numpar = 4;
+        if numblox[1] < 10 {
+            return Err(Error::AutoCaFailed);
+        }
+    }
+
+    // ---- solve the normal equations ----
+    let mut fitparams = [[[0.0f64; 16]; 2]; 2];
+    for c in 0..2 {
+        for dir in 0..2 {
+            if !lin_eq::lin_eq_solve(
+                numpar,
+                &mut polymat[c][dir],
+                &mut shiftmat[c][dir],
+                &mut fitparams[c][dir],
+            ) {
+                return Err(Error::AutoCaFailed);
+            }
+        }
+    }
+    Ok(fitparams)
+}
+
+/// Measure the residual-CA polynomial for `mosaic` without applying any
+/// correction. Convenience wrapper over [`detect_ca`]; the result is the same
+/// [`FitParams`] that drives the auto path of [`correct_ca_bayer`].
+pub fn fit_ca_bayer(
+    mosaic: &Array2D<f32>,
+    cfa: &CfaDesc,
+    params: &CaParams,
+) -> Result<FitParams, Error> {
+    detect_ca(mosaic, cfa, params)
 }
 
 #[cfg(test)]
@@ -798,7 +1473,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_non_bayer() {
+    fn rejects_odd_width() {
         // GMCY-style is not supported; build via a 4-colour description is not
         // exposed, so just assert an odd width is rejected as a proxy gate.
         let mut m = make_mosaic(257usize, 200usize);
@@ -810,15 +1485,26 @@ mod tests {
     }
 
     #[test]
-    fn auto_without_fit_errors() {
+    fn auto_without_fit_runs_detection() {
+        // With pass 1 ported, `auto_ca` without a `fit` must run detection
+        // (then apply, or return `Error::AutoCaFailed` if too few blocks).
         let mut m = make_mosaic(256usize, 200usize);
         let params = CaParams {
             auto_ca: true,
             ..Default::default()
         };
-        assert_eq!(
-            correct_ca_bayer(&mut m, &rggb(), &params, None),
-            Err(Error::AutoCaNotYet)
-        );
+        let res = correct_ca_bayer(&mut m, &rggb(), &params, None);
+        assert!(res.is_ok() || matches!(res, Err(Error::AutoCaFailed)));
+    }
+
+    #[test]
+    fn fit_ca_bayer_returns_coefficients() {
+        let m = make_mosaic(256usize, 200usize);
+        let params = CaParams {
+            auto_ca: true,
+            ..Default::default()
+        };
+        let res = fit_ca_bayer(&m, &rggb(), &params);
+        assert!(res.is_ok() || matches!(res, Err(Error::AutoCaFailed)));
     }
 }

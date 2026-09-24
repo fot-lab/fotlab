@@ -22,19 +22,22 @@
 //! materialises only the ROI); the caller is responsible for running this
 //! *before* any demosaic and for feeding the corrected mosaic onwards.
 //!
-//! ## Scope of this port (batch C1)
+//! ## Scope of this port
 //!
-//! This batch implements the **pass-2 shift-application** stage — the part that
-//! actually rewrites the mosaic's R/B planes — for both the manual
-//! (`cared`/`cablue` radial) and the auto path (shift parameters supplied via
-//! `fit`). The pass-1 *auto-fit measurement* (per-tile colour-difference
-//! correlation + 4th-order 2-D polynomial regression solved with
-//! [`lin_eq_solve`]) is a follow-up batch; until it lands,
-//! `auto_ca = true` without a `fit` returns [`Error::AutoCaNotYet`].
+//! Both passes of `CA_correct_RT` are ported:
+//!   * **pass 1** — auto-fit measurement [`ca_correct::detect_ca`] (per-tile
+//!     colour-difference correlation + 2-D polynomial regression solved with
+//!     [`lin_eq_solve`]); exposed publicly as [`fit_ca_bayer`].
+//!   * **pass 2** — shift application [`correct_ca_bayer`], for both the manual
+//!     (`ca_red`/`ca_blue` radial) and auto paths (auto either measures via pass
+//!     1 or reuses a supplied [`FitParams`], the `fitParamsIn` path).
+//!
+//! The port works in the `0..1` linear mosaic domain; the upstream `/65535`
+//! round-trip is omitted and all thresholds are unchanged.
 
 pub mod ca_correct;
 pub mod gauss;
 pub mod lin_eq;
 
-pub use ca_correct::{correct_ca_bayer, CaParams, Error, FitParams};
+pub use ca_correct::{correct_ca_bayer, fit_ca_bayer, CaParams, Error, FitParams};
 pub use lin_eq::lin_eq_solve;
