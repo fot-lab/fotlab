@@ -21,7 +21,7 @@
 //! dark   = box_min(guide)                         // local dark channel
 //! src    = dark / h0[p]                           // normalised local haze proxy
 //! g      = guided_filter(guide, src, r, eps)      // edge-aware, own guide
-//! h(x)   = clamp(h0[p] * g, 0, tail)             // refined spatially-varying floor; ceiling = user percentile
+//! h(x)   = clamp(h0[p] * g, 0, cap_tail)         // refined spatially-varying floor; cap_tail = `ceiling` param
 //! ```
 //! In uniform haze `dark ≈ h0` everywhere, so `g ≈ 1` and `h ≈ h0` — the old
 //! behaviour is recovered. In thick-haze patches `dark > h0` raises `h`, in
@@ -53,6 +53,7 @@ pub(crate) fn dehaze(
     height: usize,
     strength: Option<f32>,
     percentile: Option<f32>,
+    ceiling: Option<f32>,
     planes: &CfaPlanes,
     active: Option<(usize, usize, usize, usize)>,
     dark_radius: usize,
@@ -67,18 +68,25 @@ pub(crate) fn dehaze(
         return pixels;
     }
 
-    // Global per-plane floor (existing histogram algorithm; percentile honored).
-    // Anchors magnitude and backs the non-regular fallback.
-    let tail = percentile.unwrap_or(DEFAULT_TAIL).clamp(0.0, 1.0);
+    // Mode routing: `ceiling` selects the guided (2D) branch; its absence selects
+    // the scalar (global-floor) branch. The caller returns identity if both are
+    // `None`, but guard anyway.
+    let guided = ceiling.is_some();
+    // Global per-plane floor quantile (`percentile`); anchors magnitude and backs
+    // the scalar branch. Defaults to `DEFAULT_TAIL` when unset.
+    let floor_tail = percentile.unwrap_or(DEFAULT_TAIL).clamp(0.0, 1.0);
+    // Soft-mask ceiling (max over-dehaze) for the guided branch; defaults to the
+    // floor tail when unset (defensive — guided implies `ceiling` is `Some`).
+    let cap_tail = ceiling.unwrap_or(DEFAULT_TAIL).clamp(0.0, 1.0);
     let nplanes = planes.nplanes();
-    let h0 = plane_haze_floors(&pixels, width, height, planes, active, tail);
+    let h0 = plane_haze_floors(&pixels, width, height, planes, active, floor_tail);
 
     // Full-resolution haze field, filled plane by plane.
     let mut hfield = vec![0.0f32; width * height];
     let period = planes.period();
 
     for p in 0..nplanes {
-        if planes.is_regular() {
+        if guided && planes.is_regular() {
             // Regular plane -> sub-lattice guided path.
             let (dr, dc) = planes.offset(p);
             let (gw, gh) = planes.sublattice_dims(width, height, p);
@@ -102,10 +110,10 @@ pub(crate) fn dehaze(
             // Normalised local haze proxy relative to the global floor. The
             // guided filter is linear in `src`, so `h = h0 * GF(dark/h0) =
             // GF(dark)` and `h0` cancels; below the floor the field simply tracks
-            // the local dark channel. The dehaze ceiling is applied on the final
-            // floor (the `clamp(.., tail)` at scatter time), where `tail` is the
-            // user percentile: in guided mode the percentile caps how much haze
-            // floor any region may claim — i.e. the maximum over-dehaze.
+            // the local dark channel. The dehaze ceiling `cap_tail` is applied on
+            // the final floor (the `clamp(.., cap_tail)` at scatter time): it caps
+            // how much haze floor any region may claim — i.e. the maximum
+            // over-dehaze, independent of the floor quantile `floor_tail`.
             let anchor = h0[p].max(1e-4);
             let mut src = vec![0.0f32; gw * gh];
             for k in 0..gw * gh {
@@ -120,12 +128,13 @@ pub(crate) fn dehaze(
                 for j in 0..gw {
                     let r = dr + period * i;
                     let c = dc + period * j;
-                    let val = (anchor * g[i * gw + j]).clamp(0.0, tail.min(1.0));
+                    let val = (anchor * g[i * gw + j]).clamp(0.0, cap_tail.min(1.0));
                     hfield[r * width + c] = val;
                 }
             }
         } else {
-            // Non-regular plane -> global scalar floor (old behaviour).
+            // Scalar (non-guided) branch: global per-plane floor (old behaviour),
+            // whether the plane is non-regular or guided mode was not selected.
             let h = h0[p];
             for r in 0..height {
                 for c in 0..width {

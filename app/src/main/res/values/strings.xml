@@ -108,7 +108,7 @@
     <string name="studio_denoise_bm3d_hint">Sensitivity ×, 0.0 – 4.0 (0 = off)</string>
     <string name="studio_dehaze_title">Dehaze</string>
     <string name="studio_dehaze_strength_hint">Strength 0.0 – 1.0 (0 = off)</string>
-    <string name="studio_dehaze_percentile_hint">Haze-floor percentile 0.0 – 1.0 (default 0.01)</string>
+    <string name="studio_dehaze_percentile_hint">Haze-floor percentile / guided soft-mask cap, 0.0 – 1.0 (default 0.01)</string>
     <string name="studio_dehaze_radius_dark_hint">Dark-channel radius (sub-lattice px, default 8)</string>
     <string name="studio_dehaze_radius_guide_hint">Guided-filter radius (sub-lattice px, default 8)</string>
     <string name="studio_enable_stage">Enable</string>

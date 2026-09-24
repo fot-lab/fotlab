@@ -105,7 +105,7 @@
     <string name="studio_denoise_bm3d_hint">灵敏度倍率，0.0 – 4.0（0 关闭）</string>
     <string name="studio_dehaze_title">去雾</string>
     <string name="studio_dehaze_strength_hint">强度 0.0 – 1.0（0 关闭）</string>
-    <string name="studio_dehaze_percentile_hint">雾底百分位 0.0 – 1.0（默认 0.01）</string>
+    <string name="studio_dehaze_percentile_hint">雾底百分位 / 引导模式软掩膜上限，0.0 – 1.0（默认 0.01）</string>
     <string name="studio_dehaze_radius_dark_hint">暗通道窗半径（子栅格像素，默认 8）</string>
     <string name="studio_dehaze_radius_guide_hint">引导滤波窗半径（子栅格像素，默认 8）</string>
     <string name="studio_enable_stage">启用</string>

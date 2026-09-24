@@ -142,11 +142,23 @@ pub struct DevelopParams {
   /// Dehaze haze-floor percentile (0..1) for the pre-demosaic mosaic dehaze
   /// stage (`dehaze.rs`). The haze floor is estimated as this quantile of each
   /// CFA colour plane's histogram; lower is more conservative (closer to a pure
-  /// minimum), higher lifts more of the low-tail signal. Arbitrary floats from
-  /// Kotlin are clamped to `[0,1]` internally. `None` → the default tail
-  /// (`0.01`). Supplied from Kotlin when the Studio dehaze control is enabled.
+  /// minimum), higher lifts more of the low-tail signal. This is the **floor**
+  /// quantile, distinct from [`dehaze_ceiling`] (the guided soft-mask cap).
+  /// Arbitrary floats from Kotlin are clamped to `[0,1]` internally. `None` → the
+  /// default tail (`0.01`). Supplied from Kotlin when the Studio dehaze control
+  /// is enabled.
   #[uniffi(default = None)]
   pub dehaze_percentile: Option<f32>,
+  /// Dehaze guided-filter soft-mask ceiling (0..1) for the Studio dehaze stage.
+  /// In guided mode this caps the spatial haze floor any region may claim — the
+  /// maximum over-dehaze — and is independent of [`dehaze_percentile`] (the
+  /// global haze-floor quantile / anchor). `None` → the guided (2D) branch is not
+  /// selected and the scalar (global-floor) branch runs instead; with
+  /// `dehaze_percentile` also `None` the whole stage is an identity. Supplied
+  /// from Kotlin; Kotlin currently routes the single dehaze percentile input to
+  /// both fields until a non-guided UI exists.
+  #[uniffi(default = None)]
+  pub dehaze_ceiling: Option<f32>,
   /// Dehaze guided-filter dark-channel box radius (sub-lattice pixels). `None` →
   /// the engine default (8). Larger = smoother, lower-frequency haze field from
   /// the dark channel; smaller = tighter to local haze boundaries. Supplied from
@@ -357,6 +369,7 @@ pub(crate) fn develop_image(
     image.height,
     params.dehaze_strength,
     params.dehaze_percentile,
+    params.dehaze_ceiling,
     cfa,
     image.active_area.map(|r| (r.p.x, r.p.y, r.d.w, r.d.h)),
     params.dehaze_radius_dark,
