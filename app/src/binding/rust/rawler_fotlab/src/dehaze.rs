@@ -11,8 +11,9 @@
 //!
 //! `dehaze(pixels, width, height, strength, percentile, ceiling, cfa, active,
 //! radius_dark, radius_guide) -> pixels`. `strength = None` (or `0`) is identity;
-//! `percentile` is the global haze-floor quantile (scalar branch / guided anchor),
-//! `ceiling` selects the guided branch and caps over-dehaze; `percentile = None`
+//! `percentile` is the global haze-floor quantile (scalar branch only; the
+//! guided branch derives its spatial floor from the local dark channel
+//! directly), `ceiling` selects the guided branch and caps over-dehaze; `percentile = None`
 //! defaults to 1% and `ceiling = None` selects the scalar branch — both `None`
 //! is the identity fallback. `radius_dark` / `radius_guide = None` default to
 //! `GUIDE_RADIUS` (8, clamped to >= 1).

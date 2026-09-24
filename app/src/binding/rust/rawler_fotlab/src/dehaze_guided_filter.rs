@@ -3,29 +3,32 @@
 //! This module owns the actual pixel work:
 //!
 //! 1. **Global per-plane haze floor** (`plane_haze_floors`) — the histogram
-//!    percentile floor from the original `dehaze.rs`, kept as the magnitude
-//!    anchor and as the fallback for non-regular CFAs.
+//!    percentile floor from the original `dehaze.rs`, kept as the scalar
+//!    fallback for non-regular CFAs (and skipped entirely when every plane
+//!    takes the guided path).
 //! 2. **Fast guided filter** (`guided_filter`, He & Sun 2015) — a box-blur
 //!    implementation on a single-channel regular grid, reused per colour plane.
 //! 3. **Spatial dehaze** (`dehaze`) — restores the 2D awareness the original
 //!    scalar floor lacked: for every *regular* plane it builds a
-//!    sub-lattice dark channel (local box-min), normalises it against the
-//!    global floor, and refines it with a guided filter whose **guide is the
-//!    plane's own mosaic values** (per-plane own-guide, see `FOTLAB-RAWLER-000010`).
-//!    The result is a smooth, edge-aware, spatially-varying per-plane haze
-//!    field `h(x)`; non-regular planes keep the global scalar floor.
+//!    sub-lattice dark channel (local box-min) and refines it with a guided
+//!    filter whose **guide is the plane's own mosaic values** (per-plane
+//!    own-guide, see `FOTLAB-RAWLER-000010`). The result is a smooth,
+//!    edge-aware, spatially-varying per-plane haze field `h(x)`; non-regular
+//!    planes keep the global scalar floor.
 //!
 //! Pipeline per regular plane `p`:
 //! ```text
 //! guide  = plane sub-lattice values (0..1)
 //! dark   = box_min(guide)                         // local dark channel
-//! src    = dark / h0[p]                           // normalised local haze proxy
-//! g      = guided_filter(guide, src, r, eps)      // edge-aware, own guide
-//! h(x)   = clamp(h0[p] * g, 0, cap_tail)         // refined spatially-varying floor; cap_tail = `ceiling` param
+//! g      = guided_filter(guide, dark, r, eps)     // edge-aware, own guide
+//! h(x)   = clamp(g, 0, cap_tail)                  // spatially-varying floor; cap_tail = `ceiling` param
 //! ```
-//! In uniform haze `dark ≈ h0` everywhere, so `g ≈ 1` and `h ≈ h0` — the old
-//! behaviour is recovered. In thick-haze patches `dark > h0` raises `h`, in
-//! clear patches it lowers `h`, so location is respected.
+//! In uniform haze `dark ≈ h0` everywhere and the guided filter passes such a
+//! smooth field through, so `h ≈ h0` — the old behaviour is recovered. In
+//! thick-haze patches `dark > h0` raises `h`, in clear patches it lowers `h`,
+//! so location is respected. (An earlier revision normalised `dark` by `h0`
+//! before filtering and multiplied it back after; the guided filter is linear
+//! in `src`, so that anchor cancelled exactly and has been removed.)
 //!
 //! Apply (per pixel): `cleared = (v − h) / (1 − h)`, clamped at 0, blended by
 //! `strength`.
@@ -79,7 +82,13 @@ pub(crate) fn dehaze(
     // floor tail when unset (defensive — guided implies `ceiling` is `Some`).
     let cap_tail = ceiling.unwrap_or(DEFAULT_TAIL).clamp(0.0, 1.0);
     let nplanes = planes.nplanes();
-    let h0 = plane_haze_floors(&pixels, width, height, planes, active, floor_tail);
+    // The scalar branch is the only consumer of the global per-plane floors;
+    // skip the histogram pass entirely when every plane takes the guided path.
+    let h0 = if guided && planes.is_regular() {
+        Vec::new()
+    } else {
+        plane_haze_floors(&pixels, width, height, planes, active, floor_tail)
+    };
 
     // Full-resolution haze field, filled plane by plane.
     let mut hfield = vec![0.0f32; width * height];
@@ -107,28 +116,23 @@ pub(crate) fn dehaze(
             // Local dark channel (box-min) on the sub-lattice.
             let dark = box_min(&guide, gw, gh, dark_radius);
 
-            // Normalised local haze proxy relative to the global floor. The
-            // guided filter is linear in `src`, so `h = h0 * GF(dark/h0) =
-            // GF(dark)` and `h0` cancels; below the floor the field simply tracks
-            // the local dark channel. The dehaze ceiling `cap_tail` is applied on
-            // the final floor (the `clamp(.., cap_tail)` at scatter time): it caps
-            // how much haze floor any region may claim — i.e. the maximum
+            // Refine the local dark channel with the plane's OWN guide. The
+            // guided filter is linear in `src`, so the old `anchor = h0[p]`
+            // normalisation cancelled exactly between `src = dark/h0` and
+            // `h = h0·g` (verified to machine epsilon) — feeding `dark`
+            // directly is the same field with one less buffer and one less
+            // divide/multiply pass. The dehaze ceiling `cap_tail` is applied on
+            // the final floor (the `clamp(.., cap_tail)` at scatter time): it
+            // caps how much haze floor any region may claim — i.e. the maximum
             // over-dehaze, independent of the floor quantile `floor_tail`.
-            let anchor = h0[p].max(1e-4);
-            let mut src = vec![0.0f32; gw * gh];
-            for k in 0..gw * gh {
-                src[k] = (dark[k] / anchor).max(0.0);
-            }
-
-            // Refine with the plane's OWN guide.
-            let g = guided_filter(&guide, &src, gw, gh, guide_radius, guide_eps);
+            let g = guided_filter(&guide, &dark, gw, gh, guide_radius, guide_eps);
 
             // Scatter the refined field back to the plane's pixels.
             for i in 0..gh {
                 for j in 0..gw {
                     let r = dr + period * i;
                     let c = dc + period * j;
-                    let val = (anchor * g[i * gw + j]).clamp(0.0, cap_tail.min(1.0));
+                    let val = g[i * gw + j].clamp(0.0, cap_tail.min(1.0));
                     hfield[r * width + c] = val;
                 }
             }
@@ -285,10 +289,22 @@ pub(crate) fn guided_filter(
     out
 }
 
-/// Separable box mean with window radius `radius` (window = `2*radius + 1`),
-/// implemented with running sums (O(N)). Both axes are parallelised with rayon:
-/// each row/column is independent, so the horizontal pass runs per-row and the
-/// vertical pass per-column, each with distinct output indices (`OPTIMZ-PERFRM-000007`).
+/// Box mean with window radius `radius` (window = `2*radius + 1`, clamped at the
+/// borders, divided by the *actual* sample count), computed from a summed-area
+/// table (integral image): O(N) build + O(1) per-pixel query.
+///
+/// The table is `f64`, not `f32`: on a half-resolution Bayer sub-lattice
+/// (~4000×3000 for a 50 MP frame) the running sums reach ~1.2e7, where an `f32`
+/// ulp is already 1.0 — larger than the window sums being recovered by
+/// differencing. `f64` keeps that subtraction exact.
+///
+/// The previous running-sum implementation was subtly wrong: a single left-to-
+/// right pass can never see the `r` samples ahead of `x`, so it divided the
+/// trailing-only partial sum by the full centred-window count (a constant-1
+/// field came back as `(r/(2r+1))²` in the interior instead of 1.0). The
+/// integral image evaluates the true centred window directly, so there is no
+/// running window to get wrong. `box_min` below already used the correct
+/// forward+backward scheme; this function now matches its semantics.
 fn box_mean(src: &[f32], w: usize, h: usize, radius: usize) -> Vec<f32> {
     let n = w * h;
     if n == 0 {
@@ -296,54 +312,47 @@ fn box_mean(src: &[f32], w: usize, h: usize, radius: usize) -> Vec<f32> {
     }
     let r = radius.max(1).min((w.max(h) / 2).saturating_add(1));
 
-    // Horizontal pass: each row is independent -> parallel over rows.
-    let mut tmp = vec![0.0f32; n];
-    tmp.par_chunks_mut(w)
+    // Summed-area table with a zero row/column border: sat[(y+1)*iw + (x+1)] is
+    // the sum of src over [0..=y] × [0..=x].
+    let iw = w + 1;
+    let mut sat = vec![0.0f64; iw * (h + 1)];
+    // Row prefix sums (each output row independent -> parallel over rows).
+    sat[iw..]
+        .par_chunks_mut(iw)
         .zip(src.par_chunks(w))
-        .for_each(|(tmp_row, srow)| {
-            let mut acc = 0.0f32;
-            let mut q = 0usize; // left edge of the window (exclusive)
+        .for_each(|(srow, src_row)| {
+            let mut acc = 0.0f64;
             for x in 0..w {
-                acc += srow[x];
-                while q < x.saturating_sub(r) + 1 {
-                    acc -= srow[q];
-                    q += 1;
-                }
-                let l = x.saturating_sub(r);
-                let rr = (x + r).min(w - 1);
-                let cnt = (rr - l + 1) as f32;
-                tmp_row[x] = acc / cnt;
+                acc += src_row[x] as f64;
+                srow[x + 1] = acc;
             }
         });
+    // Column prefix sums: sat[y][x] += sat[y-1][x]. Sequential over y, but
+    // strictly row-major streaming (two passes of linear traffic), which beats a
+    // parallel strided column walk on cache.
+    for y in 1..=h {
+        let (above, below) = sat.split_at_mut(y * iw);
+        let prev = &above[(y - 1) * iw..y * iw];
+        let cur = &mut below[..iw];
+        for x in 0..iw {
+            cur[x] += prev[x];
+        }
+    }
 
-    // Vertical pass: each column is independent. Compute every column in parallel
-    // (reads `tmp` at stride `w`, no aliasing), then scatter back per-row in parallel.
+    // O(1) window queries, each output row independent -> parallel over rows.
     let mut out = vec![0.0f32; n];
-    let cols: Vec<Vec<f32>> = (0..w)
-        .into_par_iter()
-        .map(|x| {
-            let mut col = vec![0.0f32; h];
-            let mut acc = 0.0f32;
-            let mut q = 0usize;
-            for y in 0..h {
-                acc += tmp[y * w + x];
-                while q < y.saturating_sub(r) + 1 {
-                    acc -= tmp[q * w + x];
-                    q += 1;
-                }
-                let l = y.saturating_sub(r);
-                let rr = (y + r).min(h - 1);
-                let cnt = (rr - l + 1) as f32;
-                col[y] = acc / cnt;
-            }
-            col
-        })
-        .collect();
     out.par_chunks_mut(w)
         .enumerate()
         .for_each(|(y, out_row)| {
+            let y1 = y.saturating_sub(r);
+            let y2 = (y + r).min(h - 1);
+            let rows = (y2 - y1 + 1) as f64;
+            let (top, bot) = (y1 * iw, (y2 + 1) * iw);
             for x in 0..w {
-                out_row[x] = cols[x][y];
+                let x1 = x.saturating_sub(r);
+                let x2 = (x + r).min(w - 1);
+                let sum = sat[bot + x2 + 1] - sat[top + x2 + 1] - sat[bot + x1] + sat[top + x1];
+                out_row[x] = (sum / (rows * (x2 - x1 + 1) as f64)) as f32;
             }
         });
     out
@@ -471,4 +480,112 @@ fn box_min(src: &[f32], w: usize, h: usize, radius: usize) -> Vec<f32> {
             }
         });
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Brute-force centred-window mean: the definition `box_mean` must satisfy.
+    /// Applies the same radius clamp as `box_mean` so the windows match.
+    fn reference_box_mean(src: &[f32], w: usize, h: usize, radius: usize) -> Vec<f32> {
+        let r = radius.max(1).min((w.max(h) / 2).saturating_add(1));
+        let mut out = vec![0.0f32; w * h];
+        for y in 0..h {
+            let y1 = y.saturating_sub(r);
+            let y2 = (y + r).min(h - 1);
+            for x in 0..w {
+                let x1 = x.saturating_sub(r);
+                let x2 = (x + r).min(w - 1);
+                let mut sum = 0.0f64;
+                for yy in y1..=y2 {
+                    for xx in x1..=x2 {
+                        sum += src[yy * w + xx] as f64;
+                    }
+                }
+                out[y * w + x] = (sum / ((y2 - y1 + 1) * (x2 - x1 + 1)) as f64) as f32;
+            }
+        }
+        out
+    }
+
+    /// Deterministic pseudo-random field (no rand dependency).
+    fn pseudo_random(w: usize, h: usize) -> Vec<f32> {
+        let mut s = 0x12345678u32;
+        (0..w * h)
+            .map(|_| {
+                // xorshift32
+                s ^= s << 13;
+                s ^= s >> 17;
+                s ^= s << 5;
+                (s as f32) / (u32::MAX as f32)
+            })
+            .collect()
+    }
+
+    fn assert_close(a: &[f32], b: &[f32], tol: f32) {
+        assert_eq!(a.len(), b.len());
+        for (i, (x, y)) in a.iter().zip(b.iter()).enumerate() {
+            assert!(
+                (x - y).abs() <= tol,
+                "mismatch at {i}: {x} vs {y} (tol {tol})"
+            );
+        }
+    }
+
+    /// The regression this rewrite fixes: a constant field must come back
+    /// constant. The old running-sum version returned `(r/(2r+1))²` in the
+    /// interior (e.g. ≈0.22 for r=8), silently flattening every guided-filter
+    /// mean it fed.
+    #[test]
+    fn box_mean_preserves_constant_field() {
+        let (w, h) = (40, 40);
+        let src = vec![1.0f32; w * h];
+        for r in [1, 3, 8] {
+            let out = box_mean(&src, w, h, r);
+            assert_close(&out, &src, 1e-6);
+        }
+    }
+
+    /// Non-constant field, odd and even radii, including a radius that exceeds
+    /// half the frame (exercising the radius clamp): match the brute-force
+    /// centred-window definition everywhere, borders included.
+    #[test]
+    fn box_mean_matches_brute_force() {
+        let (w, h) = (37, 23);
+        let src = pseudo_random(w, h);
+        for r in [1, 2, 5, 30] {
+            let want = reference_box_mean(&src, w, h, r);
+            let got = box_mean(&src, w, h, r);
+            assert_close(&got, &want, 1e-4);
+        }
+    }
+
+    /// A constant `src` must pass through the guided filter unchanged
+    /// (cov = 0 ⇒ a = 0, b = mean_p). End-to-end check that the box_mean
+    /// rewrite keeps the filter's basic invariant.
+    #[test]
+    fn guided_filter_reproduces_constant_src() {
+        let (w, h) = (32, 24);
+        let guide = pseudo_random(w, h);
+        let src = vec![0.4f32; w * h];
+        let out = guided_filter(&guide, &src, w, h, 4, 0.01);
+        assert_close(&out, &src, 1e-5);
+    }
+
+    /// Guided-filter linearity in `src`: GF(g, k·p) = k·GF(g, p). This
+    /// invariant is what allowed the `anchor = h0` normalisation to be removed
+    /// from `dehaze` without changing its output — keep it pinned.
+    #[test]
+    fn guided_filter_is_linear_in_src() {
+        let (w, h) = (32, 24);
+        let guide = pseudo_random(w, h);
+        let src: Vec<f32> = pseudo_random(w, h).iter().map(|v| v * 0.5).collect();
+        let k = 37.0f32;
+        let scaled: Vec<f32> = src.iter().map(|v| v * k).collect();
+        let a = guided_filter(&guide, &src, w, h, 4, 0.01);
+        let b = guided_filter(&guide, &scaled, w, h, 4, 0.01);
+        let expect: Vec<f32> = a.iter().map(|v| v * k).collect();
+        assert_close(&b, &expect, 1e-2);
+    }
 }

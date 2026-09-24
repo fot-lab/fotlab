@@ -141,9 +141,18 @@ fn bm3d_stage(
     let ga = Arc::try_unwrap(acc).unwrap().into_inner().unwrap();
     let gw = Arc::try_unwrap(wsum).unwrap().into_inner().unwrap();
     let mut out = vec![0.0f32; n];
-    for i in 0..n {
-        out[i] = if gw[i] > 0.0 { ga[i] / gw[i] } else { src[i] };
-    }
+    // Weighted average, one pixel at a time with no cross-pixel dependency —
+    // sharded by **row band** (`par_chunks_mut`) rather than per element, per the
+    // crate's rayon discipline. Numerically identical to the sequential loop: it
+    // is the same division on the same two accumulators, only reordered across
+    // threads, and neither operand is a reduction.
+    out.par_chunks_mut(width).enumerate().for_each(|(r, dst)| {
+        let base = r * width;
+        for j in 0..width {
+            let i = base + j;
+            dst[j] = if gw[i] > 0.0 { ga[i] / gw[i] } else { src[i] };
+        }
+    });
     out
 }
 
@@ -321,15 +330,18 @@ fn build_color_img(width: usize, height: usize, cfa: Option<&CFAConfig>) -> Vec<
             let period_w = cfg.cfa.width;
             let period_h = cfg.cfa.height;
             let mut v = vec![0u8; width * height];
-            for r in 0..height {
-                let rr = r as i64;
+            // Every output cell depends only on its own (row, col), so this is a
+            // purely separable fill — sharded by **row band** (`par_chunks_mut`),
+            // never per element, per the crate's rayon discipline. The row's
+            // vertical CFA phase is hoisted out of the column loop for the same
+            // reason it was worth hoisting before: it is constant along the row.
+            v.par_chunks_mut(width).enumerate().for_each(|(r, row)| {
+                let pr = (r as i64).rem_euclid(period_h as i64) as usize;
                 for c in 0..width {
-                    let cc = c as i64;
-                    let pr = rr.rem_euclid(period_h as i64) as usize;
-                    let pc = cc.rem_euclid(period_w as i64) as usize;
-                    v[r * width + c] = cfg.cfa.color_at(pr, pc) as u8;
+                    let pc = (c as i64).rem_euclid(period_w as i64) as usize;
+                    row[c] = cfg.cfa.color_at(pr, pc) as u8;
                 }
-            }
+            });
             v
         }
         None => vec![0u8; width * height],
