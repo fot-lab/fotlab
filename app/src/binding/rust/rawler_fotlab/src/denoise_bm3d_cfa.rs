@@ -39,7 +39,7 @@
 //! high-megapixel phone RAWs you will want a smaller `SEARCH`/`STEP_REF`, GPU
 //! offload, or to run at a reduced resolution.
 
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::OnceLock;
 
 use rayon::prelude::*;
 use rawler::rawimage::CFAConfig;
@@ -116,41 +116,98 @@ fn bm3d_stage(
     if r_end <= 0 || c_end <= 0 {
         return src.to_vec();
     }
-    let refs: Vec<(i64, i64)> = (0..r_end)
-        .step_by(STEP_REF)
-        .flat_map(|r| (0..c_end).step_by(STEP_REF).map(move |c| (r, c)))
-        .collect();
+    // Lock-free aggregation by 2-D tiles — the "tile + discard-core" scheme.
+    //
+    // A reference block at (r0, c0) contributes to a (2*SEARCH + N)-wide square
+    // footprint: matched blocks can sit up to SEARCH away, and each then spreads
+    // an N*N patch. We split the image into TILE x TILE *core* squares and, per
+    // core, process every reference block whose footprint can reach it. A
+    // contribution that lands in the surrounding halo is discarded — the
+    // neighbouring tile whose core actually owns that pixel re-processes the same
+    // block and keeps it. Cores are pairwise disjoint (different tile-row *or*
+    // column band), so each tile writes only its own core into `out`: no mutex,
+    // no merge step. The redundant re-processing of boundary blocks is pure
+    // algorithm work (no contention) and is bounded by the halo/area ratio.
+    //
+    // Sharding: `par_chunks_mut` one band per TILE rows of `out`; within a band
+    // the column tiles are processed in turn, each scattering its disjoint column
+    // range. This keeps every write into `out` on a single thread and therefore
+    // data-race free, while still parallelising across tile-row bands.
+    const TILE: i64 = 256;
+    let halo: i64 = SEARCH + N as i64 - 1; // 23: matches may land SEARCH away
 
-    // Accumulators; each reference block locks once to dump its contributions.
-    let acc = Arc::new(Mutex::new(vec![0.0f32; n]));
-    let wsum = Arc::new(Mutex::new(vec![0.0f32; n]));
+    let num_tile_cols = ((w + TILE - 1) / TILE) as usize;
 
-    refs.into_par_iter().for_each(|(r0, c0)| {
-        let contribs = process_ref(r0, c0, src, match_img, width, height, color_img, sigma, hard);
-        if contribs.is_empty() {
-            return;
-        }
-        let mut ga = acc.lock().unwrap();
-        let mut gw = wsum.lock().unwrap();
-        for (pix, val, wt) in contribs {
-            ga[pix] += val;
-            gw[pix] += wt;
-        }
-    });
-
-    let ga = Arc::try_unwrap(acc).unwrap().into_inner().unwrap();
-    let gw = Arc::try_unwrap(wsum).unwrap().into_inner().unwrap();
     let mut out = vec![0.0f32; n];
-    // Weighted average, one pixel at a time with no cross-pixel dependency —
-    // sharded by **row band** (`par_chunks_mut`) rather than per element, per the
-    // crate's rayon discipline. Numerically identical to the sequential loop: it
-    // is the same division on the same two accumulators, only reordered across
-    // threads, and neither operand is a reduction.
-    out.par_chunks_mut(width).enumerate().for_each(|(r, dst)| {
-        let base = r * width;
-        for j in 0..width {
-            let i = base + j;
-            dst[j] = if gw[i] > 0.0 { ga[i] / gw[i] } else { src[i] };
+    let row_band = (TILE as usize) * width;
+    out.par_chunks_mut(row_band).enumerate().for_each(|(tr0, band)| {
+        let tr = (tr0 as i64) * TILE;
+        let th = (band.len() / width) as i64;
+        for tc0 in 0..num_tile_cols {
+            let tc = (tc0 as i64) * TILE;
+            let tw = ((w - tc).min(TILE)) as i64;
+
+            let core = (th * tw) as usize;
+            let mut acc = vec![0.0f32; core];
+            let mut wsum = vec![0.0f32; core];
+
+            // Reference blocks whose (2*SEARCH + N) footprint can reach this core.
+            //
+            // Why the two cutoffs differ by exactly N-1: a block is anchored at its
+            // top-left and hangs *downward* N-1 rows, so relative to the reference
+            // position r0 the contributed rows span
+            //     [r0 - SEARCH,  r0 + SEARCH + N - 1]
+            // i.e. SEARCH rows above r0 but SEARCH + N - 1 rows below. Inverting
+            // that relation for "which r0 can touch rows [tr, tr+th-1]" swaps the
+            // two numbers: the *lower* cutoff takes the wide halo (SEARCH + N - 1),
+            // the *upper* cutoff only SEARCH. It is not a symmetric ±halo.
+            //
+            // `tr - halo` need not sit on the STEP_REF lattice, and stepping
+            // STEP_REF from an off-lattice start would walk a *shifted* grid — a
+            // different set of blocks, hence a silently different result. Snap
+            // each start *up* to the next lattice point so we process exactly the
+            // same grid the single-pass version used.
+            //
+            // Both ends are capped to keep the original's exclusive grid range
+            // `(0..r_end).step_by(STEP_REF)`, i.e. the top row `r_end` itself is
+            // NOT a reference position. (r_end > 0 is guaranteed by the early
+            // return above, so `r_end - 1` never underflows.)
+            let step = STEP_REF as i64;
+            let r_lo = (((tr - halo).max(0) + step - 1) / step) * step;
+            let r_hi = (tr + th - 1 + SEARCH).min(r_end - 1);
+            let c_lo = (((tc - halo).max(0) + step - 1) / step) * step;
+            let c_hi = (tc + tw - 1 + SEARCH).min(c_end - 1);
+            let mut r0 = r_lo;
+            while r0 <= r_hi {
+                let mut c0 = c_lo;
+                while c0 <= c_hi {
+                    for (pix, val, wt) in
+                        process_ref(r0, c0, src, match_img, width, height, color_img, sigma, hard)
+                    {
+                        let pr = (pix as i64) / w;
+                        let pc = (pix as i64) % w;
+                        if pr >= tr && pr < tr + th && pc >= tc && pc < tc + tw {
+                            let li = ((pr - tr) * tw + (pc - tc)) as usize;
+                            acc[li] += val;
+                            wsum[li] += wt;
+                        }
+                    }
+                    c0 += STEP_REF as i64;
+                }
+                r0 += STEP_REF as i64;
+            }
+
+            // Scatter this core (disjoint columns per row) into the band.
+            for i in 0..th as usize {
+                let row_global = (tr as usize + i) * width;
+                let band_row = i * width;
+                for j in 0..tw as usize {
+                    let gi = row_global + tc as usize + j;
+                    let li = i * tw as usize + j;
+                    let v = if wsum[li] > 0.0 { acc[li] / wsum[li] } else { src[gi] };
+                    band[band_row + tc as usize + j] = v;
+                }
+            }
         }
     });
     out
@@ -212,13 +269,14 @@ fn process_ref(
     forward_group(&group, src, width, &mut coeff_src);
     let mut coeff_match = vec![0.0f32; N * N * k];
     // 1-D DCT along the group axis (collaborative filtering domain).
-    let c = dct1_matrix(k);
-    apply_axis(&mut coeff_src, k, &c, false);
+    // Cached: only K_MAX distinct group sizes exist, see dct1_cached.
+    let c = dct1_cached(k);
+    apply_axis(&mut coeff_src, k, c, false);
     if !hard {
         // Wiener stage: the pilot (basic estimate) is 3-D transformed too, so its
         // energy at each 3-D coefficient location drives the shrinkage weight.
         forward_group(&group, match_img, width, &mut coeff_match);
-        apply_axis(&mut coeff_match, k, &c, false);
+        apply_axis(&mut coeff_match, k, c, false);
     }
     // Aggregation weight per block: uniform (1) for the hard-threshold stage,
     // total Wiener weight for the Wiener stage.
@@ -239,7 +297,7 @@ fn process_ref(
             w_block += w;
         }
     }
-    apply_axis(&mut coeff_src, k, &c, true);
+    apply_axis(&mut coeff_src, k, c, true);
 
     // Inverse 2-D DCT per patch, emit aggregation contributions.
     let dct = dct_matrix();
@@ -398,6 +456,26 @@ fn dct1_matrix(m: usize) -> Vec<Vec<f32>> {
         }
     }
     c
+}
+
+/// Memoised `dct1_matrix(k)` for every reachable group size `1..=K_MAX`.
+///
+/// `process_ref` asks for one `k×k` transformer per reference block — on a 24 MP
+/// frame that is ~1.5M builds, each paying `k²` cosines plus `k + 1` heap
+/// allocations. Only `K_MAX` distinct sizes actually occur, so each is built once
+/// and reused: `dct1_matrix` is a pure function of `k`, so handing back the
+/// stored result is numerically identical to rebuilding it — the numbers do not
+/// move. Tile aggregation made this proportionately more worth doing, since
+/// boundary blocks are now re-processed and `process_ref` runs ~1.33× more often.
+///
+/// One `OnceLock` slot per size keeps the table lazy (sizes that never occur are
+/// never built) and safe to hit concurrently from every rayon worker; after
+/// warm-up the hot path is a single `get()`.
+fn dct1_cached(k: usize) -> &'static Vec<Vec<f32>> {
+    // `k` is `group.len()`, and a group always contains at least the reference
+    // block itself, so `1 <= k <= K_MAX` holds at every call site.
+    static CACHE: [OnceLock<Vec<Vec<f32>>>; K_MAX] = [const { OnceLock::new() }; K_MAX];
+    CACHE[k - 1].get_or_init(|| dct1_matrix(k))
 }
 
 /// The 8×8 orthonormal DCT-II matrix, built once.
