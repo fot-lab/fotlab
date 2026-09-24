@@ -180,6 +180,17 @@ impl RawlerImageLoaded {
         })
     }
 
+}
+
+// The rawalchemy-gated entry points live in their own exported impl block. A
+// `#[cfg]` on a *method* inside a `#[uniffi::export]` block does not reach the
+// scaffolding uniffi generates for that method, so with `--no-default-features`
+// the scaffolding still calls `Arc<RawlerImageLoaded>::{develop_and_grade,…}`
+// while the methods themselves are stripped — E0599 at each definition. Gating
+// the whole block removes the generated scaffolding along with the methods.
+#[cfg(feature = "rawalchemy")]
+#[uniffi::export]
+impl RawlerImageLoaded {
     /// Develop the cached decode into linear ProPhoto-D50 and hand it straight to
     /// the rawalchemy grading engine — a single Rust→cxx hop with no Kotlin buffer
     /// copy (`rules/REVIEW/detail/FOTLAB-RAWLER-000006`). Requires the `rawalchemy`
@@ -188,7 +199,6 @@ impl RawlerImageLoaded {
     /// [`GradeParams`] decides which grading stages run; an all-`None` record runs
     /// upstream's defaults untouched (`None` = "the engine decides" for every
     /// field — no default is pinned on this side).
-    #[cfg(feature = "rawalchemy")]
     pub fn develop_and_grade(
         &self,
         params: DevelopParams,
@@ -215,7 +225,6 @@ impl RawlerImageLoaded {
     /// function, because the grade's log OETF already encoded the pixels
     /// (`FOTLAB-RAWLER-000006` decision 4: Kotlin consumes the graded output
     /// as-is). Wrapped in `catch_unwind`; requires the `rawalchemy` feature.
-    #[cfg(feature = "rawalchemy")]
     pub fn develop_and_grade_to_png(
         &self,
         params: DevelopParams,
@@ -229,7 +238,6 @@ impl RawlerImageLoaded {
     /// [`Self::develop_to_png_at_kelvin`]; `kelvin <= 0` leaves it as-shot. So a
     /// grade re-render carries the same retained demosaic / exposure / WB state
     /// the develop presentation branch uses.
-    #[cfg(feature = "rawalchemy")]
     pub fn develop_and_grade_to_png_at_kelvin(
         &self,
         params: DevelopParams,
@@ -272,7 +280,6 @@ impl RawlerImageLoaded {
     ///
     /// Metering never applies anything and does not depend on whether the exposure stage is
     /// enabled; that decision stays with the caller. Requires the `rawalchemy` feature.
-    #[cfg(feature = "rawalchemy")]
     pub fn meter_auto_exposure(
         &self,
         params: DevelopParams,

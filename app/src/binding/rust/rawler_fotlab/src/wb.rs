@@ -70,8 +70,13 @@ pub fn cct_to_xy(t: f32) -> (f32, f32) {
             / (1.0 + 8.42420235e-4 * t + 7.08145163e-7 * t2);
         let vp = (0.317398726 + 4.22806245e-5 * t + 4.20481691e-8 * t2)
             / (1.0 - 2.89741816e-5 * t + 1.61456053e-7 * t2);
-        let denom = 6.0 * up - 16.0 * vp + 12.0;
-        (9.0 * up / denom, 4.0 * vp / denom)
+        // Krystek returns CIE 1960 UCS (u, v); the CIE 1931 conversion is
+        // x = 3u / (2u - 8v + 4), y = 2v / (2u - 8v + 4). `denom` is that shared
+        // denominator scaled by 3, so both numerators are scaled to match
+        // (9u / 3D and 6v / 3D). Any other scaling puts the warm end off the
+        // locus — e.g. 2856 K must land on Illuminant A (0.4476, 0.4075).
+        let denom = 6.0 * up - 24.0 * vp + 12.0;
+        (9.0 * up / denom, 6.0 * vp / denom)
     } else {
         let x = if t <= 7000.0 {
             -4.6070e9 / (t * t * t) + 2.9678e6 / (t * t) + 99.11 / t + 0.244063
@@ -90,7 +95,12 @@ pub fn xy_to_cct(x: f32, y: f32) -> f32 {
     if !(y > 0.0) {
         return 0.0;
     }
-    let n = (x - 0.3320) / (y - 0.1858);
+    // McCamy (1992): n = (x - 0.3320) / (0.1858 - y). The denominator is
+    // `0.1858 - y`, NOT `y - 0.1858` — every real white point has y > 0.1858, so
+    // the correct form is negative for warm light (x > 0.3320) and yields a LOWER
+    // CCT, which is the physical direction. Flipping the sign inverts warm/cool:
+    // D65 (0.3127, 0.3290) then reads ~4664 K instead of ~6500 K.
+    let n = (x - 0.3320) / (0.1858 - y);
     let cct = 449.0 * n * n * n + 3525.0 * n * n + 6823.3 * n + 5520.33;
     if cct.is_finite() && cct > 0.0 {
         cct

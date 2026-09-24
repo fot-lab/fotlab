@@ -318,7 +318,7 @@ jobs:
   # separate job so it neither slows nor serialises the .so build, and so a test
   # failure is reported as its own item rather than as a native build failure.
   unit-tests:
-    name: Unit tests (rawtrp_demos, host)
+    name: Unit tests (host)
     runs-on: ubuntu-26.04
     steps:
       - name: Check out
@@ -339,7 +339,9 @@ jobs:
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: app/src/binding/rust/rawtrp_demos -> target
+          workspaces: |
+            app/src/binding/rust/rawtrp_demos -> target
+            app/src/binding/rust/rawler_fotlab -> target
           cache-all-crates: true
           env-vars: DNGLAB_SHA
 
@@ -349,4 +351,14 @@ jobs:
         run: |
           set -euo pipefail
           cargo test --manifest-path app/src/binding/rust/rawtrp_demos/Cargo.toml
+        shell: bash
+
+      # rawler_fotlab carries an optional `rawalchemy` feature that pulls in a
+      # C++ grading engine (needs cmake + NDK), which is irrelevant to the pure-
+      # Rust dehaze tests. Test with `--no-default-features` so the host job stays
+      # NDK-free.
+      - name: Test rawler_fotlab
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path app/src/binding/rust/rawler_fotlab/Cargo.toml --no-default-features
         shell: bash
