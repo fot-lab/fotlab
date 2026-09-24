@@ -129,61 +129,89 @@ fn bm3d_stage(
     // no merge step. The redundant re-processing of boundary blocks is pure
     // algorithm work (no contention) and is bounded by the halo/area ratio.
     //
-    // Sharding: `par_chunks_mut` one band per TILE rows of `out`; within a band
-    // the column tiles are processed in turn, each scattering its disjoint column
-    // range. This keeps every write into `out` on a single thread and therefore
-    // data-race free, while still parallelising across tile-row bands.
+    // Scheduling: **one rayon task per tile** (see `regions` below), not one per
+    // tile-row band — a few hundred jobs instead of ~20, which is what gives
+    // work-stealing anything to even out. See `tile_scan_window` for the bounds.
     const TILE: i64 = 256;
     let halo: i64 = SEARCH + N as i64 - 1; // 23: matches may land SEARCH away
+    let step = STEP_REF as i64;
 
+    let num_tile_rows = ((h + TILE - 1) / TILE) as usize;
     let num_tile_cols = ((w + TILE - 1) / TILE) as usize;
+    let num_tiles = num_tile_rows * num_tile_cols;
+
+    // Per-tile geometry plus its cost proxy: how many reference blocks the tile has
+    // to scan. That count is closed-form from the window below and dominates the
+    // runtime, since every one of them pays a full SEARCH² block match plus its
+    // transforms. Edge tiles come out cheaper simply because the window gets
+    // clipped by the image border. Tuple is `(tr, th, tc, tw, cost, linear_index)`.
+    let mut tiles: Vec<(i64, i64, i64, i64, i64, usize)> = Vec::with_capacity(num_tiles);
+    let mut linear = 0usize;
+    for tr0 in 0..num_tile_rows {
+        let tr = tr0 as i64 * TILE;
+        let th = (h - tr).min(TILE);
+        for tc0 in 0..num_tile_cols {
+            let tc = tc0 as i64 * TILE;
+            let tw = (w - tc).min(TILE);
+            let (r_lo, r_hi, c_lo, c_hi) =
+                tile_scan_window(tr, th, tc, tw, step, halo, r_end, c_end);
+            let rows_hit = if r_hi < r_lo { 0 } else { (r_hi - r_lo) / step + 1 };
+            let cols_hit = if c_hi < c_lo { 0 } else { (c_hi - c_lo) / step + 1 };
+            tiles.push((tr, th, tc, tw, rows_hit * cols_hit, linear));
+            linear += 1;
+        }
+    }
+    // Load balancing, longest-processing-time-first: hand rayon the heaviest tiles
+    // first so the stragglers start immediately and overlap with everything else,
+    // instead of surfacing at the end after the other cores have already drained
+    // their queues. The ordering lives in `tiles`, and `regions` below is built in
+    // that same order, so index 0 is the most expensive tile. Pure ordering — the
+    // work per tile is untouched, hence the output is unchanged.
+    tiles.sort_by(|a, b| b.4.cmp(&a.4));
+    let mut pos_of = vec![0usize; num_tiles];
+    for (p, &tile) in tiles.iter().enumerate() {
+        pos_of[tile.5] = p;
+    }
 
     let mut out = vec![0.0f32; n];
-    let row_band = (TILE as usize) * width;
-    out.par_chunks_mut(row_band).enumerate().for_each(|(tr0, band)| {
-        let tr = (tr0 as i64) * TILE;
-        let th = (band.len() / width) as i64;
-        for tc0 in 0..num_tile_cols {
-            let tc = (tc0 as i64) * TILE;
-            let tw = ((w - tc).min(TILE)) as i64;
+    {
+        // Give every tile ownership of its own scattered pieces of `out`. A tile's
+        // core is a *strided* rectangle (rows tr..tr+th, columns tc..tc+tw), and
+        // Rust cannot issue two `&mut` strided rectangles out of one row slice — so
+        // instead each row is split once into disjoint column segments and filed
+        // under its owning tile. Every resulting `&mut [f32]` is exclusive, so this
+        // parallelises per tile with no unsafe and no staging buffer: these pieces
+        // already *are* the output pixels.
+        let mut regions: Vec<Vec<&mut [f32]>> = (0..num_tiles).map(|_| Vec::new()).collect();
+        for (br, row) in out.chunks_mut(width).enumerate() {
+            let base = (br / TILE as usize) * num_tile_cols;
+            let mut rest = row;
+            for tc0 in 0..num_tile_cols {
+                let tw = ((w - tc0 as i64 * TILE).min(TILE)) as usize;
+                let (head, tail) = rest.split_at_mut(tw);
+                regions[pos_of[base + tc0]].push(head);
+                rest = tail;
+            }
+        }
 
+        // `with_min_len(1)` is the other half of the balancing: without it rayon
+        // stops splitting once a chunk is small enough for its heuristic, leaving a
+        // straggler tile locked inside somebody's chunk with nothing left to steal.
+        // Forcing one tile per job means any idle thread can peel off exactly one.
+        regions.par_iter_mut().with_min_len(1).enumerate().for_each(|(p, rows)| {
+            let (tr, th, tc, tw, _, _) = tiles[p];
             let core = (th * tw) as usize;
             let mut acc = vec![0.0f32; core];
             let mut wsum = vec![0.0f32; core];
-
-            // Reference blocks whose (2*SEARCH + N) footprint can reach this core.
-            //
-            // Why the two cutoffs differ by exactly N-1: a block is anchored at its
-            // top-left and hangs *downward* N-1 rows, so relative to the reference
-            // position r0 the contributed rows span
-            //     [r0 - SEARCH,  r0 + SEARCH + N - 1]
-            // i.e. SEARCH rows above r0 but SEARCH + N - 1 rows below. Inverting
-            // that relation for "which r0 can touch rows [tr, tr+th-1]" swaps the
-            // two numbers: the *lower* cutoff takes the wide halo (SEARCH + N - 1),
-            // the *upper* cutoff only SEARCH. It is not a symmetric ±halo.
-            //
-            // `tr - halo` need not sit on the STEP_REF lattice, and stepping
-            // STEP_REF from an off-lattice start would walk a *shifted* grid — a
-            // different set of blocks, hence a silently different result. Snap
-            // each start *up* to the next lattice point so we process exactly the
-            // same grid the single-pass version used.
-            //
-            // Both ends are capped to keep the original's exclusive grid range
-            // `(0..r_end).step_by(STEP_REF)`, i.e. the top row `r_end` itself is
-            // NOT a reference position. (r_end > 0 is guaranteed by the early
-            // return above, so `r_end - 1` never underflows.)
-            let step = STEP_REF as i64;
-            let r_lo = (((tr - halo).max(0) + step - 1) / step) * step;
-            let r_hi = (tr + th - 1 + SEARCH).min(r_end - 1);
-            let c_lo = (((tc - halo).max(0) + step - 1) / step) * step;
-            let c_hi = (tc + tw - 1 + SEARCH).min(c_end - 1);
+            let (r_lo, r_hi, c_lo, c_hi) =
+                tile_scan_window(tr, th, tc, tw, step, halo, r_end, c_end);
             let mut r0 = r_lo;
             while r0 <= r_hi {
                 let mut c0 = c_lo;
                 while c0 <= c_hi {
-                    for (pix, val, wt) in
-                        process_ref(r0, c0, src, match_img, width, height, color_img, sigma, hard)
-                    {
+                    let contribs =
+                        process_ref(r0, c0, src, match_img, width, height, color_img, sigma, hard);
+                    for (pix, val, wt) in contribs {
                         let pr = (pix as i64) / w;
                         let pc = (pix as i64) % w;
                         if pr >= tr && pr < tr + th && pc >= tc && pc < tc + tw {
@@ -192,25 +220,63 @@ fn bm3d_stage(
                             wsum[li] += wt;
                         }
                     }
-                    c0 += STEP_REF as i64;
+                    c0 += step;
                 }
-                r0 += STEP_REF as i64;
+                r0 += step;
             }
 
-            // Scatter this core (disjoint columns per row) into the band.
+            // `rows[i][j]` already *is* output pixel (tr+i, tc+j), so scattering
+            // needs no offsets at all.
             for i in 0..th as usize {
-                let row_global = (tr as usize + i) * width;
-                let band_row = i * width;
                 for j in 0..tw as usize {
-                    let gi = row_global + tc as usize + j;
                     let li = i * tw as usize + j;
-                    let v = if wsum[li] > 0.0 { acc[li] / wsum[li] } else { src[gi] };
-                    band[band_row + tc as usize + j] = v;
+                    rows[i][j] = if wsum[li] > 0.0 {
+                        acc[li] / wsum[li]
+                    } else {
+                        src[(tr as usize + i) * width + tc as usize + j]
+                    };
                 }
             }
-        }
-    });
+        });
+    }
     out
+}
+
+/// The range of `STEP_REF` lattice positions whose blocks can contribute to the
+/// tile core `[tr, tr+th) x [tc, tc+tw)`. Both the cost ordering and the tile's own
+/// scan call this, so the two can never drift apart.
+///
+/// Why the two cutoffs differ by exactly N-1: a block is anchored at its top-left
+/// and hangs *downward* N-1 rows, so relative to its own top-left r0 the rows it
+/// contributes span `[r0 - SEARCH, r0 + SEARCH + N - 1]` — SEARCH rows above r0
+/// but SEARCH + N - 1 below. Inverting that relation for "which r0 can reach rows
+/// [tr, tr+th-1]" swaps the two numbers: the *lower* cutoff takes the wide halo
+/// (SEARCH + N - 1), the *upper* cutoff only SEARCH. It is not a symmetric halo,
+/// and getting it wrong silently drops real contributions.
+///
+/// Two further invariants this preserves:
+///   * starts are snapped *up* onto the STEP_REF lattice. `tr - halo` is usually
+///     off-lattice, and stepping STEP_REF from an off-lattice start walks a shifted
+///     grid — a different set of blocks, hence a silently different image.
+///   * both ends stay inside the original exclusive grid range
+///     `(0..r_end).step_by(STEP_REF)`, so row `r_end` itself is never a reference
+///     position. (`r_end > 0` is guaranteed by the early return above, so
+///     `r_end - 1` cannot underflow.)
+fn tile_scan_window(
+    tr: i64,
+    th: i64,
+    tc: i64,
+    tw: i64,
+    step: i64,
+    halo: i64,
+    r_end: i64,
+    c_end: i64,
+) -> (i64, i64, i64, i64) {
+    let r_lo = (((tr - halo).max(0) + step - 1) / step) * step;
+    let r_hi = (tr + th - 1 + SEARCH).min(r_end - 1);
+    let c_lo = (((tc - halo).max(0) + step - 1) / step) * step;
+    let c_hi = (tc + tw - 1 + SEARCH).min(c_end - 1);
+    (r_lo, r_hi, c_lo, c_hi)
 }
 
 /// Process one reference block end-to-end: match, forward-transform, shrink,
