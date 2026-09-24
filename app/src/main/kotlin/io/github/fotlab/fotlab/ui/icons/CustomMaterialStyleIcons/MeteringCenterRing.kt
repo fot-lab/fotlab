@@ -18,21 +18,18 @@
 package io.github.fotlab.fotlab.ui.icons
 
 import androidx.compose.material.icons.materialIcon
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.path
 
-// "Center-ring" metering glyph: a 20x14 rounded-rect frame (corner radius 1, 1px stroke drawn
-// inward) around a full ring (outer radius 3, diameter 6, 1px stroke). This is the same as the
-// "Center-weighted" glyph with the centre dot removed. All shapes are mutually centre-aligned on the
-// standard 24x24 grid. Hand-authored so the icon stays a plain monochrome ImageVector that recolors
-// through Icon(tint = ...) like any stock icon.
+// "Center-ring" metering glyph: a 20x14 rectangle frame (the ~0.5px corner radius is negligible at
+// 1px stroke) around a full ring (radius 3). This is the same as the "Center-weighted" glyph with the
+// centre dot removed. All shapes are mutually centre-aligned on the standard 24x24 grid.
+// Hand-authored so the icon stays a plain monochrome ImageVector that recolors through
+// Icon(tint = ...) like any stock icon.
 //
 // Accessor shape mirrors generated Material icons (lazy get() + backing nullable field).
 
@@ -47,28 +44,37 @@ public val CustomMaterialStyleIcons.Filled.MeteringCenterRing: ImageVector
             return _meteringCenterRing!!
         }
         _meteringCenterRing = materialIcon(name = "CustomMaterialStyleIcons.Filled.MeteringCenterRing") {
-            // Outer frame: 20x14 rounded rect, corner radius 1, 1px stroke drawn inward.
-            val frame = Path().apply {
-                addRoundRect(RoundRect(Rect(2.5f, 5.5f, 21.5f, 18.5f), CornerRadius(0.5f)))
+            // Outer frame: 20x14 rectangle, 1px stroke.
+            path(
+                fill = null,
+                stroke = SolidColor(Color(0xFF000000)),
+                strokeLineWidth = 1f,
+                strokeLineCap = StrokeCap.Butt,
+                strokeLineJoin = StrokeJoin.Miter,
+                strokeLineMiter = 4f,
+            ) {
+                moveTo(2.5f, 5.5f)
+                horizontalLineTo(21.5f)
+                verticalLineTo(18.5f)
+                horizontalLineTo(2.5f)
+                close()
             }
-            addPath(
-                frame,
+            // Ring: full circle, radius 3 (diameter 6), 1px stroke.
+            path(
+                fill = null,
                 stroke = SolidColor(Color(0xFF000000)),
                 strokeLineWidth = 1f,
                 strokeLineCap = StrokeCap.Butt,
                 strokeLineJoin = StrokeJoin.Miter,
                 strokeLineMiter = 4f,
-            )
-            // Ring: full circle, outer radius 3, diameter 6, 1px stroke (inner radius 2.5).
-            val ring = Path().apply { addOval(Rect(9f, 9f, 15f, 15f)) }
-            addPath(
-                ring,
-                stroke = SolidColor(Color(0xFF000000)),
-                strokeLineWidth = 1f,
-                strokeLineCap = StrokeCap.Butt,
-                strokeLineJoin = StrokeJoin.Miter,
-                strokeLineMiter = 4f,
-            )
+            ) {
+                moveTo(15f, 12f)
+                curveTo(15f, 13.6569f, 13.6569f, 15f, 12f, 15f)
+                curveTo(10.3431f, 15f, 9f, 13.6569f, 9f, 12f)
+                curveTo(9f, 10.3431f, 10.3431f, 9f, 12f, 9f)
+                curveTo(13.6569f, 9f, 15f, 10.3431f, 15f, 12f)
+                close()
+            }
         }
         return _meteringCenterRing!!
     }
