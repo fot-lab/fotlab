@@ -101,8 +101,8 @@
     <string name="studio_wb_hint">色温（K），例如 5500</string>
     <string name="studio_denoise_title">降噪强度</string>
     <string name="studio_denoise_hint">灵敏度倍率，0.0 – 8.0（0 关闭）</string>
-    <string name="studio_denoise_bm3d_label">BM3D（协作滤波）</string>
-    <string name="studio_denoise_bm3d_hint">灵敏度倍率，0.0 – 4.0（0 关闭）</string>
+    <string name="studio_denoise_bm3d_label">BM3D（高质量协作滤波-需要数分钟）</string>
+    <string name="studio_denoise_bm3d_hint">灵敏度倍率，0 到 0.02（0 关闭）</string>
     <string name="studio_dehaze_title">去雾</string>
     <string name="studio_cd_lca">LCA（色差校正）</string>
     <string name="studio_label_lca">LCA</string>
