@@ -45,6 +45,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.zIndex
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -153,11 +154,16 @@ fun LibraryViewerDialog(
             // "open in Studio" action (just left of the info toggle). The info toggle persists
             // (`FOTLAB-UIXDES`, viewer layout). The optional detail panel sits above this bar so
             // the controls stay reachable; the left-right order is unchanged from the old top bar.
+            // The whole overlay gets zIndex(1f) so it always draws above the full-bleed pager, and
+            // the control row carries its own scrim (matching ViewerDetails) because the white
+            // icons sit directly over the (often bright) bottom of the photo — without the scrim
+            // they were invisible after the bar moved from the top.
             Column(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
                     .fillMaxWidth()
-                    .navigationBarsPadding(),
+                    .navigationBarsPadding()
+                    .zIndex(1f),
             ) {
                 if (showDetails) {
                     ViewerDetails(
@@ -165,12 +171,16 @@ fun LibraryViewerDialog(
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 4.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                Surface(
+                    color = Color.Black.copy(alpha = 0.5f),
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 4.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                     IconButton(onClick = onDismiss) {
                         Icon(
                             imageVector = Icons.Filled.Close,
@@ -200,6 +210,7 @@ fun LibraryViewerDialog(
                             tint = Color.White,
                         )
                     }
+                }
                 }
             }
         }
