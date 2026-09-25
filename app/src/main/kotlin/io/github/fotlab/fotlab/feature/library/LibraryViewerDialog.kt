@@ -12,6 +12,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,7 +20,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -69,7 +69,7 @@ import kotlin.math.roundToInt
  * shows the media large with a detail panel (EXIF for images, video metadata for clips) at the
  * bottom; a two-finger pinch zooms the image; a single-finger horizontal swipe moves
  * to the previous / next item, mixing images and videos together in the folder's current sort
- * order (`FsNodeRelationDao` orders children by `time_created`); and the top-left X closes it.
+ * order (`FsNodeRelationDao` orders children by `time_created`); and the bottom X closes it.
  *
  * The viewer receives the already-sorted media list of the folder plus the tapped index, so it
  * navigates exactly the order the user sees in the grid / list.
@@ -149,57 +149,58 @@ fun LibraryViewerDialog(
                 }
             }
 
-            // Top bar: close (top-left X), the item count to its right, then — on the far right —
-            // an "open in Studio" action (just left of the info toggle). The info toggle persists
-            // (`FOTLAB-UIXDES`, viewer layout).
-            Row(
+            // Bottom bar: close (X), the item count to its right, then — on the far right — an
+            // "open in Studio" action (just left of the info toggle). The info toggle persists
+            // (`FOTLAB-UIXDES`, viewer layout). The optional detail panel sits above this bar so
+            // the controls stay reachable; the left-right order is unchanged from the old top bar.
+            Column(
                 modifier = Modifier
-                    .align(Alignment.TopStart)
+                    .align(Alignment.BottomStart)
                     .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(horizontal = 4.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                    .navigationBarsPadding(),
             ) {
-                IconButton(onClick = onDismiss) {
-                    Icon(
-                        imageVector = Icons.Filled.Close,
-                        contentDescription = stringResource(id = R.string.library_viewer_cd_close),
-                        tint = Color.White,
+                if (showDetails) {
+                    ViewerDetails(
+                        node = items[pagerState.currentPage],
+                        modifier = Modifier.fillMaxWidth(),
                     )
                 }
-                Text(
-                    text = "${pagerState.currentPage + 1} / ${items.size}",
-                    color = Color.White.copy(alpha = 0.8f),
-                    style = MaterialTheme.typography.labelMedium,
-                )
-                Spacer(modifier = Modifier.weight(1f))
-                IconButton(onClick = { onOpenInStudio(items[pagerState.currentPage]) }) {
-                    Icon(
-                        imageVector = Icons.Filled.AddPhotoAlternate,
-                        contentDescription = stringResource(id = R.string.library_viewer_cd_open_in_studio),
-                        tint = Color.White,
-                    )
-                }
-                IconButton(
-                    onClick = { scope.launch { LibraryCore.setViewerShowInfo(!showDetails) } },
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Info,
-                        contentDescription = stringResource(id = R.string.library_viewer_cd_info),
-                        tint = Color.White,
-                    )
-                }
-            }
-
-            // Bottom detail panel for the current item.
-            if (showDetails) {
-                ViewerDetails(
-                    node = items[pagerState.currentPage],
+                Row(
                     modifier = Modifier
-                        .align(Alignment.BottomStart)
                         .fillMaxWidth()
-                        .navigationBarsPadding(),
-                )
+                        .padding(horizontal = 4.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    IconButton(onClick = onDismiss) {
+                        Icon(
+                            imageVector = Icons.Filled.Close,
+                            contentDescription = stringResource(id = R.string.library_viewer_cd_close),
+                            tint = Color.White,
+                        )
+                    }
+                    Text(
+                        text = "${pagerState.currentPage + 1} / ${items.size}",
+                        color = Color.White.copy(alpha = 0.8f),
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                    Spacer(modifier = Modifier.weight(1f))
+                    IconButton(onClick = { onOpenInStudio(items[pagerState.currentPage]) }) {
+                        Icon(
+                            imageVector = Icons.Filled.AddPhotoAlternate,
+                            contentDescription = stringResource(id = R.string.library_viewer_cd_open_in_studio),
+                            tint = Color.White,
+                        )
+                    }
+                    IconButton(
+                        onClick = { scope.launch { LibraryCore.setViewerShowInfo(!showDetails) } },
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Info,
+                            contentDescription = stringResource(id = R.string.library_viewer_cd_info),
+                            tint = Color.White,
+                        )
+                    }
+                }
             }
         }
     }
