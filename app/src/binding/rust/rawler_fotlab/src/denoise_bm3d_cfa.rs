@@ -13,12 +13,17 @@
 //!
 //! ## Algorithm (Dabov et al. BM3D, made CFA-aware)
 //!
-//! 1. **Block matching on the mosaic.** Reference `N×N` patches are grouped with
-//!    other patches whose CFA *phase* matches (top-left pixel has the same
-//!    colour), so every compared pixel in the two patches carries the same colour
-//!    and the SSD is colour-honest. This generalises to any periodic CFA (Bayer,
-//!    X-Trans) and to monochrome (all phases identical) at once, and — for Bayer —
-//!    halves the candidate set versus unrestricted search.
+//! 1. **Block matching on the mosaic.** Reference `N×N` patches are grouped only
+//!    with patches sitting at the same position inside one CFA tile, so the two
+//!    patches have identical colour *layouts* and every compared pixel carries
+//!    the same colour — that is what makes the SSD colour-honest. Matching the
+//!    top-left colour alone is **not** sufficient: in Bayer both green
+//!    sub-lattices (even,odd) and (odd,even) start with G yet lay out R and B
+//!    transposed, so grouping them averages red samples against blue ones. This
+//!    restriction is the single modification BM3D needs for CFA data (Danielyan
+//!    et al., "Cross-color BM3D filtering of noisy raw data", LNLA 2009), and it
+//!    generalises to any periodic CFA (Bayer, X-Trans) and to monochrome
+//!    (period `1×1` ⇒ no constraint) at once.
 //! 2. **3-D transform.** Each patch is 2-D DCT-transformed, the patches are
 //!    stacked into an `N×N×K` volume, and a 1-D DCT is applied along the `K`
 //!    (group) axis — collaborative filtering in a transform domain. (A 1-D DCT is
@@ -83,26 +88,28 @@ pub(crate) fn denoise_bm3d_cfa(
     }
 
     let sigma = STRENGTH_TO_SIGMA * strength;
-    // Per-pixel CFA colour id (0 for monochrome / non-CFA). Drives phase-matched
-    // block matching so every compared pixel is the same colour.
-    let color_img = build_color_img(width, height, cfa);
+    // Block matching may only group blocks sitting at the *same position inside
+    // the CFA tile*; that, and not "same colour in the top-left corner", is what
+    // makes two blocks' whole N×N colour layout identical. See `cfa_period`.
+    let period = cfa_period(cfa);
 
     // Stage 1 — hard-thresholding on the noisy image → basic estimate.
-    let basic = bm3d_stage(&pixels, &pixels, width, height, &color_img, sigma, true);
+    let basic = bm3d_stage(&pixels, &pixels, width, height, period, sigma, true);
 
     // Stage 2 — Wiener, matching on the basic estimate, filtering the original.
-    bm3d_stage(&pixels, &basic, width, height, &color_img, sigma, false)
+    bm3d_stage(&pixels, &basic, width, height, period, sigma, false)
 }
 
 /// Run one BM3D stage. `src` is the image to filter; `match_img` is the image
 /// block-matching runs on (the noisy image for the hard-threshold stage, the
-/// basic estimate for the Wiener stage). Returns the aggregated image.
+/// basic estimate for the Wiener stage). `cfa_period` gates which blocks may be
+/// grouped together. Returns the aggregated image.
 fn bm3d_stage(
     src: &[f32],
     match_img: &[f32],
     width: usize,
     height: usize,
-    color_img: &[u8],
+    cfa_period: (i64, i64),
     sigma: f32,
     hard: bool,
 ) -> Vec<f32> {
@@ -210,7 +217,7 @@ fn bm3d_stage(
                 let mut c0 = c_lo;
                 while c0 <= c_hi {
                     let contribs =
-                        process_ref(r0, c0, src, match_img, width, height, color_img, sigma, hard);
+                        process_ref(r0, c0, src, match_img, width, height, cfa_period, sigma, hard);
                     for (pix, val, wt) in contribs {
                         let pr = (pix as i64) / w;
                         let pc = (pix as i64) % w;
@@ -289,36 +296,50 @@ fn process_ref(
     match_img: &[f32],
     width: usize,
     height: usize,
-    color_img: &[u8],
+    cfa_period: (i64, i64),
     sigma: f32,
     hard: bool,
 ) -> Vec<(usize, f32, f32)> {
     let w = width as i64;
     let h = height as i64;
-    let phase = color_img[(r0 * w + c0) as usize];
+    // Two blocks have identical colour layouts exactly when their top-left
+    // corners sit at the same position inside the CFA tile, i.e. when their
+    // offset is a whole number of periods. Checking only that the two corners
+    // share a *colour* is not enough: in Bayer both green sub-lattices (even,odd)
+    // and (odd,even) start with G yet lay out R and B transposed.
+    //
+    // On Bayer this happens to coincide with the old rule, because STEP_REF (4)
+    // is a multiple of the period (2): every reference block lands on the same
+    // phase, so "same colour" already implied "same layout". The gap only opens
+    // where it is not — X-Trans, whose 6×6 period does not divide STEP_REF, so
+    // references cycle through all 36 phases and same-colour/different-layout
+    // pairs really did get grouped before.
+    let pr = cfa_period.0.max(1);
+    let pc = cfa_period.1.max(1);
 
     let tau = (MATCH_C * sigma).powi(2) * (N * N) as f32;
     let mut group: Vec<(i64, i64)> = vec![(r0, c0)]; // self always grouped
     let mut cand: Vec<(f32, (i64, i64))> = Vec::new();
-    for dr in -SEARCH..=SEARCH {
+    // Walk only the offsets that are whole multiples of the CFA period. That is
+    // the "same colour configuration" gate enforced *by construction* instead of
+    // by testing every offset, so it is strictly cheaper than the check it
+    // replaces: on Bayer a quarter of the offsets are visited, on X-Trans 6×6
+    // only one in thirty-six.
+    let dc0 = first_aligned(-SEARCH, pc);
+    let mut dr = first_aligned(-SEARCH, pr);
+    while dr <= SEARCH {
         let rr = r0 + dr;
-        if rr < 0 || rr + N as i64 > h {
-            continue;
+        if rr >= 0 && rr + N as i64 <= h {
+            let mut dc = dc0;
+            while dc <= SEARCH {
+                let cc = c0 + dc;
+                if cc >= 0 && cc + N as i64 <= w && !(dr == 0 && dc == 0) {
+                    cand.push((patch_ssd(match_img, width, r0, c0, rr, cc), (rr, cc)));
+                }
+                dc += pc;
+            }
         }
-        for dc in -SEARCH..=SEARCH {
-            let cc = c0 + dc;
-            if cc < 0 || cc + N as i64 > w {
-                continue;
-            }
-            if dr == 0 && dc == 0 {
-                continue;
-            }
-            // Phase match → same colour layout → colour-honest full-patch SSD.
-            if color_img[(rr * w + cc) as usize] != phase {
-                continue;
-            }
-            cand.push((patch_ssd(match_img, width, r0, c0, rr, cc), (rr, cc)));
-        }
+        dr += pr;
     }
     cand.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
     for (d, pos) in cand {
@@ -429,8 +450,10 @@ fn apply_axis(coeff: &mut [f32], k: usize, c: &[Vec<f32>], inverse: bool) {
     }
 }
 
-/// Sum of squared per-pixel differences between two `N×N` patches. Phase already
-/// matched by the caller, so every compared pixel shares a colour.
+/// Sum of squared per-pixel differences between two `N×N` patches. The caller
+/// has already restricted the pair to the *same CFA configuration* (not merely
+/// the same colour in the top-left corner), so every compared pixel really does
+/// share a colour and the difference is meaningful.
 fn patch_ssd(img: &[f32], width: usize, r0: i64, c0: i64, r1: i64, c1: i64) -> f32 {
     let w = width as i64;
     let mut s = 0.0;
@@ -447,28 +470,37 @@ fn patch_ssd(img: &[f32], width: usize, r0: i64, c0: i64, r1: i64, c1: i64) -> f
     s
 }
 
-/// Per-pixel CFA colour id, `0` where there is no CFA (monochrome / non-CFA).
-fn build_color_img(width: usize, height: usize, cfa: Option<&CFAConfig>) -> Vec<u8> {
+/// Tiling period of the CFA as `(rows, cols)`.
+///
+/// Two blocks may be grouped only when they sit at the *same position inside one
+/// tile*; that is exactly the condition for their whole N×N colour layout to be
+/// identical, and it is the one restriction BM3D needs in order to work on CFA
+/// data — Danielyan et al., "Cross-color BM3D filtering of noisy raw data"
+/// (LNLA 2009): "restricting the grouping to blocks having the same color
+/// configuration … is the only modification required in order to successfully
+/// apply the BM3D filter to noisy CFA data". Without it, blocks with different
+/// configurations end up in one group and the shrinkage produces "severe
+/// checkerboard artefacts in regions with small but nonzero intercolor
+/// difference" — precisely the R↔B cast measured on near-neutral grey.
+///
+/// `(1, 1)` when there is no CFA: every offset is a whole number of periods, so
+/// matching stays unconstrained, exactly as it was before CFA support existed.
+fn cfa_period(cfa: Option<&CFAConfig>) -> (i64, i64) {
     match cfa {
-        Some(cfg) => {
-            let period_w = cfg.cfa.width;
-            let period_h = cfg.cfa.height;
-            let mut v = vec![0u8; width * height];
-            // Every output cell depends only on its own (row, col), so this is a
-            // purely separable fill — sharded by **row band** (`par_chunks_mut`),
-            // never per element, per the crate's rayon discipline. The row's
-            // vertical CFA phase is hoisted out of the column loop for the same
-            // reason it was worth hoisting before: it is constant along the row.
-            v.par_chunks_mut(width).enumerate().for_each(|(r, row)| {
-                let pr = (r as i64).rem_euclid(period_h as i64) as usize;
-                for c in 0..width {
-                    let pc = (c as i64).rem_euclid(period_w as i64) as usize;
-                    row[c] = cfg.cfa.color_at(pr, pc) as u8;
-                }
-            });
-            v
-        }
-        None => vec![0u8; width * height],
+        Some(cfg) => (cfg.cfa.height.max(1) as i64, cfg.cfa.width.max(1) as i64),
+        None => (1, 1),
+    }
+}
+
+/// Smallest `x >= lo` that is a whole multiple of `p`. Callers pass a range that
+/// contains `0` (as `[-SEARCH, SEARCH]` does), so a solution always exists.
+fn first_aligned(lo: i64, p: i64) -> i64 {
+    debug_assert!(p > 0);
+    let m = lo.rem_euclid(p);
+    if m == 0 {
+        lo
+    } else {
+        lo + (p - m)
     }
 }
 
