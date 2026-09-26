@@ -320,6 +320,15 @@ object StudioEngine {
      */
     private var currentExposureEv: Float? = null
 
+    /**
+     * Exposure-stage clip bounds (0..1) retained for the next develop re-render, fused into the
+     * native exposure pass (clamp → `2^ev` gain). Gated by the same Exposure-dialog enable switch
+     * as [currentExposureEv]: a stage-off render (`ev = null`) never clips either. Defaults are
+     * the no-op `[0, 1]` on the already-normalised 0..1 mosaic; kept ordered (lower ≤ upper).
+     */
+    private var currentExposureClipLower: Float = 0f
+    private var currentExposureClipUpper: Float = 1f
+
     /** The denoise strength (sensitivity multiplier) retained for the next develop re-render; null = off. */
     private var currentDenoiseStrength: Float? = null
 
@@ -488,6 +497,8 @@ object StudioEngine {
         val params = DevelopParams(
             demosaicAlgorithm = currentAlgorithm,
             exposureEv = currentExposureEv,
+            exposureClipLower = currentExposureClipLower,
+            exposureClipUpper = currentExposureClipUpper,
             wb = null,
             denoiseStrength = currentDenoiseStrength,
                         denoiseBm3dStrength = currentDenoiseBm3dStrength,
@@ -641,6 +652,12 @@ object StudioEngine {
     /** The current exposure compensation in stops; `null` means the stage is skipped (as-shot). The UI prefills the Exposure dialog from this. */
     fun currentExposureEv(): Float? = currentExposureEv
 
+    /**
+     * The current exposure clip bounds as `(lower, upper)` (0..1); the UI prefills the Exposure
+     * dialog's clip row from this. Only effective while the exposure stage is enabled.
+     */
+    fun currentExposureClip(): Pair<Float, Float> = currentExposureClipLower to currentExposureClipUpper
+
     /** The as-shot color temperature (Kelvin) decoded from the current RAW, or 0f when unavailable. */
     fun asShotWhiteBalanceKelvin(): Float = loadedImage?.asShotColorTempKelvin() ?: 0f
 
@@ -674,14 +691,24 @@ object StudioEngine {
     }
 
     /**
-     * Re-develop the current RAW with a new exposure compensation [ev] (in stops) entered from the
-     * Studio Exposure dialog, keeping the current demosaic algorithm. [ev] is written into
-     * [DevelopParams.exposureEv] so the native calibrate step applies the `2^ev` linear gain before
-     * the cam→sRGB matrix; the canvas is re-rendered from the re-developed PNG. `null` skips the
-     * exposure stage entirely (as-shot), which is how the Exposure dialog's enable switch turns it off.
+     * Re-develop the current RAW with a new exposure-stage configuration from the Studio Exposure
+     * dialog: [ev] in stops (applied as the `2^ev` linear gain) plus the clip bounds [clipLower] /
+     * [clipUpper] (0..1) applied to the scaled mosaic immediately *before* the gain and fused into
+     * the same native rayon pass. `null` [ev] skips the stage entirely (as-shot, clip included) —
+     * how the dialog's enable switch turns it off. The bounds are coerced to 0..1 and, defensively,
+     * ordered so lower ≤ upper even if the UI ever hands them swapped.
      */
-    fun setExposureEv(ev: Float?) {
+    fun setExposure(ev: Float?, clipLower: Float, clipUpper: Float) {
         currentExposureEv = ev
+        val lo = clipLower.coerceIn(0f, 1f)
+        val hi = clipUpper.coerceIn(0f, 1f)
+        if (lo <= hi) {
+            currentExposureClipLower = lo
+            currentExposureClipUpper = hi
+        } else {
+            currentExposureClipLower = hi
+            currentExposureClipUpper = lo
+        }
         reDevelop()
     }
 
@@ -698,13 +725,15 @@ object StudioEngine {
      *
      * Metering only *proposes* a value: it applies nothing and is independent of the Exposure stage
      * switch. The user may still edit the field, and only confirming with the switch ON writes the
-     * value into [DevelopParams.exposureEv] (see [setExposureEv]).
+     * value into [DevelopParams.exposureEv] (see [setExposure]).
      */
     fun meterAutoExposure(mode: String): Float? {
         val loaded = loadedImage ?: return null
         val params = DevelopParams(
             demosaicAlgorithm = currentAlgorithm,
             exposureEv = currentExposureEv,
+            exposureClipLower = currentExposureClipLower,
+            exposureClipUpper = currentExposureClipUpper,
             wb = null,
             denoiseStrength = currentDenoiseStrength,
                         denoiseBm3dStrength = currentDenoiseBm3dStrength,
@@ -818,6 +847,8 @@ object StudioEngine {
                     DevelopParams(
                         demosaicAlgorithm = algorithm,
                         exposureEv = exposureEv,
+                        exposureClipLower = currentExposureClipLower,
+                        exposureClipUpper = currentExposureClipUpper,
                         wb = null,
                         denoiseStrength = currentDenoiseStrength,
                         denoiseBm3dStrength = currentDenoiseBm3dStrength,
@@ -837,6 +868,8 @@ object StudioEngine {
                     DevelopParams(
                         demosaicAlgorithm = algorithm,
                         exposureEv = exposureEv,
+                        exposureClipLower = currentExposureClipLower,
+                        exposureClipUpper = currentExposureClipUpper,
                         wb = null,
                         denoiseStrength = currentDenoiseStrength,
                         denoiseBm3dStrength = currentDenoiseBm3dStrength,

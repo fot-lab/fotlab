@@ -104,6 +104,8 @@
     <string name="studio_label_lut">LUT</string>
     <string name="studio_exposure_title">Exposure (EV)</string>
     <string name="studio_exposure_hint">Stops, e.g. -2.0 … 2.0</string>
+    <string name="studio_exposure_clip_lower">Clip lower</string>
+    <string name="studio_exposure_clip_upper">Clip upper</string>
     <string name="studio_exposure_metering">Auto-exposure metering</string>
     <string name="studio_exposure_metering_calculating">Calculating…</string>
     <string name="studio_wb_title">As-shot: %1$s K</string>

@@ -114,6 +114,21 @@ pub struct DevelopParams {
   /// `FOTLAB-RAWLER-000004` §as-shot).
   #[uniffi(default = None)]
   pub exposure_ev: Option<f32>,
+  /// Exposure-stage **lower clip bound** (0..1) for the scaled mosaic, applied
+  /// immediately *before* the `2^exposure_ev` gain and fused into the same rayon
+  /// pass (`exposure.rs`). Values strictly below this bound are forced up to it.
+  /// Gated behind the same enable switch as [`exposure_ev`] on the Kotlin side,
+  /// so a stage-off render (`None`) never clips. Defaults to 0.0 — a no-op on
+  /// the already black/white-level-normalised 0..1 mosaic.
+  #[uniffi(default = 0.0)]
+  pub exposure_clip_lower: f32,
+  /// Exposure-stage **upper clip bound** (0..1) for the scaled mosaic, applied
+  /// immediately *before* the `2^exposure_ev` gain and fused into the same rayon
+  /// pass (`exposure.rs`). Values at or above this bound are forced down to it.
+  /// Gated behind the same enable switch as [`exposure_ev`] on the Kotlin side.
+  /// Defaults to 1.0 — likewise a no-op on the normalised mosaic.
+  #[uniffi(default = 1.0)]
+  pub exposure_clip_upper: f32,
   /// Optional white-balance multipliers (RGBE order). `None` → rawler's as-shot
   /// `wb_coeffs`.
   pub wb: Option<Vec<f32>>,
@@ -364,10 +379,16 @@ pub(crate) fn develop_image(
     RawPhotometricInterpretation::Cfa(config) => Some(config),
     _ => None,
   };
-  // Exposure first: the `2^exposure_ev` linear gain on the normalised mosaic,
-  // applied before the neighbour-quality stages. Channel-uniform and linear, so
-  // it commutes with demosaic.
-  let pixels = apply_exposure(pixels, params.exposure_ev);
+  // Exposure first: the stage's min/max clip fused into the same rayon pass
+  // (clamp, then scale; `exposure.rs`) followed by the `2^exposure_ev` linear
+  // gain on the normalised mosaic, applied before the neighbour-quality stages.
+  // Channel-uniform and per-element, so it commutes with demosaic.
+  let pixels = apply_exposure(
+    pixels,
+    params.exposure_ev,
+    params.exposure_clip_lower,
+    params.exposure_clip_upper,
+  );
   // Denoise (pre-demosaic mosaic): orchestrates two composed sub-stages in order
   // — (1) RT-style CFA impulse / hot-dead-pixel removal on `denoise_strength`,
   // then (2) BM3D-CFA collaborative filtering on the raw mosaic on

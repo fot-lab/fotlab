@@ -6,6 +6,7 @@ import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -214,6 +215,12 @@ fun StudioScreen() {
     // early-returns), ON enables it and passes the value. Each is prefilled from the engine state when
     // its dialog opens.
     var exposureEnabled by remember { mutableStateOf(false) }
+    // Exposure clip bounds (0..1) field text, shown as one left/right row in the Exposure
+    // dialog between the enable switch and the EV field. Both fields share the switch's
+    // enabled state; the pair is coerced to 0..1 and ordered (lower ≤ upper) engine-side
+    // on OK. Defaults are the no-op [0, 1].
+    var exposureClipLowerInput by remember { mutableStateOf("0.0") }
+    var exposureClipUpperInput by remember { mutableStateOf("1.0") }
     var denoiseEnabled by remember { mutableStateOf(false) }
     var denoiseBm3dEnabled by remember { mutableStateOf(false) }
     var dehazeEnabled by remember { mutableStateOf(false) }
@@ -392,6 +399,9 @@ fun StudioScreen() {
                             onExposure = {
                                 exposureEnabled = StudioEngine.currentExposureEv() != null
                                 exposureInput = StudioEngine.currentExposureEv()?.toString() ?: ""
+                                val (clipLower, clipUpper) = StudioEngine.currentExposureClip()
+                                exposureClipLowerInput = clipLower.toString()
+                                exposureClipUpperInput = clipUpper.toString()
                                 showExposureDialog = true
                             },
                             onWhiteBalance = {
@@ -513,18 +523,27 @@ fun StudioScreen() {
     }
 
     // Exposure dialog: the enable switch gates *application*, not editing — the value field is always
-    // editable (so a metered value can be tweaked even while the stage is off). On OK, when the switch
-    // is OFF the stage is skipped (exposureEv = null → native as-shot) regardless of the field; when ON
-    // the parsed stops are applied. OK is disabled only when the switch is ON and the field is not a
-    // parseable number.
+    // editable (so a metered value can be tweaked even while the stage is off), while the clip-bound
+    // row between the switch and the EV field shares the switch's enabled state. On OK, when the
+    // switch is OFF the stage is skipped (exposureEv = null → native as-shot, clip included)
+    // regardless of the fields; when ON the parsed stops and clip bounds are applied. OK is disabled
+    // when the switch is ON and any of the three fields is not a parseable number.
     if (showExposureDialog) {
         AlertDialog(
             onDismissRequest = { showExposureDialog = false },
             confirmButton = {
                 TextButton(
-                    enabled = !exposureEnabled || exposureInput.toFloatOrNull() != null,
+                    enabled = !exposureEnabled || (
+                        exposureInput.toFloatOrNull() != null &&
+                            exposureClipLowerInput.toFloatOrNull() != null &&
+                            exposureClipUpperInput.toFloatOrNull() != null
+                        ),
                     onClick = {
-                        StudioEngine.setExposureEv(if (exposureEnabled) exposureInput.toFloatOrNull() else null)
+                        StudioEngine.setExposure(
+                            ev = if (exposureEnabled) exposureInput.toFloatOrNull() else null,
+                            clipLower = exposureClipLowerInput.toFloatOrNull() ?: 0f,
+                            clipUpper = exposureClipUpperInput.toFloatOrNull() ?: 1f,
+                        )
                         showExposureDialog = false
                     },
                 ) {
@@ -543,6 +562,33 @@ fun StudioScreen() {
                         Text(text = stringResource(id = R.string.studio_enable_stage))
                         Spacer(modifier = Modifier.weight(1f))
                         Switch(checked = exposureEnabled, onCheckedChange = { exposureEnabled = it })
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    // Clip-bounds row: between the enable switch and the EV field — left is the
+                    // lower bound, right the upper. Both fields share the switch's enabled state;
+                    // with the switch OFF the whole stage (clip included) is skipped on OK anyway.
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        TextField(
+                            value = exposureClipLowerInput,
+                            onValueChange = { exposureClipLowerInput = it },
+                            enabled = exposureEnabled,
+                            singleLine = true,
+                            modifier = Modifier.weight(1f),
+                            label = { Text(text = stringResource(id = R.string.studio_exposure_clip_lower)) },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        )
+                        TextField(
+                            value = exposureClipUpperInput,
+                            onValueChange = { exposureClipUpperInput = it },
+                            enabled = exposureEnabled,
+                            singleLine = true,
+                            modifier = Modifier.weight(1f),
+                            label = { Text(text = stringResource(id = R.string.studio_exposure_clip_upper)) },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        )
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     TextField(

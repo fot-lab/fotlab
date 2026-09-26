@@ -416,7 +416,7 @@ class RawRoutingTest {
      * here; the others are covered by the crate's own kernel tests plus the catalogue/wiring
      * assertions, and each extra option costs another full develop of a 36 MP frame.
      *
-     * Finally, a parameter that MUST move pixels — exposure EV +1 stop via [StudioEngine.setExposureEv]
+     * Finally, a parameter that MUST move pixels — exposure EV +1 stop via [StudioEngine.setExposure]
      * — has to produce a different (still color, full-frame) PNG and EV 0 must reproduce the original,
      * proving redevelop genuinely recomputes calibrate on the resident image rather than returning a
      * cached frame. Engine-level (same entry points the bottom bar calls) on a 36 MP Sony ARW to keep
@@ -485,7 +485,7 @@ class RawRoutingTest {
 
         // +1 EV doubles linear light before clipping; a meaningful share of (dark) pixels must move,
         // so the PNG cannot stay identical — this is the "redevelop really recomputed" proof.
-        StudioEngine.setExposureEv(1f)
+        StudioEngine.setExposure(1f, clipLower = 0f, clipUpper = 1f)
         val brighter = runBlocking {
             withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame(requireDifferentFrom = initialBytes) }
         }
@@ -493,7 +493,7 @@ class RawRoutingTest {
         assertDevelopedIsColor(brighter.bytes, "Sony ILCE-7R EV +1")
 
         // EV 0 reproduces the as-shot frame. Restore because StudioEngine is a process-wide singleton.
-        StudioEngine.setExposureEv(0f)
+        StudioEngine.setExposure(0f, clipLower = 0f, clipUpper = 1f)
         val restored = runBlocking {
             withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame(requireDifferentFrom = brighter.bytes) }
         }

@@ -95,6 +95,8 @@
     <string name="studio_label_lut">LUT</string>
     <string name="studio_exposure_title">曝光（EV）</string>
     <string name="studio_exposure_hint">档位，例如 -2.0 … 2.0</string>
+    <string name="studio_exposure_clip_lower">下限钳制</string>
+    <string name="studio_exposure_clip_upper">上限钳制</string>
     <string name="studio_exposure_metering">自动曝光测光</string>
     <string name="studio_exposure_metering_calculating">计算中…</string>
     <string name="studio_wb_title">机内白平衡：%1$s K</string>
