@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AllOut
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.Exposure
@@ -209,6 +210,14 @@ fun StudioScreen() {
     var caAuto by remember { mutableStateOf(true) }
     var caRedInput by remember { mutableStateOf("") }
     var caBlueInput by remember { mutableStateOf("") }
+
+    // Clipping dialog state (opened by the DevelopFilm bar Clipping icon, the AllOut glyph).
+    // The switch IS the tool — there is no numeric parameter: ON clamps every component of the
+    // linear ProPhoto-D50 buffer into 0..1 as the last native step (before rawalchemy), OFF
+    // leaves the editing branch wide-gamut and unclamped. The sRGB presentation PNG is
+    // unaffected either way, so the switch only changes what the grade fork receives.
+    var showClippingDialog by remember { mutableStateOf(false) }
+    var clipToGamutEnabled by remember { mutableStateOf(false) }
 
     // Per-stage enable toggles for the develop dialogs. The switch has priority over the numeric
     // value: OFF skips the stage regardless of the field (the engine writes `null`, the native stage
@@ -410,6 +419,10 @@ fun StudioScreen() {
                                     if (kelvin > 0f) kelvin.roundToInt().toString() else ""
                                 showWhiteBalanceDialog = true
                             },
+                            onClipping = {
+                                clipToGamutEnabled = StudioEngine.currentClipToGamut()
+                                showClippingDialog = true
+                            },
                         )
                         // Grade tools (Contrast/Saturation/LOG/LUT) are RAW-only, like the
                         // former grade bar.
@@ -517,6 +530,45 @@ fun StudioScreen() {
                         placeholder = { Text(text = stringResource(id = R.string.studio_ca_blue_hint)) },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     )
+                }
+            },
+        )
+    }
+
+    // Clipping dialog: the switch IS the parameter — there is no numeric field, and OK is always
+    // enabled. The body states what the switch does in the engine's own terms (the boundary it
+    // clips to is the D50 ProPhoto RGB cube, i.e. the working space of the editing fork), so the
+    // user can tell that this is a *display/editing* clamp and not a raw-data change: the sRGB
+    // presentation PNG is clipped the same way either way, and only the buffer rawalchemy grades
+    // changes.
+    if (showClippingDialog) {
+        AlertDialog(
+            onDismissRequest = { showClippingDialog = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        StudioEngine.setClipToGamut(clipToGamutEnabled)
+                        showClippingDialog = false
+                    },
+                ) {
+                    Text(text = stringResource(id = R.string.common_action_ok))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClippingDialog = false }) {
+                    Text(text = stringResource(id = R.string.common_action_cancel))
+                }
+            },
+            title = { Text(text = stringResource(id = R.string.studio_clipping_title)) },
+            text = {
+                Column {
+                    Text(text = stringResource(id = R.string.studio_clipping_body))
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(text = stringResource(id = R.string.studio_enable_stage))
+                        Spacer(modifier = Modifier.weight(1f))
+                        Switch(checked = clipToGamutEnabled, onCheckedChange = { clipToGamutEnabled = it })
+                    }
                 }
             },
         )
@@ -1188,6 +1240,27 @@ private fun CaButton(
 }
 
 /**
+ * Out-of-gamut clipping switch (opens the Clipping dialog owned by StudioScreen).
+ *
+ * Material's *all out* glyph is the deliberate choice here: it is the "pull everything inside
+ * the boundary" mark, which is exactly what the tool does to a ProPhoto buffer whose channels
+ * left the 0..1 cube. Like the other DevelopFilm-bar tools it carries no state of its own — the
+ * dialog's switch is the only control (`FOTLAB-UIXDES-000002`: the screen owns the dialogs).
+ */
+@Composable
+private fun ClippingButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    IconButton(onClick = onClick, modifier = modifier) {
+        Icon(
+            imageVector = Icons.Filled.AllOut,
+            contentDescription = stringResource(id = R.string.studio_cd_clipping),
+        )
+    }
+}
+
+/**
  * Contrast parameter of the boost group. Primary tint while configured. Opens
  * [BoostParameterDialog]; the boost switch itself is derived (either parameter configured).
  */
@@ -1406,6 +1479,7 @@ private fun StudioOperationBarDevelopFilm(
     onCa: () -> Unit,
     onExposure: () -> Unit,
     onWhiteBalance: () -> Unit,
+    onClipping: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     HorizontalOperationBar(
@@ -1435,6 +1509,10 @@ private fun StudioOperationBarDevelopFilm(
                 id = "wb",
                 label = stringResource(id = R.string.studio_label_whitebalance),
             ) { WhiteBalanceButton(onWhiteBalance) },
+            OperationalButton(
+                id = "clipping",
+                label = stringResource(id = R.string.studio_label_clipping),
+            ) { ClippingButton(onClipping) },
         ),
     )
 }

@@ -107,8 +107,12 @@
     <string name="studio_denoise_bm3d_hint">灵敏度倍率，0 到 0.02（0 关闭）</string>
     <string name="studio_dehaze_title">去雾</string>
     <string name="studio_cd_lca">LCA（色差校正）</string>
+    <string name="studio_cd_clipping">截断（超出色域的颜色）</string>
     <string name="studio_label_lca">LCA</string>
+    <string name="studio_label_clipping">截断</string>
     <string name="studio_ca_title">LCA（色差校正）</string>
+    <string name="studio_clipping_title">截断</string>
+    <string name="studio_clipping_body">将超出色域的颜色截断到 D50 ProPhoto RGB 边界</string>
     <string name="studio_ca_auto_label">自动拟合</string>
     <string name="studio_ca_red_hint">红色径向强度（0 关闭）</string>
     <string name="studio_ca_blue_hint">蓝色径向强度（0 关闭）</string>

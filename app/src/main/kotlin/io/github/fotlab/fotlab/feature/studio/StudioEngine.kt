@@ -205,6 +205,7 @@ object StudioEngine {
             dehazeRadiusDark = currentDehazeRadiusDark,
             dehazeRadiusGuide = currentDehazeRadiusGuide,
             ca = currentCa,
+            clipToGamut = currentClipToGamut,
                         downsample = downsampleState.value,
                     ),
                 ) ?: return StudioRenderResult.Unsupported
@@ -508,6 +509,7 @@ object StudioEngine {
             dehazeRadiusDark = currentDehazeRadiusDark,
             dehazeRadiusGuide = currentDehazeRadiusGuide,
             ca = currentCa,
+            clipToGamut = currentClipToGamut,
             // The grade fork develops through the same pipeline, so it honours the switch too —
             // grading a quarter-resolution frame is simply grading fewer pixels.
             downsample = downsampleState.value,
@@ -743,6 +745,7 @@ object StudioEngine {
             dehazeRadiusDark = currentDehazeRadiusDark,
             dehazeRadiusGuide = currentDehazeRadiusGuide,
             ca = currentCa,
+            clipToGamut = currentClipToGamut,
             downsample = downsampleState.value,
         )
         // `metered` is the offset relative to the current image; add the recorded applied exposure
@@ -774,6 +777,32 @@ object StudioEngine {
 
     /** The current CA settings; the UI prefills the LCA dialog from this. */
     fun currentCa(): CaSettings? = currentCa
+
+    /**
+     * Whether out-of-gamut clipping is retained for the next render (the Studio Clipping dialog's
+     * switch). Clipping only affects the **editing** fork — the linear ProPhoto-D50 buffer that is
+     * handed to rawalchemy — so the switch is carried in the develop params but is a no-op for the
+     * sRGB presentation PNG.
+     */
+    private var currentClipToGamut: Boolean = false
+
+    /** The current out-of-gamut clipping switch; the UI prefills the Clipping dialog from this. */
+    fun currentClipToGamut(): Boolean = currentClipToGamut
+
+    /**
+     * Re-render with out-of-gamut clipping [enabled] (Studio Clipping dialog). Every component of
+     * the linear ProPhoto-D50 buffer is clamped into 0..1 as the last native step, i.e. before it
+     * reaches rawalchemy, so the graded output can no longer show the >1 excursions that the
+     * unclipped editing branch carried.
+     *
+     * The render goes through [reGrade] rather than [reDevelop] because the sRGB presentation fork
+     * is unaffected: when no grade stage is active [reGrade] falls back to the same develop, so
+     * toggling the switch with grading off is a visually identical re-render.
+     */
+    fun setClipToGamut(enabled: Boolean) {
+        currentClipToGamut = enabled
+        reGrade()
+    }
 
     /**
      * Re-develop the current RAW with a denoise [strength] (sensitivity multiplier on the detection
@@ -858,6 +887,7 @@ object StudioEngine {
             dehazeRadiusDark = currentDehazeRadiusDark,
             dehazeRadiusGuide = currentDehazeRadiusGuide,
             ca = currentCa,
+            clipToGamut = currentClipToGamut,
                         downsample = downsample,
                     ),
                     wbKelvin,
@@ -879,6 +909,7 @@ object StudioEngine {
             dehazeRadiusDark = currentDehazeRadiusDark,
             dehazeRadiusGuide = currentDehazeRadiusGuide,
             ca = currentCa,
+            clipToGamut = currentClipToGamut,
                         downsample = downsample,
                     ),
                 )

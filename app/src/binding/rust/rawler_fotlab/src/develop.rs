@@ -41,6 +41,10 @@
 //! 6. crop-default  — crop to the recommended area (rawler `CropDefault`); the crop
 //!    rectangle is halved when the demosaic stage produced a quarter-resolution image,
 //!    derived from the dimensions rather than from the switch.
+//! 7. `clip_to_gamut` — optional per-channel clamp of the finished image into `[0,1]`.
+//!    **ProPhoto (editing) branch only**, and always the last step, so the buffer
+//!    rawalchemy grades and the handle `develop` hands back to Kotlin are already
+//!    in gamut. Off by default, i.e. the editing branch stays unclamped.
 //!
 //! Dual fork (`rules/REVIEW/detail/FOTLAB-RAWLER-000005.md`): the linear result
 //! is finished into a display-ready sRGB PNG (gamma + clip) for the UI by
@@ -198,6 +202,25 @@ pub struct DevelopParams {
   /// Bayer CFAs are supported — other CFAs degrade to the uncorrected mosaic.
   #[uniffi(default = None)]
   pub ca: Option<CaSettings>,
+  /// **Out-of-gamut clipping** switch for the *editing* branch (the Studio
+  /// "Clipping" tool). When `true`, every component of the finished linear
+  /// **ProPhoto-D50** image is clamped into `[0,1]` (above 1 → 1, below 0 → 0)
+  /// as the **last** step of `develop_image` — after calibrate and crop, before
+  /// the buffer leaves Rust — so rawalchemy's grade, the metering pass and the
+  /// handle `develop` returns to Kotlin all receive an in-gamut image
+  /// (`rules/REVIEW/detail/FOTLAB-RAWLER-000013.md` §F8).
+  ///
+  /// The *presentation* branch (sRGB D65) is deliberately **not** touched: it is
+  /// finished by `bound::rawlerimagedeveloped_to_png`, which applies gamma and
+  /// then performs exactly the same per-channel clip, so turning this on changes
+  /// only the ProPhoto fork. This is a plain per-channel **clip**, not gamut
+  /// mapping: a highlight whose channels clip unequally still rotates in hue —
+  /// the point is that the excursion is resolved at the ProPhoto boundary
+  /// instead of being handed downstream intact.
+  ///
+  /// `false` (the default) = today's behaviour: wide gamut, unclamped.
+  #[uniffi(default = false)]
+  pub clip_to_gamut: bool,
 }
 
 /// Grading parameters supplied by Kotlin for [`develop_and_grade`].
@@ -448,7 +471,38 @@ pub(crate) fn develop_image(
   // but keeping the identical order means the crop coordinates resolve
   // exactly the way upstream resolves them.
   let linear = calibrate(intermediate, &image, wb, space)?;
-  crop_default(&image, linear)
+  let mut linear = crop_default(&image, linear)?;
+
+  // Out-of-gamut clipping (the Studio "Clipping" switch) — the LAST step of the
+  // pipeline, so the buffer every consumer of the editing branch sees is already
+  // in gamut: rawalchemy's grade, the auto-exposure meter, and the handle
+  // `develop` hands back to Kotlin. Runs after the crop so it touches only the
+  // pixels that survive, and is gated on the editing branch because the sRGB
+  // presentation branch is finished by `bound::rawlerimagedeveloped_to_png`,
+  // which clips (after gamma) on its own.
+  if params.clip_to_gamut && space == WorkingSpace::ProPhotoD50 {
+    clamp_to_gamut(&mut linear);
+  }
+  Ok(linear)
+}
+
+/// Clamp every component of `image` into `[0,1]` — the D50 ProPhoto RGB
+/// boundary — in place.
+///
+/// This is the Studio "Clipping" switch. It is deliberately the *same*
+/// per-channel operation `bound::shrink_f32` performs on the presentation branch
+/// one stage later (`bound.rs`), so the two forks can disagree about an
+/// out-of-gamut pixel only by *when* it is clipped, never by what clipping
+/// means. It is **not** gamut mapping: hue and luminance are not preserved, and
+/// a highlight whose channels clip unequally still shifts hue — the point is
+/// that the excursion is resolved here instead of travelling downstream intact
+/// (`rules/REVIEW/detail/FOTLAB-RAWLER-000013.md` §F7/F8).
+///
+/// NaN passes through unchanged (`f32::clamp` returns a NaN input); a
+/// well-formed develop contains none, and substituting a value here would only
+/// hide the loader failure that produced it.
+fn clamp_to_gamut(image: &mut RawlerImageDeveloped) {
+  image.rgb.par_iter_mut().for_each(|v| *v = v.clamp(0.0, 1.0));
 }
 
 /// Take ownership of the scaled f32 pixel buffer from [RawImage] without a
