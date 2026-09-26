@@ -1,9 +1,12 @@
 package io.github.fotlab.fotlab.feature.library
 
+import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.os.Build
 import android.provider.OpenableColumns
 import android.text.format.DateUtils
 import android.text.format.Formatter
@@ -18,7 +21,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -47,6 +49,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -99,6 +102,21 @@ fun LibraryViewerDialog(
     // down while it is zoomed (or mid-pinch), and switching items returns to the fitted size.
     val zoomState = rememberZoomState()
     LaunchedEffect(pagerState.currentPage) { zoomState.reset() }
+
+    // How far the bottom bar has to stay off the bottom edge.
+    //
+    // The viewer is its own `Dialog` window: the content measures to the full screen, but a dialog
+    // window is laid out into the area the system leaves for applications, so the strip the
+    // navigation bar occupies can fall *outside* the window that is actually shown — anything
+    // placed at the very bottom is then clipped away. That is why the bar was visible for years at
+    // the top (`align(TopStart)`) and completely invisible at the bottom. In that situation
+    // Compose's own `WindowInsets.navigationBars` reads zero, so it cannot be used to fix it; the
+    // height is taken from the activity window instead, which always reports the real value. Both
+    // sources agree on the same number whenever the dialog window really is full screen, so this
+    // is not a second, stacked padding.
+    val bottomInset = with(LocalDensity.current) {
+        LocalContext.current.navigationBarBottomPx().toDp()
+    }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -155,13 +173,14 @@ fun LibraryViewerDialog(
             // the controls stay reachable; the left-right order is unchanged from the old top bar.
             // The whole overlay is the last child of the Box, so it draws above the full-bleed
             // pager by default, and the control row carries its own scrim (matching ViewerDetails)
-            // because the white icons sit directly over the (often bright) bottom of the photo —
-            // without the scrim they were invisible after the bar moved from the top.
+            // because the white icons sit directly over the (often bright) bottom of the photo.
+            // `bottomInset` (computed above) keeps it out of the strip the dialog window does not
+            // actually show — without it the bar is clipped away entirely.
             Column(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
                     .fillMaxWidth()
-                    .navigationBarsPadding(),
+                    .padding(bottom = bottomInset),
             ) {
                 if (showDetails) {
                     ViewerDetails(
@@ -446,6 +465,37 @@ private fun exifDateTime(raw: String): String? = runCatching {
 }.getOrNull()
 
 private fun stringS(context: Context, resId: Int): String = context.getString(resId)
+
+/**
+ * Navigation-bar height in pixels, read from the **activity** window.
+ *
+ * The viewer renders into its own `Dialog` window. A dialog window is laid out into the area the
+ * system leaves for applications, while the Compose content inside it still measures to the full
+ * screen — so the bottom strip of that measured content is not part of the window actually shown
+ * and anything placed there is clipped away. In that situation Compose's own
+ * `WindowInsets.navigationBars` reads zero, so it cannot be used to correct for it; the activity
+ * window always reports the real navigation-bar height, and that is the source used here.
+ */
+private fun Context.navigationBarBottomPx(): Int {
+    val decor = activityOrNull()?.window?.decorView ?: return 0
+    val insets = decor.rootWindowInsets ?: return 0
+    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        insets.getInsets(android.view.WindowInsets.Type.navigationBars()).bottom
+    } else {
+        @Suppress("DEPRECATION")
+        insets.stableInsetBottom
+    }
+}
+
+/** Unwraps the [Activity] out of a themed / wrapped context — a `Dialog` hands a wrapper down. */
+private fun Context.activityOrNull(): Activity? {
+    var current: Context? = this
+    while (current != null) {
+        if (current is Activity) return current
+        current = (current as? ContextWrapper)?.baseContext
+    }
+    return null
+}
 
 private val DATE_FLAGS = DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_SHOW_TIME or
     DateUtils.FORMAT_SHOW_YEAR or DateUtils.FORMAT_NUMERIC_DATE
