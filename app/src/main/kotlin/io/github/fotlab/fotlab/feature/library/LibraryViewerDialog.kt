@@ -67,6 +67,7 @@ import io.github.fotlab.fotlab.ui.rememberZoomState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.maxOf
 import kotlin.math.roundToInt
 
 /**
@@ -116,27 +117,27 @@ fun LibraryViewerDialog(
     ) {
         BackHandler(onBack = onDismiss)
 
-        // How far the bottom bar has to stay off the bottom edge to land inside the region that
-        // the display really shows.
+        // How far the bottom bar has to stay off the bottom edge so its *bottom* edge lands on the
+        // bottom of the region the display actually shows, instead of the bar hanging off that edge
+        // (where the system navigation bar — or a clipped dialog window — would hide part of it).
         //
-        // The viewer is its own `Dialog` window, so its bottom edge is *not* the screen's bottom
-        // edge, in two different ways, and no single source is reliable on every device:
-        //   * the window is drawn edge to edge and the navigation bar covers the strip below it —
-        //     the navigation-bar inset says how tall that strip is (read from this dialog window
-        //     and from the activity window, whichever reports the real value);
-        //   * the window is laid out into the area the system leaves for applications while the
-        //     Compose content inside it is still measured to the full screen — then the root is
-        //     taller than the view hosting it, and that difference is exactly the strip that is
-        //     clipped away and never reaches the display.
-        // All three are measured at runtime and the largest wins, so the bar is never placed in a
-        // region the display does not show, and the padding is never applied twice.
+        // The viewer is its own `Dialog` window drawn edge to edge, so its bottom is not the screen's
+        // bottom, and the navigation bar overlays the strip at the very bottom. The height of that
+        // strip is taken from the activity window's insets, with the system `navigation_bar_height`
+        // resources as a fallback that is available immediately and does not depend on inset delivery
+        // (which can read zero inside a `Dialog` until the view is laid out). The dialog content is
+        // also measured to the full screen while the window can be shorter, so the root is taller
+        // than the host view and that difference is the strip clipped away; `clippedBottomPx` (below)
+        // measures that. All sources are taken at runtime and the largest wins, so the bar is never
+        // placed where the display does not show it and the padding is never applied twice.
         val hostView = LocalView.current
+        val localContext = LocalContext.current
         val clippedBottomPx = remember { mutableStateOf(0) }
         val density = LocalDensity.current
         val bottomInset = with(density) {
             maxOf(
-                hostView.navigationBarBottomPx(),
-                LocalContext.current.navigationBarBottomPx(),
+                localContext.navigationBarBottomPx(),
+                navBarHeightFromResources(localContext),
                 clippedBottomPx.value,
             ).toDp()
         }
@@ -506,6 +507,23 @@ private fun View.navigationBarBottomPx(): Int {
 /** Same measurement taken from the **activity** window's decor view. */
 private fun Context.navigationBarBottomPx(): Int =
     activityOrNull()?.window?.decorView?.navigationBarBottomPx() ?: 0
+
+/**
+ * Navigation-bar height from the system dimension resources. It is available immediately and does
+ * not depend on window-inset delivery, which can read zero inside a `Dialog` until the view is laid
+ * out — so it is the reliable floor when the activity-window inset has not arrived yet. Both the
+ * three-button height and the gesture-mode height are taken, so the value is sensible in either
+ * navigation mode.
+ */
+private fun navBarHeightFromResources(context: Context): Int {
+    val res = context.resources
+    val id = res.getIdentifier("navigation_bar_height", "dimen", "android")
+    val gestureId = res.getIdentifier("navigation_bar_height_gesture", "dimen", "android")
+    return maxOf(
+        if (id != 0) res.getDimensionPixelSize(id) else 0,
+        if (gestureId != 0) res.getDimensionPixelSize(gestureId) else 0,
+    )
+}
 
 /** Unwraps the [Activity] out of a themed / wrapped context — a `Dialog` hands a wrapper down. */
 private fun Context.activityOrNull(): Activity? {
