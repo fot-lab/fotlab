@@ -45,7 +45,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.zIndex
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -154,16 +153,15 @@ fun LibraryViewerDialog(
             // "open in Studio" action (just left of the info toggle). The info toggle persists
             // (`FOTLAB-UIXDES`, viewer layout). The optional detail panel sits above this bar so
             // the controls stay reachable; the left-right order is unchanged from the old top bar.
-            // The whole overlay gets zIndex(1f) so it always draws above the full-bleed pager, and
-            // the control row carries its own scrim (matching ViewerDetails) because the white
-            // icons sit directly over the (often bright) bottom of the photo — without the scrim
-            // they were invisible after the bar moved from the top.
+            // The whole overlay is the last child of the Box, so it draws above the full-bleed
+            // pager by default, and the control row carries its own scrim (matching ViewerDetails)
+            // because the white icons sit directly over the (often bright) bottom of the photo —
+            // without the scrim they were invisible after the bar moved from the top.
             Column(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
                     .fillMaxWidth()
-                    .navigationBarsPadding()
-                    .zIndex(1f),
+                    .navigationBarsPadding(),
             ) {
                 if (showDetails) {
                     ViewerDetails(
