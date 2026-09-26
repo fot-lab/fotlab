@@ -114,20 +114,30 @@ fn shrink_f32(v: f32) -> u8 {
     (v.clamp(0.0, 1.0) * 255.0) as u8
 }
 
-/// Encode one linear sRGB channel to an 8-bit sRGB byte: apply the sRGB transfer
-/// function then clip into [0,1]. Out-of-[0,1] (highlight/shadow excursions from
-/// the unclamped develop) are resolved here — the only clip in the UI path.
+/// Encode one linear sRGB channel to an 8-bit sRGB byte.
+///
+/// The sRGB transfer function (OETF) is only defined for the `[0,1]` linear
+/// domain, so the (possibly out-of-range — e.g. highlight-overflow) linear input
+/// is clamped to `[0,1]` **before** gamma is applied. This keeps the operator in
+/// its defined domain rather than relying on the downstream byte-clamp to catch
+/// out-of-range inputs. Because the OETF is strictly monotonic, clamping before
+/// vs. after the curve yields identical 8-bit bytes (`clamp(gamma(v)) ==
+/// gamma(clamp(v))`), so this is a defensive/correctness change, not a visual
+/// one — the only clip in the UI path is still here, just moved to the input
+/// side of the curve. `encode_srgb` is already invoked per-channel inside the
+/// rayon parallel loop of [`rawlerimagedeveloped_to_png`], so the clamp is
+/// automatically parallelised.
 fn encode_srgb(v: f32) -> u8 {
-    shrink_f32(srgb_apply_gamma(v))
+    shrink_f32(srgb_apply_gamma(v.clamp(0.0, 1.0)))
 }
 
 /// Encode a developed [`RawlerImageDeveloped`] (expected in **linear sRGB D65**) to a
 /// finished, display-ready RGBA8 sRGB PNG.
 ///
 /// This is the *presentation* half of the dual-fork
-/// (`rules/REVIEW/detail/FOTLAB-RAWLER-000005.md`): the linear values are run
-/// through the sRGB transfer function (`srgb_apply_gamma`) and then clipped to
-/// [0,1] — the only place clipping happens. The in-memory editing object
+/// (`rules/REVIEW/detail/FOTLAB-RAWLER-000005.md`): each linear value is clamped
+/// to `[0,1]` and then run through the sRGB transfer function (`srgb_apply_gamma`)
+/// — the only place clipping happens. The in-memory editing object
 /// (ProPhoto D50, unclamped) is never touched. This is the output side of
 /// `rawler_fotlab::develop_to_png`.
 pub(crate) fn rawlerimagedeveloped_to_png(image: &RawlerImageDeveloped) -> Result<Vec<u8>, String> {
