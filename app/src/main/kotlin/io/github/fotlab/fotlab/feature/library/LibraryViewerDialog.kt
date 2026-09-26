@@ -67,7 +67,6 @@ import io.github.fotlab.fotlab.ui.rememberZoomState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlin.math.maxOf
 import kotlin.math.roundToInt
 
 /**
@@ -135,7 +134,7 @@ fun LibraryViewerDialog(
         val clippedBottomPx = remember { mutableStateOf(0) }
         val density = LocalDensity.current
         val bottomInset = with(density) {
-            maxOf(
+            maxInt(
                 localContext.navigationBarBottomPx(),
                 navBarHeightFromResources(localContext),
                 clippedBottomPx.value,
@@ -519,10 +518,21 @@ private fun navBarHeightFromResources(context: Context): Int {
     val res = context.resources
     val id = res.getIdentifier("navigation_bar_height", "dimen", "android")
     val gestureId = res.getIdentifier("navigation_bar_height_gesture", "dimen", "android")
-    return maxOf(
+    return maxInt(
         if (id != 0) res.getDimensionPixelSize(id) else 0,
         if (gestureId != 0) res.getDimensionPixelSize(gestureId) else 0,
     )
+}
+
+/**
+ * Max of any number of non-negative ints. Implemented with plain comparisons instead of
+ * `kotlin.math.maxOf` so it compiles regardless of stdlib surface differences across Kotlin
+ * versions. All inputs here are insets / paddings and are therefore non-negative.
+ */
+private fun maxInt(vararg values: Int): Int {
+    var m = 0
+    for (v in values) if (v > m) m = v
+    return m
 }
 
 /** Unwraps the [Activity] out of a themed / wrapped context — a `Dialog` hands a wrapper down. */
