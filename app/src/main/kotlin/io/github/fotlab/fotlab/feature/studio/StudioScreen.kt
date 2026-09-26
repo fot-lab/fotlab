@@ -112,7 +112,7 @@ import kotlin.math.roundToInt
  * consumed exactly once, and the bar stays module-owned. The fun bar follows the shared
  * skeleton — drawer menu at the far left (bottom-left), overflow at the far right, and a
  * file-open action just left of the overflow (`FOTLAB-UIXDES-000002`). The develop tools (Denoise / Dehaze / Exposure / Demosaic / White Balance)
- * sit as icon-only buttons right of the drawer menu — ordered Denoise (grain, strength input) → Dehaze (air, strength + percentile input) → Exposure (stops input) → Demosaic (dropdown) → White Balance (Kelvin input); the dropdowns anchor at the fun bar and therefore
+ * sit as icon-only buttons right of the drawer menu — ordered Exposure (stops input) → Denoise (grain, strength input) → Dehaze (air, strength + percentile input) → Demosaic (dropdown) → White Balance (Kelvin input); the dropdowns anchor at the fun bar and therefore
  * open upward. Directly above the fun bar (RAW files only) sits the grade bar — the rawalchemy
  * fork's Boost / LOG / LUT chips (`StudioGradeBar`), its content unchanged by the layout move.
  * The module also owns its drawer; nothing here is shared with the shell.
@@ -790,7 +790,7 @@ private val StudioScreenFunBarHeight = 64.dp
 /**
  * The Studio fun bar: the shared skeleton of `FOTLAB-UIXDES-000002`, pinned to the screen's
  * bottom edge. Left-to-right: drawer menu, then the three *category* icons that dock one of the
- * Studio operation bars in the slot above — Theaters (DevelopFilm: Denoise / Dehaze / Exposure / Demosaic / White Balance),
+ * Studio operation bars in the slot above — Theaters (DevelopFilm: Exposure / Denoise / Dehaze / Demosaic / White Balance),
  * Tune (TuneImage: Contrast / Saturation) and PhotoFilter (StyleFilter: LOG / LUT); a flexible
  * gap; the
  * file-open action and the overflow (three-dot) at the far right. The develop/grade tools
@@ -1342,8 +1342,8 @@ private fun LutButton(
 
 /**
  * DevelopFilm bar — the develop tools that used to live directly on the fun bar, now ordered
- * Denoise → Dehaze → Exposure → Demosaic → White Balance: the mosaic-cleaning stages run before
- * demosaic, exposure is third, and white balance sits after demosaic. Reordering the list below
+ * Exposure → Denoise → Dehaze → Demosaic → White Balance: exposure is first, the mosaic-cleaning
+ * stages run before demosaic, and white balance sits after demosaic. Reordering the list below
  * reorders the bar.
  *
  * [demosaicCandidates] is the native catalogue, passed in rather than read here so the bar stays a
@@ -1366,6 +1366,10 @@ private fun StudioOperationBarDevelopFilm(
         modifier = modifier,
         items = listOf(
             OperationalButton(
+                id = "exposure",
+                label = stringResource(id = R.string.studio_label_exposure),
+            ) { ExposureButton(onExposure) },
+            OperationalButton(
                 id = "ca",
                 label = stringResource(id = R.string.studio_label_lca),
             ) { CaButton(onCa) },
@@ -1377,10 +1381,6 @@ private fun StudioOperationBarDevelopFilm(
                 id = "dehaze",
                 label = stringResource(id = R.string.studio_label_dehaze),
             ) { DehazeButton(onDehaze) },
-            OperationalButton(
-                id = "exposure",
-                label = stringResource(id = R.string.studio_label_exposure),
-            ) { ExposureButton(onExposure) },
             OperationalButton(
                 id = "demosaic",
                 label = stringResource(id = R.string.studio_label_demosaic),

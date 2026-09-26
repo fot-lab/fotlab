@@ -342,23 +342,32 @@ pub(crate) fn develop_image(
   // read (CFA/photometric, color matrix, wb, active/crop areas).
   let mut pixels = take_scaled_pixels(&mut image)?;
 
-  // Pre-demosaic mosaic stages, composed as pure functions (`denoise.rs` /
-  // `dehaze.rs` / `exposure.rs`). Each consumes the mosaic buffer and returns it;
-  // `None` (or a zero strength) is the identity, so an unconfigured stage is free.
-  // Order: **Denoise → Dehaze → Exposure**. Denoise and dehaze run on the *raw
-  // normalised* 0..1 mosaic — before any gain — so each solves its own source
-  // value problem first:
+  // Pre-demosaic mosaic stages, composed as pure functions (`exposure.rs` /
+  // `denoise.rs` / `dehaze.rs` / `ca.rs`). Each consumes the mosaic buffer and
+  // returns it; `None` (or a zero strength) is the identity, so an unconfigured
+  // stage is free.
+  // Order: **Exposure → Denoise → Dehaze → CA**. Exposure is applied FIRST as
+  // the channel-uniform linear `2^exposure_ev` gain, so the neighbour-quality
+  // stages that follow solve their problems on the exposure-corrected source:
+  //   * dehaze now reads the exposure-compensated mosaic, which removes the
+  //     exposure-dependent dehaze failure — an underexposed capture no longer
+  //     occupies only the low sub-range of [0,1], so its local dark channel is
+  //     not globally scaled down (see `rules/REVIEW/detail/FOTLAB-RAWLER-000012.md` F7);
   //   * denoise is scale-invariant under a uniform linear gain (median + neighbour
   //     range scale together), so its result is identical on either side of
   //     exposure;
-  //   * dehaze bins a 0..1 histogram, so it MUST see the normalised mosaic — a
-  //     positive EV would push values >1.0 into the top bin and bias the floor.
-  // Exposure is applied last among the mosaic stages as the channel-uniform
-  // linear `2^exposure_ev` gain; because it is linear it commutes with demosaic.
+  //   * exposure is linear, so it still commutes with demosaic.
+  // Trade-off: the dehaze histogram is now built on exposure-scaled values that
+  // may exceed 1.0 for a positive EV; the existing [0,1] histogram-bin clamp and
+  // the `cap_tail` clamp on the haze field keep the estimate bounded.
   let cfa = match &image.photometric {
     RawPhotometricInterpretation::Cfa(config) => Some(config),
     _ => None,
   };
+  // Exposure first: the `2^exposure_ev` linear gain on the normalised mosaic,
+  // applied before the neighbour-quality stages. Channel-uniform and linear, so
+  // it commutes with demosaic.
+  let pixels = apply_exposure(pixels, params.exposure_ev);
   // Denoise (pre-demosaic mosaic): orchestrates two composed sub-stages in order
   // — (1) RT-style CFA impulse / hot-dead-pixel removal on `denoise_strength`,
   // then (2) BM3D-CFA collaborative filtering on the raw mosaic on
@@ -373,9 +382,11 @@ pub(crate) fn develop_image(
     cfa,
   );
   // Dehaze: separate haze floor per CFA colour plane, as a configurable
-  // `dehaze_percentile` of each plane's 0..1 histogram, DCP-style contrast
-  // restore, blended by `dehaze_strength`; histograms are restricted to the
-  // active area so masked borders do not bias the estimate.
+  // `dehaze_percentile` of each plane's histogram, DCP-style contrast restore,
+  // blended by `dehaze_strength`; histograms are restricted to the active area
+  // so masked borders do not bias the estimate. Runs AFTER exposure so it sees
+  // the exposure-corrected mosaic; the [0,1] histogram-bin clamp bounds the
+  // estimate for a positive EV.
   let pixels = dehaze(
     pixels,
     image.width,
@@ -389,13 +400,10 @@ pub(crate) fn develop_image(
     params.dehaze_radius_guide,
   );
   // CA correction: pre-demosaic radial CA on the full-frame mosaic (after
-  // dehaze, before exposure — like the other neighbour-quality stages it wants
-  // the normalised source values). `None` is the identity; non-Bayer CFAs and
-  // kernel failures degrade to the uncorrected mosaic (see `ca.rs`).
+  // dehaze and exposure — like the other neighbour-quality stages it wants the
+  // corrected source values). `None` is the identity; non-Bayer CFAs and kernel
+  // failures degrade to the uncorrected mosaic (see `ca.rs`).
   let pixels = correct_ca(pixels, image.width, image.height, params.ca.as_ref(), cfa);
-  // Exposure last: the `2^exposure_ev` linear gain on the cleaned, normalised
-  // mosaic. Channel-uniform and linear, so it commutes with demosaic.
-  let pixels = apply_exposure(pixels, params.exposure_ev);
 
   // Demosaic stage — its ROI is already active_area, exactly like rawler's
   // Demosaic + FujiRotate + CropActiveArea steps. `params.downsample` picks the superpixel
