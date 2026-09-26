@@ -233,8 +233,11 @@ fun StudioScreen() {
     // Share-as-PNG: while an image is resident on the canvas the fun bar's open-file slot becomes
     // a share action. CreateDocument hands the user the system file manager to choose the save
     // location and name (prefilled with the tap-time timestamp); the callback re-reads the canvas
-    // state and writes the bytes as PNG — RAW output is already an engine-produced PNG, the Coil
-    // path decodes the source and re-encodes.
+    // state and writes it as a *compressed* PNG. The engine delivers an uncompressed PNG (rawler
+    // path) or a source Uri (Coil path); both branches decode and re-encode through Android's
+    // native PNG encoder so the exported file is actually zlib-compressed instead of huge.
+    // (PNG quality is ignored by the platform, so this is the strongest lossless compression the
+    // native API offers — there is no public Android API to force zlib level 9.)
     val shareLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("image/png"),
     ) { target ->
@@ -244,7 +247,16 @@ fun StudioScreen() {
                 runCatching {
                     val bytes = when (val result = current) {
                         is StudioRenderResult.Ready -> when (val model = result.model) {
-                            is ByteBuffer -> model.array()
+                            // rawler path: Rust PNG bytes are uncompressed — decode and re-encode
+                            // through the native encoder to apply zlib compression.
+                            is ByteBuffer -> BitmapFactory.decodeByteArray(model.array(), 0, model.array().size)
+                                ?.let { bmp ->
+                                    ByteArrayOutputStream().use { out ->
+                                        bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
+                                        out.toByteArray()
+                                    }
+                                }
+                            // Coil path: decode the source and re-encode with the native encoder.
                             is Uri -> context.contentResolver.openInputStream(model)?.use { input ->
                                 BitmapFactory.decodeStream(input)?.let { bmp ->
                                     ByteArrayOutputStream().use { out ->
