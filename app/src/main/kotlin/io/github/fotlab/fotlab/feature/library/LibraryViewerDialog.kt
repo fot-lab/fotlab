@@ -15,9 +15,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -64,6 +62,7 @@ import androidx.exifinterface.media.ExifInterface
 import coil3.request.ImageRequest
 import io.github.fotlab.fotlab.R
 import io.github.fotlab.fotlab.ui.ZoomableAsyncImage
+import io.github.fotlab.fotlab.ui.operation.OverlayOperationBar
 import io.github.fotlab.fotlab.ui.rememberZoomState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -198,37 +197,29 @@ fun LibraryViewerDialog(
                 }
             }
 
-            // Bottom bar: close (X), the item count to its right, then — on the far right — an
-            // "open in Studio" action (just left of the info toggle). The info toggle persists
-            // (`FOTLAB-UIXDES`, viewer layout). The optional detail panel sits above this bar so
-            // the controls stay reachable; the left-right order is unchanged from the old top bar.
-            // The whole overlay is the last child of the Box, so it draws above the full-bleed
-            // pager by default, and the control row carries its own scrim (matching ViewerDetails)
-            // because the white icons sit directly over the (often bright) bottom of the photo.
+            // Bottom bar: the controls live in a shared overlay container
+            // (`OverlayOperationBar`) and are allocated by slot — close (X) leading, the item count
+            // next to it, then the "open in Studio" action and the info toggle trailing on the far
+            // right. The info toggle persists (`FOTLAB-UIXDES`, viewer layout), and the optional
+            // detail panel is stacked above the row so the controls stay reachable. The left-right
+            // order is unchanged from the old top bar, and the container's scrim is what keeps the
+            // white icons visible over the (often bright) bottom of the photo.
             // `bottomInset` (computed above) keeps it out of the strip the dialog window does not
             // actually show — without it the bar is clipped away entirely.
-            Column(
+            OverlayOperationBar(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
                     .fillMaxWidth()
                     .padding(bottom = bottomInset),
-            ) {
-                if (showDetails) {
-                    ViewerDetails(
-                        node = items[pagerState.currentPage],
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
-                Surface(
-                    color = Color.Black.copy(alpha = 0.5f),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 4.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
+                above = {
+                    if (showDetails) {
+                        ViewerDetails(
+                            node = items[pagerState.currentPage],
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                },
+                leading = {
                     IconButton(onClick = onDismiss) {
                         Icon(
                             imageVector = Icons.Filled.Close,
@@ -236,12 +227,15 @@ fun LibraryViewerDialog(
                             tint = Color.White,
                         )
                     }
+                },
+                content = {
                     Text(
                         text = "${pagerState.currentPage + 1} / ${items.size}",
                         color = Color.White.copy(alpha = 0.8f),
                         style = MaterialTheme.typography.labelMedium,
                     )
-                    Spacer(modifier = Modifier.weight(1f))
+                },
+                trailing = {
                     IconButton(onClick = { onOpenInStudio(items[pagerState.currentPage]) }) {
                         Icon(
                             imageVector = Icons.Filled.AddPhotoAlternate,
@@ -258,9 +252,8 @@ fun LibraryViewerDialog(
                             tint = Color.White,
                         )
                     }
-                }
-                }
-            }
+                },
+            )
         }
     }
 }
