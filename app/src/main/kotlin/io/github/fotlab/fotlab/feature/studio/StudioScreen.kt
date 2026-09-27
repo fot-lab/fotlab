@@ -221,7 +221,7 @@ fun StudioScreen() {
     var dehazeRadiusDarkInput by remember { mutableStateOf("") }
     var dehazeRadiusGuideInput by remember { mutableStateOf("") }
     // Dehaze merge mode (Each/Blue/Min/Avg); default Min. Carried through to the engine on OK.
-    var dehazeMergeModeInput by remember { mutableStateOf(DehazeMergeMode.Min) }
+    var dehazeMergeModeInput by remember { mutableStateOf(DehazeMergeMode.MIN) }
     var dehazeMergeModeMenuOpen by remember { mutableStateOf(false) }
 
     // LCA (chromatic-aberration correction) dialog state (opened by the DevelopFilm bar LCA icon,
@@ -849,7 +849,7 @@ fun StudioScreen() {
                                 dehazeMergeModeInput,
                             )
                         } else {
-                            StudioEngine.setDehaze(null, null, null, null, DehazeMergeMode.Min)
+                            StudioEngine.setDehaze(null, null, null, null, DehazeMergeMode.MIN)
                         }
                         showDehazeDialog = false
                     },
@@ -913,10 +913,10 @@ fun StudioScreen() {
                     Box {
                         TextField(
                             value = when (dehazeMergeModeInput) {
-                                DehazeMergeMode.Each -> stringResource(id = R.string.studio_dehaze_merge_each)
-                                DehazeMergeMode.Blue -> stringResource(id = R.string.studio_dehaze_merge_blue)
-                                DehazeMergeMode.Min -> stringResource(id = R.string.studio_dehaze_merge_min)
-                                DehazeMergeMode.Avg -> stringResource(id = R.string.studio_dehaze_merge_avg)
+                                DehazeMergeMode.EACH -> stringResource(id = R.string.studio_dehaze_merge_each)
+                                DehazeMergeMode.BLUE -> stringResource(id = R.string.studio_dehaze_merge_blue)
+                                DehazeMergeMode.MIN -> stringResource(id = R.string.studio_dehaze_merge_min)
+                                DehazeMergeMode.AVG -> stringResource(id = R.string.studio_dehaze_merge_avg)
                             },
                             onValueChange = { },
                             readOnly = true,
@@ -934,28 +934,28 @@ fun StudioScreen() {
                             DropdownMenuItem(
                                 text = { Text(text = stringResource(id = R.string.studio_dehaze_merge_each)) },
                                 onClick = {
-                                    dehazeMergeModeInput = DehazeMergeMode.Each
+                                    dehazeMergeModeInput = DehazeMergeMode.EACH
                                     dehazeMergeModeMenuOpen = false
                                 },
                             )
                             DropdownMenuItem(
                                 text = { Text(text = stringResource(id = R.string.studio_dehaze_merge_blue)) },
                                 onClick = {
-                                    dehazeMergeModeInput = DehazeMergeMode.Blue
+                                    dehazeMergeModeInput = DehazeMergeMode.BLUE
                                     dehazeMergeModeMenuOpen = false
                                 },
                             )
                             DropdownMenuItem(
                                 text = { Text(text = stringResource(id = R.string.studio_dehaze_merge_min)) },
                                 onClick = {
-                                    dehazeMergeModeInput = DehazeMergeMode.Min
+                                    dehazeMergeModeInput = DehazeMergeMode.MIN
                                     dehazeMergeModeMenuOpen = false
                                 },
                             )
                             DropdownMenuItem(
                                 text = { Text(text = stringResource(id = R.string.studio_dehaze_merge_avg)) },
                                 onClick = {
-                                    dehazeMergeModeInput = DehazeMergeMode.Avg
+                                    dehazeMergeModeInput = DehazeMergeMode.AVG
                                     dehazeMergeModeMenuOpen = false
                                 },
                             )

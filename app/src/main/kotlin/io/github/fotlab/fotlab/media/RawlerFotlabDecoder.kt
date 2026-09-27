@@ -1,5 +1,6 @@
 package io.github.fotlab.fotlab.media
 
+import io.github.fotlab.fotlab_rawler.DehazeMergeMode
 import io.github.fotlab.fotlab_rawler.DemosaicAlgorithm
 import io.github.fotlab.fotlab_rawler.DevelopParams
 import io.github.fotlab.fotlab_rawler.RawlerFotlabBridge
@@ -42,6 +43,7 @@ class RawlerFotlabDecoder : RawDecoder {
             exposureEv = exposureEv,
             wb = null,
             downsample = downsample,
+            dehazeMergeMode = DehazeMergeMode.MIN,
         )
         return RawlerFotlabBridge.developRawToPng(bytes, params)
     }

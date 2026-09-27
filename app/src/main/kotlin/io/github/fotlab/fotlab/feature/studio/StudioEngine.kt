@@ -351,7 +351,7 @@ object StudioEngine {
     private var currentDehazeRadiusGuide: Int? = null
 
     /** The dehaze merge mode (Each/Blue/Min/Avg) retained for the next develop re-render; null = Min. */
-    private var currentDehazeMergeMode: DehazeMergeMode = DehazeMergeMode.Min
+    private var currentDehazeMergeMode: DehazeMergeMode = DehazeMergeMode.MIN
 
     /**
      * The RAW decoded once and held resident as a UniFFI handle; null when no raw file is loaded.

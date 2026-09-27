@@ -2,6 +2,7 @@ package io.github.fotlab.fotlab.smoke
 
 import android.graphics.Bitmap
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import io.github.fotlab.fotlab_rawler.DehazeMergeMode
 import io.github.fotlab.fotlab_rawler.DemosaicAlgorithm
 import io.github.fotlab.fotlab_rawler.DevelopParams
 import io.github.fotlab.fotlab_rawler.RawlerFotlabBridge
@@ -84,7 +85,7 @@ class RawlerNativeSmokeTest {
 
     /** A develop request with the default CFA algorithm — used to probe the develop path. */
     private val developParams: DevelopParams
-        get() = DevelopParams(demosaicAlgorithm = DemosaicAlgorithm.DEFAULT, exposureEv = 0.0f, wb = null)
+        get() = DevelopParams(demosaicAlgorithm = DemosaicAlgorithm.DEFAULT, exposureEv = 0.0f, wb = null, dehazeMergeMode = DehazeMergeMode.MIN)
 
     /** Call #3 (develop): non-RAW input degrades to `null` instead of aborting the process. */
     @Test
