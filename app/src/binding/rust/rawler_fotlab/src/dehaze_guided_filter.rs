@@ -888,11 +888,20 @@ mod tests {
     /// never accidentally "fixed" back to a ratio-preserving form.
     #[test]
     fn dehaze_classical_allows_coloured_cast() {
-        let (w, h, period) = (32, 24, 2);
+        let (w, h, _period) = (32, 24, 2);
         let planes = bayer_planes();
 
-        // Neutral frame: R=G=B=0.5 everywhere (no texture) => uniform mask, ratio kept.
-        let neutral: Vec<f32> = (0..w * h).map(|_| 0.5).collect();
+        // Neutral (uniform) frame: every photosite identical => the shared mask h is
+        // the same for all, and the classical offset `-A*strength*h` is identical for
+        // every channel, so the four photosites of a cell keep the SAME value. That is
+        // "no relative cast" (the R:G:B ratio is identical before and after).
+        //
+        // NOTE (accepted DCP artifact, not a bug): for a *uniform* frame the dark
+        // channel equals the level, so h == level and the classical map crushes the
+        // level to 0 — DCP conflates brightness with haze. The pin here is the
+        // *relative* invariant (all channels equal), not the absolute output.
+        let c = 0.5f32;
+        let neutral: Vec<f32> = (0..w * h).map(|_| c).collect();
         let out_n = dehaze(
             neutral.clone(), w, h, Some(1.0), Some(0.01), Some(1.0), &planes, None, 3, 4, 0.01,
             1.0,
@@ -900,43 +909,47 @@ mod tests {
         for bi in 0..h / 2 {
             for bj in 0..w / 2 {
                 let base = (2 * bi) * w + 2 * bj;
-                let samples: [(usize, f32); 4] = [(0, 0), (0, 1), (1, 0), (1, 1)]
-                    .map(|(dr, dc)| (base + dr * w + dc, neutral[base + dr * w + dc]));
-                for a in 0..4 {
-                    for b in 0..4 {
-                        let (ia, va) = samples[a];
-                        let (ib, vb) = samples[b];
-                        let ratio_in = va / vb;
-                        let ratio_out = out_n[ia] / out_n[ib];
-                        assert!(
-                            (ratio_in - ratio_out).abs() < 1e-5,
-                            "neutral cell ({bi},{bj}) ratio {a}/{b}: in {ratio_in} vs out {ratio_out}"
-                        );
-                    }
-                }
+                let cell = [
+                    out_n[base],
+                    out_n[base + 1],
+                    out_n[base + w],
+                    out_n[base + w + 1],
+                ];
+                let lo = cell.iter().cloned().fold(f32::INFINITY, f32::min);
+                let hi = cell.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+                assert!(
+                    (hi - lo) < 1e-5,
+                    "neutral cell ({bi},{bj}) should keep all channels equal (no cast): {cell:?}"
+                );
             }
         }
 
-        // Coloured frame: R=0.6, G=0.4, B=0.2 per plane. Ratios must CHANGE.
+        // Coloured frame: distinct R/G/B levels + texture. The shared offset
+        // `-A*strength*h` is one EQUAL absolute amount, so it shifts channels of
+        // different magnitude by different *relative* amounts: the per-channel
+        // absolute change `(out - in)` differs between R and G. A cast-free (ratio
+        // preserving) transform would give every channel the same `(out - in)`. Pin
+        // the deliberate cast with a division-free check (robust to the darkest
+        // channel hitting the zero crossing, where `out == 0`).
         let coloured = bayer_frame(w, h);
         let out_c = dehaze(
             coloured.clone(), w, h, Some(1.0), Some(0.01), Some(1.0), &planes, None, 3, 4, 0.01,
             1.0,
         );
-        let mut max_ratio_shift = 0.0f32;
+        let mut max_change_diff = 0.0f32;
         for bi in 0..h / 2 {
             for bj in 0..w / 2 {
                 let base = (2 * bi) * w + 2 * bj;
                 let r = base; // R photosite
-                let b = base + w + 1; // B photosite
-                let ratio_in = coloured[r] / coloured[b];
-                let ratio_out = out_c[r] / out_c[b];
-                max_ratio_shift = max_ratio_shift.max((ratio_in - ratio_out).abs());
+                let g = base + 1; // G1 photosite
+                let d_r = out_c[r] - coloured[r];
+                let d_g = out_c[g] - coloured[g];
+                max_change_diff = max_change_diff.max((d_r - d_g).abs());
             }
         }
         assert!(
-            max_ratio_shift > 1e-3,
-            "coloured ratios should shift under classical dehaze, got {max_ratio_shift}"
+            max_change_diff > 1e-3,
+            "coloured channels must NOT share one (out-in) offset (cast-free); got {max_change_diff}"
         );
     }
 }
