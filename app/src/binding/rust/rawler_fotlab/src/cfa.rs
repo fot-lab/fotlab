@@ -17,7 +17,7 @@
 
 use std::collections::HashMap;
 
-use rawler::rawimage::CFAConfig;
+use rawler::rawimage::{CFAConfig, CFAColor};
 
 /// Number of decimated samples along one axis: the photosites at
 /// `offset, offset + period, …` that still land inside `extent`.
@@ -182,6 +182,20 @@ impl CfaPlanes {
     /// Panics if the plane is not regular; check [`CfaPlanes::is_regular`] first.
     pub fn offset(&self, plane: usize) -> (usize, usize) {
         self.offsets[plane][0]
+    }
+
+    /// Index of the plane whose photosite colour is blue, for the `Blue` dehaze
+    /// merge mode (apply the blue channel's estimated haze field to every colour).
+    /// Returns `None` when no blue plane exists — e.g. monochrome / the `trivial`
+    /// single plane — in which case callers fall back to the first plane.
+    pub fn blue_plane(&self, config: &CFAConfig) -> Option<usize> {
+        for p in 0..self.nplanes {
+            let (dr, dc) = *self.offsets.get(p)?.first()?;
+            if config.cfa.color_at(dr, dc) == CFAColor::BLUE {
+                return Some(p);
+            }
+        }
+        None
     }
 
     /// Dimensions `(gw, gh)` of the decimated sub-lattice grid for a regular plane.

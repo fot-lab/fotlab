@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AllOut
@@ -96,6 +97,7 @@ import io.github.fotlab.fotlab.ui.operation.HorizontalOperationBar
 import io.github.fotlab.fotlab.ui.operation.OperationalButton
 import io.github.fotlab.fotlab.ui.rememberZoomState
 import io.github.fotlab.fotlab_rawler.CaSettings
+import io.github.fotlab.fotlab_rawler.DehazeMergeMode
 import io.github.fotlab.fotlab_rawler.DemosaicAlgorithm
 import io.github.fotlab.fotlab_rawler.DemosaicCandidate
 import kotlinx.coroutines.Dispatchers
@@ -218,6 +220,9 @@ fun StudioScreen() {
     var dehazePercentileInput by remember { mutableStateOf("") }
     var dehazeRadiusDarkInput by remember { mutableStateOf("") }
     var dehazeRadiusGuideInput by remember { mutableStateOf("") }
+    // Dehaze merge mode (Each/Blue/Min/Avg); default Min. Carried through to the engine on OK.
+    var dehazeMergeModeInput by remember { mutableStateOf(DehazeMergeMode.Min) }
+    var dehazeMergeModeMenuOpen by remember { mutableStateOf(false) }
 
     // LCA (chromatic-aberration correction) dialog state (opened by the DevelopFilm bar LCA icon,
     // the ClosedCaption glyph). Auto mode fits the residual-CA polynomial natively; otherwise the
@@ -423,6 +428,7 @@ fun StudioScreen() {
                                 dehazePercentileInput = StudioEngine.currentDehazePercentile()?.toString() ?: ""
                                 dehazeRadiusDarkInput = StudioEngine.currentDehazeRadiusDark()?.toString() ?: ""
                                 dehazeRadiusGuideInput = StudioEngine.currentDehazeRadiusGuide()?.toString() ?: ""
+                                dehazeMergeModeInput = StudioEngine.currentDehazeMergeMode()
                                 showDehazeDialog = true
                             },
                             onCa = {
@@ -840,9 +846,10 @@ fun StudioScreen() {
                                 dehazePercentileInput.toFloatOrNull(),
                                 dehazeRadiusDarkInput.toIntOrNull(),
                                 dehazeRadiusGuideInput.toIntOrNull(),
+                                dehazeMergeModeInput,
                             )
                         } else {
-                            StudioEngine.setDehaze(null, null, null, null)
+                            StudioEngine.setDehaze(null, null, null, null, DehazeMergeMode.Min)
                         }
                         showDehazeDialog = false
                     },
@@ -899,6 +906,61 @@ fun StudioScreen() {
                         placeholder = { Text(text = stringResource(id = R.string.studio_dehaze_radius_guide_hint)) },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    // Dehaze merge mode — a clickable read-only field that expands a DropdownMenu
+                    // of the four modes (Each / Blue / Min / Avg). The selection is held in
+                    // `dehazeMergeModeInput` and passed to the engine on OK; default is Min.
+                    Box {
+                        TextField(
+                            value = when (dehazeMergeModeInput) {
+                                DehazeMergeMode.Each -> stringResource(id = R.string.studio_dehaze_merge_each)
+                                DehazeMergeMode.Blue -> stringResource(id = R.string.studio_dehaze_merge_blue)
+                                DehazeMergeMode.Min -> stringResource(id = R.string.studio_dehaze_merge_min)
+                                DehazeMergeMode.Avg -> stringResource(id = R.string.studio_dehaze_merge_avg)
+                            },
+                            onValueChange = { },
+                            readOnly = true,
+                            enabled = dehazeEnabled,
+                            singleLine = true,
+                            label = { Text(text = stringResource(id = R.string.studio_dehaze_merge_label)) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable(enabled = dehazeEnabled) { dehazeMergeModeMenuOpen = true },
+                        )
+                        DropdownMenu(
+                            expanded = dehazeMergeModeMenuOpen,
+                            onDismissRequest = { dehazeMergeModeMenuOpen = false },
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text(text = stringResource(id = R.string.studio_dehaze_merge_each)) },
+                                onClick = {
+                                    dehazeMergeModeInput = DehazeMergeMode.Each
+                                    dehazeMergeModeMenuOpen = false
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(text = stringResource(id = R.string.studio_dehaze_merge_blue)) },
+                                onClick = {
+                                    dehazeMergeModeInput = DehazeMergeMode.Blue
+                                    dehazeMergeModeMenuOpen = false
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(text = stringResource(id = R.string.studio_dehaze_merge_min)) },
+                                onClick = {
+                                    dehazeMergeModeInput = DehazeMergeMode.Min
+                                    dehazeMergeModeMenuOpen = false
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(text = stringResource(id = R.string.studio_dehaze_merge_avg)) },
+                                onClick = {
+                                    dehazeMergeModeInput = DehazeMergeMode.Avg
+                                    dehazeMergeModeMenuOpen = false
+                                },
+                            )
+                        }
+                    }
                 }
             },
         )

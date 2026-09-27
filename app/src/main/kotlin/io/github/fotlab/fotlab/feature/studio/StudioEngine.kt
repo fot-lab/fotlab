@@ -16,6 +16,7 @@ import io.github.fotlab.fotlab.media.StubRawDecoder
 import io.github.fotlab.fotlab.media.route
 import io.github.fotlab.fotlab_rawler.DemosaicAlgorithm
 import io.github.fotlab.fotlab_rawler.DemosaicCandidate
+import io.github.fotlab.fotlab_rawler.DehazeMergeMode
 import io.github.fotlab.fotlab_rawler.CaSettings
 import io.github.fotlab.fotlab_rawler.DevelopParams
 import io.github.fotlab.fotlab_rawler.GradeParams
@@ -204,6 +205,7 @@ object StudioEngine {
             dehazeCeiling = currentDehazePercentile,
             dehazeRadiusDark = currentDehazeRadiusDark,
             dehazeRadiusGuide = currentDehazeRadiusGuide,
+            dehazeMergeMode = currentDehazeMergeMode,
             ca = currentCa,
             clipToGamut = currentClipToGamut,
                         downsample = downsampleState.value,
@@ -347,6 +349,9 @@ object StudioEngine {
 
     /** The dehaze guided-filter window radius (sub-lattice px); null = engine default (8). */
     private var currentDehazeRadiusGuide: Int? = null
+
+    /** The dehaze merge mode (Each/Blue/Min/Avg) retained for the next develop re-render; null = Min. */
+    private var currentDehazeMergeMode: DehazeMergeMode = DehazeMergeMode.Min
 
     /**
      * The RAW decoded once and held resident as a UniFFI handle; null when no raw file is loaded.
@@ -508,6 +513,7 @@ object StudioEngine {
             dehazeCeiling = currentDehazePercentile,
             dehazeRadiusDark = currentDehazeRadiusDark,
             dehazeRadiusGuide = currentDehazeRadiusGuide,
+            dehazeMergeMode = currentDehazeMergeMode,
             ca = currentCa,
             clipToGamut = currentClipToGamut,
             // The grade fork develops through the same pipeline, so it honours the switch too —
@@ -744,6 +750,7 @@ object StudioEngine {
             dehazeCeiling = currentDehazePercentile,
             dehazeRadiusDark = currentDehazeRadiusDark,
             dehazeRadiusGuide = currentDehazeRadiusGuide,
+            dehazeMergeMode = currentDehazeMergeMode,
             ca = currentCa,
             clipToGamut = currentClipToGamut,
             downsample = downsampleState.value,
@@ -771,6 +778,9 @@ object StudioEngine {
 
     /** The current dehaze guided-filter radius; the UI prefills the Dehaze dialog from this. */
     fun currentDehazeRadiusGuide(): Int? = currentDehazeRadiusGuide
+
+    /** The current dehaze merge mode; the UI prefills the Dehaze dialog from this. */
+    fun currentDehazeMergeMode(): DehazeMergeMode = currentDehazeMergeMode
 
     /** The CA-correction settings retained for the next develop re-render; null = off. */
     private var currentCa: CaSettings? = null
@@ -823,11 +833,12 @@ object StudioEngine {
      * `None`/0 makes the whole dehaze an identity, so the blend must be set alongside the percentile.
      * The canvas is re-rendered from the re-developed PNG.
      */
-    fun setDehaze(strength: Float?, percentile: Float?, radiusDark: Int?, radiusGuide: Int?) {
+    fun setDehaze(strength: Float?, percentile: Float?, radiusDark: Int?, radiusGuide: Int?, mergeMode: DehazeMergeMode) {
         currentDehazeStrength = strength
         currentDehazePercentile = percentile
         currentDehazeRadiusDark = radiusDark
         currentDehazeRadiusGuide = radiusGuide
+        currentDehazeMergeMode = mergeMode
         reDevelop()
     }
 
@@ -886,6 +897,7 @@ object StudioEngine {
             dehazeCeiling = currentDehazePercentile,
             dehazeRadiusDark = currentDehazeRadiusDark,
             dehazeRadiusGuide = currentDehazeRadiusGuide,
+            dehazeMergeMode = currentDehazeMergeMode,
             ca = currentCa,
             clipToGamut = currentClipToGamut,
                         downsample = downsample,
@@ -908,6 +920,7 @@ object StudioEngine {
             dehazeCeiling = currentDehazePercentile,
             dehazeRadiusDark = currentDehazeRadiusDark,
             dehazeRadiusGuide = currentDehazeRadiusGuide,
+            dehazeMergeMode = currentDehazeMergeMode,
             ca = currentCa,
             clipToGamut = currentClipToGamut,
                         downsample = downsample,

@@ -42,7 +42,7 @@
 //!
 //! ```text
 //! estimate  ->  per-plane fields      PlaneMask::{Grid, Uniform}
-//! merge     ->  one shared field      average of the planes, full resolution
+//! merge     ->  shared OR per-plane   Avg / Min / Blue (one field) or Each (per-plane)
 //! apply     ->  pixels                cleared = (v − A) / (1 − strength·h) + A   (classical; chroma NOT preserved)
 //! ```
 //!
@@ -70,6 +70,30 @@ use rayon::prelude::*;
 
 use crate::cfa::CfaPlanes;
 
+/// How the per-plane haze estimates are combined into the field applied to pixels.
+///
+/// * `Each` — no merge: every colour plane applies the filter it estimated for
+///   itself (the pre-"shared field" behaviour).
+/// * `Blue` — every plane uses the **blue** channel plane's estimated field
+///   (`CfaPlanes::blue_plane`). Blue scatters most in haze, so its dark channel
+///   is typically the lowest — applying it everywhere is the most conservative
+///   single-plane choice.
+/// * `Min` — per pixel, the minimum haze across the planes: a pixel is only
+///   dehazed where *every* plane agrees it is hazy. This is the **default**.
+/// * `Avg` — per-pixel mean across the planes (the original shared-field merge).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, uniffi::Enum)]
+pub enum DehazeMergeMode {
+    /// No merge — each plane applies its own estimated field.
+    Each,
+    /// Every plane uses the blue channel plane's field.
+    Blue,
+    /// Per-pixel minimum of the plane fields (default).
+    #[default]
+    Min,
+    /// Per-pixel mean of the plane fields (the original shared-field merge).
+    Avg,
+}
+
 /// Histogram bins over the normalised [0,1] mosaic.
 const BINS: usize = 256;
 
@@ -93,6 +117,8 @@ pub(crate) fn dehaze(
     dark_radius: usize,
     guide_radius: usize,
     guide_eps: f32,
+    merge_mode: DehazeMergeMode,
+    blue_plane: Option<usize>,
     atmospheric_light: f32,
 ) -> Vec<f32> {
     let strength = match strength {
@@ -121,13 +147,34 @@ pub(crate) fn dehaze(
         plane_haze_floors(&pixels, width, height, planes, active, floor_tail)
     };
 
-    // 1. estimate (per plane) -> 2. merge (one shared field) -> 3. apply.
+    // 1. estimate (per plane) -> 2. merge (one shared field, or keep per-plane)
+    // -> 3. apply.
     let masks = estimate_masks(
         &pixels, width, height, planes, guided, cap_tail, &floors,
         dark_radius, guide_radius, guide_eps,
     );
-    let mask = merge_masks(&masks, width, height, planes.period());
-    apply_mask(&mut pixels, &mask, strength, atmospheric_light);
+    match merge_mode {
+        DehazeMergeMode::Each => {
+            // No merge: every colour plane applies the field it estimated for itself.
+            let plane_cells = build_plane_cells(&masks, width, height, planes.period());
+            apply_each(&mut pixels, &plane_cells, planes, width, height, strength, atmospheric_light);
+        }
+        DehazeMergeMode::Blue => {
+            // Every plane uses the blue channel plane's estimated field.
+            let blue = blue_plane.unwrap_or(0);
+            let mask = reduce_cells(&masks, &Reduction::Blue(blue), width, height, planes.period());
+            apply_mask(&mut pixels, &mask, strength, atmospheric_light);
+        }
+        DehazeMergeMode::Min => {
+            let mask = reduce_cells(&masks, &Reduction::Min, width, height, planes.period());
+            apply_mask(&mut pixels, &mask, strength, atmospheric_light);
+        }
+        DehazeMergeMode::Avg => {
+            // The historical shared-field merge: per-cell mean across the planes.
+            let mask = merge_masks(&masks, width, height, planes.period());
+            apply_mask(&mut pixels, &mask, strength, atmospheric_light);
+        }
+    }
     pixels
 }
 
@@ -222,82 +269,181 @@ fn estimate_masks(
     masks
 }
 
-/// Stage 2: collapse the per-plane estimates into **one** shared field.
+/// Stage 2 reduction: how the per-plane estimates collapse onto the common
+/// *period grid* before being expanded to full resolution.
+enum Reduction {
+    /// Per-cell mean of the planes that reached the cell (the historical `Avg`).
+    Avg,
+    /// Per-cell minimum of the planes that reached the cell.
+    Min,
+    /// The blue channel plane's estimate for every cell (`Blue` mode).
+    Blue(usize),
+}
+
+/// The value plane `mask` contributes at common-grid cell `(i, j)`, or `None`
+/// when the plane does not cover that cell (a regular grid plane whose sub-lattice
+/// stops short of the frame edge at a partial tail row/column). `Uniform` planes
+/// always cover every cell.
+fn plane_value_at(mask: &PlaneMask, i: usize, j: usize) -> Option<f32> {
+    match mask {
+        PlaneMask::Grid { gw: pw, gh: ph, values } => {
+            if i < *ph && j < *pw {
+                Some(values[i * (*pw) + j])
+            } else {
+                None
+            }
+        }
+        PlaneMask::Uniform(v) => Some(*v),
+    }
+}
+
+/// Collapse the per-plane estimates into **one** shared full-resolution field
+/// (`Min` / `Blue` / `Avg` modes). Mirrors the old `merge_masks` cell-wise
+/// accumulation, but replaces the fixed mean with the requested [`Reduction`].
 ///
-/// All of the fields are resampled onto the common *period grid*
-/// `(ceil(width/period), ceil(height/period))` before they are combined,
-/// because that is the only grid where all planes are comparable:
+/// Every field is resampled onto the common period grid
+/// `(ceil(width/period), ceil(height/period))` because that is the only grid where
+/// all planes are comparable: a grid plane at offset `(dr, dc)` seeds its sample
+/// `(i, j)` at photosite `(dr + period*i, dc + period*j)`, whose common-grid cell
+/// is `(i, j)` whenever `dr, dc < period` (always true). Uniform planes contribute
+/// one number to every cell. Cells no plane reached get `0` (no extra haze).
 ///
-/// * A grid plane seeded at period offset `(dr, dc)` has its sample `(i, j)` at
-///   the photosite `(dr + period*i, dc + period*j)`, whose common-grid cell is
-///   `(floor((dr + period*i)/period), floor((dc + period*j)/period)) = (i, j)`
-///   as long as `dr, dc < period` — which always holds. So plane grids are
-///   co-indexed with the common grid from the origin; they differ only in
-///   *where inside the cell* each sample is centred, by up to `period − 1`
-///   photosites. At the radii used here that misregistration is far below the
-///   support of the field, so the samples are averaged cell-wise with no
-///   resampling: this is the "pixel count mapping" a non-periodic set of planes
-///   would otherwise need.
-/// * A uniform plane is a single number, so it contributes that number to every
-///   cell. That is also why Bayer's four grids of equal size and an irregular
-///   CFA's mixed bags go through the same accumulation: a grid simply covers
-///   fewer cells than the whole frame, and the per-cell divisor is the number of
-///   planes that actually reached it.
-///
-/// The result is expanded back to full resolution: every photosite in a cell
-/// receives that cell's mean, which is what makes the applied field identical
-/// across the colours within a CFA period.
-fn merge_masks(masks: &[PlaneMask], width: usize, height: usize, period: usize) -> Vec<f32> {
+/// The reduced cells are then expanded to full resolution: every photosite in a
+/// cell receives that cell's value, so the applied field is identical across the
+/// colours within a CFA period.
+fn reduce_cells(
+    masks: &[PlaneMask],
+    reduction: &Reduction,
+    width: usize,
+    height: usize,
+    period: usize,
+) -> Vec<f32> {
     if width == 0 || height == 0 {
         return Vec::new();
     }
     let period = period.max(1);
     let gw = (width + period - 1) / period;
     let gh = (height + period - 1) / period;
-    let mut sum = vec![0.0f32; gw * gh];
-    let mut seen = vec![0u32; gw * gh];
 
-    for mask in masks {
-        match mask {
-            PlaneMask::Uniform(v) => {
-                for (s, k) in sum.iter_mut().zip(seen.iter_mut()) {
-                    *s += *v;
-                    *k += 1;
-                }
-            }
-            PlaneMask::Grid {
-                gw: pw,
-                gh: ph,
-                values,
-            } => {
-                let rows = (*ph).min(gh);
-                let cols = (*pw).min(gw);
-                for i in 0..rows {
-                    for j in 0..cols {
-                        let k = i * gw + j;
-                        sum[k] += values[i * *pw + j];
-                        seen[k] += 1;
+    let mut cell = vec![0.0f32; gw * gh];
+    for ci in 0..gh {
+        for cj in 0..gw {
+            let k = ci * gw + cj;
+            cell[k] = match reduction {
+                Reduction::Avg => {
+                    let mut s = 0.0f32;
+                    let mut n = 0u32;
+                    for m in masks {
+                        if let Some(v) = plane_value_at(m, ci, cj) {
+                            s += v;
+                            n += 1;
+                        }
+                    }
+                    if n > 0 {
+                        s / n as f32
+                    } else {
+                        0.0
                     }
                 }
-            }
+                Reduction::Min => {
+                    let mut m = f32::INFINITY;
+                    let mut any = false;
+                    for mm in masks {
+                        if let Some(v) = plane_value_at(mm, ci, cj) {
+                            m = m.min(v);
+                            any = true;
+                        }
+                    }
+                    if any {
+                        m
+                    } else {
+                        0.0
+                    }
+                }
+                Reduction::Blue(b) => plane_value_at(&masks[*b], ci, cj).unwrap_or(0.0),
+            };
         }
     }
 
     // Expand cell -> photosites. Row-independent, so parallelised with rayon
     // (`OPTIMZ-PERFRM-000007`).
-    let cells: Vec<f32> = sum
-        .iter()
-        .zip(seen.iter())
-        .map(|(s, k)| if *k == 0 { 0.0 } else { s / *k as f32 })
-        .collect();
     let mut out = vec![0.0f32; width * height];
     out.par_chunks_mut(width).enumerate().for_each(|(r, row)| {
         let bi = r / period;
         for c in 0..width {
-            row[c] = cells[bi * gw + c / period];
+            row[c] = cell[bi * gw + c / period];
         }
     });
     out
+}
+
+/// `Each` mode: per-plane cell grids, one per plane, expanded to the whole frame
+/// so the apply step can look each pixel's field up by `plane_at(r, c)`. A grid
+/// plane seeds `plane_cells[p][cell]` from its sub-lattice (only the cells it
+/// reaches); a uniform plane fills every cell with its constant.
+fn build_plane_cells(
+    masks: &[PlaneMask],
+    width: usize,
+    height: usize,
+    period: usize,
+) -> Vec<Vec<f32>> {
+    let period = period.max(1);
+    let gw = (width + period - 1) / period;
+    let gh = (height + period - 1) / period;
+    let nplanes = masks.len();
+    let mut plane_cells = vec![vec![0.0f32; gw * gh]; nplanes];
+    for p in 0..nplanes {
+        match &masks[p] {
+            PlaneMask::Grid { gw: pw, gh: ph, values } => {
+                let rows = (*ph).min(gh);
+                let cols = (*pw).min(gw);
+                for i in 0..rows {
+                    for j in 0..cols {
+                        plane_cells[p][i * gw + j] = values[i * (*pw) + j];
+                    }
+                }
+            }
+            PlaneMask::Uniform(v) => {
+                for cell in plane_cells[p].iter_mut() {
+                    *cell = *v;
+                }
+            }
+        }
+    }
+    plane_cells
+}
+
+/// Apply the classical recovery per pixel, each colour plane using **its own**
+/// field from `plane_cells` (the `Each` merge mode). `plane_cells[plane][cell]`
+/// is plane `plane`'s haze value at the pixel's CFA-period cell.
+fn apply_each(
+    pixels: &mut [f32],
+    plane_cells: &[Vec<f32>],
+    planes: &CfaPlanes,
+    width: usize,
+    height: usize,
+    strength: f32,
+    atmospheric_light: f32,
+) {
+    const EPS: f32 = 1e-3;
+    let period = planes.period().max(1);
+    let gw = (width + period - 1) / period;
+    pixels.par_chunks_mut(width).enumerate().for_each(|(r, row)| {
+        let bi = r / period;
+        for c in 0..width {
+            let plane = planes.plane_at(r, c);
+            let h = plane_cells[plane][bi * gw + c / period];
+            let t = (1.0 - strength * h).max(EPS);
+            row[c] = ((row[c] - atmospheric_light) / t + atmospheric_light).max(0.0);
+        }
+    });
+}
+
+/// The historical shared-field merge: per-cell mean across the planes. Kept as a
+/// thin wrapper so callers/tests that only need the average keep reading
+/// `merge_masks`.
+pub(crate) fn merge_masks(masks: &[PlaneMask], width: usize, height: usize, period: usize) -> Vec<f32> {
+    reduce_cells(masks, &Reduction::Avg, width, height, period)
 }
 
 /// Stage 3: apply one shared field to every pixel with the **classical
@@ -862,8 +1008,8 @@ mod tests {
         let planes = bayer_planes();
         let px = bayer_frame(w, h);
         let out = dehaze(
-            px.clone(), w, h, Some(1.0), Some(0.01), Some(1.0), &planes, None, 3, 4, 0.01,
-            1.0,
+            px.clone(), w, h, Some(1.0), Some(0.01), Some(1.0),             &planes, None, 3, 4, 0.01,
+            DehazeMergeMode::Avg, None, 1.0,
         );
         let moved = out
             .iter()
@@ -903,8 +1049,8 @@ mod tests {
         let c = 0.5f32;
         let neutral: Vec<f32> = (0..w * h).map(|_| c).collect();
         let out_n = dehaze(
-            neutral.clone(), w, h, Some(1.0), Some(0.01), Some(1.0), &planes, None, 3, 4, 0.01,
-            1.0,
+            neutral.clone(), w, h, Some(1.0), Some(0.01), Some(1.0),             &planes, None, 3, 4, 0.01,
+            DehazeMergeMode::Avg, None, 1.0,
         );
         for bi in 0..h / 2 {
             for bj in 0..w / 2 {
@@ -933,8 +1079,8 @@ mod tests {
         // channel hitting the zero crossing, where `out == 0`).
         let coloured = bayer_frame(w, h);
         let out_c = dehaze(
-            coloured.clone(), w, h, Some(1.0), Some(0.01), Some(1.0), &planes, None, 3, 4, 0.01,
-            1.0,
+            coloured.clone(), w, h, Some(1.0), Some(0.01), Some(1.0),             &planes, None, 3, 4, 0.01,
+            DehazeMergeMode::Avg, None, 1.0,
         );
         let mut max_change_diff = 0.0f32;
         for bi in 0..h / 2 {
@@ -951,5 +1097,109 @@ mod tests {
             max_change_diff > 1e-3,
             "coloured channels must NOT share one (out-in) offset (cast-free); got {max_change_diff}"
         );
+    }
+
+    /// Two equal-extent Grid planes with distinct values: the `Avg` reduction must
+    /// be their per-cell mean. Pins the historical shared-field merge arithmetic
+    /// at the cell level (independent of expansion to full resolution).
+    #[test]
+    fn reduce_cells_avg_is_mean_of_planes() {
+        let period = 2;
+        let (w, h) = (4, 4); // cell grid is 2×2
+        let masks = vec![
+            PlaneMask::Grid { gw: w / period, gh: h / period, values: vec![0.4; 4] },
+            PlaneMask::Grid { gw: w / period, gh: h / period, values: vec![0.2; 4] },
+        ];
+        let reduced = reduce_cells(&masks, &Reduction::Avg, w, h, period);
+        // Every photosite of every cell gets the same 0.3 mean.
+        for &v in reduced.iter() {
+            assert!((v - 0.3).abs() < 1e-6, "Avg cell should be 0.3, got {v}");
+        }
+    }
+
+    /// Same planes, `Min` reduction must be the per-cell minimum.
+    #[test]
+    fn reduce_cells_min_is_min_of_planes() {
+        let period = 2;
+        let (w, h) = (4, 4);
+        let masks = vec![
+            PlaneMask::Grid { gw: w / period, gh: h / period, values: vec![0.4; 4] },
+            PlaneMask::Grid { gw: w / period, gh: h / period, values: vec![0.2; 4] },
+        ];
+        let reduced = reduce_cells(&masks, &Reduction::Min, w, h, period);
+        for &v in reduced.iter() {
+            assert!((v - 0.2).abs() < 1e-6, "Min cell should be 0.2, got {v}");
+        }
+    }
+
+    /// `Blue(b)` reduction must return plane `b`'s estimated field verbatim — not
+    /// the mean, not the min. Use a third plane so blue (index 1) differs from
+    /// both the average and the min, making the selection unambiguous.
+    #[test]
+    fn reduce_cells_blue_selects_blue_plane() {
+        let period = 2;
+        let (w, h) = (4, 4);
+        let masks = vec![
+            PlaneMask::Grid { gw: w / period, gh: h / period, values: vec![0.4; 4] },
+            PlaneMask::Grid { gw: w / period, gh: h / period, values: vec![0.7; 4] }, // blue plane
+            PlaneMask::Grid { gw: w / period, gh: h / period, values: vec![0.0; 4] },
+        ];
+        let reduced = reduce_cells(&masks, &Reduction::Blue(1), w, h, period);
+        for &v in reduced.iter() {
+            assert!((v - 0.7).abs() < 1e-6, "Blue mode must copy the blue plane (0.7), got {v}");
+        }
+    }
+
+    /// The defining property of `Each`: every plane applies **its own** field, so
+    /// a uniform input spreads differently per plane. Build four uniform planes
+    /// with distinct haze (only plane 1 strong), neutral input, and assert that
+    /// the plane-1 photosite collapses to 0 while the others are untouched —
+    /// proof the field was *not* merged into one shared value.
+    #[test]
+    fn apply_each_applies_per_plane_field() {
+        let (w, h, period) = (4, 4, 2);
+        let planes = bayer_planes();
+        // Uniform planes: floor only as haze (scalar-style), plane 1 strong.
+        let masks = vec![
+            PlaneMask::Uniform(0.0),
+            PlaneMask::Uniform(0.6),
+            PlaneMask::Uniform(0.0),
+            PlaneMask::Uniform(0.0),
+        ];
+        let plane_cells = build_plane_cells(&masks, w, h, period);
+        let mut px = vec![0.5f32; w * h]; // neutral frame
+        apply_each(&mut px, &plane_cells, &planes, w, h, 1.0, 1.0);
+
+        // plane_at(0,0)=0 → untouched 0.5; plane_at(0,1)=1 → h=0.6 ⇒ cleared 0.
+        let r00 = px[0 * w + 0];
+        let r01 = px[0 * w + 1];
+        assert!((r00 - 0.5).abs() < 1e-6, "plane 0 should be untouched, got {r00}");
+        assert!((r01 - 0.0).abs() < 1e-6, "plane 1 should be dehazed to 0, got {r01}");
+        assert!((r00 - r01).abs() > 0.4, "Each must apply distinct per-plane fields");
+    }
+
+    /// Regression pin: `Avg` (the default) must reproduce the historical shared-
+    /// field merge byte-for-byte. Re-derive the masks the engine used, reduce them
+    /// with the old `merge_masks` mean, apply with `apply_mask`, and assert the
+    /// end-to-end `dehaze(.. Avg ..)` output matches. If Avg ever silently diverges
+    /// from the pre-merge-mode behaviour this fails.
+    #[test]
+    fn dehaze_avg_recovers_historical_merge() {
+        let (w, h) = (32, 24);
+        let planes = bayer_planes();
+        let px = bayer_frame(w, h);
+        let out = dehaze(
+            px.clone(), w, h, Some(1.0), Some(0.01), Some(1.0),
+            &planes, None, 3, 4, 0.01,
+            DehazeMergeMode::Avg, None, 1.0,
+        );
+
+        // Manual reconstruction of the historical Avg path.
+        let masks = estimate_masks(&px, w, h, &planes, true, 1.0, &[], 3, 4, 0.01);
+        let field = merge_masks(&masks, w, h, planes.period());
+        let mut manual = px.clone();
+        apply_mask(&mut manual, &field, 1.0, 1.0);
+
+        assert_close(&out, &manual, 1e-6);
     }
 }

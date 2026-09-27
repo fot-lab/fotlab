@@ -67,6 +67,7 @@ use crate::ca::{correct_ca, CaSettings};
 use crate::calibrate::{calibrate, WorkingSpace};
 use crate::decode::decode_to_rawimage;
 use crate::dehaze::dehaze;
+use crate::dehaze_guided_filter::DehazeMergeMode;
 use crate::demosaic::{demosaic, DemosaicAlgorithm};
 use crate::denoise::denoise;
 use crate::exposure::apply_exposure;
@@ -193,6 +194,15 @@ pub struct DevelopParams {
   /// field. Supplied from Kotlin when the Studio dehaze control is enabled.
   #[uniffi(default = None)]
   pub dehaze_radius_guide: Option<i32>,
+  /// How the per-plane haze estimates combine into the field applied to pixels
+  /// (`dehaze_guided_filter::DehazeMergeMode`). `Each` = every colour plane applies
+  /// the filter it estimated for itself (no merge); `Blue` = every plane uses the
+  /// blue channel plane's field; `Min` = per-pixel minimum haze across the planes;
+  /// `Avg` = per-pixel mean across the planes (the historical shared-field merge).
+  /// Defaults to `Min` (the enum's `#[default]`, the most conservative: a pixel is
+  /// only dehazed where *every* plane agrees it is hazy). Supplied from Kotlin when
+  /// the Studio dehaze control is enabled.
+  pub dehaze_merge_mode: DehazeMergeMode,
   /// Chromatic-aberration correction settings (the Studio LCA stage), applied
   /// **before** exposure on the full-frame scaled mosaic, after dehaze — the
   /// port of RawTherapee's `CA_correct_RT` (`rawtrp_correct` crate,
@@ -442,6 +452,7 @@ pub(crate) fn develop_image(
     image.active_area.map(|r| (r.p.x, r.p.y, r.d.w, r.d.h)),
     params.dehaze_radius_dark,
     params.dehaze_radius_guide,
+    params.dehaze_merge_mode,
     // Atmospheric light A = 1.0 (fully-saturated haze / white point). Kept as a
     // parameter at the FFI boundary for later per-channel / non-unity extension;
     // the dehaze apply formula `cleared = (v - A) / (1 - strength*h) + A` carries it

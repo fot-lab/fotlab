@@ -123,6 +123,11 @@
     <string name="studio_dehaze_percentile_hint">Haze-floor percentile / guided soft-mask cap, 0.0 – 1.0 (default 0.01)</string>
     <string name="studio_dehaze_radius_dark_hint">Dark-channel radius (sub-lattice px, default 8)</string>
     <string name="studio_dehaze_radius_guide_hint">Guided-filter radius (sub-lattice px, default 8)</string>
+    <string name="studio_dehaze_merge_label">Merge mode</string>
+    <string name="studio_dehaze_merge_each">Each (no merge, each plane applies its own filter)</string>
+    <string name="studio_dehaze_merge_blue">Blue (apply the blue channel field to all colours)</string>
+    <string name="studio_dehaze_merge_min">Min (per-pixel minimum haze across planes)</string>
+    <string name="studio_dehaze_merge_avg">Avg (per-pixel mean across planes)</string>
     <string name="studio_enable_stage">Enable</string>
     <string name="studio_decoding">Decoding…</string>
     <string name="studio_unsupported_title">Unsupported Format</string>
