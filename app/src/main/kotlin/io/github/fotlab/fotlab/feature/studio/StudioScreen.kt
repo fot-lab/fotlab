@@ -1,8 +1,12 @@
 package io.github.fotlab.fotlab.feature.studio
 
+import android.app.Activity
+import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.provider.DocumentsContract
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -79,6 +83,7 @@ import coil3.request.ImageRequest
 import io.github.fotlab.fotlab.R
 import io.github.fotlab.fotlab.feature.library.LibraryCore
 import io.github.fotlab.fotlab.feature.studio.StudioRenderResult
+import io.github.fotlab.fotlab.media.MediaPreference
 import io.github.fotlab.fotlab.ui.ZoomableAsyncImage
 import io.github.fotlab.fotlab.ui.icons.CustomMaterialStyleIcons
 import io.github.fotlab.fotlab.ui.icons.MeteringCenterAsterisk
@@ -130,6 +135,14 @@ fun StudioScreen() {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
+    // Per-SAF-call "last document URI" (LUT / PNG export / import). The system picker only
+    // remembers one global last directory, so we persist each call's own and feed it back as
+    // EXTRA_INITIAL_URI so LUT and export no longer fight over the same starting folder.
+    val mediaPref = remember { MediaPreference(context) }
+    val lastLutUri by mediaPref.lastLutUri.collectAsState(initial = null)
+    val lastExportUri by mediaPref.lastExportUri.collectAsState(initial = null)
+    val lastImportUri by mediaPref.lastImportUri.collectAsState(initial = null)
+
     val zoomState = rememberZoomState()
     val renderResult by StudioEngine.renderResult.collectAsState()
     // Boost/LOG/LUT grade-fork state.
@@ -153,10 +166,14 @@ fun StudioScreen() {
     // shared state is what makes the canvas behave exactly like the Library viewer.
 
     val importLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument(),
-    ) { picked ->
+        contract = ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        val picked = result.takeIf { it.resultCode == Activity.RESULT_OK }?.data?.data
         if (picked != null) {
+            // Remember read access across process death so the next import opens here.
+            persistUriPermission(context, picked, write = false)
             scope.launch {
+                mediaPref.setLastImportUri(picked.toString())
                 // Land the picked file in the Library directory currently on screen (shared state,
                 // never Recycle), then surface it on the Studio canvas.
                 LibraryCore.importUris(LibraryCore.currentDirectoryId.value, listOf(picked))
@@ -241,9 +258,15 @@ fun StudioScreen() {
     // LUT picker: deliberately `*/*` — the interaction is not format-restricted; rawalchemy decides
     // whether the picked bytes are a usable .cube LUT (and an error dialog reports it if not).
     val lutPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument(),
-    ) { picked ->
-        if (picked != null) StudioEngine.setGradeLut(picked)
+        contract = ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        val picked = result.takeIf { it.resultCode == Activity.RESULT_OK }?.data?.data
+        if (picked != null) {
+            // Remember read access across process death so the next LUT pick opens here.
+            persistUriPermission(context, picked, write = false)
+            scope.launch { mediaPref.setLastLutUri(picked.toString()) }
+            StudioEngine.setGradeLut(picked)
+        }
     }
 
     // Share-as-PNG: while an image is resident on the canvas the fun bar's open-file slot becomes
@@ -255,14 +278,18 @@ fun StudioScreen() {
     // (PNG quality is ignored by the platform, so this is the strongest lossless compression the
     // native API offers — there is no public Android API to force zlib level 9.)
     val shareLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument("image/png"),
-    ) { target ->
+        contract = ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        val target = result.takeIf { it.resultCode == Activity.RESULT_OK }?.data?.data
         if (target != null) {
+            // Remember write access across process death so the next export opens here.
+            persistUriPermission(context, target, write = true)
+            scope.launch { mediaPref.setLastExportUri(target.toString()) }
             val current = renderResult
             scope.launch(Dispatchers.IO) {
                 runCatching {
-                    val bytes = when (val result = current) {
-                        is StudioRenderResult.Ready -> when (val model = result.model) {
+                    val bytes = when (val r = current) {
+                        is StudioRenderResult.Ready -> when (val model = r.model) {
                             // rawler path: Rust PNG bytes are uncompressed — decode and re-encode
                             // through the native encoder to apply zlib compression.
                             is ByteBuffer -> BitmapFactory.decodeByteArray(model.array(), 0, model.array().size)
@@ -320,11 +347,18 @@ fun StudioScreen() {
                 // The screen's own fun bar, menu at the bottom-left.
                 StudioScreenFunBar(
                     onOpenDrawer = { scope.launch { drawerState.open() } },
-                    onOpenFile = { importLauncher.launch(arrayOf("*/*")) },
+                    onOpenFile = {
+                        importLauncher.launch(
+                            openDocumentIntent(arrayOf("*/*"), lastImportUri?.let { Uri.parse(it) }),
+                        )
+                    },
                     onShareFile = {
-                        // Prefill the system file manager with the tap-time timestamp.
+                        // Prefill the system file manager with the tap-time timestamp, and start it
+                        // in the folder the last PNG export landed in (rather than the global SAF one).
                         val stamp = SimpleDateFormat("yyyy-MM-dd-HH-mm-ss", Locale.US).format(Date())
-                        shareLauncher.launch("$stamp.png")
+                        shareLauncher.launch(
+                            createDocumentIntent("image/png", "$stamp.png", lastExportUri?.let { Uri.parse(it) }),
+                        )
                     },
                     showShare = renderResult is StudioRenderResult.Ready,
                     onResetView = { zoomState.reset() },
@@ -440,7 +474,11 @@ fun StudioScreen() {
                                 lutName = gradeSelection.lutName,
                                 logSpaces = logSpaces,
                                 onLogSpace = StudioEngine::setGradeLogSpace,
-                                onPickLut = { lutPickerLauncher.launch(arrayOf("*/*")) },
+                                onPickLut = {
+                                    lutPickerLauncher.launch(
+                                        openDocumentIntent(arrayOf("*/*"), lastLutUri?.let { Uri.parse(it) }),
+                                    )
+                                },
                                 onClearLut = StudioEngine::clearGradeLut,
                             )
                         }
@@ -1569,4 +1607,49 @@ private fun StudioOperationBarStyleFilter(
             },
         ),
     )
+}
+
+// ---------------------------------------------------------------------------
+// SAF helpers — per-call "remember my last folder"
+// ---------------------------------------------------------------------------
+
+/**
+ * Build an `ACTION_OPEN_DOCUMENT` intent that, when [initialUri] is non-null, starts the system
+ * picker in that document's parent folder via [DocumentsContract.EXTRA_INITIAL_URI]. Passing the
+ * *document* URI (not a tree) is exactly what makes the picker open where the previous pick landed,
+ * which is how LUT / import keep their own independent "recent directory" instead of sharing the
+ * single global SAF one.
+ */
+private fun openDocumentIntent(mimeTypes: Array<String>, initialUri: Uri?): Intent =
+    Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+        addCategory(Intent.CATEGORY_OPENABLE)
+        type = mimeTypes.firstOrNull() ?: "*/*"
+        putExtra(Intent.EXTRA_MIME_TYPES, mimeTypes)
+        if (initialUri != null) putExtra(DocumentsContract.EXTRA_INITIAL_URI, initialUri)
+    }
+
+/**
+ * Build an `ACTION_CREATE_DOCUMENT` intent (PNG export / ios_share) that prefills the file name via
+ * [Intent.EXTRA_TITLE] and, when [initialUri] is non-null, opens the picker in that export's parent
+ * folder so repeated exports stay put.
+ */
+private fun createDocumentIntent(mimeType: String, title: String, initialUri: Uri?): Intent =
+    Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+        addCategory(Intent.CATEGORY_OPENABLE)
+        type = mimeType
+        putExtra(Intent.EXTRA_TITLE, title)
+        if (initialUri != null) putExtra(DocumentsContract.EXTRA_INITIAL_URI, initialUri)
+    }
+
+/**
+ * Take a persistable URI permission on a document the system picker just granted us, so the
+ * [DocumentsContract.EXTRA_INITIAL_URI] hint survives process death. Some providers grant only
+ * transient permission and throw on the persistable call — that is non-fatal, so we swallow it.
+ */
+private fun persistUriPermission(context: Context, uri: Uri, write: Boolean) {
+    runCatching {
+        val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or
+            if (write) Intent.FLAG_GRANT_WRITE_URI_PERMISSION else 0
+        context.contentResolver.takePersistableUriPermission(uri, flags)
+    }
 }
