@@ -17,7 +17,8 @@
 
 use std::collections::HashMap;
 
-use rawler::rawimage::{CFAConfig, CFAColor};
+use rawler::cfa::CFAColor;
+use rawler::rawimage::CFAConfig;
 
 /// Number of decimated samples along one axis: the photosites at
 /// `offset, offset + period, …` that still land inside `extent`.
@@ -191,7 +192,7 @@ impl CfaPlanes {
     pub fn blue_plane(&self, config: &CFAConfig) -> Option<usize> {
         for p in 0..self.nplanes {
             let (dr, dc) = *self.offsets.get(p)?.first()?;
-            if config.cfa.color_at(dr, dc) == CFAColor::BLUE {
+            if config.cfa.cfa_color_at(dr, dc) == CFAColor::BLUE {
                 return Some(p);
             }
         }

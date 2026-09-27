@@ -421,7 +421,7 @@ fn apply_each(
     plane_cells: &[Vec<f32>],
     planes: &CfaPlanes,
     width: usize,
-    height: usize,
+    _height: usize,
     strength: f32,
     atmospheric_light: f32,
 ) {
