@@ -18,8 +18,9 @@
 //! ## Estimation, merge and application are deliberately separate steps
 //!
 //! Estimating a haze floor is per plane; *using* one is per pixel, and the two
-//! were folded into a single loop for a while. That coupling produced the
-//! colour cast in two distinct ways:
+//! stay in separate stages so a single shared field is built once and applied
+//! identically to every colour plane of a CFA period. The earlier folded version
+//! produced a colour cast in two distinct ways (now understood and accepted):
 //!
 //! 1. **Per-channel transmission.** With one field per plane the apply step
 //!    became `cleared_c = (v_c − h_c) / (1 − h_c)`, i.e. a different
@@ -31,16 +32,18 @@
 //!    *shared* field as `cleared = (v − h) / (1 − h)` subtracts the same
 //!    absolute `h` from every channel. The channels carry different magnitudes,
 //!    so an equal absolute offset shifts their ratios — a neutral block still
-//!    casts. Preserving colour means preserving the *ratios between* channels,
-//!    so the haze field must act as a **multiplicative gain** (a ratio), never
-//!    as an absolute value to subtract.
+//!    casts. That is exactly the behaviour we now *accept*: the apply step uses
+//!    the classical recovery `cleared = (v − A) / (1 − strength·h) + A` (see
+//!    [`apply_mask`]) in exchange for a physically-correct, 2-D-aware dehaze; the
+//!    field stays shared per CFA period so the cast is bounded and spatially
+//!    coherent rather than per-photosite noise.
 //!
 //! So the pipeline is three stages, with a shared field inserted in the middle:
 //!
 //! ```text
 //! estimate  ->  per-plane fields      PlaneMask::{Grid, Uniform}
 //! merge     ->  one shared field      average of the planes, full resolution
-//! apply     ->  pixels                cleared = v · (1 − h)        (ratio, chroma-stable)
+//! apply     ->  pixels                cleared = (v − A) / (1 − strength·h) + A   (classical; chroma NOT preserved)
 //! ```
 //!
 //! Per regular plane `p` the estimate is
@@ -90,6 +93,7 @@ pub(crate) fn dehaze(
     dark_radius: usize,
     guide_radius: usize,
     guide_eps: f32,
+    atmospheric_light: f32,
 ) -> Vec<f32> {
     let strength = match strength {
         Some(s) => s.clamp(0.0, 1.0),
@@ -123,7 +127,7 @@ pub(crate) fn dehaze(
         dark_radius, guide_radius, guide_eps,
     );
     let mask = merge_masks(&masks, width, height, planes.period());
-    apply_mask(&mut pixels, &mask, strength);
+    apply_mask(&mut pixels, &mask, strength, atmospheric_light);
     pixels
 }
 
@@ -296,24 +300,37 @@ fn merge_masks(masks: &[PlaneMask], width: usize, height: usize, period: usize) 
     out
 }
 
-/// Stage 3: apply one shared field to every pixel as a **multiplicative gain**.
+/// Stage 3: apply one shared field to every pixel with the **classical
+/// atmospheric-scattering recovery** — the exact inverse of `I = J·(1 − h) + A·h`
+/// for a spatially-varying `h`:
 ///
-/// `cleared = v · (1 − h)`, i.e. a ratio, blended by `strength` →
-/// `v · (1 − strength·h)`, clamped at 0. The same gain `g = 1 − strength·h`
-/// is applied to every colour plane, so channel ratios — and therefore the
-/// hue — are preserved exactly; the dehaze effect shows up only as the intended
-/// 2D-aware brightness reduction (high `h` → dimmer) and the saturation boost
-/// that comes with it. Per-pixel and order-free, so parallelised over the
-/// full-resolution buffer (`OPTIMZ-PERFRM-000007`). `h` no longer depends on
-/// the pixel's own colour plane, and it is applied as a ratio rather than as an
-/// absolute offset — that is the point of the stage split.
-fn apply_mask(pixels: &mut [f32], mask: &[f32], strength: f32) {
+/// ```text
+/// t       = max(1 − strength·h, EPS)   # effective transmission (strength = user amount)
+/// cleared  = (v − A) / t + A           # = (v − A·strength·h) / (1 − strength·h)
+/// cleared  = max(cleared, 0)
+/// ```
+///
+/// `strength` (0..1) scales how much haze is removed: `strength = 0` ⇒ `t = 1` ⇒
+/// identity; `strength = 1` ⇒ full classical recovery. `A` is the atmospheric light
+/// (constant 1.0 at the FFI boundary today; a parameter here for later per-channel /
+/// non-unity extension). Per-pixel and order-free, so parallelised over the
+/// full-resolution buffer (`OPTIMZ-PERFRM-000007`).
+///
+/// Unlike the old multiplicative-gain form this subtracts the **absolute** airlight
+/// `A·strength·h`, so channel ratios are *not* preserved — a neutral block stays
+/// neutral but a coloured block casts by `A·strength·h`. That is the deliberate
+/// trade for a physically-correct, 2-D-aware dehaze (see the module header and
+/// `dehaze_classical_allows_coloured_cast`). `h` is shared across the CFA period so
+/// the cast is spatially coherent and bounded.
+fn apply_mask(pixels: &mut [f32], mask: &[f32], strength: f32, atmospheric_light: f32) {
+    const EPS: f32 = 1e-3;
     pixels
         .par_iter_mut()
         .zip(mask.par_iter())
         .for_each(|(px, &h)| {
-            let gain = (1.0 - strength * h).max(0.0);
-            *px *= gain;
+            let t = (1.0 - strength * h).max(EPS); // effective transmission, floored to avoid /0
+            let recovered = ((*px - atmospheric_light) / t + atmospheric_light).max(0.0);
+            *px = recovered;
         });
 }
 
@@ -846,6 +863,7 @@ mod tests {
         let px = bayer_frame(w, h);
         let out = dehaze(
             px.clone(), w, h, Some(1.0), Some(0.01), Some(1.0), &planes, None, 3, 4, 0.01,
+            1.0,
         );
         let moved = out
             .iter()
@@ -858,50 +876,67 @@ mod tests {
         }
     }
 
-    /// Chroma must be preserved: applying the shared haze field as a multiplicative
-    /// gain leaves the *ratios between* colour planes intact. A neutral (constant
-    /// per plane) mosaic has a uniform mask, so every plane is scaled by the same
-    /// gain — the R:G:B ratio before and after dehaze is identical. This is exactly
-    /// the property the old additive `(v − h)/(1 − h)` form broke: an equal absolute
-    /// offset shifts channels of different magnitude by different *relative* amounts.
+    /// Channel-ratio semantics of the classical (additive) apply form.
+    ///
+    /// Neutral (equal-R/G/B) mosaic: the additive `-A·strength·h` term is identical
+    /// for every channel, so the four photosites of a cell keep their input ratio —
+    /// a neutral block does NOT cast (same as the old gain form for neutral input).
+    ///
+    /// Coloured mosaic: the same absolute offset shifts channels of different
+    /// magnitude by different *relative* amounts, so ratios change. That cast is the
+    /// deliberate trade for a physically-correct dehaze and is pinned here so it is
+    /// never accidentally "fixed" back to a ratio-preserving form.
     #[test]
-    fn dehaze_preserves_channel_ratios() {
-        let (w, h) = (32, 24);
+    fn dehaze_classical_allows_coloured_cast() {
+        let (w, h, period) = (32, 24, 2);
         let planes = bayer_planes();
-        // Constant levels per plane (no texture) => uniform mask, clean ratio check.
-        let px: Vec<f32> = (0..w * h)
-            .map(|k| {
-                let (r, c) = (k / w, k % w);
-                match (r % 2, c % 2) {
-                    (0, 0) => 0.60, // R
-                    (0, 1) => 0.40, // G1
-                    (1, 0) => 0.45, // G2
-                    _ => 0.20,      // B
-                }
-            })
-            .collect();
-        let out = dehaze(
-            px.clone(), w, h, Some(1.0), Some(0.01), Some(1.0), &planes, None, 3, 4, 0.01,
+
+        // Neutral frame: R=G=B=0.5 everywhere (no texture) => uniform mask, ratio kept.
+        let neutral: Vec<f32> = (0..w * h).map(|_| 0.5).collect();
+        let out_n = dehaze(
+            neutral.clone(), w, h, Some(1.0), Some(0.01), Some(1.0), &planes, None, 3, 4, 0.01,
+            1.0,
         );
-        // Within each CFA cell the four photosites keep their input ratio.
         for bi in 0..h / 2 {
             for bj in 0..w / 2 {
                 let base = (2 * bi) * w + 2 * bj;
                 let samples: [(usize, f32); 4] = [(0, 0), (0, 1), (1, 0), (1, 1)]
-                    .map(|(dr, dc)| (base + dr * w + dc, px[base + dr * w + dc]));
+                    .map(|(dr, dc)| (base + dr * w + dc, neutral[base + dr * w + dc]));
                 for a in 0..4 {
                     for b in 0..4 {
                         let (ia, va) = samples[a];
                         let (ib, vb) = samples[b];
                         let ratio_in = va / vb;
-                        let ratio_out = out[ia] / out[ib];
+                        let ratio_out = out_n[ia] / out_n[ib];
                         assert!(
                             (ratio_in - ratio_out).abs() < 1e-5,
-                            "cell ({bi},{bj}) ratio {a}/{b}: in {ratio_in} vs out {ratio_out}"
+                            "neutral cell ({bi},{bj}) ratio {a}/{b}: in {ratio_in} vs out {ratio_out}"
                         );
                     }
                 }
             }
         }
+
+        // Coloured frame: R=0.6, G=0.4, B=0.2 per plane. Ratios must CHANGE.
+        let coloured = bayer_frame(w, h);
+        let out_c = dehaze(
+            coloured.clone(), w, h, Some(1.0), Some(0.01), Some(1.0), &planes, None, 3, 4, 0.01,
+            1.0,
+        );
+        let mut max_ratio_shift = 0.0f32;
+        for bi in 0..h / 2 {
+            for bj in 0..w / 2 {
+                let base = (2 * bi) * w + 2 * bj;
+                let r = base; // R photosite
+                let b = base + w + 1; // B photosite
+                let ratio_in = coloured[r] / coloured[b];
+                let ratio_out = out_c[r] / out_c[b];
+                max_ratio_shift = max_ratio_shift.max((ratio_in - ratio_out).abs());
+            }
+        }
+        assert!(
+            max_ratio_shift > 1e-3,
+            "coloured ratios should shift under classical dehaze, got {max_ratio_shift}"
+        );
     }
 }

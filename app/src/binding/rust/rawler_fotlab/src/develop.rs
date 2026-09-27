@@ -442,6 +442,11 @@ pub(crate) fn develop_image(
     image.active_area.map(|r| (r.p.x, r.p.y, r.d.w, r.d.h)),
     params.dehaze_radius_dark,
     params.dehaze_radius_guide,
+    // Atmospheric light A = 1.0 (fully-saturated haze / white point). Kept as a
+    // parameter at the FFI boundary for later per-channel / non-unity extension;
+    // the dehaze apply formula `cleared = (v - A) / (1 - strength*h) + A` carries it
+    // through unchanged. Kotlin still passes no A (constant today).
+    1.0,
   );
   // CA correction: pre-demosaic radial CA on the full-frame mosaic (after
   // dehaze and exposure — like the other neighbour-quality stages it wants the

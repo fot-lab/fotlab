@@ -10,13 +10,15 @@
 //! ## Contract
 //!
 //! `dehaze(pixels, width, height, strength, percentile, ceiling, cfa, active,
-//! radius_dark, radius_guide) -> pixels`. `strength = None` (or `0`) is identity;
-//! `percentile` is the global haze-floor quantile (scalar branch only; the
+//! radius_dark, radius_guide, atmospheric_light) -> pixels`. `strength = None` (or `0`)
+//! is identity; `percentile` is the global haze-floor quantile (scalar branch only; the
 //! guided branch derives its spatial floor from the local dark channel
 //! directly), `ceiling` selects the guided branch and caps over-dehaze; `percentile = None`
 //! defaults to 1% and `ceiling = None` selects the scalar branch — both `None`
 //! is the identity fallback. `radius_dark` / `radius_guide = None` default to
-//! `GUIDE_RADIUS` (8, clamped to >= 1).
+//! `GUIDE_RADIUS` (8, clamped to >= 1). `atmospheric_light` is `A` in the apply
+//! formula `cleared = (v - A) / (1 - strength*h) + A` (the classical atmospheric-scattering
+//! recovery); constant 1.0 at the FFI boundary, a parameter for later per-channel extension.
 //!
 //! `cfa = None` (non-CFA input) falls back to a single global plane, matching
 //! the old behaviour; `cpp > 1` multi-channel buffers are left untouched by the
@@ -46,6 +48,7 @@ pub(crate) fn dehaze(
     active: Option<(usize, usize, usize, usize)>,
     radius_dark: Option<i32>,
     radius_guide: Option<i32>,
+    atmospheric_light: f32,
 ) -> Vec<f32> {
     let dark_radius = radius_dark.unwrap_or(GUIDE_RADIUS as i32).max(1) as usize;
     let guide_radius = radius_guide.unwrap_or(GUIDE_RADIUS as i32).max(1) as usize;
@@ -57,12 +60,12 @@ pub(crate) fn dehaze(
     match cfa {
         Some(config) => {
             let planes = CfaPlanes::from_cfa(config);
-            dehaze_run(pixels, width, height, strength, percentile, ceiling, &planes, active, dark_radius, guide_radius, GUIDE_EPS)
+            dehaze_run(pixels, width, height, strength, percentile, ceiling, &planes, active, dark_radius, guide_radius, GUIDE_EPS, atmospheric_light)
         }
         None => {
             // Non-CFA input: single global plane (no spatial field).
             let planes = CfaPlanes::trivial();
-            dehaze_run(pixels, width, height, strength, percentile, ceiling, &planes, active, dark_radius, guide_radius, GUIDE_EPS)
+            dehaze_run(pixels, width, height, strength, percentile, ceiling, &planes, active, dark_radius, guide_radius, GUIDE_EPS, atmospheric_light)
         }
     }
 }
