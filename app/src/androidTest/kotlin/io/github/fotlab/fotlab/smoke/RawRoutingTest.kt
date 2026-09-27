@@ -237,9 +237,9 @@ class RawRoutingTest {
         // The viewer is now its own navigation destination (FOTLAB-UIXDES, viewer-as-screen):
         // tapping a thumbnail calls onOpenViewer -> navigate(library/viewer), and the viewer's
         // "Open in Studio" calls onOpenInStudio -> StudioEngine.setCurrentNode + navigate(Studio).
-        val navController = rememberNavController()
         hostContent {
             AppTheme {
+                val navController = rememberNavController()
                 NavHost(navController = navController, startDestination = "library") {
                     composable("library") {
                         LibraryScreen(
