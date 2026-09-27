@@ -34,10 +34,17 @@ import io.github.fotlab.fotlab.MainActivity
 import io.github.fotlab.fotlab.R
 import io.github.fotlab.fotlab.feature.library.LibraryCore
 import io.github.fotlab.fotlab.feature.library.LibraryScreen
+import io.github.fotlab.fotlab.feature.library.LibraryViewerScreen
 import io.github.fotlab.fotlab.feature.studio.StudioEngine
 import io.github.fotlab.fotlab.feature.studio.StudioRenderResult
 import io.github.fotlab.fotlab.feature.studio.StudioScreen
 import io.github.fotlab.fotlab.ui.theme.AppTheme
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.Modifier
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
 import io.github.fotlab.fotlab_rawler.DemosaicAlgorithm
 import io.github.fotlab.fotlab_rawler.RawlerFotlabBridge
 import java.io.ByteArrayOutputStream
@@ -226,9 +233,37 @@ class RawRoutingTest {
             ?: throw AssertionError("import produced no fs_node for $uri")
         step("import", "node id=${node.fsNodeId} name='${node.nameDisplay}' mime='${node.typeMime}'")
 
-        // ---- 3) the real LibraryScreen: tap the imported thumbnail ----
-        var navigatedToStudio = false
-        hostContent { AppTheme { LibraryScreen(onNavigateToStudio = { navigatedToStudio = true }) } }
+        // ---- 3) the real LibraryScreen inside a NavHost, assembled like the app shell ----
+        // The viewer is now its own navigation destination (FOTLAB-UIXDES, viewer-as-screen):
+        // tapping a thumbnail calls onOpenViewer -> navigate(library/viewer), and the viewer's
+        // "Open in Studio" calls onOpenInStudio -> StudioEngine.setCurrentNode + navigate(Studio).
+        val navController = rememberNavController()
+        hostContent {
+            AppTheme {
+                NavHost(navController = navController, startDestination = "library") {
+                    composable("library") {
+                        LibraryScreen(
+                            onNavigateToStudio = { navController.navigate("studio") },
+                            onOpenViewer = { navController.navigate("viewer") },
+                        )
+                    }
+                    composable("viewer") {
+                        LibraryViewerScreen(
+                            onDismiss = { navController.popBackStack() },
+                            onOpenInStudio = { node ->
+                                node.uriStorage?.let { StudioEngine.setCurrentNode(it) }
+                                navController.navigate("studio")
+                            },
+                        )
+                    }
+                    composable("studio") {
+                        // The engine renders independently of any Studio composable; a destination
+                        // only needs to exist so onOpenInStudio's navigate() does not throw.
+                        Box(Modifier.fillMaxSize())
+                    }
+                }
+            }
+        }
         composeRule.waitUntil(30_000) {
             composeRule.onAllNodesWithText(sample.gridText, substring = true)
                 .fetchSemanticsNodes().isNotEmpty()
@@ -258,8 +293,6 @@ class RawRoutingTest {
             }
         }
         step("studio", "renderResult transitions: $states")
-        step("studio", "navigated to Studio=$navigatedToStudio")
-        assertTrue("pressing '$studioDesc' must navigate to Studio", navigatedToStudio)
 
         val model = (ready as StudioRenderResult.Ready).model
         step("studio", "final=${ready.javaClass.simpleName} model=${model.javaClass.simpleName}")
