@@ -784,7 +784,7 @@ object StudioEngine {
      * handed to rawalchemy — so the switch is carried in the develop params but is a no-op for the
      * sRGB presentation PNG.
      */
-    private var currentClipToGamut: Boolean = false
+    private var currentClipToGamut: Boolean = true
 
     /** The current out-of-gamut clipping switch; the UI prefills the Clipping dialog from this. */
     fun currentClipToGamut(): Boolean = currentClipToGamut

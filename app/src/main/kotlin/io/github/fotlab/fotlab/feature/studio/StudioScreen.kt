@@ -217,7 +217,7 @@ fun StudioScreen() {
     // leaves the editing branch wide-gamut and unclamped. The sRGB presentation PNG is
     // unaffected either way, so the switch only changes what the grade fork receives.
     var showClippingDialog by remember { mutableStateOf(false) }
-    var clipToGamutEnabled by remember { mutableStateOf(false) }
+    var clipToGamutEnabled by remember { mutableStateOf(true) }
 
     // Per-stage enable toggles for the develop dialogs. The switch has priority over the numeric
     // value: OFF skips the stage regardless of the field (the engine writes `null`, the native stage
