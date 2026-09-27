@@ -153,6 +153,7 @@ private enum class LibraryViewMode { Library, RecycleBin }
 @Composable
 fun LibraryScreen(
     onNavigateToStudio: () -> Unit,
+    onOpenViewer: () -> Unit,
 ) {
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     var currentDirectory by remember { mutableStateOf<FsNodeObject?>(null) }
@@ -164,10 +165,6 @@ fun LibraryScreen(
     var deleteInvalid by remember { mutableStateOf(false) }
     // Node awaiting a rename from the single-selection edit action; null = dialog closed.
     var renameTarget by remember { mutableStateOf<FsNodeObject?>(null) }
-    // Media list + start index for the full-screen viewer, captured from the folder's current
-    // sort order the moment a tile is tapped (FOTLAB-IMGMGR viewer).
-    var viewerItems by remember { mutableStateOf<List<FsNodeObject>?>(null) }
-    var viewerStart by remember { mutableStateOf(0) }
     val scope = rememberCoroutineScope()
     val newCollectionName = stringResource(id = R.string.library_new_collection_name)
 
@@ -273,8 +270,8 @@ fun LibraryScreen(
                 }
             },
         ) { innerPadding ->
-            // Two sibling regions, laid out by the Scaffold: content above, the fun bar in its
-            // bottomBar slot. The viewer overlays the content region.
+            // Content region only: the fun bar sits in the Scaffold's bottomBar slot; the viewer
+            // lives in its own navigation destination now, not an overlay here.
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -294,10 +291,13 @@ fun LibraryScreen(
                                         node.isCollection() -> currentDirectory = node
                                         isMedia(node.typeMime) -> {
                                             // Open the full-screen viewer on the tapped media, paging
-                                            // through the folder's media in its current sort order.
+                                            // through the folder's media in its current sort order. The
+                                            // session is handed over through the core, then the screen
+                                            // navigates to the viewer destination (viewer-as-screen).
                                             val media = children.filter { isMedia(it.typeMime) }
-                                            viewerStart = media.indexOfFirst { it.fsNodeId == id }.coerceAtLeast(0)
-                                            viewerItems = media
+                                            val start = media.indexOfFirst { it.fsNodeId == id }.coerceAtLeast(0)
+                                            LibraryCore.setViewerSession(media, start)
+                                            onOpenViewer()
                                         }
                                         else -> LibraryCore.selection.toggle(id)
                                     }
@@ -333,25 +333,9 @@ fun LibraryScreen(
                             onOpenDrawer = { scope.launch { drawerState.open() } },
                             onCycleLayout = { scope.launch { LibraryCore.cycleLayoutMode() } },
                             onRefresh = { scope.launch { LibraryCore.refresh() } },
-                            onNavigateToStudio = onNavigateToStudio,
+                            onOpenViewer = onOpenViewer,
                         )
                     }
-                }
-
-                // Full-screen image / video viewer, opened by tapping a media tile.
-                if (viewerItems != null) {
-                    LibraryViewerDialog(
-                        items = viewerItems!!,
-                        startIndex = viewerStart,
-                        onDismiss = { viewerItems = null },
-                        onOpenInStudio = { node ->
-                            // Equivalent to: close the dialog, switch to Studio (nav bar), and open the
-                            // tapped image there (`FOTLAB-UIXDES`, viewer layout).
-                            node.uriStorage?.let { StudioEngine.setCurrentNode(it) }
-                            onNavigateToStudio()
-                            viewerItems = null
-                        },
-                    )
                 }
             }
         }

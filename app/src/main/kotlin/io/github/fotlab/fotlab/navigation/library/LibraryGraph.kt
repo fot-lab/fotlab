@@ -4,6 +4,8 @@ import androidx.navigation.NavGraphBuilder
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.composable
 import io.github.fotlab.fotlab.feature.library.LibraryScreen
+import io.github.fotlab.fotlab.feature.library.LibraryViewerScreen
+import io.github.fotlab.fotlab.feature.studio.StudioEngine
 import io.github.fotlab.fotlab.navigation.studio.StudioDestination
 
 /**
@@ -12,6 +14,11 @@ import io.github.fotlab.fotlab.navigation.studio.StudioDestination
  */
 object LibraryDestination {
     const val ROUTE = "library"
+}
+
+/** Full-screen media viewer, opened as its own destination (`FOTLAB-UIXDES`, viewer-as-screen). */
+object ViewerDestination {
+    const val ROUTE = "library/viewer"
 }
 
 /**
@@ -25,6 +32,25 @@ fun NavGraphBuilder.libraryGraph(navController: NavHostController) {
     composable(route = LibraryDestination.ROUTE) {
         LibraryScreen(
             onNavigateToStudio = {
+                navController.navigate(StudioDestination.ROUTE) {
+                    popUpTo(navController.graph.startDestinationId) {
+                        saveState = true
+                    }
+                    launchSingleTop = true
+                    restoreState = true
+                }
+            },
+            onOpenViewer = { navController.navigate(ViewerDestination.ROUTE) },
+        )
+    }
+
+    composable(route = ViewerDestination.ROUTE) {
+        LibraryViewerScreen(
+            onDismiss = { navController.popBackStack() },
+            onOpenInStudio = { node ->
+                // Equivalent to: leave the viewer, switch to Studio (nav bar), and open the
+                // tapped image there (`FOTLAB-UIXDES`, viewer layout).
+                node.uriStorage?.let { StudioEngine.setCurrentNode(it) }
                 navController.navigate(StudioDestination.ROUTE) {
                     popUpTo(navController.graph.startDestinationId) {
                         saveState = true

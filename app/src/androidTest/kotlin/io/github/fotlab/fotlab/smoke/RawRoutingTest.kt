@@ -83,7 +83,7 @@ import org.junit.runner.RunWith
  *     [LibraryCore.importUris] — the same call the picker's callback makes, and the only place
  *     the virtual `uri_storage` mapping is created (no file is ever copied or moved);
  *  3. the real [LibraryScreen] grid is tapped on the imported thumbnail, which opens
- *     `LibraryViewerDialog` exactly as on a device;
+ *     `LibraryViewerScreen` exactly as on a device;
  *  4. the viewer's "Open in Studio" button is pressed, which is what hands the node to
  *     [StudioEngine.setCurrentNode];
  *  5. the resulting [StudioRenderResult] names the pipeline: `Ready(Uri)` is the Coil branch,
@@ -240,7 +240,7 @@ class RawRoutingTest {
         composeRule.waitUntil(30_000) {
             composeRule.onAllNodesWithContentDescription(closeDesc).fetchSemanticsNodes().isNotEmpty()
         }
-        step("viewer", "LibraryViewerDialog opened from the tap")
+        step("viewer", "LibraryViewerScreen opened from the tap")
 
         // ---- 4) the viewer's "Open in Studio" button ----
         val studioDesc = context.getString(R.string.library_viewer_cd_open_in_studio)

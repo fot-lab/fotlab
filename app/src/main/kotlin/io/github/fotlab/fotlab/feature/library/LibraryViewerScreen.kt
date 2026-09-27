@@ -1,94 +1,107 @@
 package io.github.fotlab.fotlab.feature.library
 
-import android.app.Activity
 import android.content.Context
-import android.content.ContextWrapper
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.text.format.DateUtils
 import android.text.format.Formatter
-import android.view.View
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.BrokenImage
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
 import androidx.exifinterface.media.ExifInterface
 import coil3.request.ImageRequest
 import io.github.fotlab.fotlab.R
 import io.github.fotlab.fotlab.ui.ZoomableAsyncImage
-import io.github.fotlab.fotlab.ui.operation.OverlayOperationBar
 import io.github.fotlab.fotlab.ui.rememberZoomState
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.roundToInt
 
 /**
- * Full-screen viewer for library media, opened on a single tap of an image or video tile.
+ * Full-screen viewer for library media, opened as its own navigation destination (the route
+ * `library/viewer`) the moment a tile is tapped (`FOTLAB-UIXDES`, viewer-as-screen).
  *
- * Behaviour follows the request: a single tap opens the dialog on the tapped item; the dialog
- * shows the media large with a detail panel (EXIF for images, video metadata for clips) at the
- * bottom; a two-finger pinch zooms the image; a single-finger horizontal swipe moves
- * to the previous / next item, mixing images and videos together in the folder's current sort
- * order (`FsNodeRelationDao` orders children by `time_created`); and the bottom X closes it.
+ * It mirrors [io.github.fotlab.fotlab.feature.studio.StudioScreen]: a module-level Material3
+ * `Scaffold` nested in the shell's root `Scaffold`, with its own fun bar in the `bottomBar` slot.
+ * Because the viewer is now a real destination — not a `Dialog` window — the navigation-bar inset
+ * is delivered normally and the fun bar consumes it with `windowInsetsPadding(WindowInsets.navigationBars)`,
+ * so the bar always lands on the bottom edge of the region the display actually shows (the old
+ * `Dialog` could not see that inset and clipped the bar off the bottom).
  *
- * The viewer receives the already-sorted media list of the folder plus the tapped index, so it
- * navigates exactly the order the user sees in the grid / list.
+ * Behaviour: a single tap opens the viewer on the tapped item; the viewer shows the media large with
+ * a detail panel (EXIF for images, video metadata for clips) above the fun bar; a two-finger pinch
+ * zooms the image; a single-finger horizontal swipe moves to the previous / next item, mixing images
+ * and videos together in the folder's current sort order (`FsNodeRelationDao` orders children by
+ * `time_created`). The fun bar's X pops the destination, and "open in Studio" switches to Studio.
+ *
+ * The viewer receives the already-sorted media list + tapped index through [LibraryCore.viewerSession],
+ * written by the grid the moment a tile is tapped, so it pages exactly the order the user sees.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun LibraryViewerDialog(
-    items: List<FsNodeObject>,
-    startIndex: Int,
+fun LibraryViewerScreen(
     onDismiss: () -> Unit,
     onOpenInStudio: (FsNodeObject) -> Unit,
 ) {
+    val session by LibraryCore.viewerSession.collectAsState(initial = null)
+    // The session is written the moment before this destination is pushed. `collectAsState` shows
+    // its initial `null` for the first frame, so the wait covers that gap; it only dismisses when
+    // no session ever arrives (e.g. a process restore straight into this destination).
+    LaunchedEffect(Unit) {
+        withTimeoutOrNull(1_000) { LibraryCore.viewerSession.first { it != null } } ?: onDismiss()
+    }
+    val started = session ?: return
+    val items = started.items
+    val startIndex = started.startIndex
+
     if (items.isEmpty()) {
         LaunchedEffect(Unit) { onDismiss() }
         return
@@ -107,56 +120,27 @@ fun LibraryViewerDialog(
     val zoomState = rememberZoomState()
     LaunchedEffect(pagerState.currentPage) { zoomState.reset() }
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(
-            usePlatformDefaultWidth = false,
-            decorFitsSystemWindows = false,
-        ),
-    ) {
-        BackHandler(onBack = onDismiss)
-
-        // How far the bottom bar has to stay off the bottom edge so its *bottom* edge lands on the
-        // bottom of the region the display actually shows, instead of the bar hanging off that edge
-        // (where the system navigation bar — or a clipped dialog window — would hide part of it).
-        //
-        // The viewer is its own `Dialog` window drawn edge to edge, so its bottom is not the screen's
-        // bottom, and the navigation bar overlays the strip at the very bottom. The height of that
-        // strip is taken from the activity window's insets, with the system `navigation_bar_height`
-        // resources as a fallback that is available immediately and does not depend on inset delivery
-        // (which can read zero inside a `Dialog` until the view is laid out). The dialog content is
-        // also measured to the full screen while the window can be shorter, so the root is taller
-        // than the host view and that difference is the strip clipped away; `clippedBottomPx` (below)
-        // measures that. All sources are taken at runtime and the largest wins, so the bar is never
-        // placed where the display does not show it and the padding is never applied twice.
-        val hostView = LocalView.current
-        val localContext = LocalContext.current
-        val clippedBottomPx = remember { mutableStateOf(0) }
-        val density = LocalDensity.current
-        val bottomInset = with(density) {
-            maxInt(
-                localContext.navigationBarBottomPx(),
-                navBarHeightFromResources(localContext),
-                clippedBottomPx.value,
-            ).toDp()
-        }
-
+    Scaffold(
+        // The viewer owns the navigation-bar inset (the shell zeroed its own contentWindowInsets),
+        // so its fun bar can sit flush on the bottom edge of the drawable region.
+        contentWindowInsets = WindowInsets.navigationBars,
+        bottomBar = {
+            ViewerFunBar(
+                page = pagerState.currentPage,
+                count = items.size,
+                showDetails = showDetails,
+                onClose = onDismiss,
+                onOpenInStudio = { onOpenInStudio(items[pagerState.currentPage]) },
+                onToggleInfo = { scope.launch { LibraryCore.setViewerShowInfo(!showDetails) } },
+            )
+        },
+    ) { innerPadding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black)
-                .onSizeChanged { size ->
-                    // Only a laid-out host view means anything (a zero height would otherwise read
-                    // as "the whole root is clipped"), and the result is capped at a quarter of the
-                    // height: a real window is only ever off by the height of a system bar, and a
-                    // bogus reading must not fling the bar upwards.
-                    val hostHeight = hostView.height
-                    clippedBottomPx.value = if (hostHeight > 0) {
-                        (size.height - hostHeight).coerceIn(0, size.height / 4)
-                    } else {
-                        0
-                    }
-                },
+                .padding(innerPadding)
+                .consumeWindowInsets(innerPadding)
+                .background(Color.Black),
         ) {
             HorizontalPager(
                 state = pagerState,
@@ -197,63 +181,76 @@ fun LibraryViewerDialog(
                 }
             }
 
-            // Bottom bar: the controls live in a shared overlay container
-            // (`OverlayOperationBar`) and are allocated by slot — close (X) leading, the item count
-            // next to it, then the "open in Studio" action and the info toggle trailing on the far
-            // right. The info toggle persists (`FOTLAB-UIXDES`, viewer layout), and the optional
-            // detail panel is stacked above the row so the controls stay reachable. The left-right
-            // order is unchanged from the old top bar, and the container's scrim is what keeps the
-            // white icons visible over the (often bright) bottom of the photo.
-            // `bottomInset` (computed above) keeps it out of the strip the dialog window does not
-            // actually show — without it the bar is clipped away entirely.
-            OverlayOperationBar(
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .fillMaxWidth()
-                    .padding(bottom = bottomInset),
-                above = {
-                    if (showDetails) {
-                        ViewerDetails(
-                            node = items[pagerState.currentPage],
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-                },
-                leading = {
-                    IconButton(onClick = onDismiss) {
-                        Icon(
-                            imageVector = Icons.Filled.Close,
-                            contentDescription = stringResource(id = R.string.library_viewer_cd_close),
-                            tint = Color.White,
-                        )
-                    }
-                },
-                content = {
-                    Text(
-                        text = "${pagerState.currentPage + 1} / ${items.size}",
-                        color = Color.White.copy(alpha = 0.8f),
-                        style = MaterialTheme.typography.labelMedium,
-                    )
-                },
-                trailing = {
-                    IconButton(onClick = { onOpenInStudio(items[pagerState.currentPage]) }) {
-                        Icon(
-                            imageVector = Icons.Filled.AddPhotoAlternate,
-                            contentDescription = stringResource(id = R.string.library_viewer_cd_open_in_studio),
-                            tint = Color.White,
-                        )
-                    }
-                    IconButton(
-                        onClick = { scope.launch { LibraryCore.setViewerShowInfo(!showDetails) } },
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Info,
-                            contentDescription = stringResource(id = R.string.library_viewer_cd_info),
-                            tint = Color.White,
-                        )
-                    }
-                },
+            // Detail panel floats above the fun bar over the image; it is only shown when the info
+            // toggle is on. Like the old overlay's `above` slot, it keeps the controls reachable.
+            if (showDetails) {
+                ViewerDetails(
+                    node = items[pagerState.currentPage],
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth(),
+                )
+            }
+        }
+    }
+}
+
+/** Height of the viewer's own fun bar. */
+private val ViewerFunBarHeight = 56.dp
+
+/**
+ * The viewer's fun bar — its own bottom bar, not a reused studio bar. A translucent black scrim keeps
+ * the white icons visible over the (often bright) bottom of the photo; `windowInsetsPadding` lifts the
+ * row above the system navigation bar so none of it is clipped (`FOTLAB-UIXDES`, viewer-as-screen).
+ */
+@Composable
+private fun ViewerFunBar(
+    page: Int,
+    count: Int,
+    showDetails: Boolean,
+    onClose: () -> Unit,
+    onOpenInStudio: () -> Unit,
+    onToggleInfo: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        color = Color.Black.copy(alpha = 0.5f),
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .windowInsetsPadding(WindowInsets.navigationBars)
+                .height(ViewerFunBarHeight),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onClose) {
+                Icon(
+                    imageVector = Icons.Filled.Close,
+                    contentDescription = stringResource(id = R.string.library_viewer_cd_close),
+                    tint = Color.White,
+                )
+            }
+            Text(
+                text = "${page + 1} / $count",
+                color = Color.White.copy(alpha = 0.8f),
+                style = MaterialTheme.typography.labelMedium,
             )
+            Spacer(modifier = Modifier.weight(1f))
+            IconButton(onClick = onOpenInStudio) {
+                Icon(
+                    imageVector = Icons.Filled.AddPhotoAlternate,
+                    contentDescription = stringResource(id = R.string.library_viewer_cd_open_in_studio),
+                    tint = Color.White,
+                )
+            }
+            IconButton(onClick = onToggleInfo) {
+                Icon(
+                    imageVector = Icons.Filled.Info,
+                    contentDescription = stringResource(id = R.string.library_viewer_cd_info),
+                    tint = Color.White.copy(alpha = if (showDetails) 1f else 0.5f),
+                )
+            }
         }
     }
 }
@@ -484,68 +481,14 @@ private fun exifOrientationText(value: Int): String = when (value) {
 }
 
 private fun exifDateTime(raw: String): String? = runCatching {
-    val parsed = EXIF_DATE_FORMAT.parse(raw)
-    parsed?.let { DateUtils.formatDateTime(null, it.time, DATE_FLAGS) }
+    EXIF_DATE_FORMAT.parse(raw)?.let { EXIF_DISPLAY_FORMAT.format(it) }
 }.getOrNull()
 
 private fun stringS(context: Context, resId: Int): String = context.getString(resId)
-
-/**
- * Navigation-bar height in pixels as the [view]'s own window sees it.
- *
- * The viewer renders into its own `Dialog` window, which is a second window with its own inset
- * chain: depending on the device and the navigation mode, the insets reported inside the dialog
- * and the ones reported by the activity window do not have to agree, so the caller takes the
- * largest of its sources rather than trusting any single one.
- */
-private fun View.navigationBarBottomPx(): Int {
-    val insets = ViewCompat.getRootWindowInsets(this) ?: return 0
-    return insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom
-}
-
-/** Same measurement taken from the **activity** window's decor view. */
-private fun Context.navigationBarBottomPx(): Int =
-    activityOrNull()?.window?.decorView?.navigationBarBottomPx() ?: 0
-
-/**
- * Navigation-bar height from the system dimension resources. It is available immediately and does
- * not depend on window-inset delivery, which can read zero inside a `Dialog` until the view is laid
- * out — so it is the reliable floor when the activity-window inset has not arrived yet. Both the
- * three-button height and the gesture-mode height are taken, so the value is sensible in either
- * navigation mode.
- */
-private fun navBarHeightFromResources(context: Context): Int {
-    val res = context.resources
-    val id = res.getIdentifier("navigation_bar_height", "dimen", "android")
-    val gestureId = res.getIdentifier("navigation_bar_height_gesture", "dimen", "android")
-    return maxInt(
-        if (id != 0) res.getDimensionPixelSize(id) else 0,
-        if (gestureId != 0) res.getDimensionPixelSize(gestureId) else 0,
-    )
-}
-
-/**
- * Max of any number of non-negative ints. Implemented with plain comparisons instead of
- * `kotlin.math.maxOf` so it compiles regardless of stdlib surface differences across Kotlin
- * versions. All inputs here are insets / paddings and are therefore non-negative.
- */
-private fun maxInt(vararg values: Int): Int {
-    var m = 0
-    for (v in values) if (v > m) m = v
-    return m
-}
-
-/** Unwraps the [Activity] out of a themed / wrapped context — a `Dialog` hands a wrapper down. */
-private fun Context.activityOrNull(): Activity? {
-    var current: Context? = this
-    while (current != null) {
-        if (current is Activity) return current
-        current = (current as? ContextWrapper)?.baseContext
-    }
-    return null
-}
 
 private val DATE_FLAGS = DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_SHOW_TIME or
     DateUtils.FORMAT_SHOW_YEAR or DateUtils.FORMAT_NUMERIC_DATE
 
 private val EXIF_DATE_FORMAT = java.text.SimpleDateFormat("yyyy:MM:dd HH:mm:ss", java.util.Locale.US)
+
+private val EXIF_DISPLAY_FORMAT = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())

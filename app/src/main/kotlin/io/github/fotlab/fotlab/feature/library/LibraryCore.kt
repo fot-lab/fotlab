@@ -188,6 +188,17 @@ object LibraryCore {
     suspend fun setViewerShowInfo(show: Boolean) = layoutPreference.setShowViewerInfo(show)
 
     /**
+     * The in-flight viewer session: the media list (in the folder's current sort order) plus the
+     * tapped start index. A grid writes it the moment a tile is tapped, then navigates to the
+     * viewer destination, which reads it back — the hand-off channel that replaces the dialog's
+     * constructor parameters (`FOTLAB-UIXDES`, viewer-as-screen). Process-scoped like [selection].
+     */
+    data class ViewerSession(val items: List<FsNodeObject>, val startIndex: Int)
+    private val viewerSessionState = MutableStateFlow<ViewerSession?>(null)
+    val viewerSession: StateFlow<ViewerSession?> = viewerSessionState.asStateFlow()
+    fun setViewerSession(items: List<FsNodeObject>, startIndex: Int) { viewerSessionState.value = ViewerSession(items, startIndex) }
+
+    /**
      * Reconcile the virtual tree with the real world (`FOTLAB-UIXDES-000004` R10): soft-delete
      * every live non-folder node whose real object is gone and every live orphan node, reusing
      * the delete path so they share one `time_deleted` timestamp. No physical row is removed and

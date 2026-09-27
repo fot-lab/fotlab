@@ -8,6 +8,10 @@ import android.provider.MediaStore
 import android.util.Log
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.ComposeView
@@ -27,7 +31,7 @@ import io.github.fotlab.fotlab.R
 import io.github.fotlab.fotlab.feature.library.FsNodeObject
 import io.github.fotlab.fotlab.feature.library.LibraryCore
 import io.github.fotlab.fotlab.feature.library.LibraryScreen
-import io.github.fotlab.fotlab.feature.library.LibraryViewerDialog
+import io.github.fotlab.fotlab.feature.library.LibraryViewerScreen
 import io.github.fotlab.fotlab.ui.theme.AppTheme
 import io.github.fotlab.fotlab.ui.ZoomableAsyncImage
 import io.github.fotlab.fotlab.ui.ZoomState
@@ -57,12 +61,12 @@ import org.junit.runner.RunWith
  *     hand-rolled centroid jumps; here `calculateCentroid` can return `Offset.Unspecified`,
  *     which `ZoomState.transform` must fall back from.
  *  3. **Clamping** — a wide two-finger spread must clamp inside `[minScale, maxScale]`.
- *  4. **The REAL dialog** — [LibraryViewerDialog] itself (Dialog + HorizontalPager +
+ *  4. **The REAL viewer** — [LibraryViewerScreen] itself (HorizontalPager +
  *     ZoomableAsyncImage with `keepParentDraggable`), paged with drags, the literal user
  *     journey that crashes on the device.
  *  5. **Tap thumbnail → viewer opens** — the crash window BEFORE the viewer comes up:
  *     the REAL [LibraryScreen] grid, a real click on a real thumbnail cell, driving the
- *     screen's own `onNodeClick` → `viewerItems` state → dialog composition path.
+ *     screen's own `onNodeClick` → session hand-off → viewer destination path.
  *
  * Gestures are built from the injection primitives (`down`/`moveBy`/`up`) with explicit
  * pointer ids, which also lets us interleave finger add/lift exactly mid-stream.
@@ -375,11 +379,11 @@ class ZoomableGestureTest {
         )
     }
 
-    // -------------------------------------------------- 4: the real dialog journey
+    // -------------------------------------------------- 4: the real viewer journey
 
     /**
-     * The literal user journey that crashes on the device: [LibraryViewerDialog] opens on the
-     * tapped image (Dialog + HorizontalPager + ZoomableAsyncImage with `keepParentDraggable`),
+     * The literal user journey that crashes on the device: [LibraryViewerScreen] opens on the
+     * tapped image (HorizontalPager + ZoomableAsyncImage with `keepParentDraggable`),
      * then pages back and forth with one-finger drags. Each drag is injected on the CURRENT
      * page's image (centered and visible); paging itself must hand the gesture to the pager
      * because the image stays fitted. Composition and paging must survive.
@@ -387,15 +391,14 @@ class ZoomableGestureTest {
     @Test
     fun realViewerDialogOpensAndPages() {
         val closeDesc = context.getString(R.string.library_viewer_cd_close)
+        LibraryCore.setViewerSession(nodes(), 0)
         hostContent {
-            LibraryViewerDialog(
-                items = nodes(),
-                startIndex = 0,
+            LibraryViewerScreen(
                 onDismiss = {},
                 onOpenInStudio = {},
             )
         }
-        step("dialog", "LibraryViewerDialog composed over 3 nodes without throwing")
+        step("dialog", "LibraryViewerScreen composed over 3 nodes without throwing")
         composeRule.onNodeWithContentDescription(closeDesc).assertExists()
 
         // Forward: fling from the page we are on, then the next page becomes centered.
@@ -429,9 +432,9 @@ class ZoomableGestureTest {
 
     /**
      * The reported crash window BEFORE the viewer comes up: tapping a Library thumbnail must
-     * flip the screen's `viewerItems` state and compose [LibraryViewerDialog] without dying.
-     * This drives the REAL [LibraryScreen] — grid cell `onNodeClick`, state transition, dialog
-     * composition — with a real click, inside the app process (MainApplication prepared the
+     * write the viewer session and open the viewer destination ([LibraryViewerScreen]) without
+     * dying. This drives the REAL [LibraryScreen] — grid cell `onNodeClick`, session hand-off,
+     * viewer composition — with a real click, inside the app process (MainApplication prepared the
      * core, so the import below hits the same Room/DataStore path the device uses). Any
      * exception in the tap-to-open window fails here with a debug-emulator stack trace.
      */
@@ -450,7 +453,18 @@ class ZoomableGestureTest {
         step("import", "rootChildren=${children.size}: ${children.joinToString { it.nameDisplay }}")
 
         val closeDesc = context.getString(R.string.library_viewer_cd_close)
-        hostContent { AppTheme { LibraryScreen(onNavigateToStudio = {}) } }
+        hostContent {
+            var viewerOpen by remember { mutableStateOf(false) }
+            AppTheme {
+                if (viewerOpen) {
+                    // The nav destination the real shell pushes; the tap already wrote the
+                    // viewer session through the core.
+                    LibraryViewerScreen(onDismiss = { viewerOpen = false }, onOpenInStudio = {})
+                } else {
+                    LibraryScreen(onNavigateToStudio = {}, onOpenViewer = { viewerOpen = true })
+                }
+            }
+        }
 
         // Wait for the real rootChildren flow to emit the imported node into the grid.
         composeRule.waitUntil(15_000) {
@@ -469,7 +483,7 @@ class ZoomableGestureTest {
         }
         composeRule.onNodeWithContentDescription(closeDesc).assertExists()
         composeRule.onNodeWithContentDescription(pngName).assertExists()
-        step("dialog", "LibraryViewerDialog opened from the tap with the tapped image loaded")
+        step("dialog", "LibraryViewerScreen opened from the tap with the tapped image loaded")
 
         // One gesture on the live dialog for good measure.
         composeRule.onNodeWithContentDescription(pngName)

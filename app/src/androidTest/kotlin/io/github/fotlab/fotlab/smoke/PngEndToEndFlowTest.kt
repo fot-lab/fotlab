@@ -51,7 +51,7 @@ import org.junit.runner.RunWith
  *     exact bytes that were written (`FOTLAB-IMGMGR-000001` R1/R3 — the mapping is the stored
  *     string; there is no path rewriting).
  *  3. **Library viewer** — the viewer picks the renderer by the MIME recorded at import time
- *     and hands the parsed Uri to Coil (`LibraryViewerDialog.kt`). This test replays that exact
+ *     and hands the parsed Uri to Coil (`LibraryViewerScreen.kt`). This test replays that exact
  *     branch and executes the same Coil request.
  *  4. **Studio sniff + route** — the full parallel sniff ([FormatSniffer]: Coil-side
  *     BitmapFactory probe + rawler-side native probe, bounded by the timeout) runs on real PNG
@@ -239,7 +239,7 @@ class PngEndToEndFlowTest {
         try {
             val node = importAtRoot(uri)
 
-            // The viewer's routing decision (LibraryViewerDialog.kt):
+            // The viewer's routing decision (LibraryViewerScreen.kt):
             step("viewer", "viewer branch decision on typeMime='${node.typeMime}'")
             assertTrue("viewer must take the image/ branch", node.typeMime.startsWith("image/"))
             val viewerUri = node.uriStorage?.let(Uri::parse)
