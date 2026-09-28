@@ -64,32 +64,35 @@ for r in range(4):
             col = BLUE
         fill(x, y, x + 9, y + 9, col)
 
-# "FotLab" wordmark: 9dp tall, cell 1.8dp, centred in the 72x18 plate.
-PATTERNS = {
-    'F': [(0, 0), (1, 0), (2, 0), (0, 1), (0, 2), (1, 2), (2, 2), (0, 3), (0, 4)],
-    'o': [(0, 2), (1, 2), (2, 2), (0, 3), (2, 3), (0, 4), (1, 4), (2, 4)],
-    't': [(1, 1), (0, 2), (1, 2), (2, 2), (1, 3), (1, 4), (2, 4)],
-    'L': [(0, 0), (0, 1), (0, 2), (0, 3), (0, 4), (1, 4), (2, 4)],
-    'a': [(0, 2), (1, 2), (2, 2), (0, 3), (2, 3), (0, 4), (1, 4), (2, 4), (3, 4)],
-    'b': [(0, 0), (0, 1), (0, 2), (1, 2), (2, 2), (0, 3), (2, 3), (0, 4), (1, 4), (2, 4)],
+# "FotLab" wordmark: 7x9 pixel font. Each char box is 9x9dp (CELL=1dp);
+# the design uses the inner 7 columns (1dp blank left/right). '#'=filled,
+# '+'=blank. Runs are [start_col, end_col] inclusive.
+GLYPHS = {
+    'F': {0: [[0, 6]], 1: [[0, 1], [6, 6]], 2: [[0, 1]], 3: [[0, 1]],
+          4: [[0, 5]], 5: [[0, 1]], 6: [[0, 1]], 7: [[0, 1]], 8: [[0, 1]]},
+    'o': {4: [[1, 5]], 5: [[0, 1], [5, 6]], 6: [[0, 1], [5, 6]],
+          7: [[0, 1], [5, 6]], 8: [[1, 5]]},
+    't': {1: [[3, 3]], 2: [[2, 3]], 3: [[2, 3]], 4: [[0, 6]], 5: [[2, 3]],
+          6: [[2, 3]], 7: [[2, 3]], 8: [[3, 6]]},
+    'L': {0: [[0, 1]], 1: [[0, 1]], 2: [[0, 1]], 3: [[0, 1]], 4: [[0, 1]],
+          5: [[0, 1]], 6: [[0, 1]], 7: [[0, 1], [6, 6]], 8: [[0, 6]]},
+    'a': {4: [[1, 5]], 5: [[5, 6]], 6: [[1, 6]], 7: [[0, 1], [5, 6]], 8: [[1, 6]]},
+    'b': {0: [[0, 1]], 1: [[0, 1]], 2: [[0, 1]], 3: [[0, 1]], 4: [[0, 1], [3, 5]],
+          5: [[0, 2], [5, 6]], 6: [[0, 1], [5, 6]], 7: [[0, 1], [5, 6]],
+          8: [[0, 0], [2, 5]]},
 }
 WORD = "FotLab"
-CELL = 1.8
-TOP = 76.5          # top of cap-height band
+CELL = 1.0
+TOP = 76.5          # top of the 9dp-tall band
 TEXT_LEFT = 27      # 6 slots x 9dp, centred in 72-wide plate
 
-
-def max_col(pat):
-    return max(c for c, _ in pat)
-
-
 for i, ch in enumerate(WORD):
-    pat = PATTERNS[ch]
-    art_w = (max_col(pat) + 1) * CELL
-    art_left = TEXT_LEFT + i * 9 + (9 - art_w) / 2
-    for col, row in pat:
-        fill(art_left + col * CELL, TOP + row * CELL,
-             art_left + col * CELL + CELL, TOP + row * CELL + CELL, BLACK)
+    slot_left = TEXT_LEFT + i * 9
+    for row, runs in GLYPHS[ch].items():
+        y = TOP + row
+        for a, b in runs:
+            x = slot_left + a + 1          # design col -> box col (c+1)
+            fill(x, y, x + (b - a + 1), y + 1, BLACK)
 
 
 def write_png(path):

@@ -5,9 +5,9 @@
        - content block 72x72, centred -> x[18,90], y[18,90]
        - dark-brown CMOS frame: 4.5dp brown + 4.5dp white gap on every side
        - 6x4 square pixel array (each cell 9dp) = 6 groups of 2x2 RGGB
-         (R G / G B), occupying 54x36 inside the frame
-       - 18%-gray subtitle plate 72x18 below the frame (top flush with
-         frame bottom); "FotLab" pixel wordmark, 9dp tall, centred in plate
+       - 18%-gray subtitle plate 72x18 below the frame
+       - "FotLab" wordmark: 7x9 pixel font, each char box 9x9dp, design in
+         the inner 7 columns (1dp blank on each side); baseline at y=85.5
      White background supplied by ic_launcher_background. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
@@ -40,9 +40,9 @@
         android:fillColor="#3B82D6"
         android:pathData="M36 36h9v9h-9z M54 36h9v9h-9z M72 36h9v9h-9z M36 54h9v9h-9z M54 54h9v9h-9z M72 54h9v9h-9z" />
 
-    <!-- "FotLab" pixel wordmark, 9dp tall, cell=1.8dp, centred in plate -->
+    <!-- "FotLab" 7x9 pixel wordmark (cell = 1dp, baseline y=85.5) -->
     <path
         android:fillColor="#141414"
-        android:pathData="M28.8 76.5h1.8v1.8h-1.8z M30.6 76.5h1.8v1.8h-1.8z M32.4 76.5h1.8v1.8h-1.8z M28.8 78.3h1.8v1.8h-1.8z M28.8 80.1h1.8v1.8h-1.8z M30.6 80.1h1.8v1.8h-1.8z M32.4 80.1h1.8v1.8h-1.8z M28.8 81.9h1.8v1.8h-1.8z M28.8 83.7h1.8v1.8h-1.8z M37.8 80.1h1.8v1.8h-1.8z M39.6 80.1h1.8v1.8h-1.8z M41.4 80.1h1.8v1.8h-1.8z M37.8 81.9h1.8v1.8h-1.8z M41.4 81.9h1.8v1.8h-1.8z M37.8 83.7h1.8v1.8h-1.8z M39.6 83.7h1.8v1.8h-1.8z M41.4 83.7h1.8v1.8h-1.8z M48.6 78.3h1.8v1.8h-1.8z M46.8 80.1h1.8v1.8h-1.8z M48.6 80.1h1.8v1.8h-1.8z M50.4 80.1h1.8v1.8h-1.8z M48.6 81.9h1.8v1.8h-1.8z M48.6 83.7h1.8v1.8h-1.8z M50.4 83.7h1.8v1.8h-1.8z M55.8 76.5h1.8v1.8h-1.8z M55.8 78.3h1.8v1.8h-1.8z M55.8 80.1h1.8v1.8h-1.8z M55.8 81.9h1.8v1.8h-1.8z M55.8 83.7h1.8v1.8h-1.8z M57.6 83.7h1.8v1.8h-1.8z M59.4 83.7h1.8v1.8h-1.8z M63.9 80.1h1.8v1.8h-1.8z M65.7 80.1h1.8v1.8h-1.8z M67.5 80.1h1.8v1.8h-1.8z M63.9 81.9h1.8v1.8h-1.8z M67.5 81.9h1.8v1.8h-1.8z M63.9 83.7h1.8v1.8h-1.8z M65.7 83.7h1.8v1.8h-1.8z M67.5 83.7h1.8v1.8h-1.8z M69.3 83.7h1.8v1.8h-1.8z M73.8 76.5h1.8v1.8h-1.8z M73.8 78.3h1.8v1.8h-1.8z M73.8 80.1h1.8v1.8h-1.8z M75.6 80.1h1.8v1.8h-1.8z M77.4 80.1h1.8v1.8h-1.8z M73.8 81.9h1.8v1.8h-1.8z M77.4 81.9h1.8v1.8h-1.8z M73.8 83.7h1.8v1.8h-1.8z M75.6 83.7h1.8v1.8h-1.8z M77.4 83.7h1.8v1.8h-1.8z" />
+        android:pathData="M28 76.5h7v1h-7z M28 77.5h2v1h-2z M34 77.5h1v1h-1z M28 78.5h2v1h-2z M28 79.5h2v1h-2z M28 80.5h6v1h-6z M28 81.5h2v1h-2z M28 82.5h2v1h-2z M28 83.5h2v1h-2z M28 84.5h2v1h-2z M38 80.5h5v1h-5z M37 81.5h2v1h-2z M42 81.5h2v1h-2z M37 82.5h2v1h-2z M42 82.5h2v1h-2z M37 83.5h2v1h-2z M42 83.5h2v1h-2z M38 84.5h5v1h-5z M49 77.5h1v1h-1z M48 78.5h2v1h-2z M48 79.5h2v1h-2z M46 80.5h7v1h-7z M48 81.5h2v1h-2z M48 82.5h2v1h-2z M48 83.5h2v1h-2z M49 84.5h4v1h-4z M55 76.5h2v1h-2z M55 77.5h2v1h-2z M55 78.5h2v1h-2z M55 79.5h2v1h-2z M55 80.5h2v1h-2z M55 81.5h2v1h-2z M55 82.5h2v1h-2z M55 83.5h2v1h-2z M61 83.5h1v1h-1z M55 84.5h7v1h-7z M65 80.5h5v1h-5z M69 81.5h2v1h-2z M65 82.5h6v1h-6z M64 83.5h2v1h-2z M69 83.5h2v1h-2z M65 84.5h6v1h-6z M73 76.5h2v1h-2z M73 77.5h2v1h-2z M73 78.5h2v1h-2z M73 79.5h2v1h-2z M73 80.5h2v1h-2z M76 80.5h3v1h-3z M73 81.5h3v1h-3z M78 81.5h2v1h-2z M73 82.5h2v1h-2z M78 82.5h2v1h-2z M73 83.5h2v1h-2z M78 83.5h2v1h-2z M73 84.5h1v1h-1z M75 84.5h4v1h-4z" />
 
 </vector>
