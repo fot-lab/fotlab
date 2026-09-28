@@ -27,17 +27,17 @@
 
     <!-- RGGB pixel array: RED squares (9x9) -->
     <path
-        android:fillColor="#D17A7D"
+        android:fillColor="#B23B3F"
         android:pathData="M27 27h9v9h-9z M45 27h9v9h-9z M63 27h9v9h-9z M27 45h9v9h-9z M45 45h9v9h-9z M63 45h9v9h-9z" />
 
     <!-- RGGB pixel array: GREEN squares (9x9) -->
     <path
-        android:fillColor="#7CAE92"
+        android:fillColor="#2C7A4B"
         android:pathData="M36 27h9v9h-9z M54 27h9v9h-9z M72 27h9v9h-9z M36 45h9v9h-9z M54 45h9v9h-9z M72 45h9v9h-9z M27 36h9v9h-9z M45 36h9v9h-9z M63 36h9v9h-9z M27 54h9v9h-9z M45 54h9v9h-9z M63 54h9v9h-9z" />
 
     <!-- RGGB pixel array: BLUE squares (9x9) -->
     <path
-        android:fillColor="#7B9BC4"
+        android:fillColor="#2E63B0"
         android:pathData="M36 36h9v9h-9z M54 36h9v9h-9z M72 36h9v9h-9z M36 54h9v9h-9z M54 54h9v9h-9z M72 54h9v9h-9z" />
 
     <!-- "FotLab" 7x9 pixel wordmark (cell = 1dp, baseline y=85.5) -->
