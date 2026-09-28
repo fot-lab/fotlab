@@ -3,24 +3,26 @@ name = "rawtherapee_fotlab"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "FotLab binding over RawTherapee's C++ demosaic algorithms (external/RawTherapee)"
-# GPL v3 inherited from RawTherapee: linking librtengine (and this shim) into the
-# rawtherapee_fotlab binary makes the combined work a GPL v3 derivative. Keep this
-# in mind if the wider fotlab distribution has licensing constraints.
+description = "FotLab: vendored DCP/LCP profile parsers (from RawTherapee) + Rust deprofile apply"
+# Licensing: only RawTherapee's self-contained DCP/LCP *parsers* are vendored
+# (constructors + getters; apply methods stripped; Glib::ustring -> std::string so
+# glibmm is not needed). No librtengine link, so this crate is NOT a GPL derivative.
+# The Rust apply math is original.
 
-# Mirror of rawler_fotlab: a standalone cdylib (consumed by Kotlin over cxx) that
-# lives OUTSIDE the RawTherapee build. RawTherapee is reached through the C++ shim
-# under cxx/ and linked as a *static* library produced by the Android/NDK build of
-# the submodule.
+# Consumed by `rawler_fotlab` (an rlib dependency of its cdylib). The C++ stdlib
+# link directive emitted by build.rs propagates to the final cdylib. No librtengine
+# / glibmm / expat — only the self-contained vendored DCP/LCP decoders under
+# cxx/vendor plus our expat_minimal are compiled.
 [lib]
 name = "rawtherapee_fotlab"
 crate-type = ["cdylib", "staticlib", "rlib"]
 path = "src/lib.rs"
 
 [dependencies]
-# cxx provides the safe Rust <-> C++ FFI bridge (the `rt_demosaic` call).
+# cxx provides the safe Rust <-> C++ FFI bridge for the DCP/LCP decode calls.
 cxx = "1"
 thiserror = "2.0"
 
 [build-dependencies]
-cxx = "1"
+# cxx-build hosts the `cxx_build::bridge` build-script API (cxx::Build does not exist).
+cxx-build = "1"

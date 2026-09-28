@@ -1,131 +1,58 @@
-//! rawtherapee_fotlab — FotLab's binding over RawTherapee's C++ demosaic algorithms.
+//! rawtherapee_fotlab — vendored DCP/LCP profile **parsers** (extracted from
+//! RawTherapee) plus a Rust re-implementation of the deprofile **apply** step.
 //!
 //! # What this crate is
 //!
-//! A standalone `cdylib` (mirroring `rawler_fotlab`) that exposes ONE capability
-//! to Kotlin/the develop pipeline: run a **selected RawTherapee demosaic algorithm**
-//! over a caller-supplied CFA mosaic — no file decode, no white balance, no colour
-//! management. The output is **linear RGB, still in camera/CFA space**, which is
-//! exactly the state our develop pipeline expects *before* it applies white balance
-//! and the cam→ProPhoto(D50) transform (tying back to the colour-pipeline research:
-//! dnglab's `develop` lands on sRGB D65, rawalchemy wants ProPhoto D50; RawTherapee's
-//! demosaic output is the neutral linear-RGB hub we feed downstream).
+//! A standalone `cdylib` (mirroring `rawler_fotlab`) that the develop pipeline
+//! calls to **read** Adobe DCP (camera colour) and LCP (lens correction)
+//! profiles. The heavy binary/XML *decode* is vendored from RawTherapee — but
+//! trimmed to the profile **constructors + getters only**: no `librtengine` link,
+//! no colour-management or apply code. The *apply* (vignette, distortion,
+//! baseline-exposure, colour matrix) is re-implemented in Rust in this crate
+//! (`lcp.rs` / `dcp.rs`) for our single-channel CFA-space pipeline.
 //!
-//! # Why RawTherapee at all
-//!
-//! RawTherapee ships notably stronger demosaic algorithms than rawler/dnglab's
-//! bilinear/PPG set — AMAZE, RCD, LMMSE, IGV, and a high-quality 3-pass X-Trans
-//! interpolator. Our `develop.rs` already does the pre-demosaic work (decode,
-//! black/white scaling, exposure); this crate lets us bolt RT's demosaic onto that
-//! existing pipeline instead of re-implementing it.
-//!
-//! # Architecture (the FFI chain)
+//! # FFI chain
 //!
 //! ```text
-//! Kotlin / develop.rs (has CFA, pre-demosaic)
-//!    │ cxx call
+//! develop.rs (has CFA, pre-demosaic)
+//!    │ Rust call
 //!    ▼
-//! rawtherapee_fotlab::demosaic::demosaic_cfa   (this crate, Rust; panic-safe)
-//!    │ cxx bridge
+//! rawtherapee_fotlab::{parse_dcp, parse_lcp, compute_lcp_model}  (this crate, Rust)
+//!    │ cxx call  (decode only)
 //!    ▼
-//! rt_demosaic_shim.cc  (extern "C++", cxx ABI)   — cxx/rt_demosaic_shim.cc
-//!    │ constructs RawImageSource + RawImage, calls:
+//! rt_deprofile_shim.cc  (extern "C++", cxx ABI)   — cxx/rt_deprofile_shim.cc
+//!    │ constructs rtengine::DCPProfile / LCPProfile (vendored parse ctor)
 //!    ▼
-//! RawImageSource::demosaic_external            — hook in external/RawTherapee worktree
-//!    │ (applied manually; this repo ships NO patch — see README.md)
+//! vendored RT DCP/LCP parsers  — cxx/vendor/rtengine/{dcp,lcp}.cc
 //!    ▼
-//! rtengine (static lib) — amaze/rcd/vng4/lmmse/igv/xtrans algorithms
-//!    ▼
-//! linear RGB (w*h*3) back to Rust → LinearImage
+//! parsed params back to Rust → Rust apply (vignette/distortion/baseline/matrix)
 //! ```
 //!
 //! # Licensing
 //!
-//! RawTherapee is **GPL v3**. Linking `librtengine` (and this shim) into the
-//! `rawtherapee_fotlab` binary makes the combined work a GPL v3 derivative. If the
-//! wider fotlab distribution must avoid GPL propagation, move the shim into a
-//! separate process and call it over files/pipes (the GPL does not extend across a
-//! process boundary) instead of linking.
+//! We vendor ONLY RawTherapee's self-contained DCP/LCP *parsers* (constructors +
+//! getters; apply methods stripped; `Glib::ustring` → `std::string` so glibmm is
+//! not needed). This keeps the crate clear of the GPL `librtengine` link while
+//! reusing RT's exact decode. The apply math in this crate is original Rust, not
+//! derived from RT's apply code.
 
 use std::panic::{self, AssertUnwindSafe};
 
-mod demosaic;
-mod error;
-
-pub use demosaic::{demosaic_cfa, CfaPattern, LinearImage, RtDemosaicAlgorithm};
-pub use error::RtDemosaicError;
-
 // ---------------------------------------------------------------------------
-// cxx bridge: the single C++ function we call. `include!` pulls in the exact
-// declaration from cxx/rt_demosaic_shim.h so cxx's generated C++ header and this
-// Rust declaration agree on the ABI.
-// ---------------------------------------------------------------------------
-#[cxx::bridge]
-mod ffi {
-    extern "C++" {
-        include!("rt_demosaic_shim.h");
-
-        /// Run one RT demosaic algorithm. Returns 0 on success, <0 on error
-        /// (message written into `err`).
-        fn rt_demosaic(
-            method: i32,
-            cfa: &[f32],
-            w: i32,
-            h: i32,
-            filters: u32,
-            is_xtrans: bool,
-            xtrans: &[u8],
-            out_rgb: &mut [f32],
-            err: &mut [u8],
-        ) -> i32;
-    }
-}
-
-/// Raw C++ call, wrapped in a panic boundary.
-///
-/// RawTherapee's demosaic code may `throw` or assert on inputs it dislikes; a C++
-/// exception unwinding across the `extern "C"` cxx frame is UB and aborts the
-/// process. We catch C++ exceptions inside the shim (rt_demosaic_shim.cc) by
-/// returning an error code, and additionally guard the whole Rust call with
-/// `catch_unwind` so a Rust-side panic also degrades to `Err` instead of SIGABRT.
-/// This mirrors the crash-hardening pattern in rawler_fotlab (FOTLAB-CRASH-000001).
-fn rt_demosaic_safe(
-    method: i32,
-    cfa: &[f32],
-    w: i32,
-    h: i32,
-    filters: u32,
-    is_xtrans: bool,
-    xtrans: &[u8],
-    out_rgb: &mut [f32],
-) -> Result<(), RtDemosaicError> {
-    let mut errbuf = [0u8; 256];
-    let rc = panic::catch_unwind(AssertUnwindSafe(|| {
-        ffi::rt_demosaic(method, cfa, w, h, filters, is_xtrans, xtrans, out_rgb, &mut errbuf)
-    }))
-    .unwrap_or(-99); // panic across FFI => treat as failure
-
-    if rc < 0 {
-        let msg = std::str::from_utf8(&errbuf)
-            .map(|s| s.trim_end_matches('\0').to_string())
-            .unwrap_or_else(|_| format!("rt_demosaic returned {rc}"));
-        return Err(RtDemosaicError::Demosaic(msg));
-    }
-    Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// Deprofile bridge: DCP/LCP parse + LCP CFA-space apply.
-//
-// Same discipline as the demosaic bridge above: i32 rc + err buffer, panic-guarded
-// on the Rust side (rt_demosaic_safe). The C++ shim (rt_deprofile_shim.cc) does
-// the try/catch so a C++ exception never unwinds across the FFI frame.
+// cxx bridge: the C++ *decode* functions we call. `include!` pulls in the exact
+// declaration from cxx/rt_deprofile_shim.h so cxx's generated C++ header and this
+// Rust declaration agree on the ABI. The apply step is NOT here — it is Rust.
 // ---------------------------------------------------------------------------
 #[cxx::bridge]
 mod ffi_deprofile {
     extern "C++" {
-        include!("rt_deprofile_shim.h");
+        // Spelled relative to the crate root so the cxx-generated header resolves
+        // it via the `manifest` include path (mirrors rawalchemy_fotlab's
+        // `cpp/rawalchemy_api.h`). The shim .cc includes it the same way.
+        include!("cxx/rt_deprofile_shim.h");
 
+        /// Parse a DCP file into its colour matrices / illuminants / baseline flags.
+        /// Returns 0 on success, <0 on error (message written into `err`).
         fn rt_parse_dcp(
             path: &CxxString,
             cm1: &mut Vec<f64>,
@@ -149,6 +76,8 @@ mod ffi_deprofile {
             err: &mut [u8],
         ) -> i32;
 
+        /// Parse an LCP file into its profile metadata.
+        /// Returns 0 on success, <0 on error (message written into `err`).
         fn rt_parse_lcp(
             path: &CxxString,
             profile_name: &mut Vec<u8>,
@@ -161,18 +90,23 @@ mod ffi_deprofile {
             err: &mut [u8],
         ) -> i32;
 
-        fn rt_apply_lcp_cfa(
+        /// Decode + interpolate the LCP correction model for the given focal /
+        /// geometry. Fills `model` with 13 floats in this exact order:
+        ///   x0, y0, fx, fy, vign0, vign1, vign2, vign3, dist0, dist1, dist2, dist3, dist4
+        /// (rfx/rfy are derived as 1/fx, 1/fy on the Rust side). Sets `is_fisheye`
+        /// and `swap_xy`. Returns 0 on success, <0 on error (msg in `err`).
+        fn rt_compute_lcp_model(
             path: &CxxString,
             focal_length: f32,
             focal_length_35mm: f32,
             focus_dist: f32,
             aperture: f32,
-            vignette: bool,
-            distortion: bool,
             raw_rotation_deg: i32,
             w: i32,
             h: i32,
-            pixels: &mut [f32],
+            model: &mut Vec<f32>,
+            is_fisheye: &mut bool,
+            swap_xy: &mut bool,
             err: &mut [u8],
         ) -> i32;
     }
@@ -184,4 +118,4 @@ mod deprofile_error;
 
 pub use deprofile_error::DeprofileError;
 pub use dcp::{parse_dcp, DcpParams};
-pub use lcp::{apply_lcp_cfa, parse_lcp, LcpParams};
+pub use lcp::{apply_lcp_cfa, compute_lcp_model, parse_lcp, LcpModel, LcpParams};

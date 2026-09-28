@@ -107,8 +107,9 @@ pub struct RawlerImageDeveloped {
 /// HSD / Tone / Look applications live at the RGB calibration stage (B5) and are
 /// out of scope for this mosaic stage.
 ///
-/// Requires the `rawtherapee_fotlab` crate (links librtengine). Parsing happens
-/// once per render here; a later pass can cache parsed profiles by path.
+/// Requires the `rawtherapee_fotlab` crate (vendored DCP/LCP decode + Rust apply;
+/// no librtengine link). Parsing happens once per render here; a later pass can
+/// cache parsed profiles by path.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct CameraProfileParams {
   /// Path to the `.dcp` file.
@@ -122,11 +123,13 @@ pub struct CameraProfileParams {
 /// LCP lens profile hook for a develop render.
 ///
 /// Vignette and distortion are colour-independent, so they are applied directly
-/// to the single-channel CFA mosaic by reusing RawTherapee's `LCPMapper`
-/// (`processVignette` + `correctDistortion`). CA is intentionally skipped
-/// (per-channel, belongs to the RGB stage). `raw_rotation_deg` reuses the RAW
-/// rotation; `focal_length` is required by the model, the rest default to
-/// sensible fallbacks when the caller does not supply EXIF-derived values.
+/// to the single-channel CFA mosaic by `rawtherapee_fotlab::apply_lcp_cfa`, which
+/// re-implements RawTherapee's `LCPMapper` apply in Rust (vignette radial
+/// multiplier + distortion geometric warp) over the decoded LCP coefficients.
+/// CA is intentionally skipped (per-channel, belongs to the RGB stage).
+/// `raw_rotation_deg` reuses the RAW rotation; `focal_length` is required by the
+/// model, the rest default to sensible fallbacks when the caller does not supply
+/// EXIF-derived values.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct LensProfileParams {
   /// Path to the `.lcp` file.
@@ -495,8 +498,9 @@ pub(crate) fn develop_image(
   //     applied here (`×= 2^offset`) when the user enables it. Colour matrix /
   //     HSD / Tone / Look belong to the RGB calibration stage (B5).
   //   * LCP: vignette + distortion are colour-independent, so they are applied
-  //     directly to the CFA mosaic (reusing RawTherapee's `LCPMapper`). CA is
-  //     intentionally skipped (per-channel, RGB stage).
+  //     directly to the CFA mosaic by `rawtherapee_fotlab::apply_lcp_cfa` (a Rust
+  //     re-implementation of RT's `LCPMapper` apply over the decoded coefficients).
+  //     CA is intentionally skipped (per-channel, RGB stage).
   if let Some(cp) = &params.camera_profile {
     match rawtherapee_fotlab::parse_dcp(&cp.path) {
       Ok(dcp) => {

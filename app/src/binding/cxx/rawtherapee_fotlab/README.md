@@ -1,35 +1,35 @@
 # rawtherapee_fotlab
 
-> **No patch shipped.** This crate's C++ shim calls two hooks that must exist in the
-> `external/RawTherapee` submodule worktree: `RawImage::set_xtrans` and
-> `RawImageSource::demosaic_external`. Those hooks are applied **manually / out-of-band**
-> to the submodule — this repository deliberately does **not** carry a `.patch` file.
-> Without the hooks present in the submodule, the crate will **not** build/link.
+FotLab's binding over **RawTherapee's DCP / LCP profile decoders**, plus a Rust
+re-implementation of the **deprofile apply** step for the CFA-space develop
+pipeline.
 
-FotLab's binding over **RawTherapee's C++ demosaic algorithms** (`external/RawTherapee`).
-It lets the develop pipeline run a selected RawTherapee demosaic kernel over a
-caller-supplied CFA mosaic — no file decode, no white balance, no colour management.
+This crate does **not** demosaic and does **not** link RawTherapee's
+`librtengine`. It vendors ONLY the self-contained DCP/LCP **decode** code
+(constructors + getters + `calcParams` + `prepareParams`) from RawTherapee, and
+re-writes the **apply** (vignette + distortion) in Rust for our single-channel
+CFA mosaic. No submodule hooks, no `glibmm`, no `lcms2`/`exiv2` — the only
+compiled C++ is the vendored decoders + a tiny expat replacement.
 
-This crate mirrors [`../rawler_fotlab`](../rawler_fotlab) in layout and intent.
+See `rules/DESIGN/detail/FOTLAB-NATIVE-000005.md` for the product decision; the
+**vendor decode only / Rust apply** split is recorded in the task log (the
+original plan to link `librtengine` was dropped).
 
 ## What it does
 
 ```
-develop.rs (already has CFA, pre-demosaic)
-   │ cxx call: demosaic_cfa(cfa, w, h, pattern, algorithm)
+develop.rs (has CFA, pre-demosaic)
+   │ Rust call
    ▼
-src/demosaic.rs            (Rust; panic-safe, validates, allocates out)
-   │ cxx bridge (src/lib.rs)
+rawtherapee_fotlab::{parse_dcp, parse_lcp, compute_lcp_model, apply_lcp_cfa}  (this crate, Rust)
+   │ cxx call  (decode only)
    ▼
-cxx/rt_demosaic_shim.cc    (C++ adapter; builds RawImageSource + RawImage)
-   │ calls
+rt_deprofile_shim.cc  (extern "C++", cxx ABI)   — cxx/rt_deprofile_shim.{h,cc}
+   │ constructs rtengine::DCPProfile / LCPProfile (vendored decode ctor)
    ▼
-RawImageSource::demosaic_external   (hook added to external/RawTherapee)
-   │
+vendored RT decoders  — cxx/vendor/rtengine/{dcp,lcp}.cc (trimmed) + expat_minimal
    ▼
-librtengine.a  →  amaze / rcd / vng4 / lmmse / igv / xtrans kernels
-   ▼
-LinearImage (interleaved linear RGB, camera-space, NOT white-balanced)
+parsed params / interpolated model back to Rust → Rust apply (vignette/distortion)
 ```
 
 ## Directory layout
@@ -37,108 +37,95 @@ LinearImage (interleaved linear RGB, camera-space, NOT white-balanced)
 ```
 rawtherapee_fotlab/
 ├── Cargo.toml
-├── build.rs                      # compiles the shim + links librtengine
+├── build.rs                      # compiles vendored decoders + shim, links only the C++ stdlib
 ├── README.md
 ├── cxx/
-│   ├── rt_demosaic_shim.h        # C ABI declaration (cxx types)
-│   └── rt_demosaic_shim.cc       # C++ adapter → RawImageSource::demosaic_external
+│   ├── rt_deprofile_shim.h        # C ABI declaration (cxx types) — the `include!` target
+│   ├── rt_deprofile_shim.cc       # C++ adapter → rtengine::DCPProfile / LCPProfile (decode only)
+│   └── vendor/                    # trimmed copies of RT's decoders (no apply, no glibmm)
+│       ├── rtengine/
+│       │   ├── dcp.cc  dcp.h       # DCP (TIFF) profile parser
+│       │   ├── lcp.cc  lcp.h       # LCP (XML)  profile parser
+│       │   └── rt_math.h           # self-contained math helper (intp / max)
+│       └── expat/
+│           └── expat_minimal.{h,cc}  # minimal SAX XML reader driving lcp.cc's handlers
 └── src/
-    ├── lib.rs                    # cxx bridge (demosaic + deprofile) + panic boundary + re-exports
-    ├── demosaic.rs               # demosaic_cfa + CfaPattern + LinearImage + RtDemosaicAlgorithm
+    ├── lib.rs                    # cxx bridge (decode fns) + panic boundary + re-exports
     ├── dcp.rs                    # parse_dcp -> DcpParams (wraps rt_parse_dcp)
-    ├── lcp.rs                    # parse_lcp / apply_lcp_cfa (wraps rt_parse_lcp / rt_apply_lcp_cfa)
-    ├── deprofile_error.rs        # DeprofileError
-    └── error.rs                  # RtDemosaicError
+    ├── lcp.rs                    # parse_lcp / compute_lcp_model / apply_lcp_cfa (Rust apply)
+    └── deprofile_error.rs        # DeprofileError
 ```
 
-The deprofile shim reuses RawTherapee's `DCPProfile` (read-only parse) and
-`LCPMapper` (vignette via the single-channel RAW `processVignette`, distortion
-via `correctDistortion` inverted through a radial LUT) — see
-`rules/DESIGN/detail/FOTLAB-NATIVE-000005.md`.
+## Vendoring rules (how the decode copies stay GPL-isolated)
 
-## Required RawTherapee hooks (apply to the submodule worktree, out-of-band)
+The files under `cxx/vendor/` are **trimmed** copies of RawTherapee's
+`rtengine/dcp.{h,cc}` and `lcp.{h,cc}`:
 
-RawTherapee's demosaic algorithms are `RawImageSource` **member methods**, not free
-functions, and they read the CFA pattern through the `RawImage` (`ri`), not from
-`this`. `RawImageSource` is `final`. So the only clean way to call them is a small
-public hook, added to the vendored `external/RawTherapee` (branch `dev`):
+* **Apply code removed.** `DCPProfile::apply*` / `DCPStore` / `LCPStore` /
+  `LCPMapper` (the geometry/vignette/CA machinery) are NOT vendored.
+* **`Glib::ustring` → `std::string`**, `g_fopen` → `std::fopen`; all
+  `settings->verbose` lines dropped. No `glibmm` dependency remains.
+* **expat replaced** by `cxx/vendor/expat/expat_minimal.{h,cc}` — a small
+  self-contained SAX reader that implements only the `XML_Parser*` API
+  `lcp.cc` uses.
+* **Only constructors + getters + `calcParams` + `prepareParams`** are kept, so
+  the crate never links `librtengine` and is **not** a GPL `librtengine`
+  derivative. The Rust apply math in `lcp.rs` is original (derived from the
+  decoded coefficients), not copied from RT's apply source.
 
-1. `RawImage::set_xtrans` — public setter mirror of `getXtransMatrix` (so an X-Trans
-   pattern can be supplied without decoding a file).
-2. `RawImageSource::demosaic_external` — runs ONE selected algorithm over a
-   caller-supplied CFA and writes interleaved linear RGB.
+When upstream RT changes a parser, re-run the same trim (keep the decode, strip
+the apply) — do not vendor `librtengine` or add submodule hooks.
 
-**This repository does NOT ship a patch for these hooks.** Apply them by editing the
-submodule sources directly (the exact edits are documented in the code comments of
-`cxx/rt_demosaic_shim.cc` and `src/demosaic.rs`, and summarised here):
+## FFI contract
 
-- In `rtengine/rawimage.h`, add a public `set_xtrans(const int xtransMatrix[6][6])`
-  next to `getXtransMatrix`.
-- In `rtengine/rawimagesource.h`, add a `public` declaration
-  `int demosaic_external(...)` to `RawImageSource` (it is `final`, so no subclassing).
-- In `rtengine/rawimagesource.cc`, implement `demosaic_external` (build the `RawImage`,
-  set `filters`/`xtrans`, copy the CFA into an owned `this->rawData`, force
-  `initialGain = 1.0`, then dispatch the selected kernel).
+`src/lib.rs` declares three `extern "C++"` functions (mirrored in
+`cxx/rt_deprofile_shim.h`; cxx emits static assertions against that header):
 
-### Out-of-band inline getters for DCP/LCP (deprofile)
+* `rt_parse_dcp(path, …) -> i32` — fills the four colour matrices, has-flags,
+  illuminants, baseline offset into out-params.
+* `rt_parse_lcp(path, …) -> i32` — fills profile metadata (name / camera / lens /
+  fisheye / sensor-format / frame count).
+* `rt_compute_lcp_model(path, focal…, w, h, model, is_fisheye, swap_xy, err)
+  -> i32` — runs `calcParams(VIGNETTE)` + `calcParams(DISTORTION)` +
+  `prepareParams` for the given geometry and packs **13 floats** into `model`
+  (`x0, y0, fx, fy, vign0..3, dist0..4`); `rfx/rfy` are `1/fx, 1/fy` on the Rust
+  side. `swap_xy` reflects the raw-rotation handling RT's `LCPMapper` applies.
 
-The deprofile shim (`rt_deprofile_shim.cc`) reads DCP/LCP values that the
-vendored `external/RawTherapee` public API does not currently expose. As with the
-demosaic hooks above, add these **header-only** inline getters to the submodule
-worktree. They live in-class, so **no `.cc` changes are needed and
-`librtengine.a` does NOT need rebuilding** (the field layout is unchanged):
+All return `0` on success, `<0` with a message in `err` on failure.
 
-- `rtengine/dcp.h` (`DCPProfile`, just before `private:`): `getHasColorMatrix1/2`,
-  `getHasForwardMatrix1/2`, `getColorMatrix1/2`, `getForwardMatrix1/2`,
-  `getBaselineExposureOffsetValue`.
-- `rtengine/lcp.h` (`LCPProfile`, in the public section): `getProfileName`,
-  `getCamera`, `getLens`, `getIsRaw`, `getIsFisheye`, `getSensorFormatFactor`,
-  `getPersModelCount`.
+## Rust API (consumed by `rawler_fotlab::develop`)
 
-Note: `DCPProfile` does **not** store the camera make/model, so auto-matching
-(OQ4) must use RT's `DCPStore` or read the DNG tags separately; the parsed
-`DcpParams` keeps `make`/`model`/`unique_camera_model`/`camera_model` fields
-reserved (currently `None`).
+* `parse_dcp(&str) -> Result<DcpParams>` — colour matrices / illuminants /
+  baseline offset (read-only parse).
+* `parse_lcp(&str) -> Result<LcpParams>` — profile metadata.
+* `compute_lcp_model(&str, focal…, w, h) -> Result<LcpModel>` — interpolated
+  correction coefficients.
+* `apply_lcp_cfa(&str, focal…, vignette, distortion, raw_rotation_deg, w, h,
+  &mut [f32]) -> Result<()>` — applies vignette (radial multiplier) and/or
+  distortion (geometric reverse-map + bilinear resample) **in place** to a
+  single-channel CFA mosaic. CA is intentionally skipped (per-channel, RGB stage).
 
-Because the hooks are maintained in the submodule worktree by hand, they are **not**
-part of fotlab's tracked source and will not appear in a fresh `git submodule update`.
-If you would rather not keep the hooks in the submodule at all, this crate stays
-disabled — the glue code remains as reference.
+The apply math mirrors RT's `LCPMapper::processVignette` /
+`correctDistortion` (see `rtengine/lcp.cc`) but is original Rust over the decoded
+coefficients. Vignette is applied first (RAW-space), then distortion warps the
+vignetted mosaic — matching RT's staging order.
 
 ## Build integration
 
-`build.rs` compiles `cxx/rt_demosaic_shim.cc` and links `librtengine.a`. The
-surrounding Android/NDK build must provide:
+`build.rs` uses `cxx_build::bridge` and compiles:
 
-| Env var            | Meaning                                                      |
-|--------------------|-------------------------------------------------------------|
-| `RAWTHERAPEE_SRC`  | root of the RawTherapee submodule (for include paths)       |
-| `RAWTHERAPEE_GEN`  | dir of RT's *generated* `procparams` headers (if separate)  |
-| `RAWTHERAPEE_LIB`  | dir containing `librtengine.a` + transitive `.a` files      |
+* `cxx/rt_deprofile_shim.cc`
+* `cxx/vendor/rtengine/dcp.cc`, `cxx/vendor/rtengine/lcp.cc`
+* `cxx/vendor/expat/expat_minimal.cc`
 
-The link step also needs RT's transitive deps (lcms2, exiv2, fftw3, png, z, glibmm,
-OpenMP runtime) — trim/add per target once you see the real undefined symbols.
-
-## Data contract
-
-* **Input `cfa`**: single-channel CFA mosaic, row-major, length `w*h`, **linear**,
-  black/white scaled into 0..1, **not** white-balanced. Orientation must match
-  `filters` (Bayer bitmask; or `filters = 9` + 6×6 `xtrans` for Fuji X-Trans).
-* **Output `LinearImage.rgb`**: interleaved linear RGB, length `w*h*3`, **still in
-  camera/CFA space — not white-balanced, no gamma.** The downstream pipeline applies
-  white balance + the cam→ProPhoto(D50) matrix afterwards (this is what rawalchemy's
-  Log pipeline expects as input).
-
-### Implementation notes baked into the code (also see `src/demosaic.rs`)
-
-* The CFA is **copied** into an OWNED `this->rawData`, not zero-copy wrapped:
-  `array2D` copy/assign drops the `ARRAY2D_BYREFERENCE` flag (array2d.h:147-164), so a
-  by-reference view assigned to a member would dangle.
-* `initialGain` is forced to `1.0` in `demosaic_external` — the ctor leaves it `0.0`,
-  and `amaze_demosaic_RT` computes `1.0 / initialGain` (divide-by-zero at 0.0).
+with include paths `cxx/vendor/rtengine` and `cxx/vendor/expat`. It links **only**
+the C++ standard library (`dylib=c++` on Android, `dylib=stdc++` on host) — no
+`RAWTHERAPEE_SRC` / `RAWTHERAPEE_LIB` env vars, no `librtengine`.
 
 ## Licensing
 
-RawTherapee is **GPL v3**. Linking `librtengine` makes this binary a GPL v3 derivative.
-If fotlab must avoid GPL propagation, run the shim as a separate process and call it
-over files/pipes instead of linking.
+RawTherapee is **GPL v3**, but this crate vendors ONLY the decoder constructors +
+getters + `calcParams`/`prepareParams` (apply methods stripped; `Glib::ustring`
+→ `std::string`), so it does **not** link `librtengine` and is not a GPL
+`librtengine` derivative. The apply code in this crate (`src/lcp.rs`) is original
+Rust. If you modify the vendored decoders, preserve their GPL headers.
