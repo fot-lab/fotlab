@@ -24,6 +24,7 @@
 #include <cstring>
 #include <functional>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -192,6 +193,35 @@ double xyCoordToTemperature(const std::array<double, 2>& white_xy)
 
         // Find distance above or below line.
         double dt = -uu * dv + vv * du;
+
+        // If below line, we have found line pair.
+        if (dt <= 0.0 || index == 30) {
+            // Find fractional weight of two lines.
+            if (dt > 0.0) {
+                dt = 0.0;
+            }
+
+            dt = -dt;
+
+            double f;
+
+            if (index == 1) {
+                f = 0.0;
+            } else {
+                f = dt / (last_dt + dt);
+            }
+
+            // Interpolate the temperature.
+            res = 1.0e6 / (temp_table[index - 1].r * f + temp_table[index].r * (1.0 - f));
+            break;
+        }
+
+        // Try next line pair.
+        last_dt = dt;
+    }
+
+    return res;
+}
 
 class DCPMetadata
 {
@@ -870,15 +900,13 @@ DCPProfile::DCPProfile(const std::string& filename) :
         });
 
     if (file == nullptr) {
-            printf ("Unable to load DCP profile '%s' !\n", filename.c_str());
-        }
+        printf ("Unable to load DCP profile '%s' !\n", filename.c_str());
         return;
     }
 
     DCPMetadata md(file.get());
     if (!md.parse()) {
-            printf ("Unable to load DCP profile '%s'.\n", filename.c_str());
-        }
+        printf ("Unable to load DCP profile '%s'.\n", filename.c_str());
         return;
     }
 
@@ -918,8 +946,7 @@ DCPProfile::DCPProfile(const std::string& filename) :
 
     // Color Matrix (one is always there)
     if (!md.find(TAG_KEY_COLOR_MATRIX_1)) {
-            std::cerr << "DCP '" << filename.c_str() << "' is missing 'ColorMatrix1'. Skipped." << std::endl;
-        }
+        std::cerr << "DCP '" << filename.c_str() << "' is missing 'ColorMatrix1'. Skipped." << std::endl;
         return;
     }
 

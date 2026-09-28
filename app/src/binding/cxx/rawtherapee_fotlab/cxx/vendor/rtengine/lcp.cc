@@ -20,6 +20,8 @@
 #include <algorithm>
 #include <cassert>
 #include <cctype>
+#include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <sstream>
@@ -218,8 +220,6 @@ rtengine::LCPProfile::LCPProfile(const std::string& fname) :
 
     XML_ParserFree(parser);
 
-        std::printf("Parsing %s\n", fname.c_str());
-    }
     // Two phase filter: first filter out the very rough ones, that distord the average a lot
     // force it, even if there are few frames (community profiles)
     filterBadFrames(LCPCorrectionMode::VIGNETTE, 2.0, 0);
@@ -516,11 +516,9 @@ void rtengine::LCPProfile::calcParams(
                         static_cast<double>(pLow->focDist),
                         static_cast<double>(pHigh->focDist),
                         static_cast<double>(facLow));
-        }
     } else {
             std::printf("Error: LCP file contained no %s parameters\n", mode == LCPCorrectionMode::VIGNETTE ? "vignette" : mode == LCPCorrectionMode::DISTORTION ? "distortion" : "CA" );
         }
-    }
 }
 
 
@@ -599,7 +597,6 @@ int rtengine::LCPProfile::filterBadFrames(LCPCorrectionMode mode, double maxAvgD
         }
 
             std::printf("Filtered %.1f%% frames for maxAvgDevFac %g leaving %i\n", filtered * 100.0 / count, maxAvgDevFac, count - filtered);
-        }
     }
 
     return filtered;
