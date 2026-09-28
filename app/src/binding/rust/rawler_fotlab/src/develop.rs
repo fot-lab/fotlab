@@ -30,6 +30,12 @@
 //!     channel; demosaic is linear so the result is identical). Applied **last**
 //!     among the mosaic stages, after denoise and dehaze have cleaned the
 //!     normalised 0..1 source values.
+//! 3d. `camera_profile` / `lens_profile` — the deprofile stage. DCP is read-only
+//!     here: only the CFA-space **BaselineExposure** scalar (`×= 2^offset`, gated
+//!     by `apply_baseline_exposure`) is applied. LCP vignette + distortion are
+//!     colour-independent, so they are applied directly to the CFA mosaic by
+//!     reusing RawTherapee's `LCPMapper`. Runs *before* exposure on the scaled
+//!     mosaic (`FOTLAB-NATIVE-000005` B3/B4).
 //! 4. `demosaic`    — selectable debayer + Fuji rotate + active-area crop (ROI). When
 //!    `downsample` is set this stage runs rawler's **superpixel** debayer instead: same
 //!    input (the exposed mosaic), same slot, but the result is quarter-resolution. The
@@ -90,6 +96,62 @@ pub struct RawlerImageDeveloped {
   pub width: u32,
   pub height: u32,
   pub rgb: Vec<f32>,
+}
+
+/// DCP camera profile hook for a develop render.
+///
+/// Per the design (`FOTLAB-NATIVE-000005` rev 3/4/5): DCP is **read-only** here.
+/// The only CFA-space op is the scalar `BaselineExposure` (`×= 2^offset`), and
+/// even that is gated by [`CameraProfileParams::apply_baseline_exposure`] — when
+/// off, the parsed offset is passed through untouched. The colour matrix /
+/// HSD / Tone / Look applications live at the RGB calibration stage (B5) and are
+/// out of scope for this mosaic stage.
+///
+/// Requires the `rawtherapee_fotlab` crate (links librtengine). Parsing happens
+/// once per render here; a later pass can cache parsed profiles by path.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct CameraProfileParams {
+  /// Path to the `.dcp` file.
+  pub path: String,
+  /// Apply the CFA-stage BaselineExposure scalar (`×= 2^offset`). Default true;
+  /// false keeps the baseline read-only (no change to the mosaic).
+  #[uniffi(default = true)]
+  pub apply_baseline_exposure: bool,
+}
+
+/// LCP lens profile hook for a develop render.
+///
+/// Vignette and distortion are colour-independent, so they are applied directly
+/// to the single-channel CFA mosaic by reusing RawTherapee's `LCPMapper`
+/// (`processVignette` + `correctDistortion`). CA is intentionally skipped
+/// (per-channel, belongs to the RGB stage). `raw_rotation_deg` reuses the RAW
+/// rotation; `focal_length` is required by the model, the rest default to
+/// sensible fallbacks when the caller does not supply EXIF-derived values.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct LensProfileParams {
+  /// Path to the `.lcp` file.
+  pub path: String,
+  /// Apply LCP vignette in CFA space.
+  #[uniffi(default = false)]
+  pub apply_vignette: bool,
+  /// Apply LCP distortion (geometry) in CFA space.
+  #[uniffi(default = false)]
+  pub apply_distortion: bool,
+  /// Focal length (mm) at capture — required by the LCP model.
+  pub focal_length: f32,
+  /// 35mm-equivalent focal length (mm). Defaults to [`LensProfileParams::focal_length`]
+  /// when omitted.
+  #[uniffi(default = None)]
+  pub focal_length_35mm: Option<f32>,
+  /// Focus distance (m). Defaults to 1.0 (near-infinity) when omitted.
+  #[uniffi(default = None)]
+  pub focus_dist: Option<f32>,
+  /// Aperture (f-number). Defaults to 8.0 when omitted.
+  #[uniffi(default = None)]
+  pub aperture: Option<f32>,
+  /// Raw rotation (degrees) applied before correction. Defaults to 0.
+  #[uniffi(default = 0)]
+  pub raw_rotation_deg: i32,
 }
 
 /// Develop parameters supplied by Kotlin for each render.
@@ -231,6 +293,14 @@ pub struct DevelopParams {
   /// `false` (the default) = today's behaviour: wide gamut, unclamped.
   #[uniffi(default = false)]
   pub clip_to_gamut: bool,
+  /// DCP camera profile hook (read-only parse + CFA-space BaselineExposure scalar).
+  /// `None` = no camera profile stage. See [`CameraProfileParams`].
+  #[uniffi(default = None)]
+  pub camera_profile: Option<CameraProfileParams>,
+  /// LCP lens profile hook (vignette + distortion in CFA space, reusing RT's
+  /// LCPMapper). `None` = no lens profile stage. See [`LensProfileParams`].
+  #[uniffi(default = None)]
+  pub lens_profile: Option<LensProfileParams>,
 }
 
 /// Grading parameters supplied by Kotlin for [`develop_and_grade`].
@@ -394,8 +464,9 @@ pub(crate) fn develop_image(
   // `denoise.rs` / `dehaze.rs` / `ca.rs`). Each consumes the mosaic buffer and
   // returns it; `None` (or a zero strength) is the identity, so an unconfigured
   // stage is free.
-  // Order: **Exposure → Denoise → Dehaze → CA**. Exposure is applied FIRST as
-  // the channel-uniform linear `2^exposure_ev` gain, so the neighbour-quality
+  // Order: **Deprofile → Exposure → Denoise → Dehaze → CA**. Deprofile runs
+  // first (see block below); exposure is applied next as the channel-uniform
+  // linear `2^exposure_ev` gain, so the neighbour-quality
   // stages that follow solve their problems on the exposure-corrected source:
   //   * dehaze now reads the exposure-compensated mosaic, which removes the
   //     exposure-dependent dehaze failure — an underexposed capture no longer
@@ -412,6 +483,53 @@ pub(crate) fn develop_image(
     RawPhotometricInterpretation::Cfa(config) => Some(config),
     _ => None,
   };
+
+  // Deprofile (pre-demosaic, in CFA mosaic space) — runs BEFORE exposure, matching
+  // the design's "exposure 之前、CFA mosaic 空间" staging (`FOTLAB-NATIVE-000005`).
+  // All of these are multiplicative on the mosaic, so the exact ordering among
+  // them and exposure is immaterial, but placing them first keeps them on the
+  // as-scaled raw. Every sub-stage is a no-op when its profile is `None` or its
+  // flag is off, so an unconfigured render is unchanged.
+  //
+  //   * DCP: read-only parse; only the CFA-stage BaselineExposure scalar is
+  //     applied here (`×= 2^offset`) when the user enables it. Colour matrix /
+  //     HSD / Tone / Look belong to the RGB calibration stage (B5).
+  //   * LCP: vignette + distortion are colour-independent, so they are applied
+  //     directly to the CFA mosaic (reusing RawTherapee's `LCPMapper`). CA is
+  //     intentionally skipped (per-channel, RGB stage).
+  if let Some(cp) = &params.camera_profile {
+    match rawtherapee_fotlab::parse_dcp(&cp.path) {
+      Ok(dcp) => {
+        if cp.apply_baseline_exposure && dcp.has_baseline_exposure {
+          let factor = 2.0f32.powf(dcp.baseline_exposure_offset as f32);
+          pixels.par_iter_mut().for_each(|v| *v *= factor);
+        }
+      }
+      Err(e) => log::warn!("deprofile: DCP parse failed for {}: {e}", cp.path),
+    }
+  }
+  if let Some(lp) = &params.lens_profile {
+    let focal = lp.focal_length;
+    let focal35 = lp.focal_length_35mm.unwrap_or(focal);
+    let focus = lp.focus_dist.unwrap_or(1.0);
+    let aperture = lp.aperture.unwrap_or(8.0);
+    if let Err(e) = rawtherapee_fotlab::apply_lcp_cfa(
+      &lp.path,
+      focal,
+      focal35,
+      focus,
+      aperture,
+      lp.apply_vignette,
+      lp.apply_distortion,
+      lp.raw_rotation_deg,
+      image.width as usize,
+      image.height as usize,
+      &mut pixels,
+    ) {
+      log::warn!("deprofile: LCP apply failed for {}: {e}", lp.path);
+    }
+  }
+
   // Exposure first: the stage's min/max clip fused into the same rayon pass
   // (clamp, then scale; `exposure.rs`) followed by the `2^exposure_ev` linear
   // gain on the normalised mosaic, applied before the neighbour-quality stages.

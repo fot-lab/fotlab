@@ -29,6 +29,8 @@ fn main() {
 
     // The .cc implements the function declared in the cxx bridge (src/lib.rs).
     build.file("cxx/rt_demosaic_shim.cc");
+    // Deprofile shim: DCP/LCP parse + LCP CFA apply (declared in the same bridge).
+    build.file("cxx/rt_deprofile_shim.cc");
     // Parse the #[cxx::bridge] module so cxx emits the matching C++ glue.
     build.bridge("src/lib.rs");
 
@@ -70,6 +72,8 @@ fn main() {
     // Rebuild when the shim changes.
     println!("cargo:rerun-if-changed=cxx/rt_demosaic_shim.cc");
     println!("cargo:rerun-if-changed=cxx/rt_demosaic_shim.h");
+    println!("cargo:rerun-if-changed=cxx/rt_deprofile_shim.cc");
+    println!("cargo:rerun-if-changed=cxx/rt_deprofile_shim.h");
     println!("cargo:rerun-if-changed=src/lib.rs");
     // The RawTherapee hooks (RawImage::set_xtrans + RawImageSource::demosaic_external)
     // must be present in the submodule worktree before building. This repo ships no

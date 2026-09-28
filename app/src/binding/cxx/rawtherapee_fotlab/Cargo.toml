@@ -14,7 +14,7 @@ description = "FotLab binding over RawTherapee's C++ demosaic algorithms (extern
 # the submodule.
 [lib]
 name = "rawtherapee_fotlab"
-crate-type = ["cdylib", "staticlib"]
+crate-type = ["cdylib", "staticlib", "rlib"]
 path = "src/lib.rs"
 
 [dependencies]

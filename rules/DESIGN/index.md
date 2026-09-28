@@ -23,4 +23,5 @@ This file contains **only** the item table. No statistics, no changelog — git 
 | `FOTLAB-UIXDES-000006` | Selection mode — long press, top bar state and batch actions | `UIXDES` | Draft | P1 | [detail](rules/DESIGN/detail/FOTLAB-UIXDES-000006.md) |
 | `FOTLAB-PIPELN-000001` | Processing pipeline — loader / develop / process | `PIPELN` | Draft | P1 | [detail](rules/DESIGN/detail/FOTLAB-PIPELN-000001.md) |
 | `FOTLAB-NATIVE-000004` | First-party RawTherapee demosaic engine — pure-Rust port, rayon-parallel, selectable algorithm surface | `NATIVE` | Draft | P1 | [detail](rules/DESIGN/detail/FOTLAB-NATIVE-000004.md) |
-<!-- Next sequence per category: UIXDES 000007, DATABS 000003, NATIVE 000005, IMGMGR 000002, PIPELN 000002. Append one row per new item; never reuse or renumber IDs. -->
+| `FOTLAB-NATIVE-000005` | RawTherapee DCP/LCP parser (extend existing `rawtherapee_fotlab` cxx) + Camera/Lens Profile correction in develop pipeline | `NATIVE` | Draft | P1 | [detail](rules/DESIGN/detail/FOTLAB-NATIVE-000005.md) |
+<!-- Next sequence per category: UIXDES 000007, DATABS 000003, NATIVE 000006, IMGMGR 000002, PIPELN 000002. Append one row per new item; never reuse or renumber IDs. -->

@@ -43,10 +43,18 @@ rawtherapee_fotlab/
 │   ├── rt_demosaic_shim.h        # C ABI declaration (cxx types)
 │   └── rt_demosaic_shim.cc       # C++ adapter → RawImageSource::demosaic_external
 └── src/
-    ├── lib.rs                    # cxx bridge + panic boundary + re-exports
+    ├── lib.rs                    # cxx bridge (demosaic + deprofile) + panic boundary + re-exports
     ├── demosaic.rs               # demosaic_cfa + CfaPattern + LinearImage + RtDemosaicAlgorithm
+    ├── dcp.rs                    # parse_dcp -> DcpParams (wraps rt_parse_dcp)
+    ├── lcp.rs                    # parse_lcp / apply_lcp_cfa (wraps rt_parse_lcp / rt_apply_lcp_cfa)
+    ├── deprofile_error.rs        # DeprofileError
     └── error.rs                  # RtDemosaicError
 ```
+
+The deprofile shim reuses RawTherapee's `DCPProfile` (read-only parse) and
+`LCPMapper` (vignette via the single-channel RAW `processVignette`, distortion
+via `correctDistortion` inverted through a radial LUT) — see
+`rules/DESIGN/detail/FOTLAB-NATIVE-000005.md`.
 
 ## Required RawTherapee hooks (apply to the submodule worktree, out-of-band)
 
@@ -71,6 +79,26 @@ submodule sources directly (the exact edits are documented in the code comments 
 - In `rtengine/rawimagesource.cc`, implement `demosaic_external` (build the `RawImage`,
   set `filters`/`xtrans`, copy the CFA into an owned `this->rawData`, force
   `initialGain = 1.0`, then dispatch the selected kernel).
+
+### Out-of-band inline getters for DCP/LCP (deprofile)
+
+The deprofile shim (`rt_deprofile_shim.cc`) reads DCP/LCP values that the
+vendored `external/RawTherapee` public API does not currently expose. As with the
+demosaic hooks above, add these **header-only** inline getters to the submodule
+worktree. They live in-class, so **no `.cc` changes are needed and
+`librtengine.a` does NOT need rebuilding** (the field layout is unchanged):
+
+- `rtengine/dcp.h` (`DCPProfile`, just before `private:`): `getHasColorMatrix1/2`,
+  `getHasForwardMatrix1/2`, `getColorMatrix1/2`, `getForwardMatrix1/2`,
+  `getBaselineExposureOffsetValue`.
+- `rtengine/lcp.h` (`LCPProfile`, in the public section): `getProfileName`,
+  `getCamera`, `getLens`, `getIsRaw`, `getIsFisheye`, `getSensorFormatFactor`,
+  `getPersModelCount`.
+
+Note: `DCPProfile` does **not** store the camera make/model, so auto-matching
+(OQ4) must use RT's `DCPStore` or read the DNG tags separately; the parsed
+`DcpParams` keeps `make`/`model`/`unique_camera_model`/`camera_model` fields
+reserved (currently `None`).
 
 Because the hooks are maintained in the submodule worktree by hand, they are **not**
 part of fotlab's tracked source and will not appear in a fresh `git submodule update`.

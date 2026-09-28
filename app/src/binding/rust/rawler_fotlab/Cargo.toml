@@ -71,3 +71,8 @@ rawalchemy_fotlab = { path = "../../cxx/rawalchemy_fotlab", optional = true }
 # (rules/DESIGN/detail/FOTLAB-NATIVE-000004.md).
 rawtrp_demos = { path = "../rawtrp_demos" }
 rawtrp_correct = { path = "../rawtrp_correct" }
+# DCP/LCP deprofile: reuses RawTherapee's DCPProfile / LCPMapper from
+# librtengine.a (the same static lib rawtrp_demos links). Confined to
+# binding/cxx/ like the other RT-backed crates; this is the consumer side that
+# threads the parsed profiles into develop_image's CFA-space stages.
+rawtherapee_fotlab = { path = "../../cxx/rawtherapee_fotlab" }

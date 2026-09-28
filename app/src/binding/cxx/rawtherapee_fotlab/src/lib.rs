@@ -113,3 +113,75 @@ fn rt_demosaic_safe(
     }
     Ok(())
 }
+
+// ---------------------------------------------------------------------------
+// Deprofile bridge: DCP/LCP parse + LCP CFA-space apply.
+//
+// Same discipline as the demosaic bridge above: i32 rc + err buffer, panic-guarded
+// on the Rust side (rt_demosaic_safe). The C++ shim (rt_deprofile_shim.cc) does
+// the try/catch so a C++ exception never unwinds across the FFI frame.
+// ---------------------------------------------------------------------------
+#[cxx::bridge]
+mod ffi_deprofile {
+    extern "C++" {
+        include!("rt_deprofile_shim.h");
+
+        fn rt_parse_dcp(
+            path: &CxxString,
+            cm1: &mut Vec<f64>,
+            cm2: &mut Vec<f64>,
+            fm1: &mut Vec<f64>,
+            fm2: &mut Vec<f64>,
+            has_cm1: &mut bool,
+            has_cm2: &mut bool,
+            has_fm1: &mut bool,
+            has_fm2: &mut bool,
+            will_interp: &mut bool,
+            temp1: &mut f64,
+            temp2: &mut f64,
+            baseline: &mut f64,
+            light1: &mut i16,
+            light2: &mut i16,
+            has_tone: &mut bool,
+            has_look: &mut bool,
+            has_huesat: &mut bool,
+            has_baseline: &mut bool,
+            err: &mut [u8],
+        ) -> i32;
+
+        fn rt_parse_lcp(
+            path: &CxxString,
+            profile_name: &mut Vec<u8>,
+            camera: &mut Vec<u8>,
+            lens: &mut Vec<u8>,
+            is_raw: &mut bool,
+            is_fisheye: &mut bool,
+            sensor_format_factor: &mut f32,
+            pers_model_count: &mut i32,
+            err: &mut [u8],
+        ) -> i32;
+
+        fn rt_apply_lcp_cfa(
+            path: &CxxString,
+            focal_length: f32,
+            focal_length_35mm: f32,
+            focus_dist: f32,
+            aperture: f32,
+            vignette: bool,
+            distortion: bool,
+            raw_rotation_deg: i32,
+            w: i32,
+            h: i32,
+            pixels: &mut [f32],
+            err: &mut [u8],
+        ) -> i32;
+    }
+}
+
+mod dcp;
+mod lcp;
+mod deprofile_error;
+
+pub use deprofile_error::DeprofileError;
+pub use dcp::{parse_dcp, DcpParams};
+pub use lcp::{apply_lcp_cfa, parse_lcp, LcpParams};
