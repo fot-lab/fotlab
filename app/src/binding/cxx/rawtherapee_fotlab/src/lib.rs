@@ -36,7 +36,8 @@
 //! reusing RT's exact decode. The apply math in this crate is original Rust, not
 //! derived from RT's apply code.
 
-use std::panic::{self, AssertUnwindSafe};
+// (the `std::panic::{self, AssertUnwindSafe}` imports used for catch_unwind live
+// in the modules that actually wrap the FFI calls, not here)
 
 // ---------------------------------------------------------------------------
 // cxx bridge: the C++ *decode* functions we call. `include!` pulls in the exact

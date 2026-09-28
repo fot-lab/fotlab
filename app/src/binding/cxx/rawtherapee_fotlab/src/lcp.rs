@@ -18,8 +18,10 @@
 use crate::deprofile_error::DeprofileError;
 use crate::ffi_deprofile::rt_compute_lcp_model;
 use crate::ffi_deprofile::rt_parse_lcp;
-use cxx::Vec as CxxVec;
 use std::panic::{self, AssertUnwindSafe};
+
+// NOTE: there is no `cxx::Vec`. On the Rust side a C++ `rust::Vec<T>` is plain
+// `std::vec::Vec<T>`, which is already in the prelude.
 
 /// Metadata decoded from an LCP profile (no correction coefficients).
 #[derive(Debug, Clone)]
@@ -53,9 +55,9 @@ pub struct LcpModel {
 
 /// Parse an LCP file into its profile metadata.
 pub fn parse_lcp(path: &str) -> Result<LcpParams, DeprofileError> {
-    let mut profile_name = CxxVec::default();
-    let mut camera = CxxVec::default();
-    let mut lens = CxxVec::default();
+    let mut profile_name: Vec<u8> = Vec::new();
+    let mut camera: Vec<u8> = Vec::new();
+    let mut lens: Vec<u8> = Vec::new();
     let mut is_raw = false;
     let mut is_fisheye = false;
     let mut sensor_format_factor = 0.0f32;
@@ -113,7 +115,7 @@ pub fn compute_lcp_model(
     w: usize,
     h: usize,
 ) -> Result<LcpModel, DeprofileError> {
-    let mut model = CxxVec::default();
+    let mut model: Vec<f32> = Vec::new();
     let mut is_fisheye = false;
     let mut swap_xy = false;
     let mut errbuf = [0u8; 256];

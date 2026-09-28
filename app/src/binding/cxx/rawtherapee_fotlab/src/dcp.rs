@@ -7,8 +7,10 @@
 
 use crate::deprofile_error::DeprofileError;
 use crate::ffi_deprofile::rt_parse_dcp;
-use cxx::Vec as CxxVec;
 use std::panic::{self, AssertUnwindSafe};
+
+// NOTE: there is no `cxx::Vec`. On the Rust side a C++ `rust::Vec<T>` is plain
+// `std::vec::Vec<T>`, which is already in the prelude.
 
 #[derive(Debug, Clone)]
 pub struct DcpParams {
@@ -47,10 +49,10 @@ fn flat_to_3x3(v: &[f64]) -> [[f64; 3]; 3] {
 /// Parse a DCP file, returning the extracted parameters. On RT failure the error
 /// string from the shim is surfaced as [`DeprofileError::Parse`].
 pub fn parse_dcp(path: &str) -> Result<DcpParams, DeprofileError> {
-    let mut cm1 = CxxVec::default();
-    let mut cm2 = CxxVec::default();
-    let mut fm1 = CxxVec::default();
-    let mut fm2 = CxxVec::default();
+    let mut cm1: Vec<f64> = Vec::new();
+    let mut cm2: Vec<f64> = Vec::new();
+    let mut fm1: Vec<f64> = Vec::new();
+    let mut fm2: Vec<f64> = Vec::new();
     let mut has_cm1 = false;
     let mut has_cm2 = false;
     let mut has_fm1 = false;
