@@ -45,7 +45,11 @@ use std::panic::{self, AssertUnwindSafe};
 // ---------------------------------------------------------------------------
 #[cxx::bridge]
 mod ffi_deprofile {
-    extern "C++" {
+    // `unsafe extern "C++"`: every shim function has a fully-safe signature
+    // (only CxxString / Vec / bool / [u8] / scalar params), so cxx treats them
+    // as safe-to-call C++ and *requires* the block to be `unsafe extern "C++"`.
+    // The generated `unsafe fn`s are wrapped in `unsafe {}` by the Rust modules.
+    unsafe extern "C++" {
         // Spelled relative to the crate root so the cxx-generated header resolves
         // it via the `manifest` include path (mirrors rawalchemy_fotlab's
         // `cpp/rawalchemy_api.h`). The shim .cc includes it the same way.

@@ -69,28 +69,30 @@ pub fn parse_dcp(path: &str) -> Result<DcpParams, DeprofileError> {
 
     cxx::let_cxx_string!(cpath = path);
     let rc = panic::catch_unwind(AssertUnwindSafe(|| {
-        rt_parse_dcp(
-            &cpath,
-            &mut cm1,
-            &mut cm2,
-            &mut fm1,
-            &mut fm2,
-            &mut has_cm1,
-            &mut has_cm2,
-            &mut has_fm1,
-            &mut has_fm2,
-            &mut will_interp,
-            &mut temp1,
-            &mut temp2,
-            &mut baseline,
-            &mut light1,
-            &mut light2,
-            &mut has_tone,
-            &mut has_look,
-            &mut has_huesat,
-            &mut has_baseline,
-            &mut errbuf,
-        )
+        unsafe {
+            rt_parse_dcp(
+                &cpath,
+                &mut cm1,
+                &mut cm2,
+                &mut fm1,
+                &mut fm2,
+                &mut has_cm1,
+                &mut has_cm2,
+                &mut has_fm1,
+                &mut has_fm2,
+                &mut will_interp,
+                &mut temp1,
+                &mut temp2,
+                &mut baseline,
+                &mut light1,
+                &mut light2,
+                &mut has_tone,
+                &mut has_look,
+                &mut has_huesat,
+                &mut has_baseline,
+                &mut errbuf,
+            )
+        }
     }))
     .unwrap_or(-99);
 

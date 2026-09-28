@@ -24,7 +24,6 @@
 // ===========================================================================
 
 use std::env;
-use std::path::Path;
 
 fn main() {
     let manifest = env!("CARGO_MANIFEST_DIR");
