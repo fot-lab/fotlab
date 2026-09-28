@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- FotLab icon preview (open in any browser).
+     Geometry is identical to res/drawable/ic_launcher_foreground.xml. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="512" height="512">
+  <rect x="0" y="0" width="108" height="108" fill="#FFFFFF"/>
+  <path fill="#2B1A0F" d="M10.8 11.3h86.4v10.2h-86.4z M10.8 65.5h86.4v10.2h-86.4z M10.8 11.3h10.2v64.4h-10.2z M87 11.3h10.2v64.4h-10.2z"/>
+  <path fill="#E5484D" d="M21 21.5h11v11h-11z M43 21.5h11v11h-11z M65 21.5h11v11h-11z M21 43.5h11v11h-11z M43 43.5h11v11h-11z M65 43.5h11v11h-11z"/>
+  <path fill="#4FB477" d="M32 21.5h11v11h-11z M21 32.5h11v11h-11z M54 21.5h11v11h-11z M43 32.5h11v11h-11z M76 21.5h11v11h-11z M65 32.5h11v11h-11z M32 43.5h11v11h-11z M21 54.5h11v11h-11z M54 43.5h11v11h-11z M43 54.5h11v11h-11z M76 43.5h11v11h-11z M65 54.5h11v11h-11z"/>
+  <path fill="#3B82D6" d="M32 32.5h11v11h-11z M54 32.5h11v11h-11z M76 32.5h11v11h-11z M32 54.5h11v11h-11z M54 54.5h11v11h-11z M76 54.5h11v11h-11z"/>
+  <path fill="#141414" d="M18 81.7h3v3h-3z M21 81.7h3v3h-3z M24 81.7h3v3h-3z M18 84.7h3v3h-3z M18 87.7h3v3h-3z M21 87.7h3v3h-3z M24 87.7h3v3h-3z M18 90.7h3v3h-3z M18 93.7h3v3h-3z M30 87.7h3v3h-3z M33 87.7h3v3h-3z M36 87.7h3v3h-3z M30 90.7h3v3h-3z M36 90.7h3v3h-3z M30 93.7h3v3h-3z M33 93.7h3v3h-3z M36 93.7h3v3h-3z M45 84.7h3v3h-3z M42 87.7h3v3h-3z M45 87.7h3v3h-3z M48 87.7h3v3h-3z M45 90.7h3v3h-3z M45 93.7h3v3h-3z M48 93.7h3v3h-3z M54 81.7h3v3h-3z M54 84.7h3v3h-3z M54 87.7h3v3h-3z M54 90.7h3v3h-3z M54 93.7h3v3h-3z M57 93.7h3v3h-3z M60 93.7h3v3h-3z M66 87.7h3v3h-3z M69 87.7h3v3h-3z M72 87.7h3v3h-3z M66 90.7h3v3h-3z M72 90.7h3v3h-3z M66 93.7h3v3h-3z M69 93.7h3v3h-3z M72 93.7h3v3h-3z M75 93.7h3v3h-3z M81 81.7h3v3h-3z M81 84.7h3v3h-3z M81 87.7h3v3h-3z M84 87.7h3v3h-3z M87 87.7h3v3h-3z M81 90.7h3v3h-3z M87 90.7h3v3h-3z M81 93.7h3v3h-3z M84 93.7h3v3h-3z M87 93.7h3v3h-3z"/>
+</svg>
