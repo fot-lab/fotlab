@@ -18,9 +18,9 @@ def px(v):
 WHITE = (255, 255, 255)
 GRAY = (209, 209, 209)   # 18% gray subtitle plate
 BROWN = (43, 26, 15)
-RED = (178, 59, 63)
-GREEN = (44, 122, 75)
-BLUE = (46, 99, 176)
+RED = (138, 43, 58)
+GREEN = (75, 93, 46)
+BLUE = (31, 107, 168)
 BLACK = (20, 20, 20)
 
 W = H = 512
