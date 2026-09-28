@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdint>
 #include <array>
+#include <type_traits>
 
 namespace rtengine
 {
@@ -240,6 +241,14 @@ T log2lin(T x, T base)
 {
     constexpr T one(1);
     return (std::pow(base, x) - one) / (base - one);
+}
+
+// Vendored from rtengine/utils.h: LCP code calls this unqualified with an
+// rtengine enum, so ADL on the argument's associated namespace finds it.
+template<typename ENUM>
+constexpr typename std::underlying_type<ENUM>::type toUnderlying(ENUM value)
+{
+    return static_cast<typename std::underlying_type<ENUM>::type>(value);
 }
 
 }
