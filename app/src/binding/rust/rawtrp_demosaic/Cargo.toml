@@ -1,5 +1,5 @@
 [package]
-name = "rawtrp_demos"
+name = "rawtrp_demosaic"
 version = "0.1.0"
 edition = "2021"
 publish = false
@@ -20,7 +20,7 @@ description = "First-party pure-Rust port of the RawTherapee demosaic kernels (B
 # through the path dependency below.
 
 [lib]
-name = "rawtrp_demos"
+name = "rawtrp_demosaic"
 crate-type = ["rlib"]
 path = "src/lib.rs"
 

@@ -9,7 +9,7 @@
 //!
 //! ## Contract
 //!
-//! Like the demosaic kernels in `rawtrp_demos`, this crate takes the minimal
+//! Like the demosaic kernels in `rawtrp_demosaic`, this crate takes the minimal
 //! contract from `rules/STRUCT/detail/RAWTRP-DECODE-000003.md` §3.1 — **an
 //! array plus a CFA description** — so it needs no `RawImageSource` and no C++:
 //!

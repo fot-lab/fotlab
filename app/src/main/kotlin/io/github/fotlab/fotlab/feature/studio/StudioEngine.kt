@@ -300,7 +300,7 @@ object StudioEngine {
      * The demosaic algorithms the DevelopFilm bar offers, in catalogue order.
      *
      * Read from the native catalogue instead of a list written in the Composable, so the day a
-     * kernel lands in `rawtrp_demos` the menu already offers it (`FOTLAB-NATIVE-000004` D5).
+     * kernel lands in `rawtrp_demosaic` the menu already offers it (`FOTLAB-NATIVE-000004` D5).
      * Each entry carries both its display label and the [DemosaicAlgorithm] to send back, which
      * is what keeps the UI from needing an id→algorithm table of its own — the list and the
      * dispatch come from the same place and cannot drift apart.

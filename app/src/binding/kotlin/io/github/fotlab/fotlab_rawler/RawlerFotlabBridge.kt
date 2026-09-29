@@ -134,7 +134,7 @@ object RawlerFotlabBridge {
 
     /**
      * The demosaic algorithms the Studio dropdown may offer, in display order: rawler's own
-     * debayers (`RAWLER …`) followed by the RawTherapee kernels ported in `rawtrp_demos`
+     * debayers (`RAWLER …`) followed by the RawTherapee kernels ported in `rawtrp_demosaic`
      * (`RAWTRP …`), each carrying the [DemosaicAlgorithm] the menu sends back
      * (`FOTLAB-NATIVE-000004` D5). Not a develop call — it only enumerates, so it is cheap
      * enough to read once and cache.

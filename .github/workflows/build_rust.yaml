@@ -340,17 +340,17 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
-            app/src/binding/rust/rawtrp_demos -> target
+            app/src/binding/rust/rawtrp_demosaic -> target
             app/src/binding/rust/rawler_fotlab -> target
           cache-all-crates: true
           env-vars: DNGLAB_SHA
 
-      # `rawtrp_demos` is its own workspace (a sibling of rawler_fotlab, not a
+      # `rawtrp_demosaic` is its own workspace (a sibling of rawler_fotlab, not a
       # member of it), hence `--manifest-path` rather than `-p`.
-      - name: Test rawtrp_demos
+      - name: Test rawtrp_demosaic
         run: |
           set -euo pipefail
-          cargo test --manifest-path app/src/binding/rust/rawtrp_demos/Cargo.toml
+          cargo test --manifest-path app/src/binding/rust/rawtrp_demosaic/Cargo.toml
         shell: bash
 
       # rawler_fotlab carries an optional `rawalchemy` feature that pulls in a

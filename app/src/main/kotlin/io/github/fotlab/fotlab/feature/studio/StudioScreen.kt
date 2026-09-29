@@ -1215,7 +1215,7 @@ private val PickerMenuMaxHeight = 256.dp
  *
  * The entries come from the native catalogue ([StudioEngine.demosaicCandidates]), not from a list
  * written here: the menu and the pipeline read the same catalogue, so a kernel ported in
- * `rawtrp_demos` cannot show up in one without the other (`FOTLAB-NATIVE-000004` D5). See
+ * `rawtrp_demosaic` cannot show up in one without the other (`FOTLAB-NATIVE-000004` D5). See
  * [demosaicLabel] for how each entry's text is chosen.
  */
 @Composable

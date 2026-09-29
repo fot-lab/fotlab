@@ -84,7 +84,7 @@ pub(crate) fn correct_ca(
 
   // Wrap the mosaic, correct in place, hand the buffer back. `Array2D` owns a
   // plain row-major `Vec`, so the round trip is two row-wise moves.
-  let mut mosaic = rawtrp_demos::Array2D::new(width, height);
+  let mut mosaic = rawtrp_demosaic::Array2D::new(width, height);
   for row in 0..height {
     mosaic.row_mut(row).copy_from_slice(&pixels[row * width..(row + 1) * width]);
   }

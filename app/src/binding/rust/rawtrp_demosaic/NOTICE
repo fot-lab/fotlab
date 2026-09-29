@@ -1,4 +1,4 @@
-rawtrp_demos — first-party Rust port of the RawTherapee demosaic kernels
+rawtrp_demosaic — first-party Rust port of the RawTherapee demosaic kernels
 =========================================================================
 
 The demosaicing algorithms in this crate are **ports of RawTherapee**, which is

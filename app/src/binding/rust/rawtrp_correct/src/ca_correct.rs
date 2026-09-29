@@ -38,7 +38,7 @@
 //! omitted, and all thresholds (`eps`, the `0.25` ratio test, `±3.99` shift
 //! clamp) are unchanged because they live in the normalised domain.
 
-use rawtrp_demos::{Array2D, CfaDesc};
+use rawtrp_demosaic::{Array2D, CfaDesc};
 use rayon::prelude::*;
 use std::sync::Mutex;
 
@@ -1402,7 +1402,7 @@ pub fn fit_ca_bayer(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rawtrp_demos::CfaDesc;
+    use rawtrp_demosaic::CfaDesc;
 
     fn rggb() -> CfaDesc {
         // RGGB folded Bayer

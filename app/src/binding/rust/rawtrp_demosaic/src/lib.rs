@@ -1,4 +1,4 @@
-//! `rawtrp_demos` — first-party pure-Rust port of the RawTherapee demosaic kernels.
+//! `rawtrp_demosaic` — first-party pure-Rust port of the RawTherapee demosaic kernels.
 //!
 //! One module per algorithm, each ported from a named upstream file (see the file
 //! header) and parallelised with rayon at the **same** sharding points where
