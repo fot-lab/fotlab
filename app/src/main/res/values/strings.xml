@@ -90,6 +90,8 @@
     <string name="studio_cd_saturation">Saturation</string>
     <string name="studio_cd_log">Log curve</string>
     <string name="studio_cd_lut">LUT</string>
+    <string name="studio_cd_dcp">DCP camera profile</string>
+    <string name="studio_cd_lcp">LCP lens profile</string>
     <!-- Visible labels rendered under each operation-bar icon (short, fits a 56dp slot). -->
     <string name="studio_label_demosaic">Demosaic</string>
     <string name="studio_label_exposure">Exposure</string>
@@ -98,6 +100,8 @@
     <string name="studio_label_dehaze">Dehaze</string>
     <string name="studio_label_lca">LCA</string>
     <string name="studio_label_clipping">Clipping</string>
+    <string name="studio_label_dcp">DCP</string>
+    <string name="studio_label_lcp">LCP</string>
     <string name="studio_ca_title">LCA (chromatic aberration)</string>
     <string name="studio_ca_auto_label">Auto-fit</string>
     <string name="studio_ca_red_hint">Red radial strength (0 = off)</string>
@@ -154,6 +158,13 @@
     <!-- LUT dropdown items. -->
     <string name="studio_grade_lut_pick">Choose file…</string>
     <string name="studio_grade_lut_clear">None (remove LUT)</string>
+    <!-- DCP / LCP profile dropdowns (mirror the LUT picker; SAF file chooser + a "none" reset). -->
+    <string name="studio_dcp_pick">Choose file…</string>
+    <string name="studio_dcp_clear">None (remove camera correction)</string>
+    <string name="studio_lcp_pick">Choose file…</string>
+    <string name="studio_lcp_clear">None (remove lens correction)</string>
+    <string name="studio_dcp_error_copy">Could not read the picked file. Choose another DCP.</string>
+    <string name="studio_lcp_error_copy">Could not read the picked file. Choose another LCP.</string>
     <!-- Grade-fork error dialog (a non-.cube / corrupt LUT, or a grader failure). -->
     <string name="studio_grade_error_title">Grading failed</string>
     <string name="studio_grade_error_message">RawAlchemy could not apply these settings. Check the LUT file — it is normally a .cube 3D LUT.</string>

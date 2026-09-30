@@ -37,6 +37,8 @@ private val KEY_SNIFF_TIMEOUT_MS = longPreferencesKey("studio_sniff_timeout_ms")
 private val KEY_LUT_LAST_URI = stringPreferencesKey("studio_lut_last_uri")
 private val KEY_EXPORT_LAST_URI = stringPreferencesKey("studio_export_last_uri")
 private val KEY_IMPORT_LAST_URI = stringPreferencesKey("studio_import_last_uri")
+private val KEY_DCP_LAST_URI = stringPreferencesKey("studio_dcp_last_uri")
+private val KEY_LCP_LAST_URI = stringPreferencesKey("studio_lcp_last_uri")
 
 class MediaPreference(context: Context) {
 
@@ -66,6 +68,12 @@ class MediaPreference(context: Context) {
     /** Last document URI imported into the canvas, or null if none yet. */
     val lastImportUri: Flow<String?> = store.data.map { it[KEY_IMPORT_LAST_URI] }
 
+    /** Last document URI picked for a DCP camera profile, or null if none yet. */
+    val lastDcpUri: Flow<String?> = store.data.map { it[KEY_DCP_LAST_URI] }
+
+    /** Last document URI picked for an LCP lens profile, or null if none yet. */
+    val lastLcpUri: Flow<String?> = store.data.map { it[KEY_LCP_LAST_URI] }
+
     /** Remember the LUT document URI (or clear with null) for next time's initial folder. */
     suspend fun setLastLutUri(value: String?) {
         store.edit { prefs ->
@@ -84,6 +92,20 @@ class MediaPreference(context: Context) {
     suspend fun setLastImportUri(value: String?) {
         store.edit { prefs ->
             if (value != null) prefs[KEY_IMPORT_LAST_URI] = value else prefs.remove(KEY_IMPORT_LAST_URI)
+        }
+    }
+
+    /** Remember the DCP document URI (or clear with null) for next time's initial folder. */
+    suspend fun setLastDcpUri(value: String?) {
+        store.edit { prefs ->
+            if (value != null) prefs[KEY_DCP_LAST_URI] = value else prefs.remove(KEY_DCP_LAST_URI)
+        }
+    }
+
+    /** Remember the LCP document URI (or clear with null) for next time's initial folder. */
+    suspend fun setLastLcpUri(value: String?) {
+        store.edit { prefs ->
+            if (value != null) prefs[KEY_LCP_LAST_URI] = value else prefs.remove(KEY_LCP_LAST_URI)
         }
     }
 }

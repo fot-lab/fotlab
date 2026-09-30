@@ -48,6 +48,8 @@ import androidx.compose.material.icons.filled.Air
 import androidx.compose.material.icons.filled.ClosedCaption
 import androidx.compose.material.icons.filled.Grain
 import androidx.compose.material.icons.filled.WbAuto
+import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.Camera
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -144,6 +146,12 @@ fun StudioScreen() {
     val lastLutUri by mediaPref.lastLutUri.collectAsState(initial = null)
     val lastExportUri by mediaPref.lastExportUri.collectAsState(initial = null)
     val lastImportUri by mediaPref.lastImportUri.collectAsState(initial = null)
+    // DCP / LCP camera & lens profile selections (drive the develop-bar icon tint) and their own
+    // "last opened document" URIs, so each picker opens where the previous pick landed.
+    val cameraProfile by StudioEngine.cameraProfile.collectAsState()
+    val lensProfile by StudioEngine.lensProfile.collectAsState()
+    val lastDcpUri by mediaPref.lastDcpUri.collectAsState(initial = null)
+    val lastLcpUri by mediaPref.lastLcpUri.collectAsState(initial = null)
 
     val zoomState = rememberZoomState()
     val renderResult by StudioEngine.renderResult.collectAsState()
@@ -271,6 +279,30 @@ fun StudioScreen() {
             persistUriPermission(context, picked, write = false)
             scope.launch { mediaPref.setLastLutUri(picked.toString()) }
             StudioEngine.setGradeLut(picked)
+        }
+    }
+
+    // DCP camera-profile picker — same SAF "remember my last folder" mechanics as the LUT picker.
+    val dcpPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        val picked = result.takeIf { it.resultCode == Activity.RESULT_OK }?.data?.data
+        if (picked != null) {
+            persistUriPermission(context, picked, write = false)
+            scope.launch { mediaPref.setLastDcpUri(picked.toString()) }
+            StudioEngine.setCameraProfileUri(picked)
+        }
+    }
+
+    // LCP lens-profile picker — same SAF "remember my last folder" mechanics as the LUT picker.
+    val lcpPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        val picked = result.takeIf { it.resultCode == Activity.RESULT_OK }?.data?.data
+        if (picked != null) {
+            persistUriPermission(context, picked, write = false)
+            scope.launch { mediaPref.setLastLcpUri(picked.toString()) }
+            StudioEngine.setLensProfileUri(picked)
         }
     }
 
@@ -463,6 +495,20 @@ fun StudioScreen() {
                                 clipToGamutEnabled = StudioEngine.currentClipToGamut()
                                 showClippingDialog = true
                             },
+                            cameraProfileActive = cameraProfile != null,
+                            lensProfileActive = lensProfile != null,
+                            onCameraProfilePick = {
+                                dcpPickerLauncher.launch(
+                                    openDocumentIntent(arrayOf("*/*"), lastDcpUri?.let { Uri.parse(it) }),
+                                )
+                            },
+                            onCameraProfileClear = StudioEngine::clearCameraProfile,
+                            onLensProfilePick = {
+                                lcpPickerLauncher.launch(
+                                    openDocumentIntent(arrayOf("*/*"), lastLcpUri?.let { Uri.parse(it) }),
+                                )
+                            },
+                            onLensProfileClear = StudioEngine::clearLensProfile,
                         )
                         // Grade tools (Contrast/Saturation/LOG/LUT) are RAW-only, like the
                         // former grade bar.
@@ -1560,6 +1606,81 @@ private fun LutButton(
 }
 
 /**
+ * DCP camera-profile picker — "Choose file…" (SAF) / "None (remove camera correction)". Primary
+ * tint while a profile is loaded (the [active] flag).
+ */
+@Composable
+private fun DcpButton(
+    active: Boolean,
+    onPick: () -> Unit,
+    onClear: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var open by remember { mutableStateOf(false) }
+    Box(modifier = modifier) {
+        IconButton(onClick = { open = true }) {
+            Icon(
+                imageVector = Icons.Filled.PhotoCamera,
+                contentDescription = stringResource(id = R.string.studio_cd_dcp),
+                tint = if (active) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text(text = stringResource(id = R.string.studio_dcp_pick)) },
+                onClick = { open = false; onPick() },
+            )
+            DropdownMenuItem(
+                text = { Text(text = stringResource(id = R.string.studio_dcp_clear)) },
+                onClick = { open = false; onClear() },
+            )
+        }
+    }
+}
+
+/**
+ * LCP lens-profile picker — "Choose file…" (SAF) / "None (remove lens correction)". Primary tint
+ * while a profile is loaded (the [active] flag). The bar sits just above the fun bar, so Material3
+ * opens this dropdown upward automatically.
+ */
+@Composable
+private fun LcpButton(
+    active: Boolean,
+    onPick: () -> Unit,
+    onClear: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var open by remember { mutableStateOf(false) }
+    Box(modifier = modifier) {
+        IconButton(onClick = { open = true }) {
+            Icon(
+                imageVector = Icons.Filled.Camera,
+                contentDescription = stringResource(id = R.string.studio_cd_lcp),
+                tint = if (active) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text(text = stringResource(id = R.string.studio_lcp_pick)) },
+                onClick = { open = false; onPick() },
+            )
+            DropdownMenuItem(
+                text = { Text(text = stringResource(id = R.string.studio_lcp_clear)) },
+                onClick = { open = false; onClear() },
+            )
+        }
+    }
+}
+
+/**
  * DevelopFilm bar — the develop tools that used to live directly on the fun bar, now ordered
  * Exposure → Denoise → Dehaze → Demosaic → White Balance: exposure is first, the mosaic-cleaning
  * stages run before demosaic, and white balance sits after demosaic. Reordering the list below
@@ -1580,11 +1701,21 @@ private fun StudioOperationBarDevelopFilm(
     onExposure: () -> Unit,
     onWhiteBalance: () -> Unit,
     onClipping: () -> Unit,
+    cameraProfileActive: Boolean = false,
+    lensProfileActive: Boolean = false,
+    onCameraProfilePick: () -> Unit,
+    onCameraProfileClear: () -> Unit,
+    onLensProfilePick: () -> Unit,
+    onLensProfileClear: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     HorizontalOperationBar(
         modifier = modifier,
         items = listOf(
+            OperationalButton(
+                id = "lcp",
+                label = stringResource(id = R.string.studio_label_lcp),
+            ) { LcpButton(active = lensProfileActive, onPick = onLensProfilePick, onClear = onLensProfileClear) },
             OperationalButton(
                 id = "exposure",
                 label = stringResource(id = R.string.studio_label_exposure),
@@ -1601,6 +1732,10 @@ private fun StudioOperationBarDevelopFilm(
                 id = "dehaze",
                 label = stringResource(id = R.string.studio_label_dehaze),
             ) { DehazeButton(onDehaze) },
+            OperationalButton(
+                id = "dcp",
+                label = stringResource(id = R.string.studio_label_dcp),
+            ) { DcpButton(active = cameraProfileActive, onPick = onCameraProfilePick, onClear = onCameraProfileClear) },
             OperationalButton(
                 id = "demosaic",
                 label = stringResource(id = R.string.studio_label_demosaic),

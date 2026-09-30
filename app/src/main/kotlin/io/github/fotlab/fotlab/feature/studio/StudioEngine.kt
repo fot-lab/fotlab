@@ -18,8 +18,10 @@ import io.github.fotlab.fotlab_rawler.DemosaicAlgorithm
 import io.github.fotlab.fotlab_rawler.DemosaicCandidate
 import io.github.fotlab.fotlab_rawler.DehazeMergeMode
 import io.github.fotlab.fotlab_rawler.CaSettings
+import io.github.fotlab.fotlab_rawler.CameraProfileParams
 import io.github.fotlab.fotlab_rawler.DevelopParams
 import io.github.fotlab.fotlab_rawler.GradeParams
+import io.github.fotlab.fotlab_rawler.LensProfileParams
 import io.github.fotlab.fotlab_rawler.RawlerImageLoaded
 import io.github.fotlab.fotlab_rawler.RawlerFotlabBridge
 import kotlinx.coroutines.CoroutineScope
@@ -208,6 +210,8 @@ object StudioEngine {
             dehazeMergeMode = currentDehazeMergeMode,
             ca = currentCa,
             clipToGamut = currentClipToGamut,
+            cameraProfile = cameraProfileState.value,
+            lensProfile = lensProfileState.value,
                         downsample = downsampleState.value,
                     ),
                 ) ?: return StudioRenderResult.Unsupported
@@ -235,6 +239,18 @@ object StudioEngine {
          * `content://` URIs so the native grader can open a real path.
          */
         const val LUT_CACHE_DIR = "grading-luts"
+
+        /**
+         * App-private cache subdirectory holding SAF-picked DCP camera-profile files copied off their
+         * `content://` URIs so the native deprofile stage can open a real path.
+         */
+        const val DCP_CACHE_DIR = "camera-profiles"
+
+        /**
+         * App-private cache subdirectory holding SAF-picked LCP lens-profile files copied off their
+         * `content://` URIs so the native deprofile stage can open a real path.
+         */
+        const val LCP_CACHE_DIR = "lens-profiles"
 
         /**
          * App-private cache subdirectory holding opened source documents copied off their
@@ -516,6 +532,8 @@ object StudioEngine {
             dehazeMergeMode = currentDehazeMergeMode,
             ca = currentCa,
             clipToGamut = currentClipToGamut,
+            cameraProfile = cameraProfileState.value,
+            lensProfile = lensProfileState.value,
             // The grade fork develops through the same pipeline, so it honours the switch too —
             // grading a quarter-resolution frame is simply grading fewer pixels.
             downsample = downsampleState.value,
@@ -561,6 +579,52 @@ object StudioEngine {
         val tmp = File.createTempFile("lut-", ".part", dir)
         try {
             (resolver.openInputStream(uri) ?: error("cannot open picked LUT")).use { input ->
+                tmp.outputStream().use { out ->
+                    val buf = ByteArray(64 * 1024)
+                    while (true) {
+                        val n = input.read(buf)
+                        if (n <= 0) break
+                        digest.update(buf, 0, n)
+                        out.write(buf, 0, n)
+                    }
+                }
+            }
+        } catch (t: Throwable) {
+            tmp.delete()
+            throw t
+        }
+        val ext = displayName.substringAfterLast('.', "")
+            .takeIf { it.isNotEmpty() }
+            ?.let { "." + it.take(8) }
+            .orEmpty()
+        val dest = File(dir, digest.digest().joinToString("") { "%02x".format(it) } + ext)
+        if (dest.exists()) {
+            tmp.delete()
+        } else if (!tmp.renameTo(dest)) {
+            tmp.copyTo(dest, overwrite = true)
+            tmp.delete()
+        }
+        return displayName to dest.absolutePath
+    }
+
+    /**
+     * Copy the SAF document behind [uri] into `cacheDir/[subdir]/<sha-256><ext>` and return
+     * `(displayName, absolutePath)`. Shared by the DCP / LCP pickers; content-addressed so re-picking
+     * the same file reuses the copy, and the extension comes from the display name so a real `.dcp` /
+     * `.lcp` keeps its suffix while an arbitrary pick is still accepted (format validation is the
+     * native deprofile stage's job). Identical mechanics to [copyLutToCache].
+     */
+    private fun copyProfileToCache(uri: Uri, subdir: String): Pair<String, String> {
+        val resolver = appContext.contentResolver
+        val displayName = resolver
+            .query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { c -> if (c.moveToFirst() && !c.isNull(0)) c.getString(0) else null }
+            ?: "profile"
+        val dir = File(appContext.cacheDir, subdir).apply { mkdirs() }
+        val digest = MessageDigest.getInstance("SHA-256")
+        val tmp = File.createTempFile("prof-", ".part", dir)
+        try {
+            (resolver.openInputStream(uri) ?: error("cannot open picked profile")).use { input ->
                 tmp.outputStream().use { out ->
                     val buf = ByteArray(64 * 1024)
                     while (true) {
@@ -753,6 +817,8 @@ object StudioEngine {
             dehazeMergeMode = currentDehazeMergeMode,
             ca = currentCa,
             clipToGamut = currentClipToGamut,
+            cameraProfile = cameraProfileState.value,
+            lensProfile = lensProfileState.value,
             downsample = downsampleState.value,
         )
         // `metered` is the offset relative to the current image; add the recorded applied exposure
@@ -798,6 +864,26 @@ object StudioEngine {
 
     /** The current out-of-gamut clipping switch; the UI prefills the Clipping dialog from this. */
     fun currentClipToGamut(): Boolean = currentClipToGamut
+
+    /**
+     * The DCP camera profile retained for the next develop re-render; null = off (no camera
+     * corrections). Only the CFA-stage BaselineExposure scalar is applied today (the colour
+     * matrix / HSD / Tone / Look belong to the RGB calibration stage and are out of scope here).
+     */
+    private val cameraProfileState = MutableStateFlow<CameraProfileParams?>(null)
+    val cameraProfile: StateFlow<CameraProfileParams?> = cameraProfileState.asStateFlow()
+
+    /**
+     * The LCP lens profile retained for the next develop re-render; null = off (no lens
+     * corrections). Vignette + distortion are colour-independent and applied directly to the
+     * single-channel CFA mosaic. `focalLength` is required by the LCP model but rawler's decoded
+     * `RawImage` does not surface it, so a fixed fallback (mm) is used until an EXIF accessor lands.
+     */
+    private val lensProfileState = MutableStateFlow<LensProfileParams?>(null)
+    val lensProfile: StateFlow<LensProfileParams?> = lensProfileState.asStateFlow()
+
+    /** Fallback focal length (mm) handed to the LCP model when the RAW exposes no EXIF focal length. */
+    private const val DEFAULT_LCP_FOCAL_MM = 50.0f
 
     /**
      * Re-render with out-of-gamut clipping [enabled] (Studio Clipping dialog). Every component of
@@ -853,6 +939,84 @@ object StudioEngine {
         reDevelop()
     }
 
+    /**
+     * Re-develop with a DCP camera profile [profile] (picked from the Studio DCP dropdown), keeping
+     * the current demosaic algorithm, exposure, white balance, denoise, dehaze and lens profile.
+     * `null` (the dropdown's "none" item) is the identity — [DevelopParams.cameraProfile] is `None`,
+     * so the deprofile stage is skipped. The canvas is re-rendered from the re-developed PNG.
+     */
+    fun setCameraProfile(profile: CameraProfileParams?) {
+        cameraProfileState.value = profile
+        reGrade()
+    }
+
+    /** Remove the DCP camera profile (the "none" item in the DCP dropdown). */
+    fun clearCameraProfile() {
+        setCameraProfile(null)
+    }
+
+    /**
+     * Accept a SAF-picked DCP [uri] (no format restriction — rawtherapee_fotlab validates the bytes as
+     * a `.dcp`). The native deprofile stage only reads real filesystem paths, never `content://` URIs,
+     * so the bytes are copied into an app-private cache file (content-addressed) and that path is what
+     * crosses the FFI. A copy failure is reported via [gradeError] without changing the selection; a
+     * bad DCP surfaces when the native develop runs.
+     */
+    fun setCameraProfileUri(uri: Uri) {
+        val token = loadNonce.get()
+        scope.launch {
+            val copied = runCatching { copyProfileToCache(uri, Constants.DCP_CACHE_DIR) }.getOrNull()
+            if (copied == null) {
+                gradeErrorState.value = appContext.getString(R.string.studio_dcp_error_copy)
+                return@launch
+            }
+            if (loadNonce.get() != token) return@launch
+            cameraProfileState.value = CameraProfileParams(copied.second, true)
+            reGrade()
+        }
+    }
+
+    /**
+     * Re-develop with an LCP lens profile [profile] (picked from the Studio LCP dropdown), keeping the
+     * current demosaic algorithm, exposure, white balance, denoise, dehaze and camera profile. `null`
+     * (the dropdown's "none" item) is the identity — [DevelopParams.lensProfile] is `None`, so the
+     * deprofile stage is skipped.
+     */
+    fun setLensProfile(profile: LensProfileParams?) {
+        lensProfileState.value = profile
+        reGrade()
+    }
+
+    /** Remove the LCP lens profile (the "none" item in the LCP dropdown). */
+    fun clearLensProfile() {
+        setLensProfile(null)
+    }
+
+    /**
+     * Accept a SAF-picked LCP [uri] (no format restriction — rawtherapee_fotlab validates the bytes as
+     * a `.lcp`). Copied into an app-private cache like the DCP/LUT pickers; vignette + distortion are
+     * both enabled so the single-channel correction actually runs. The LCP model requires a focal
+     * length that rawler does not surface, so [DEFAULT_LCP_FOCAL_MM] is used (see [lensProfileState]).
+     */
+    fun setLensProfileUri(uri: Uri) {
+        val token = loadNonce.get()
+        scope.launch {
+            val copied = runCatching { copyProfileToCache(uri, Constants.LCP_CACHE_DIR) }.getOrNull()
+            if (copied == null) {
+                gradeErrorState.value = appContext.getString(R.string.studio_lcp_error_copy)
+                return@launch
+            }
+            if (loadNonce.get() != token) return@launch
+            lensProfileState.value = LensProfileParams(
+                path = copied.second,
+                applyVignette = true,
+                applyDistortion = true,
+                focalLength = DEFAULT_LCP_FOCAL_MM,
+            )
+            reGrade()
+        }
+    }
+
     /** Shared re-develop path: re-runs the develop pipeline with the retained algorithm + exposure. */
     private fun reDevelop(wbKelvin: Float? = currentWhiteBalanceKelvin) {
         val uri = currentUri ?: return
@@ -900,6 +1064,8 @@ object StudioEngine {
             dehazeMergeMode = currentDehazeMergeMode,
             ca = currentCa,
             clipToGamut = currentClipToGamut,
+            cameraProfile = cameraProfileState.value,
+            lensProfile = lensProfileState.value,
                         downsample = downsample,
                     ),
                     wbKelvin,
@@ -923,6 +1089,8 @@ object StudioEngine {
             dehazeMergeMode = currentDehazeMergeMode,
             ca = currentCa,
             clipToGamut = currentClipToGamut,
+            cameraProfile = cameraProfileState.value,
+            lensProfile = lensProfileState.value,
                         downsample = downsample,
                     ),
                 )
