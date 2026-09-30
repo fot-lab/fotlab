@@ -150,6 +150,8 @@ fun StudioScreen() {
     // "last opened document" URIs, so each picker opens where the previous pick landed.
     val cameraProfile by StudioEngine.cameraProfile.collectAsState()
     val lensProfile by StudioEngine.lensProfile.collectAsState()
+    val userLcpFocalLengthMm by StudioEngine.userLcpFocalLengthMm.collectAsState()
+    val rawFocalLengthMm by StudioEngine.rawFocalLengthMm.collectAsState()
     val lastDcpUri by mediaPref.lastDcpUri.collectAsState(initial = null)
     val lastLcpUri by mediaPref.lastLcpUri.collectAsState(initial = null)
 
@@ -247,6 +249,8 @@ fun StudioScreen() {
     // leaves the editing branch wide-gamut and unclamped. The sRGB presentation PNG is
     // unaffected either way, so the switch only changes what the grade fork receives.
     var showClippingDialog by remember { mutableStateOf(false) }
+    var showLcpFocalDialog by remember { mutableStateOf(false) }
+    var lcpFocalInput by remember { mutableStateOf("") }
     var clipToGamutEnabled by remember { mutableStateOf(true) }
 
     // Per-stage enable toggles for the develop dialogs. The switch has priority over the numeric
@@ -497,6 +501,7 @@ fun StudioScreen() {
                             },
                             cameraProfileActive = cameraProfile != null,
                             lensProfileActive = lensProfile != null,
+                            lensProfileUserFocal = userLcpFocalLengthMm,
                             onCameraProfilePick = {
                                 dcpPickerLauncher.launch(
                                     openDocumentIntent(arrayOf("*/*"), lastDcpUri?.let { Uri.parse(it) }),
@@ -509,6 +514,10 @@ fun StudioScreen() {
                                 )
                             },
                             onLensProfileClear = StudioEngine::clearLensProfile,
+                            onLensProfileFocal = {
+                                lcpFocalInput = userLcpFocalLengthMm?.let { "%.0f".format(it) } ?: ""
+                                showLcpFocalDialog = true
+                            },
                         )
                         // Grade tools (Contrast/Saturation/LOG/LUT) are RAW-only, like the
                         // former grade bar.
@@ -539,6 +548,50 @@ fun StudioScreen() {
                 }
             }
         }
+    }
+
+    if (showLcpFocalDialog) {
+        AlertDialog(
+            onDismissRequest = { showLcpFocalDialog = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        // Empty input → clear the override (fall back to decoded-RAW → LCP built-in → constant).
+                        val mm = lcpFocalInput.toFloatOrNull()
+                        StudioEngine.setLensProfileUserFocal(mm)
+                        showLcpFocalDialog = false
+                    },
+                ) {
+                    Text(text = stringResource(id = R.string.common_action_ok))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showLcpFocalDialog = false }) {
+                    Text(text = stringResource(id = R.string.common_action_cancel))
+                }
+            },
+            title = { Text(text = stringResource(id = R.string.studio_lcp_focal_title)) },
+            text = {
+                Column {
+                    Text(
+                        text = stringResource(
+                            id = R.string.studio_lcp_focal_hint,
+                            rawFocalLengthMm?.let { "%.0f".format(it) }
+                                ?: stringResource(id = R.string.studio_lcp_focal_unknown),
+                            StudioEngine.defaultLcpFocalMm.toInt(),
+                        ),
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    TextField(
+                        value = lcpFocalInput,
+                        onValueChange = { lcpFocalInput = it.filter { ch -> ch.isDigit() || ch == '.' } },
+                        label = { Text(text = stringResource(id = R.string.studio_lcp_focal_unit)) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    )
+                }
+            },
+        )
     }
 
     if (showUnsupported) {
@@ -1652,6 +1705,8 @@ private fun LcpButton(
     active: Boolean,
     onPick: () -> Unit,
     onClear: () -> Unit,
+    onFocal: () -> Unit,
+    currentUserFocal: Float? = null,
     modifier: Modifier = Modifier,
 ) {
     var open by remember { mutableStateOf(false) }
@@ -1671,6 +1726,18 @@ private fun LcpButton(
             DropdownMenuItem(
                 text = { Text(text = stringResource(id = R.string.studio_lcp_pick)) },
                 onClick = { open = false; onPick() },
+            )
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        text = if (currentUserFocal != null) {
+                            stringResource(id = R.string.studio_lcp_focal_with_value, "%.0f".format(currentUserFocal))
+                        } else {
+                            stringResource(id = R.string.studio_lcp_focal)
+                        },
+                    )
+                },
+                onClick = { open = false; onFocal() },
             )
             DropdownMenuItem(
                 text = { Text(text = stringResource(id = R.string.studio_lcp_clear)) },
@@ -1703,10 +1770,12 @@ private fun StudioOperationBarDevelopFilm(
     onClipping: () -> Unit,
     cameraProfileActive: Boolean = false,
     lensProfileActive: Boolean = false,
+    lensProfileUserFocal: Float? = null,
     onCameraProfilePick: () -> Unit,
     onCameraProfileClear: () -> Unit,
     onLensProfilePick: () -> Unit,
     onLensProfileClear: () -> Unit,
+    onLensProfileFocal: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     HorizontalOperationBar(
@@ -1715,7 +1784,7 @@ private fun StudioOperationBarDevelopFilm(
             OperationalButton(
                 id = "lcp",
                 label = stringResource(id = R.string.studio_label_lcp),
-            ) { LcpButton(active = lensProfileActive, onPick = onLensProfilePick, onClear = onLensProfileClear) },
+            ) { LcpButton(active = lensProfileActive, onPick = onLensProfilePick, onClear = onLensProfileClear, onFocal = onLensProfileFocal, currentUserFocal = lensProfileUserFocal) },
             OperationalButton(
                 id = "exposure",
                 label = stringResource(id = R.string.studio_label_exposure),

@@ -48,7 +48,7 @@ int32_t rt_parse_lcp(const std::string& path,
                      rust::Vec<uint8_t>& profile_name, rust::Vec<uint8_t>& camera,
                      rust::Vec<uint8_t>& lens, bool& is_raw, bool& is_fisheye,
                      float& sensor_format_factor, int32_t& pers_model_count,
-                     rust::Slice<uint8_t> err);
+                     float& focal_length, rust::Slice<uint8_t> err);
 
 // Decode + interpolate the LCP correction model for the given focal / geometry.
 // Fills `model` with 13 floats: x0, y0, fx, fy, vign0..3, dist0..4 (rfx/rfy are

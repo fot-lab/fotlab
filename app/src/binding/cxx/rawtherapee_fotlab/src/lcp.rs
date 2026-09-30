@@ -33,6 +33,12 @@ pub struct LcpParams {
     pub is_fisheye: bool,
     pub sensor_format_factor: f32,
     pub pers_model_count: i32,
+    /// Built-in (prime) focal length (mm) the LCP file itself carries — the
+    /// <focalLength> of its first perspective model. `None` when the profile
+    /// carries no usable focal (the C++ side returns ≤0 in that case). Consumed
+    /// by the develop pipeline as the **third** focal priority: user override >
+    /// decoded-RAW focal > this > `DEFAULT_LCP_FOCAL_MM` (`crate::develop`).
+    pub focal_length_mm: Option<f32>,
 }
 
 /// Decoded + interpolated LCP correction model for one (focal, geometry) point.
@@ -62,6 +68,7 @@ pub fn parse_lcp(path: &str) -> Result<LcpParams, DeprofileError> {
     let mut is_fisheye = false;
     let mut sensor_format_factor = 0.0f32;
     let mut pers_model_count = 0i32;
+    let mut focal_length = 0.0f32;
     let mut errbuf = [0u8; 256];
 
     cxx::let_cxx_string!(cpath = path);
@@ -76,6 +83,7 @@ pub fn parse_lcp(path: &str) -> Result<LcpParams, DeprofileError> {
                 &mut is_fisheye,
                 &mut sensor_format_factor,
                 &mut pers_model_count,
+                &mut focal_length,
                 &mut errbuf,
             )
         }
@@ -97,6 +105,11 @@ pub fn parse_lcp(path: &str) -> Result<LcpParams, DeprofileError> {
         is_fisheye,
         sensor_format_factor,
         pers_model_count,
+        focal_length_mm: if focal_length > 0.0f32 {
+            Some(focal_length)
+        } else {
+            None
+        },
     })
 }
 

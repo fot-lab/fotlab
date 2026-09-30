@@ -238,6 +238,20 @@ rtengine::LCPProfile::~LCPProfile()
     }
 }
 
+float rtengine::LCPProfile::getLcpFocalLength() const
+{
+    // Built-in (prime) focal length (mm) carried by the LCP: the <focalLength>
+    // of the first perspective model (parsed into LCPPersModel::focLen). For a
+    // prime LCP this IS the capture focal; for a zoom LCP it is the first
+    // frame's focal (an approximation — callers resolve the effective focal
+    // against the user override and the RAW capture focal before applying).
+    // <0 (or 0, never a valid focal) signals "profile carries no usable focal".
+    if (persModelCount <= 0 || aPersModel[0] == nullptr) {
+        return -1.0f;
+    }
+    return aPersModel[0]->focLen;
+}
+
 void rtengine::LCPProfile::calcParams(
     LCPCorrectionMode mode,
     float focalLength,

@@ -106,6 +106,12 @@ public:
     bool getIsFisheye() const { return isFisheye; }
     float getSensorFormatFactor() const { return sensorFormatFactor; }
     int getPersModelCount() const { return persModelCount; }
+    // fotlab: built-in (prime) focal length (mm) carried by the LCP — the
+    // <focalLength> of the first perspective model (parsed into
+    // LCPPersModel::focLen). <0 (or 0, never a valid focal) means the profile
+    // carries no usable focal. Defined in lcp.cc (needs the full LCPPersModel
+    // type, which is only forward-declared here).
+    float getLcpFocalLength() const;
 
 private:
     class LCPPersModel;

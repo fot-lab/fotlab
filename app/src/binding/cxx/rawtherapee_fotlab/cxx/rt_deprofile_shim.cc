@@ -91,7 +91,8 @@ int32_t rt_parse_dcp(const std::string& path,
 int32_t rt_parse_lcp(const std::string& path, rust::Vec<uint8_t>& profile_name,
                      rust::Vec<uint8_t>& camera, rust::Vec<uint8_t>& lens, bool& is_raw,
                      bool& is_fisheye, float& sensor_format_factor,
-                     int32_t& pers_model_count, rust::Slice<uint8_t> err) {
+                     int32_t& pers_model_count, float& focal_length,
+                     rust::Slice<uint8_t> err) {
     char ebuf[256];
     ebuf[0] = '\0';
     try {
@@ -107,6 +108,7 @@ int32_t rt_parse_lcp(const std::string& path, rust::Vec<uint8_t>& profile_name,
         is_fisheye = prof.getIsFisheye();
         sensor_format_factor = prof.getSensorFormatFactor();
         pers_model_count = prof.getPersModelCount();
+        focal_length = prof.getLcpFocalLength();
         return 0;
     } catch (const std::exception& e) {
         std::snprintf(ebuf, sizeof(ebuf), "LCP parse threw: %s", e.what());

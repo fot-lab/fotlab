@@ -79,6 +79,13 @@ use crate::denoise::denoise;
 use crate::exposure::apply_exposure;
 use crate::RawlerFotlabError;
 
+/// Last-resort focal length (mm) used by the LCP stage when no better source is
+/// available — i.e. the user did not specify one, the RAW EXIF carried no focal
+/// length, and the LCP file itself carries no built-in focal. Mirrors the Kotlin
+/// side's `DEFAULT_LCP_FOCAL_MM` (StudioEngine) so the two layers agree on the
+/// same fallback. 50 mm ≈ a "normal" prime.
+pub const DEFAULT_LCP_FOCAL_MM: f32 = 50.0;
+
 /// The product of the develop pipeline: a linear RGB image (no gamma applied).
 ///
 /// `rgb` is row-major linear RGB float, length `width * height * 3`.
@@ -129,7 +136,12 @@ pub struct CameraProfileParams {
 /// CA is intentionally skipped (per-channel, belongs to the RGB stage).
 /// `raw_rotation_deg` reuses the RAW rotation; `focal_length` is required by the
 /// model, the rest default to sensible fallbacks when the caller does not supply
-/// EXIF-derived values.
+/// EXIF-derived values. The *effective* focal length fed to the model is resolved
+/// in [`crate::develop::develop_image`] across a priority chain: a user-specified
+/// `focal_length` (this field, when `Some`) wins, then the capture focal length
+/// decoded from the RAW (`DevelopParams::raw_focal_length_mm`), then the focal
+/// length the LCP file itself carries (built-in), and finally the
+/// `DEFAULT_LCP_FOCAL_MM` constant.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct LensProfileParams {
   /// Path to the `.lcp` file.
@@ -140,9 +152,13 @@ pub struct LensProfileParams {
   /// Apply LCP distortion (geometry) in CFA space.
   #[uniffi(default = false)]
   pub apply_distortion: bool,
-  /// Focal length (mm) at capture — required by the LCP model.
-  pub focal_length: f32,
-  /// 35mm-equivalent focal length (mm). Defaults to [`LensProfileParams::focal_length`]
+  /// Focal length (mm) at capture — user override. `None` means "not specified";
+  /// the effective focal length then falls back to the decoded-RAW focal, the
+  /// LCP built-in focal, and finally the `DEFAULT_LCP_FOCAL_MM` constant (see the
+  /// struct doc). `Some(v)` makes the user value take top priority.
+  #[uniffi(default = None)]
+  pub focal_length: Option<f32>,
+  /// 35mm-equivalent focal length (mm). Defaults to the effective focal length
   /// when omitted.
   #[uniffi(default = None)]
   pub focal_length_35mm: Option<f32>,
@@ -304,6 +320,13 @@ pub struct DevelopParams {
   /// LCPMapper). `None` = no lens profile stage. See [`LensProfileParams`].
   #[uniffi(default = None)]
   pub lens_profile: Option<LensProfileParams>,
+  /// Focal length (mm) decoded from the *capture* RAW's EXIF — the lens focal
+  /// length the shot was taken at. `None` = the decoder did not surface one.
+  /// Consumed by the LCP stage as the second priority after any user override
+  /// (see [`LensProfileParams`] doc): effective focal = user → raw → LCP built-in
+  /// → `DEFAULT_LCP_FOCAL_MM`.
+  #[uniffi(default = None)]
+  pub raw_focal_length_mm: Option<f32>,
 }
 
 /// Grading parameters supplied by Kotlin for [`develop_and_grade`].
@@ -513,7 +536,19 @@ pub(crate) fn develop_image(
     }
   }
   if let Some(lp) = &params.lens_profile {
-    let focal = lp.focal_length;
+    // Resolve the effective focal length across the priority chain documented on
+    // `LensProfileParams`: user override (Tier 1) > decoded-RAW focal (Tier 2) >
+    // LCP built-in focal (Tier 3) > constant (Tier 4). `parse_lcp` reads the
+    // focal length the LCP file itself carries; if it has none, `None` passes
+    // through to the constant.
+    let lcp_builtin = rawtherapee_fotlab::parse_lcp(&lp.path)
+      .ok()
+      .and_then(|p| p.focal_length_mm);
+    let focal = lp
+      .focal_length
+      .or(params.raw_focal_length_mm)
+      .or(lcp_builtin)
+      .unwrap_or(DEFAULT_LCP_FOCAL_MM);
     let focal35 = lp.focal_length_35mm.unwrap_or(focal);
     let focus = lp.focus_dist.unwrap_or(1.0);
     let aperture = lp.aperture.unwrap_or(8.0);

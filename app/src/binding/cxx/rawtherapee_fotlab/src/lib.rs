@@ -92,6 +92,7 @@ mod ffi_deprofile {
             is_fisheye: &mut bool,
             sensor_format_factor: &mut f32,
             pers_model_count: &mut i32,
+            focal_length: &mut f32,
             err: &mut [u8],
         ) -> i32;
 

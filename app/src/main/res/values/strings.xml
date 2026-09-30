@@ -165,6 +165,13 @@
     <string name="studio_lcp_clear">None (remove lens correction)</string>
     <string name="studio_dcp_error_copy">Could not read the picked file. Choose another DCP.</string>
     <string name="studio_lcp_error_copy">Could not read the picked file. Choose another LCP.</string>
+    <!-- LCP "specify focal length" dialog (4-tier effective-focal priority). -->
+    <string name="studio_lcp_focal_title">LCP focal length</string>
+    <string name="studio_lcp_focal">Specify focal length</string>
+    <string name="studio_lcp_focal_with_value">Specify focal length: %1$s mm</string>
+    <string name="studio_lcp_focal_hint">Priority: user-specified &gt; decoded (%1$s mm) &gt; LCP built-in &gt; default (%2$d mm). Leave empty to clear.</string>
+    <string name="studio_lcp_focal_unit">Focal length (mm)</string>
+    <string name="studio_lcp_focal_unknown">unknown</string>
     <!-- Grade-fork error dialog (a non-.cube / corrupt LUT, or a grader failure). -->
     <string name="studio_grade_error_title">Grading failed</string>
     <string name="studio_grade_error_message">RawAlchemy could not apply these settings. Check the LUT file — it is normally a .cube 3D LUT.</string>

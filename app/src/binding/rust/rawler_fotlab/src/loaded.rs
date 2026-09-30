@@ -12,13 +12,14 @@ use std::panic::{self, AssertUnwindSafe};
 use std::path::Path;
 use std::sync::Arc;
 
+use rawler::rawsource::RawSource;
 use rawler::RawImage;
 
 use crate::bound;
 use crate::calibrate::WorkingSpace;
 use crate::develop::{develop_image, DevelopParams, GradeParams};
 use crate::intermediate;
-use crate::{decode::decode_to_rawimage, RawlerFotlabError};
+use crate::RawlerFotlabError;
 
 /// A RAW decoded exactly once and kept resident in Rust so Kotlin can re-develop /
 /// re-preview it cheaply.
@@ -30,6 +31,11 @@ use crate::{decode::decode_to_rawimage, RawlerFotlabError};
 #[derive(uniffi::Object)]
 pub struct RawlerImageLoaded {
     inner: Arc<RawImage>,
+    /// Capture focal length (mm) decoded from the RAW EXIF — the second priority
+    /// in the LCP effective-focal chain (`crate::develop`): user override > this >
+    /// LCP built-in focal > `DEFAULT_LCP_FOCAL_MM`. `None` when the file surfaced
+    /// no focal length (surfaced to Kotlin via [`Self::focal_length_mm`]).
+    focal_length_mm: Option<f64>,
 }
 
 /// Factory: the only slow step. Runs rawler's full decode once and returns the
@@ -42,9 +48,11 @@ pub fn decode_rawler_image(raw: &[u8]) -> Result<Arc<RawlerImageLoaded>, RawlerF
         return Err(RawlerFotlabError::Decode("empty input".to_string()));
     }
     panic::catch_unwind(AssertUnwindSafe(|| {
-        let image = decode_to_rawimage(raw)?;
+        let src = RawSource::new_from_slice(raw);
+        let (image, focal) = crate::decode::decode_source_with_focal(&src)?;
         Ok(Arc::new(RawlerImageLoaded {
             inner: Arc::new(image),
+            focal_length_mm: focal,
         }))
     }))
     .unwrap_or_else(|_| {
@@ -72,9 +80,10 @@ pub fn decode_rawler_image_from_path(path: String) -> Result<Arc<RawlerImageLoad
     }
     panic::catch_unwind(AssertUnwindSafe(|| {
         let src = crate::decode::open_source_file(Path::new(&path))?;
-        let image = crate::decode::decode_source(&src)?;
+        let (image, focal) = crate::decode::decode_source_with_focal(&src)?;
         Ok(Arc::new(RawlerImageLoaded {
             inner: Arc::new(image),
+            focal_length_mm: focal,
         }))
     }))
     .unwrap_or_else(|_| {
@@ -148,6 +157,15 @@ impl RawlerImageLoaded {
     /// See `rules/REVIEW/detail/OPTIMZ-PERFRM-000010.md`.
     pub fn supports_downsample(&self) -> bool {
         crate::demosaic::supports_downsample(&self.inner)
+    }
+
+    /// Capture focal length (mm) decoded from the RAW EXIF — the lens focal the
+    /// shot was taken at. `None` means the file carried no focal length. Consumed
+    /// by the LCP stage as the **second** priority after any user override:
+    /// effective focal = user → raw (this) → LCP built-in → `DEFAULT_LCP_FOCAL_MM`
+    /// (`crate::develop`).
+    pub fn focal_length_mm(&self) -> Option<f64> {
+        self.focal_length_mm
     }
 
     /// Develop the cached decode into a finished sRGB PNG, overriding the white balance with the

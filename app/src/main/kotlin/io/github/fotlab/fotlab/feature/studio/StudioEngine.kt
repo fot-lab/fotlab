@@ -127,6 +127,10 @@ object StudioEngine {
         gradeSelectionState.value = GradeSelection()
         gradeErrorState.value = null
         rawLoadedState.value = false
+        // The LCP focal sources belong to the previous file: the decoded-RAW focal is re-read for the
+        // new file, and the user override is dropped so it never leaks across files.
+        rawFocalLengthMmState.value = null
+        userLcpFocalLengthMmState.value = null
         // The quarter-resolution capability is a property of the decode, so it is re-answered for
         // the new file (null = nothing resident yet). The switch's own value is a preference and
         // deliberately survives the file switch.
@@ -188,6 +192,9 @@ object StudioEngine {
                 // the drawer can disable the switch instead of leaving it inert on a sensor that
                 // cannot use superpixel (`OPTIMZ-PERFRM-000010`).
                 downsampleSupportedState.value = RawlerFotlabBridge.supportsDownsample(loaded)
+                // Capture focal length (mm) decoded from the RAW EXIF — 2nd LCP priority (tier-2). UniFFI
+                // maps Option<f64> to a nullable Double?, so null means the file carried no focal.
+                rawFocalLengthMmState.value = loaded.focalLengthMm()?.toFloat()
                 // Develop once with as-shot params: pass `null` for both `exposureEv` and `wb` so the
                 // pipeline adopts the decoded as-shot values (rawler's `RawDevelop::default()`, which
                 // dnglab uses for its DNG thumbnail and applies no exposure step — FOTLAB-RAWLER-000004
@@ -212,6 +219,7 @@ object StudioEngine {
             clipToGamut = currentClipToGamut,
             cameraProfile = cameraProfileState.value,
             lensProfile = lensProfileState.value,
+            rawFocalLengthMm = rawFocalLengthMmState.value,
                         downsample = downsampleState.value,
                     ),
                 ) ?: return StudioRenderResult.Unsupported
@@ -534,6 +542,7 @@ object StudioEngine {
             clipToGamut = currentClipToGamut,
             cameraProfile = cameraProfileState.value,
             lensProfile = lensProfileState.value,
+            rawFocalLengthMm = rawFocalLengthMmState.value,
             // The grade fork develops through the same pipeline, so it honours the switch too —
             // grading a quarter-resolution frame is simply grading fewer pixels.
             downsample = downsampleState.value,
@@ -819,6 +828,7 @@ object StudioEngine {
             clipToGamut = currentClipToGamut,
             cameraProfile = cameraProfileState.value,
             lensProfile = lensProfileState.value,
+            rawFocalLengthMm = rawFocalLengthMmState.value,
             downsample = downsampleState.value,
         )
         // `metered` is the offset relative to the current image; add the recorded applied exposure
@@ -882,8 +892,18 @@ object StudioEngine {
     private val lensProfileState = MutableStateFlow<LensProfileParams?>(null)
     val lensProfile: StateFlow<LensProfileParams?> = lensProfileState.asStateFlow()
 
-    /** Fallback focal length (mm) handed to the LCP model when the RAW exposes no EXIF focal length. */
+    /** User-specified LCP focal length (mm) — top priority in the effective-focal chain. `null` = not specified. */
+    private val userLcpFocalLengthMmState = MutableStateFlow<Float?>(null)
+    val userLcpFocalLengthMm: StateFlow<Float?> = userLcpFocalLengthMmState.asStateFlow()
+
+    /** Capture focal length (mm) decoded from the RAW EXIF — second priority. `null` = decoder surfaced none. */
+    private val rawFocalLengthMmState = MutableStateFlow<Float?>(null)
+    val rawFocalLengthMm: StateFlow<Float?> = rawFocalLengthMmState.asStateFlow()
+
+    /** Fallback focal length (mm) — mirrors the native `DEFAULT_LCP_FOCAL_MM` (rawler_fotlab::develop). Used as the
+     * last-resort LCP focal and as the Studio "指定焦距" dialog hint. */
     private const val DEFAULT_LCP_FOCAL_MM = 50.0f
+    val defaultLcpFocalMm: Float = DEFAULT_LCP_FOCAL_MM
 
     /**
      * Re-render with out-of-gamut clipping [enabled] (Studio Clipping dialog). Every component of
@@ -987,16 +1007,31 @@ object StudioEngine {
         reGrade()
     }
 
-    /** Remove the LCP lens profile (the "none" item in the LCP dropdown). */
+    /** Remove the LCP lens profile (the "none" item in the LCP dropdown). Also drops any user-specified focal override. */
     fun clearLensProfile() {
+        userLcpFocalLengthMmState.value = null
         setLensProfile(null)
+    }
+
+    /**
+     * Set the user-specified LCP focal length (mm) from the Studio "指定焦距" dialog. This is the
+     * **top** priority in the LCP effective-focal chain: it wins over the decoded-RAW focal, the LCP
+     * built-in focal, and [DEFAULT_LCP_FOCAL_MM]. `null` clears the override so the effective focal
+     * falls back to the next source. Re-develops only when an LCP is active so the new focal takes
+     * effect on the canvas.
+     */
+    fun setLensProfileUserFocal(mm: Float?) {
+        userLcpFocalLengthMmState.value = mm
+        if (lensProfileState.value != null) reGrade()
     }
 
     /**
      * Accept a SAF-picked LCP [uri] (no format restriction — rawtherapee_fotlab validates the bytes as
      * a `.lcp`). Copied into an app-private cache like the DCP/LUT pickers; vignette + distortion are
-     * both enabled so the single-channel correction actually runs. The LCP model requires a focal
-     * length that rawler does not surface, so [DEFAULT_LCP_FOCAL_MM] is used (see [lensProfileState]).
+     * both enabled so the single-channel correction actually runs. The effective focal length fed to
+     * the LCP model resolves across a priority chain: a user-specified focal (Studio "指定焦距"
+     * dialog) wins, then the focal decoded from the RAW EXIF, then the focal the LCP file itself
+     * carries, and finally [DEFAULT_LCP_FOCAL_MM] (see [lensProfileState] / the native `develop` docs).
      */
     fun setLensProfileUri(uri: Uri) {
         val token = loadNonce.get()
@@ -1011,7 +1046,7 @@ object StudioEngine {
                 path = copied.second,
                 applyVignette = true,
                 applyDistortion = true,
-                focalLength = DEFAULT_LCP_FOCAL_MM,
+                focalLength = userLcpFocalLengthMmState.value,
             )
             reGrade()
         }
@@ -1066,6 +1101,7 @@ object StudioEngine {
             clipToGamut = currentClipToGamut,
             cameraProfile = cameraProfileState.value,
             lensProfile = lensProfileState.value,
+            rawFocalLengthMm = rawFocalLengthMmState.value,
                         downsample = downsample,
                     ),
                     wbKelvin,
@@ -1091,6 +1127,7 @@ object StudioEngine {
             clipToGamut = currentClipToGamut,
             cameraProfile = cameraProfileState.value,
             lensProfile = lensProfileState.value,
+            rawFocalLengthMm = rawFocalLengthMmState.value,
                         downsample = downsample,
                     ),
                 )

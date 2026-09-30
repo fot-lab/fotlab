@@ -54,3 +54,23 @@ pub(crate) fn decode_source(src: &RawSource) -> Result<RawImage, RawlerFotlabErr
     rawler::decode(src, &RawDecodeParams::default())
         .map_err(|e| RawlerFotlabError::Decode(e.to_string()))
 }
+
+/// Like [`decode_source`], but also returns the **capture focal length (mm)**
+/// carried in the RAW EXIF — the second priority in the LCP effective-focal
+/// chain (`crate::develop`). Read from `RawMetadata.exif.focal_length` (a
+/// `Rational`); `None` when the file surfaces no focal. The metadata pass shares
+/// the decoder construction with the decode, so there is no extra pixel decode.
+pub(crate) fn decode_source_with_focal(
+    src: &RawSource,
+) -> Result<(RawImage, Option<f64>), RawlerFotlabError> {
+    let params = RawDecodeParams::default();
+    let focal = rawler::get_decoder(src)
+        .ok()
+        .and_then(|dec| dec.raw_metadata(src, &params).ok())
+        .and_then(|meta| meta.exif.focal_length)
+        // Guard `d == 0` (malformed EXIF rational): n/0 would surface inf/nan.
+        .filter(|r| r.d != 0)
+        .map(|r| r.n as f64 / r.d as f64);
+    let image = rawler::decode(src, &params).map_err(|e| RawlerFotlabError::Decode(e.to_string()))?;
+    Ok((image, focal))
+}
