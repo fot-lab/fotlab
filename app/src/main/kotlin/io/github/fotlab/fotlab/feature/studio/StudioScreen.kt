@@ -270,7 +270,7 @@ fun StudioScreen() {
 
     // Which HorizontalOperationBar is docked in the former grade-bar slot (above the fun bar).
     // Tapping the same fun-bar category icon again hides the bar; tapping another switches to it.
-    var activeBar by remember { mutableStateOf<StudioOpBar?>(null) }
+    var activeBar by remember { mutableStateOf(StudioOpBar.Basic) }
 
     // LUT picker: deliberately `*/*` — the interaction is not format-restricted; rawalchemy decides
     // whether the picked bytes are a usable .cube LUT (and an error dialog reports it if not).
@@ -387,7 +387,9 @@ fun StudioScreen() {
             bottomBar = {
                 // The screen's own fun bar, menu at the bottom-left.
                 StudioScreenFunBar(
+                    barIsOpen = activeBar != StudioOpBar.Basic,
                     onOpenDrawer = { scope.launch { drawerState.open() } },
+                    onExitBar = { activeBar = StudioOpBar.Basic },
                     onOpenFile = {
                         importLauncher.launch(
                             openDocumentIntent(arrayOf("*/*"), lastImportUri?.let { Uri.parse(it) }),
@@ -445,106 +447,114 @@ fun StudioScreen() {
                 // fun-bar category icons; only one (or none) is shown at a time. reGrade() is a
                 // safe no-op for non-RAW images (loadedImage == null), so the bar is shown for any
                 // rendered image and the buttons govern their own applicability.
-                if (renderResult is StudioRenderResult.Ready) {
+                // Exactly one operation bar is shown at all times — Basic is the floor. When no
+                // develop/adjustment/grade bar is open, or the open one cannot apply to the current
+                // image (e.g. Tune/Style on a non-RAW), Basic is docked. The bar is always shown so
+                // the fun-bar menu has a stable close target, and buttons govern their own applicability.
+                val dockedBar = if (renderResult is StudioRenderResult.Ready) {
                     when (activeBar) {
-                        // Develop tools (Demosaic/Exposure/WB) were always on the fun bar.
-                        StudioOpBar.DevelopFilm -> StudioOperationBarDevelopFilm(
-                            demosaicCandidates = StudioEngine.demosaicCandidates,
-                            onAlgorithmPicked = { algo -> StudioEngine.develop(algo) },
-                            onDenoise = {
-                                denoiseEnabled = StudioEngine.currentDenoiseStrength() != null
-                                denoiseInput = StudioEngine.currentDenoiseStrength()?.toString() ?: ""
-                                denoiseBm3dEnabled = StudioEngine.currentDenoiseBm3dStrength() != null
-                                denoiseBm3dInput = StudioEngine.currentDenoiseBm3dStrength()?.toString() ?: ""
-                                showDenoiseDialog = true
-                            },
-                            onDehaze = {
-                                dehazeEnabled = StudioEngine.currentDehazeStrength() != null
-                                dehazeStrengthInput = StudioEngine.currentDehazeStrength()?.toString() ?: ""
-                                dehazePercentileInput = StudioEngine.currentDehazePercentile()?.toString() ?: ""
-                                dehazeRadiusDarkInput = StudioEngine.currentDehazeRadiusDark()?.toString() ?: ""
-                                dehazeRadiusGuideInput = StudioEngine.currentDehazeRadiusGuide()?.toString() ?: ""
-                                dehazeMergeModeInput = StudioEngine.currentDehazeMergeMode()
-                                showDehazeDialog = true
-                            },
-                            onCa = {
-                                StudioEngine.currentCa()?.let { ca ->
-                                    caEnabled = true
-                                    caAuto = ca.auto
-                                    caRedInput = ca.red.toString()
-                                    caBlueInput = ca.blue.toString()
-                                } ?: run {
-                                    caEnabled = false
-                                    caAuto = true
-                                    caRedInput = ""
-                                    caBlueInput = ""
-                                }
-                                showCaDialog = true
-                            },
-                            onExposure = {
-                                exposureEnabled = StudioEngine.currentExposureEv() != null
-                                exposureInput = StudioEngine.currentExposureEv()?.toString() ?: ""
-                                val (clipLower, clipUpper) = StudioEngine.currentExposureClip()
-                                exposureClipLowerInput = clipLower.toString()
-                                exposureClipUpperInput = clipUpper.toString()
-                                showExposureDialog = true
-                            },
-                            onWhiteBalance = {
-                                val kelvin = StudioEngine.currentWhiteBalanceKelvin()
-                                whiteBalanceInput =
-                                    if (kelvin > 0f) kelvin.roundToInt().toString() else ""
-                                showWhiteBalanceDialog = true
-                            },
-                            onClipping = {
-                                clipToGamutEnabled = StudioEngine.currentClipToGamut()
-                                showClippingDialog = true
-                            },
-                            cameraProfileActive = cameraProfile != null,
-                            lensProfileActive = lensProfile != null,
-                            lensProfileUserFocal = userLcpFocalLengthMm,
-                            onCameraProfilePick = {
-                                dcpPickerLauncher.launch(
-                                    openDocumentIntent(arrayOf("*/*"), lastDcpUri?.let { Uri.parse(it) }),
-                                )
-                            },
-                            onCameraProfileClear = StudioEngine::clearCameraProfile,
-                            onLensProfilePick = {
-                                lcpPickerLauncher.launch(
-                                    openDocumentIntent(arrayOf("*/*"), lastLcpUri?.let { Uri.parse(it) }),
-                                )
-                            },
-                            onLensProfileClear = StudioEngine::clearLensProfile,
-                            onLensProfileFocal = {
-                                lcpFocalInput = userLcpFocalLengthMm?.let { "%.0f".format(it) } ?: ""
-                                showLcpFocalDialog = true
-                            },
-                        )
-                        // Grade tools (Contrast/Saturation/LOG/LUT) are RAW-only, like the
-                        // former grade bar.
-                        StudioOpBar.TuneImage -> if (rawLoaded) {
-                            StudioOperationBarTuneImage(
-                                contrast = gradeSelection.contrast,
-                                saturation = gradeSelection.saturation,
-                                onContrast = StudioEngine::setGradeContrast,
-                                onSaturation = StudioEngine::setGradeSaturation,
-                            )
-                        }
-                        StudioOpBar.StyleFilter -> if (rawLoaded) {
-                            StudioOperationBarStyleFilter(
-                                logSpace = gradeSelection.logSpace,
-                                lutName = gradeSelection.lutName,
-                                logSpaces = logSpaces,
-                                onLogSpace = StudioEngine::setGradeLogSpace,
-                                onPickLut = {
-                                    lutPickerLauncher.launch(
-                                        openDocumentIntent(arrayOf("*/*"), lastLutUri?.let { Uri.parse(it) }),
-                                    )
-                                },
-                                onClearLut = StudioEngine::clearGradeLut,
-                            )
-                        }
-                        null -> Unit
+                        StudioOpBar.Basic -> StudioOpBar.Basic
+                        StudioOpBar.DevelopFilm -> StudioOpBar.DevelopFilm
+                        StudioOpBar.TuneImage -> if (rawLoaded) StudioOpBar.TuneImage else StudioOpBar.Basic
+                        StudioOpBar.StyleFilter -> if (rawLoaded) StudioOpBar.StyleFilter else StudioOpBar.Basic
                     }
+                } else {
+                    StudioOpBar.Basic
+                }
+                when (dockedBar) {
+                    // Develop tools (Demosaic/Exposure/WB) were always on the fun bar.
+                    StudioOpBar.DevelopFilm -> StudioOperationBarDevelopFilm(
+                        demosaicCandidates = StudioEngine.demosaicCandidates,
+                        onAlgorithmPicked = { algo -> StudioEngine.develop(algo) },
+                        onDenoise = {
+                            denoiseEnabled = StudioEngine.currentDenoiseStrength() != null
+                            denoiseInput = StudioEngine.currentDenoiseStrength()?.toString() ?: ""
+                            denoiseBm3dEnabled = StudioEngine.currentDenoiseBm3dStrength() != null
+                            denoiseBm3dInput = StudioEngine.currentDenoiseBm3dStrength()?.toString() ?: ""
+                            showDenoiseDialog = true
+                        },
+                        onDehaze = {
+                            dehazeEnabled = StudioEngine.currentDehazeStrength() != null
+                            dehazeStrengthInput = StudioEngine.currentDehazeStrength()?.toString() ?: ""
+                            dehazePercentileInput = StudioEngine.currentDehazePercentile()?.toString() ?: ""
+                            dehazeRadiusDarkInput = StudioEngine.currentDehazeRadiusDark()?.toString() ?: ""
+                            dehazeRadiusGuideInput = StudioEngine.currentDehazeRadiusGuide()?.toString() ?: ""
+                            dehazeMergeModeInput = StudioEngine.currentDehazeMergeMode()
+                            showDehazeDialog = true
+                        },
+                        onCa = {
+                            StudioEngine.currentCa()?.let { ca ->
+                                caEnabled = true
+                                caAuto = ca.auto
+                                caRedInput = ca.red.toString()
+                                caBlueInput = ca.blue.toString()
+                            } ?: run {
+                                caEnabled = false
+                                caAuto = true
+                                caRedInput = ""
+                                caBlueInput = ""
+                            }
+                            showCaDialog = true
+                        },
+                        onExposure = {
+                            exposureEnabled = StudioEngine.currentExposureEv() != null
+                            exposureInput = StudioEngine.currentExposureEv()?.toString() ?: ""
+                            val (clipLower, clipUpper) = StudioEngine.currentExposureClip()
+                            exposureClipLowerInput = clipLower.toString()
+                            exposureClipUpperInput = clipUpper.toString()
+                            showExposureDialog = true
+                        },
+                        onWhiteBalance = {
+                            val kelvin = StudioEngine.currentWhiteBalanceKelvin()
+                            whiteBalanceInput =
+                                if (kelvin > 0f) kelvin.roundToInt().toString() else ""
+                            showWhiteBalanceDialog = true
+                        },
+                        onClipping = {
+                            clipToGamutEnabled = StudioEngine.currentClipToGamut()
+                            showClippingDialog = true
+                        },
+                        cameraProfileActive = cameraProfile != null,
+                        lensProfileActive = lensProfile != null,
+                        lensProfileUserFocal = userLcpFocalLengthMm,
+                        onCameraProfilePick = {
+                            dcpPickerLauncher.launch(
+                                openDocumentIntent(arrayOf("*/*"), lastDcpUri?.let { Uri.parse(it) }),
+                            )
+                        },
+                        onCameraProfileClear = StudioEngine::clearCameraProfile,
+                        onLensProfilePick = {
+                            lcpPickerLauncher.launch(
+                                openDocumentIntent(arrayOf("*/*"), lastLcpUri?.let { Uri.parse(it) }),
+                            )
+                        },
+                        onLensProfileClear = StudioEngine::clearLensProfile,
+                        onLensProfileFocal = {
+                            lcpFocalInput = userLcpFocalLengthMm?.let { "%.0f".format(it) } ?: ""
+                            showLcpFocalDialog = true
+                        },
+                    )
+                    // Grade tools (Contrast/Saturation/LOG/LUT) are RAW-only, like the former grade bar.
+                    StudioOpBar.TuneImage -> StudioOperationBarTuneImage(
+                        contrast = gradeSelection.contrast,
+                        saturation = gradeSelection.saturation,
+                        onContrast = StudioEngine::setGradeContrast,
+                        onSaturation = StudioEngine::setGradeSaturation,
+                    )
+                    StudioOpBar.StyleFilter -> StudioOperationBarStyleFilter(
+                        logSpace = gradeSelection.logSpace,
+                        lutName = gradeSelection.lutName,
+                        logSpaces = logSpaces,
+                        onLogSpace = StudioEngine::setGradeLogSpace,
+                        onPickLut = {
+                            lutPickerLauncher.launch(
+                                openDocumentIntent(arrayOf("*/*"), lastLutUri?.let { Uri.parse(it) }),
+                            )
+                        },
+                        onClearLut = StudioEngine::clearGradeLut,
+                    )
+                    // Basic bar: the floor — an empty placeholder slot; content to be filled later.
+                    StudioOpBar.Basic -> HorizontalOperationBar(items = emptyList<OperationalButton>())
                 }
             }
         }
@@ -1097,7 +1107,9 @@ private val StudioScreenFunBarHeight = 64.dp
  */
 @Composable
 private fun StudioScreenFunBar(
+    barIsOpen: Boolean,
     onOpenDrawer: () -> Unit,
+    onExitBar: () -> Unit,
     onOpenFile: () -> Unit,
     onShareFile: () -> Unit,
     showShare: Boolean,
@@ -1121,10 +1133,12 @@ private fun StudioScreenFunBar(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onOpenDrawer) {
+                IconButton(onClick = if (barIsOpen) onExitBar else onOpenDrawer) {
                     Icon(
-                        imageVector = Icons.Filled.Menu,
-                        contentDescription = stringResource(id = R.string.studio_cd_drawer_open),
+                        imageVector = if (barIsOpen) Icons.Filled.Close else Icons.Filled.Menu,
+                        contentDescription = stringResource(
+                            id = if (barIsOpen) R.string.studio_cd_close_bar else R.string.studio_cd_drawer_open,
+                        ),
                     )
                 }
                 IconButton(onClick = onDevelopFilm) {
@@ -1288,14 +1302,14 @@ private fun StudioDrawer(
 // ---------------------------------------------------------------------------
 
 /** The three Studio operation bars docked in the former grade-bar slot. */
-private enum class StudioOpBar { DevelopFilm, TuneImage, StyleFilter }
+private enum class StudioOpBar { DevelopFilm, TuneImage, StyleFilter, Basic }
 
 /**
- * Toggle helper: tapping the category icon for the already-active bar hides it; otherwise it
- * switches to that bar.
+ * Toggle helper: tapping the category icon for the already-active bar closes it (falls back to the
+ * Basic bar); tapping a different bar switches to it; Basic is the floor and never toggles off.
  */
-private fun StudioOpBar?.toggle(target: StudioOpBar): StudioOpBar? =
-    if (this == target) null else target
+private fun StudioOpBar.toggle(target: StudioOpBar): StudioOpBar =
+    if (this == target) StudioOpBar.Basic else target
 
 /**
  * Max height of the scrolling picker menus (Demosaic / LOG): five 48dp menu rows plus Material3's

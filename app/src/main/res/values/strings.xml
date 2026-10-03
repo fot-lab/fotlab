@@ -70,6 +70,7 @@
 
     <!-- ===== feature: studio ===== -->
     <string name="studio_cd_drawer_open">Open navigation drawer</string>
+    <string name="studio_cd_close_bar">Close current operation bar</string>
     <string name="studio_cd_open_file">Open file</string>
     <string name="studio_cd_share">Share</string>
     <string name="studio_cd_more_options">More options</string>
