@@ -35,7 +35,7 @@ The `VERSION_NAME` and `VERSION_CODE` files are **off-limits** by default. Do no
 - **Formal**: `v{YYYY.MM.DD.HH.MM}`
 - **Examples**: `v2026.06.13.05.22-rc`, `v2026.06.13.05.22`
 - CI triggers on `startsWith(github.ref, 'refs/tags/v')` for: native build, APK upload, GitHub Release
-- Release APK asset is named `FotLab-{VERSION}-universal-release.apk` (drops `v` prefix; `universal` = one APK for all four ABIs)
+- Release APK assets are split per ABI (`app/build.gradle.kts` `splits.abi`, Google "Build per-ABI APKs" best practice). The release stage (`.github/workflows/release_github.yaml`) names them `FotLab-{VERSION}-<abi>-release.apk` for `arm64-v8a` / `armeabi-v7a` / `x86` / `x86_64`, plus `FotLab-{VERSION}-universal-release.apk` as a fallback (drops `v` prefix; `universal` = one APK for all four ABIs). Each per-ABI APK is ~1/4 the size of the universal.
 
 ## ⚠️ Bump = Tag (Mandatory)
 

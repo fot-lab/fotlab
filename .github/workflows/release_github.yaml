@@ -41,23 +41,31 @@ jobs:
           name: ${{ inputs.apk-artifact-name }}
           path: apk
 
-      # The single release asset name is decided here, not in the build stage:
-      # the build produces one universal APK (no ABI splits — all four ABIs from
-      # the `rawler_fotlab` artifact are packaged together), so the asset carries
-      # the `universal` suffix. Build stages must not invent this name.
+      # The release asset names are decided here, not in the build stage. The build
+      # now produces one APK per ABI (arm64-v8a / armeabi-v7a / x86 / x86_64) plus an
+      # optional universal, all under app/build/outputs/apk/release/ (see
+      # app/build.gradle.kts `splits.abi`). Each is copied to a stable, ABI-labelled
+      # asset name so the release page lists the small per-ABI downloads and the
+      # universal fallback. Build stages must not invent these names.
       - name: Name release asset
         run: |
           set -euo pipefail
           mkdir -p release-asset
           version="${{ inputs.version-name }}"
-          # Resolved with find rather than a fixed glob: the artifact layout is
-          # whatever Gradle produced, and this is the only place the name is set.
-          apk_file="$(find apk -type f -name '*.apk' | head -n 1)"
-          if [ -z "$apk_file" ]; then
+          shopt -s nullglob
+          apks=(apk/*.apk)
+          if [ "${#apks[@]}" -eq 0 ]; then
             echo "::error::no APK found in artifact ${{ inputs.apk-artifact-name }}"
             exit 1
           fi
-          cp "$apk_file" "release-asset/FotLab-$version-universal-release.apk"
+          for apk_file in "${apks[@]}"; do
+            base="$(basename "$apk_file")"
+            # app-<abi>-release.apk        -> FotLab-<version>-<abi>-release.apk
+            # app-universal-release.apk     -> FotLab-<version>-universal-release.apk
+            abi="${base#app-}"
+            abi="${abi%-release.apk}"
+            cp "$apk_file" "release-asset/FotLab-$version-$abi-release.apk"
+          done
           ls -l release-asset
         shell: bash
 

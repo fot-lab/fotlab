@@ -112,6 +112,32 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+
+    // Per-ABI APK splits — Google's "Build per-ABI APKs" best practice
+    // (https://developer.android.com/build/configure-apk-splits). Instead of one
+    // fat universal APK carrying all four ABIs' native libs (librawler_fotlab.so +
+    // the JNA/OpenMP stubs), emit one APK per ABI plus an optional universal
+    // fallback. Each per-ABI APK ships only its own ABI's .so files, so the
+    // download is ~1/4 the size of the universal. The split is purely a *packaging*
+    // split: the .so files are placed under build/generated/jniLibs by CI (all four
+    // ABIs, matching build_rust.yaml's `cargo ndk` targets), and AGP filters them
+    // per output APK automatically — no ndk.abiFilters needed.
+    //
+    // ABI set mirrors build_rust.yaml so every emitted APK has its native lib.
+    // `universalApk = true` keeps a single all-ABI APK as a fallback for users who
+    // don't know their device ABI; GitHub Releases has no ABI filtering, so the
+    // universal remains the "grab one file" path while the per-ABI APKs are the
+    // recommended download. (All four share the same versionCode — fine for direct
+    // GitHub distribution; a Play Store multi-APK upload would instead need
+    // distinct versionCodes, which would conflict with the +1 rule in rules/VERSION.md.)
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
+            isUniversalApk = true
+        }
+    }
 }
 
 // Kotlin compiler options. The KGP `compilerOptions` DSL supersedes the deprecated

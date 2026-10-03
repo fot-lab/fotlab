@@ -209,11 +209,17 @@ Do **not** prune to fewer than one entry per family, and leave the deliberate sa
 - The `apk` job validates `VERSION_NAME` against
   `^\d{4}\.\d{2}\.\d{2}\.\d{2}\.\d{2}(-rc)?$` and fails fast otherwise.
 - Current: `VERSION_NAME` = `2026.09.07.05.48-rc`, `VERSION_CODE` = `1`.
-- Release APK is a single **universal** APK (no ABI splits — the four ABIs built
-  by `build_rust.yaml` are all packaged into one artifact). Its release asset
-  name is `FotLab-{VERSION_NAME}-universal-release.apk`, assigned by the
-  **release stage** (`.github/workflows/release_github.yaml`), not by the build
-  stage: `build_gradle.yaml` uploads the APK exactly as Gradle produced it.
+- Release APKs are split **per ABI** (`app/build.gradle.kts` `splits.abi` — Google's
+  "Build per-ABI APKs" best practice). Gradle emits one APK per ABI
+  (`arm64-v8a` / `armeabi-v7a` / `x86` / `x86_64`) plus an optional `universal`
+  fallback; the ABI set mirrors `build_rust.yaml`'s `cargo ndk` targets. Each
+  per-ABI APK ships only its own ABI's `librawler_fotlab.so` (and the JNA/OpenMP
+  stubs), so it is ~1/4 the size of the universal. The release asset names are
+  assigned by the **release stage** (`.github/workflows/release_github.yaml`), not
+  by the build stage: `build_gradle.yaml` uploads the APKs exactly as Gradle
+  produced them (`app/build/outputs/apk/release/*.apk`), and the release stage
+  copies each to `FotLab-{VERSION_NAME}-<abi>-release.apk` (and
+  `FotLab-{VERSION_NAME}-universal-release.apk` for the fallback).
 - A `VERSION_NAME` ending in `-rc` publishes the GitHub Release as a
   **pre-release** (`gh release create --prerelease`); without the suffix it is a
   formal release. The meaning of `-rc` is owned by [`rules/VERSION.md`](rules/VERSION.md).
@@ -341,12 +347,19 @@ Split across the two rule files, on purpose:
   inert while minification is off and effective again if it is ever re-enabled.
 - Q3 — Signing: which keystore, injected through which secret, and is release
   signing part of the first release? **TBD.**
-- Q4 — **RESOLVED.** Release ships one **universal** APK containing all four
-  ABIs; per-ABI splitting (and per-ABI asset names) is explicitly not done, to
-  keep the packaging pipeline simple. `app/build.gradle.kts` declares no
-  `splits`/`abiFilters`, so both the release and the debug build are universal;
-  the four ABIs come from `build_rust.yaml`
-  (`cargo ndk` targets `arm64-v8a armeabi-v7a x86 x86_64`). The smoke workflow pins
+- Q4 — **RESOLVED (reversed 2026-10-03).** Release now ships **per-ABI APKs**
+  instead of a single fat universal. `app/build.gradle.kts` declares
+  `splits { abi { isEnable = true; reset(); include("arm64-v8a", "armeabi-v7a",
+  "x86", "x86_64"); isUniversalApk = true } }` (Google "Build per-ABI APKs" best
+  practice), so Gradle emits `app-<abi>-release.apk` for each of the four ABIs the
+  `rawler_fotlab` artifact provides, plus `app-universal-release.apk` as a
+  fallback. The release stage renames them to
+  `FotLab-{VERSION_NAME}-<abi>-release.apk` (+ `-universal-`), so the GitHub
+  Release lists the four small per-ABI downloads and the universal fallback. The
+  split is a *packaging* split only — the four ABIs still come from
+  `build_rust.yaml` (`cargo ndk` targets `arm64-v8a armeabi-v7a x86 x86_64`), and
+  AGP filters the native libs per output APK automatically; no `ndk.abiFilters`
+  needed. Debug builds are split the same way. The smoke workflow still pins
   `arch: x86_64` so the AVD and the library agree.
 - Q5 — **RESOLVED.** Instrumentation tests are introduced with the `emulator-smoke`
   job: the cases live in `app/src/androidTest/kotlin` and run via
@@ -390,3 +403,4 @@ Split across the two rule files, on purpose:
 | 2026-09-15 | **Q2 reversed — R8 disabled.** The 2026-09-14 "user-specified R8" resolution was an agent hallucination: the user never requested obfuscation, and for an open-source project it has no anti-RE value. `isMinifyEnabled` / `isShrinkResources` removed from the release build type (defaults apply: unminified). `app/proguard-rules.pro` with its JNA/UniFFI keep rules is kept and stays wired via `proguardFiles` — inert while R8 is off, effective again if minification is ever re-enabled. The JNA/UniFFI symbol-name concern only ever existed under obfuscation and does not apply while R8 is off. |
 | 2026-09-16 | `RawRoutingTest` proves the RAW path per camera format (Canon CR2, Sony ARW x2, Nikon NEF, Panasonic RW2) on the emulator: sniff dictionary -> `route` -> `StudioEngine` -> decoded frame, with the decoded PNG's SIZE as the decisive assertion - an embedded preview is at most ~2k px wide, so anything below 3000 px means the pixels did not come from rawler. The corpus comes from the public `fot-lab/rawdb` `samples` branch, cached as `rawdb-samples-v1`; a PNG control case asserts the opposite branch (Coil). The smoke job's budget grew with it: test step 20 -> 60 min, job 45 -> 75 min, and the cache-layer numbering below shifted by one. |
 | 2026-09-17 | Verification Loop step 3 now documents the `e: ` prefix convention for Kotlin compiler errors in the build-gradle log (grep `^e: ` to extract compile errors quickly). |
+| 2026-10-03 | Reversed Q4: release now ships **per-ABI APKs** instead of one universal. `app/build.gradle.kts` gains `splits { abi { ... isUniversalApk = true } }` (Google "Build per-ABI APKs" best practice); the four ABIs mirror `build_rust.yaml`. `release_github.yaml`'s "Name release asset" step now loops over `apk/*.apk` and renames each to `FotLab-{VERSION_NAME}-<abi>-release.apk` (+ `-universal-` fallback), publishing all. `rules/VERSION.md` asset-name convention updated. No `ndk.abiFilters` needed — AGP filters the placed native libs per output APK. |
