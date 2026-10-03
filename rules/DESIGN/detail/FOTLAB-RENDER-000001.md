@@ -57,7 +57,7 @@ demosaic → Intermediate (camera space, R/G/B per pixel)
 
 All four are fixed or camera-only matrices plus one perceptual non-linearity:
 
-1. **`cam2xyz = pseudo_inverse(xyz2cam)`** — camera → XYZ. Use the **original** `xyz2cam` 3×3 (RGB rows of `resolve_xyz_to_cam` output), **not** a decomposition of `cam2rgb`. This is the `SrgbD65` branch's D65-resolved `xyz2cam`; it is the only branch the bypass operates on for now (see C2). Rationale: `cam2rgb` has the `normalize` neutral diagonal `D⁻¹` (`external/dnglab/rawler/src/imgop/matrix.rs:29`, row-sum-to-1) entangled into it, so inverting `cam2rgb` would not recover a clean `camera→XYZ`. Rebuilding from `xyz2cam` is exact and keeps the round-trip `xyz2cam · cam2xyz = I`.
+1. **`cam2xyz = to_xyz · cam2rgb_eff`** — camera → XYZ(D65). `cam2rgb_eff` is the effective 3×3 the 3-colour arm actually multiplies — the RGB columns of the `[[f32;3];4]` `cam2rgb` (the 4th E column is unused for RGGB); `to_xyz` is the working→XYZ matrix (`SRGB_TO_XYZ_D65` on the SrgbD65 branch). Rebuilding from these *original factors* — **never** inverting `cam2rgb` alone — keeps the round-trip exact and the XYZ mid-point genuinely D65 (see C3).
 2. **XYZ(D65) → OKLab** — standard Ottosson transform: `LMS = M1 · XYZ`, `LMS = ∛LMS`, `OKLab = M2 · LMS`, where (from `external/colour/colour/models/oklab.py`, D65-in):
 
    ```
@@ -67,7 +67,7 @@ All four are fixed or camera-only matrices plus one perceptual non-linearity:
    0.0482003018  0.2643662691  0.6338517070   0.0259040371  0.7827717662 -0.8086757660
    ```
 3. **Highlight compression** — a parametric lightness-driven chroma (and optionally lightness) roll-off. As `L → 1` (and `L > 1` for super-whites), scale `C = √(a²+b²)` down toward 0 so the clipped pixel desaturates instead of shifting hue. Exact curve is intentionally left open (see Q1); it must collapse to the identity when the strength parameter is 0 so the short-circuit invariant (R4) holds.
-4. **OKLab → XYZ(D65)** — inverse of step 2 (`LMS = M2⁻¹ · OKLab`, `LMS = LMS³`, `XYZ = M1⁻¹ · LMS`), then **`xyz2cam`** (XYZ→camera, the original 3×3) back to camera space.
+4. **OKLab → XYZ(D65)** — inverse of step 2 (`LMS = M2⁻¹ · OKLab`, `LMS = LMS³`, `XYZ = M1⁻¹ · LMS`), then **`xyz2cam_eff = cam2rgb_eff⁻¹ · to_xyz⁻¹`** (XYZ→camera) back to camera space.
 
 The two OKLab matrices (`M1`, `M2`, their inverses) are **camera-independent and fixed**; only `cam2xyz`/`xyz2cam` depend on the camera. The only non-linearities are `∛` and `x³` (three components each, branchless), so the block is fully per-pixel and rayon-parallel per row, identical in shape to the existing `cam2rgb` loop.
 

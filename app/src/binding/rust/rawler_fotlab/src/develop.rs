@@ -327,6 +327,20 @@ pub struct DevelopParams {
   /// → `DEFAULT_LCP_FOCAL_MM`.
   #[uniffi(default = None)]
   pub raw_focal_length_mm: Option<f32>,
+  /// OKLab highlight-chroma compression bypass (`rules/DESIGN/detail/FOTLAB-RENDER-000001`).
+  /// When `true` (the default), the *presentation* (`SrgbD65`) path inserts a
+  /// camera-space-in / camera-space-out OKLab block right after white balance and
+  /// before the baked `cam2rgb` matrix: camera → XYZ(D65) → OKLab → lightness-driven
+  /// chroma roll-off → XYZ(D65) → camera. The goal is to desaturate near-clipped
+  /// highlights *before* they reach `bound::encode_srgb`'s per-channel clamp, so a
+  /// highlight whose channels clip unevenly trends toward neutral instead of freezing
+  /// into magenta/cyan. It is a no-op on the `ProPhotoD50` editing branch (out of
+  /// scope for now) and a pure identity pass-through when `false`, so flipping it off
+  /// is bit-for-bit identical to today's output. Kotlin does not yet pass this field,
+  /// so the pipeline runs it by default; passing `false` from Kotlin disables it
+  /// without a Rust change (`FOTLAB-RENDER-000001` R3/C6).
+  #[uniffi(default = true)]
+  pub oklab_highlight_compress: bool,
 }
 
 /// Grading parameters supplied by Kotlin for [`develop_and_grade`].
@@ -643,7 +657,7 @@ pub(crate) fn develop_image(
   // per-pixel/rect-selection operations, so order is numerically equivalent,
   // but keeping the identical order means the crop coordinates resolve
   // exactly the way upstream resolves them.
-  let linear = calibrate(intermediate, &image, wb, space)?;
+  let linear = calibrate(intermediate, &image, wb, space, params.oklab_highlight_compress)?;
   let mut linear = crop_default(&image, linear)?;
 
   // Out-of-gamut clipping (the Studio "Clipping" switch) — the LAST step of the

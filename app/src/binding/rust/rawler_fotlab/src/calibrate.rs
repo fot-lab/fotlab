@@ -86,6 +86,7 @@ pub(crate) fn calibrate(
     image: &RawImage,
     wb: Option<[f32; 4]>,
     space: WorkingSpace,
+    oklab_compress: bool,
 ) -> Result<RawlerImageDeveloped, RawlerFotlabError> {
   // Resolve the camera color matrix at the target white point (D65 presentation /
   // D50 editing), Bradford-adapted from another illuminant (rawler's logic).
@@ -116,6 +117,42 @@ pub(crate) fn calibrate(
   let rgb2cam = normalize(multiply(&xyz2cam, &space.to_xyz_matrix()));
   let cam2rgb = pseudo_inverse(rgb2cam);
 
+  // --- OKLab highlight-compression bypass (`FOTLAB-RENDER-000001`) -----------------
+  // Enabled only on the SrgbD65 presentation branch (`oklab_compress` is a no-op on
+  // ProPhotoD50). We build the two fixed 3×3 maps camera ↔ XYZ(D65) from the *same*
+  // factors the loop already uses — the effective 3×3 of `cam2rgb` (the RGB part the
+  // 3-colour arm actually multiplies, the 4th E column is unused for RGGB) and the
+  // working→XYZ matrix — so that for any pixel the compression leaves untouched the
+  // XYZ round-trip is the *exact* identity. We deliberately do NOT decompose `cam2rgb`
+  // by inverting it alone: `normalize` entangled its neutral diagonal into it, so the
+  // round-trip through the genuine pipeline factors is exact (design doc C3).
+  let bypass_active = oklab_compress && space == WorkingSpace::SrgbD65;
+  let (cam2xyz, xyz2cam_eff, m1_inv, m2_inv) = if bypass_active {
+    let to_xyz = space.to_xyz_matrix();
+    let to_xyz_inv = pseudo_inverse(to_xyz);
+    // The 3×3 the 3-colour arm really multiplies: drop the unused E column.
+    let cam2rgb_eff = [
+      [cam2rgb[0][0], cam2rgb[0][1], cam2rgb[0][2]],
+      [cam2rgb[1][0], cam2rgb[1][1], cam2rgb[1][2]],
+      [cam2rgb[2][0], cam2rgb[2][1], cam2rgb[2][2]],
+    ];
+    let cam2rgb_eff_inv = pseudo_inverse(cam2rgb_eff);
+    // camera → XYZ(D65) = (working→XYZ) · (camera→working)
+    let cam2xyz = multiply(&to_xyz, &cam2rgb_eff);
+    // XYZ(D65) → camera = (camera→working)⁻¹ · (working→XYZ)⁻¹
+    let xyz2cam_eff = multiply(&cam2rgb_eff_inv, &to_xyz_inv);
+    let m1_inv = pseudo_inverse(OKLAB_M1);
+    let m2_inv = pseudo_inverse(OKLAB_M2);
+    (cam2xyz, xyz2cam_eff, m1_inv, m2_inv)
+  } else {
+    (
+      [[0.0_f32; 3]; 3],
+      [[0.0_f32; 3]; 3],
+      [[0.0_f32; 3]; 3],
+      [[0.0_f32; 3]; 3],
+    )
+  };
+
   // Every arm below is a per-pixel mapping with no cross-pixel dependency, so each one is
   // parallelised with rayon — this is the cost centre the upstream `map_*_to_rgb` helpers
   // cannot cover for us, because they are `pub(crate)` in rawler
@@ -144,6 +181,11 @@ pub(crate) fn calibrate(
         let r = px[0] * wb[0];
         let g = px[1] * wb[1];
         let b = px[2] * wb[2];
+        let (r, g, b) = if bypass_active {
+          oklab_highlight_compress_pixel([r, g, b], &cam2xyz, &xyz2cam_eff, &m1_inv, &m2_inv)
+        } else {
+          (r, g, b)
+        };
         let mapped = [
           cam2rgb[0][0] * r + cam2rgb[0][1] * g + cam2rgb[0][2] * b,
           cam2rgb[1][0] * r + cam2rgb[1][1] * g + cam2rgb[1][2] * b,
@@ -256,4 +298,172 @@ fn transform_1d_3x3(matrix: &[f32]) -> [[f32; 3]; 3] {
     out[i / 3][i % 3] = v;
   }
   out
+}
+
+// --- OKLab highlight-chroma compression (`FOTLAB-RENDER-000001`) ------------------
+// Standard Ottosson OKLab (D65); reference constants from `external/colour/colour/models/oklab.py`.
+// Forward:  XYZ →(M1)→ LMS →∛→ LMS' →(M2)→ OKLab.
+// Backward: OKLab →(M2⁻¹)→ LMS' →(·)³→ LMS →(M1⁻¹)→ XYZ.  The two are exact, order-symmetric
+// inverses: `∛` ↔ `(·)³` (per channel), `M2` ↔ `M2⁻¹`, `M1` ↔ `M1⁻¹`. `M1⁻¹`/`M2⁻¹` are the exact
+// matrix inverses of the same constants used forward (computed once per image via `pseudo_inverse`,
+// never transposed or approximated).
+
+const OKLAB_M1: [[f32; 3]; 3] = [
+  [0.8189330101, 0.3618667424, -0.1288597137],
+  [0.0329845436, 0.9293118715, 0.0361456387],
+  [0.0482003018, 0.2643662691, 0.6338517070],
+];
+const OKLAB_M2: [[f32; 3]; 3] = [
+  [0.2104542553, 0.7936177850, -0.0040720468],
+  [1.9779984951, -2.4285922050, 0.4505937099],
+  [0.0259040371, 0.7827717662, -0.8086757660],
+];
+
+/// OKLab `L` at/above which the highlight chroma roll-off begins, and where it reaches full
+/// desaturation. Both tunable constants (the design leaves the exact curve open, Q1). `KNEE_START`
+/// is kept below 1.0 so the clipped-highlight band — where the per-channel sRGB clamp would
+/// otherwise freeze a hue error — is caught.
+const OKLAB_KNEE_START: f32 = 0.92;
+const OKLAB_KNEE_END: f32 = 1.0;
+
+#[inline(always)]
+fn matvec3(m: &[[f32; 3]; 3], v: [f32; 3]) -> [f32; 3] {
+  [
+    m[0][0] * v[0] + m[0][1] * v[1] + m[0][2] * v[2],
+    m[1][0] * v[0] + m[1][1] * v[1] + m[1][2] * v[2],
+    m[2][0] * v[0] + m[2][1] * v[1] + m[2][2] * v[2],
+  ]
+}
+
+#[inline(always)]
+fn clamp01(x: f32) -> f32 {
+  if x < 0.0 {
+    0.0
+  } else if x > 1.0 {
+    1.0
+  } else {
+    x
+  }
+}
+
+#[inline(always)]
+fn xyz_to_oklab(xyz: [f32; 3]) -> [f32; 3] {
+  let lms = matvec3(&OKLAB_M1, xyz);
+  let lms = [lms[0].cbrt(), lms[1].cbrt(), lms[2].cbrt()];
+  matvec3(&OKLAB_M2, lms)
+}
+
+#[inline(always)]
+fn oklab_to_xyz(lab: [f32; 3], m2_inv: &[[f32; 3]; 3], m1_inv: &[[f32; 3]; 3]) -> [f32; 3] {
+  let lms = matvec3(m2_inv, lab);
+  let lms = [lms[0] * lms[0] * lms[0], lms[1] * lms[1] * lms[1], lms[2] * lms[2] * lms[2]];
+  matvec3(m1_inv, lms)
+}
+
+/// Camera-space-in / camera-space-out OKLab highlight-chroma compression.
+///
+/// `cam2xyz` / `xyz2cam_eff` are the 3×3 maps built in [`calibrate`] from the same factors the
+/// pipeline uses, so for any pixel the compression leaves untouched the round-trip is the *exact*
+/// identity (camera → XYZ → OKLab → XYZ → camera = I). Pixels with `L ≤ OKLAB_KNEE_START` (and
+/// neutral pixels) are returned unchanged with no OKLab round-trip at all, so the bypass perturbs
+/// *only* near-clipped highlights and leaves the rest of the image bit-identical to the bypass-off
+/// path.
+#[inline(always)]
+fn oklab_highlight_compress_pixel(
+  cam: [f32; 3],
+  cam2xyz: &[[f32; 3]; 3],
+  xyz2cam_eff: &[[f32; 3]; 3],
+  m1_inv: &[[f32; 3]; 3],
+  m2_inv: &[[f32; 3]; 3],
+) -> [f32; 3] {
+  let xyz = matvec3(cam2xyz, cam);
+  let lab = xyz_to_oklab(xyz);
+  let l = lab[0];
+  // Below the knee — or a neutral / out-of-gamut-negative-L pixel — leave the camera pixel
+  // exactly as-is: no f32 round-trip error bleeds into non-highlight regions.
+  if l <= OKLAB_KNEE_START {
+    return cam;
+  }
+  let a = lab[1];
+  let b = lab[2];
+  let c = (a * a + b * b).sqrt();
+  if c <= 0.0 {
+    return cam;
+  }
+  // Lightness-driven chroma roll-off: as L climbs from KNEE_START to KNEE_END, scale chroma from
+  // 1 down to 0 (smoothstep), desaturating the highlight toward neutral so the frozen sRGB-clamp
+  // hue error is reduced.
+  let t = clamp01((l - OKLAB_KNEE_START) / (OKLAB_KNEE_END - OKLAB_KNEE_START));
+  let f = t * t * (3.0 - 2.0 * t);
+  let scale = 1.0 - f;
+  let lab2 = [l, a * scale, b * scale];
+  let xyz2 = oklab_to_xyz(lab2, m2_inv, m1_inv);
+  matvec3(xyz2cam_eff, xyz2)
+}
+
+#[cfg(test)]
+mod oklab_tests {
+  use super::*;
+
+  #[test]
+  fn oklab_round_trip() {
+    let m1_inv = pseudo_inverse(OKLAB_M1);
+    let m2_inv = pseudo_inverse(OKLAB_M2);
+    for xyz in [
+      [0.5_f32, 0.5, 0.5],
+      [0.9, 0.8, 1.0],
+      [0.2, 0.4, 0.3],
+      [0.8718, 0.8427, 1.0626],
+    ] {
+      let lab = xyz_to_oklab(xyz);
+      let back = oklab_to_xyz(lab, &m2_inv, &m1_inv);
+      for i in 0..3 {
+        assert!(
+          (back[i] - xyz[i]).abs() < 1e-3,
+          "XYZ→OKLab→XYZ round trip off: {:?} vs {:?}",
+          back,
+          xyz
+        );
+      }
+    }
+  }
+
+  #[test]
+  fn bypass_identity_for_non_highlight_and_neutral() {
+    let cam2xyz = [[1.0_f32, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    let xyz2cam_eff = [[1.0_f32, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    let m1_inv = pseudo_inverse(OKLAB_M1);
+    let m2_inv = pseudo_inverse(OKLAB_M2);
+    // Neutral (equal channels) bright pixel → chroma 0 → exact identity.
+    let out =
+      oklab_highlight_compress_pixel([0.95, 0.95, 0.95], &cam2xyz, &xyz2cam_eff, &m1_inv, &m2_inv);
+    for i in 0..3 {
+      assert!((out[i] - 0.95).abs() < 1e-5, "neutral not preserved: {:?}", out);
+    }
+    // Below the knee, non-neutral → identity (no round trip, no f32 drift).
+    let out2 =
+      oklab_highlight_compress_pixel([0.3, 0.1, 0.2], &cam2xyz, &xyz2cam_eff, &m1_inv, &m2_inv);
+    assert!(
+      (out2[0] - 0.3).abs() < 1e-6 && (out2[1] - 0.1).abs() < 1e-6 && (out2[2] - 0.2).abs() < 1e-6,
+      "below-knee not identity: {:?}",
+      out2
+    );
+  }
+
+  #[test]
+  fn bypass_reduces_chroma_on_highlight() {
+    let cam2xyz = [[1.0_f32, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    let xyz2cam_eff = [[1.0_f32, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    let m1_inv = pseudo_inverse(OKLAB_M1);
+    let m2_inv = pseudo_inverse(OKLAB_M2);
+    // A bright, chroma-rich pixel above the knee — this is the sRGB [1.00, 0.78, 1.00] magenta
+    // cast, expressed in XYZ so camera == XYZ under the identity maps.
+    let lab_in = xyz_to_oklab([1.0, 0.78, 1.0]);
+    let c_in = (lab_in[1] * lab_in[1] + lab_in[2] * lab_in[2]).sqrt();
+    let out =
+      oklab_highlight_compress_pixel([1.0, 0.78, 1.0], &cam2xyz, &xyz2cam_eff, &m1_inv, &m2_inv);
+    let lab_out = xyz_to_oklab(out);
+    let c_out = (lab_out[1] * lab_out[1] + lab_out[2] * lab_out[2]).sqrt();
+    assert!(c_out < c_in, "highlight chroma should shrink: {} vs {}", c_out, c_in);
+  }
 }
