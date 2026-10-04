@@ -5,7 +5,7 @@
 - Priority: P2
 - Created: 2026-09-29
 - Owner: —
-- Related: FOTLAB-RAWLER-000014 (上游 DCP apply 在 ForwardMatrix1/2 之间做 1/T 插值 — 本条为其"我方现状"侧对照，二者结论互相印证), FOTLAB-RAWLER-000005 (工作空间锁定与 gamut 裁剪 — `calibrate` 侧改造的前序), FOTLAB-RAWLER-000004 (decode-once / develop-reuse — as-shot CCT 经 `wb.rs` 暴露给 UI), FOTLAB-NATIVE-000005 (RawTherapee DCP/LCP parser + Camera/Lens Profile correction)
+- Related: FOTLAB-RAWLER-000014 (上游 DCP apply 在 ForwardMatrix1/2 之间做 1/T 插值 — 本条为其“我方现状”侧对照，二者结论互相印证), FOTLAB-RAWLER-000005 (工作空间锁定与 gamut 裁剪 — `calibrate` 侧改造的前序), FOTLAB-RAWLER-000004 (decode-once / develop-reuse — as-shot CCT 经 `wb.rs` 暴露给 UI), FOTLAB-NATIVE-000005 (RawTherapee DCP/LCP parser + Camera/Lens Profile correction), FOTLAB-RAWLER-000019 (wb_coeffs 来源对照 — 上游解码路径与我方派生路径), FOTLAB-RAWLER-000018 (OKLab 旁路插在 wb 乘之后 — F9 实现)
 
 ## Background & Goal
 
@@ -161,7 +161,18 @@ match rawtherapee_fotlab::parse_dcp(&cp.path) {
 2. 再在 **aperture**（vignette，线性）或 **focus distance**（distortion，**log 空间**且带 euler 常数）上找 low/high；
 3. 权重 `facLow`：`focLenOnSpot` 时直接取该维权重，否则 vignette 用 `0.5·(facLow + facAperLow)`、distortion 用 `0.8·facLow + 0.2·facDistLow`（lcp.cc:475-488）。
 
-`LCPModelCommon::merge`（lcp.cc:79）用 `rtengine::intp` 逐参数线性插值，且 **`vign_param[4]` 是从插值后的 `param[5]` 重新推导的**（lcp.cc:98-99），并非直接插值 `vign_param`。这一"先插值原始参数、再推导派生参数"的顺序在 Rust 重写时必须保持，否则 vignette 曲线形状会错。
+`LCPModelCommon::merge`（lcp.cc:79）用 `rtengine::intp` 逐参数线性插值，且 **`vign_param[4]` 是从插值后的 `param[5]` 重新推导的**（lcp.cc:98-99），并非直接插值 `vign_param`。这一“先插值原始参数、再推导派生参数”的顺序在 Rust 重写时必须保持，否则 vignette 曲线形状会错。
+
+### F9. 场景白点（如 5300K）进入白平衡乘子而非矩阵 —— 代码层印证 F4/F5（2026-10-04 补充）
+
+经对实际代码核对，对“场景白点如何处理”给出确定性结论，作为 F4/F5「我方矩阵与白平衡解耦」的代码层印证：
+
+- `resolve_xyz_to_cam`（`calibrate.rs:254-291`）的 Bradford **目标**仅为工作空间白点（`SrgbD65→D65`、`ProPhotoD50→D50`，由 `space.illuminant()` 决定，见 F3）；其**源**为矩阵键名（见 `FOTLAB-RAWLER-000016` F8/F11，仍属待修正的误读，但目标方向正确）。即**渲染矩阵只锚定到参考白点（D65/D50），与场景白平衡无关**。
+- 5300K 这类**非 D65 参考**的场景白点，**全部由白平衡乘子吸收**，逐像素在矩阵之前施加：`calibrate.rs:181-183` `r = px[0]*wb[0]` … 在 `cam2rgb`（`calibrate.rs:189-193`）与 OKLab 旁路（`calibrate.rs:184`）**之前**。两种来源：
+  - **as-shot**：`params.wb = None` 时直接用 rawler 解码的 `image.wb_coeffs`（`calibrate.rs:97-106`），是相机固件已把场景白点中性化到参考白点的读数，与色彩矩阵**解耦**（上游三条解码路径见 `FOTLAB-RAWLER-000019` F1）。
+  - **显式 Kelvin**：`wb_from_color_temp`（`wb.rs:284`）→ `matrix_for_cct` 在 mired 空间插值得 `M_T`（`wb.rs:177`）→ `neutral = M_T · XYZ_white(T)` → 倒数 + 绿归一 + 地板/钳位（F2）。
+- **结论**：渲染矩阵固定锚定参考白点，场景白点全进 `wb` 乘子，与 F5「我方矩阵与白平衡解耦、上游（RT）耦合」完全一致。把渲染矩阵也按场景 illuminant 重适配 + 再做 Bradford 到参考白点是 DNG 严格模型（`dng_color_spec`）做法；现行简化与 rawler 上游同构、对中性白点精确（normalize 把中性点钉死，见 `000016` F5b），摄影上可忽略。故不是 bug，不需要补一步。
+- **顺带解释 OKLab 旁路为何正确**：旁路插在 `wb` 乘之后（`FOTLAB-RAWLER-000018` F10），入口值已是 white-balanced 相机值——5300K 早已随 `wb` 进像素，故旁路复用同一套 D65 矩阵因子即正确，无需为场景白点额外处理。
 
 ## Recommendation
 
@@ -188,3 +199,4 @@ Adobe DNG 参考实现中 ColorMatrix 与 ForwardMatrix 共用同一个 mix。�
 ## Change History
 
 - 2026-09-29 初始版本。纯调研，未改动任何代码；未做数值验证（见 R1）。
+- 2026-10-04 — 补充 F9（代码层印证 F4/F5）：经实际代码核对，“场景白点（5300K）进入白平衡乘子而非矩阵”——`resolve_xyz_to_cam`（`calibrate.rs:254-291`）只锚定工作空间白点（D65/D50），场景白点全由 `wb` 乘子吸收（`calibrate.rs:181` 在矩阵之前施加），as-shot 用上游解码读数、Kelvin 用 `matrix_for_cct` 派生；确认现行简化与上游同构、对中性白点精确、非 bug。Related 增补 `FOTLAB-RAWLER-000019`、`FOTLAB-RAWLER-000018`。
