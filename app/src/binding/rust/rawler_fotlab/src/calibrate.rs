@@ -118,28 +118,37 @@ pub(crate) fn calibrate(
   let cam2rgb = pseudo_inverse(rgb2cam);
 
   // --- OKLab highlight-compression bypass (`FOTLAB-RENDER-000001`) -----------------
-  // Enabled only on the SrgbD65 presentation branch (`oklab_compress` is a no-op on
-  // ProPhotoD50). We build the two fixed 3×3 maps camera ↔ XYZ(D65) from the *same*
-  // factors the loop already uses — the effective 3×3 of `cam2rgb` (the RGB part the
-  // 3-colour arm actually multiplies, the 4th E column is unused for RGGB) and the
-  // working→XYZ matrix — so that for any pixel the compression leaves untouched the
-  // XYZ round-trip is the *exact* identity. We deliberately do NOT decompose `cam2rgb`
-  // by inverting it alone: `normalize` entangled its neutral diagonal into it, so the
-  // round-trip through the genuine pipeline factors is exact (design doc C3).
-  let bypass_active = oklab_compress && space == WorkingSpace::SrgbD65;
+  // Runs *before* the sRGB/ProPhoto split: the roll-off is a camera-space-in /
+  // camera-space-out round trip (camera → XYZ(D65) → OKLab → XYZ(D65) → camera), so it
+  // is applied to BOTH working spaces. OKLab is defined in XYZ(D65); after the round
+  // trip we are back in camera space and only then mapped to sRGB(D65) or ProPhoto(D50)
+  // by the per-pixel `cam2rgb` below — enabling it on ProPhotoD50 does NOT touch the D50
+  // output (the OKLab step is transparent to the destination primaries).
+  //
+  // The two fixed 3×3 maps camera ↔ XYZ(D65) are built from the *same* factors the loop
+  // already uses — the effective 3×3 of the D65-anchored `cam2rgb` and the sRGB→XYZ(D65)
+  // matrix — so that for any pixel the compression leaves untouched the XYZ round-trip is
+  // the *exact* identity. We deliberately do NOT decompose `cam2rgb` by inverting it
+  // alone: `normalize` entangled its neutral diagonal into it, so the round-trip through
+  // the genuine pipeline factors is exact (design doc C3).
+  let bypass_active = oklab_compress;
   let (cam2xyz, xyz2cam_eff, m1_inv, m2_inv) = if bypass_active {
-    let to_xyz = space.to_xyz_matrix();
+    // OKLab is defined in XYZ(D65); anchor BOTH maps on D65 regardless of `space`
+    // (camera ↔ XYZ(D65)), so the round trip is correct on the ProPhotoD50 branch too.
+    let to_xyz = SRGB_TO_XYZ_D65;
     let to_xyz_inv = pseudo_inverse(to_xyz);
-    // The 3×3 the 3-colour arm really multiplies: drop the unused E column.
+    // D65-anchored camera→linear RGB (3×3): camera → XYZ(D65) = to_xyz · cam2rgb_eff.
+    let rgb2cam_d65 = normalize(multiply(&xyz2cam, &to_xyz));
+    let cam2rgb_d65 = pseudo_inverse(rgb2cam_d65);
     let cam2rgb_eff = [
-      [cam2rgb[0][0], cam2rgb[0][1], cam2rgb[0][2]],
-      [cam2rgb[1][0], cam2rgb[1][1], cam2rgb[1][2]],
-      [cam2rgb[2][0], cam2rgb[2][1], cam2rgb[2][2]],
+      [cam2rgb_d65[0][0], cam2rgb_d65[0][1], cam2rgb_d65[0][2]],
+      [cam2rgb_d65[1][0], cam2rgb_d65[1][1], cam2rgb_d65[1][2]],
+      [cam2rgb_d65[2][0], cam2rgb_d65[2][1], cam2rgb_d65[2][2]],
     ];
     let cam2rgb_eff_inv = pseudo_inverse(cam2rgb_eff);
-    // camera → XYZ(D65) = (working→XYZ) · (camera→working)
+    // camera → XYZ(D65) = sRGB→XYZ(D65) · (camera→sRGB-linear D65)
     let cam2xyz = multiply(&to_xyz, &cam2rgb_eff);
-    // XYZ(D65) → camera = (camera→working)⁻¹ · (working→XYZ)⁻¹
+    // XYZ(D65) → camera = (camera→sRGB-linear D65)⁻¹ · (sRGB→XYZ(D65))⁻¹
     let xyz2cam_eff = multiply(&cam2rgb_eff_inv, &to_xyz_inv);
     let m1_inv = pseudo_inverse(OKLAB_M1);
     let m2_inv = pseudo_inverse(OKLAB_M2);

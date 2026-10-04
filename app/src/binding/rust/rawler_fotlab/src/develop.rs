@@ -328,17 +328,18 @@ pub struct DevelopParams {
   #[uniffi(default = None)]
   pub raw_focal_length_mm: Option<f32>,
   /// OKLab highlight-chroma compression bypass (`rules/DESIGN/detail/FOTLAB-RENDER-000001`).
-  /// When `true` (the default), the *presentation* (`SrgbD65`) path inserts a
-  /// camera-space-in / camera-space-out OKLab block right after white balance and
-  /// before the baked `cam2rgb` matrix: camera → XYZ(D65) → OKLab → lightness-driven
-  /// chroma roll-off → XYZ(D65) → camera. The goal is to desaturate near-clipped
-  /// highlights *before* they reach `bound::encode_srgb`'s per-channel clamp, so a
-  /// highlight whose channels clip unevenly trends toward neutral instead of freezing
-  /// into magenta/cyan. It is a no-op on the `ProPhotoD50` editing branch (out of
-  /// scope for now) and a pure identity pass-through when `false`, so flipping it off
-  /// is bit-for-bit identical to today's output. Kotlin does not yet pass this field,
-  /// so the pipeline runs it by default; passing `false` from Kotlin disables it
-  /// without a Rust change (`FOTLAB-RENDER-000001` R3/C6).
+  /// When `true` (the default), a camera-space-in / camera-space-out OKLab block runs right
+  /// after white balance and *before* the sRGB/ProPhoto split: camera → XYZ(D65) → OKLab →
+  /// lightness-driven chroma roll-off → XYZ(D65) → camera. Because the round trip is
+  /// camera-space in/out and the OKLab step is anchored on XYZ(D65), it applies to BOTH the
+  /// `SrgbD65` presentation path and the `ProPhotoD50` editing path — the desaturated camera
+  /// values are only mapped to the destination primaries afterwards, so ProPhotoD50 output is
+  /// affected exactly as sRGB is (no D50↔D65 adaptation needed). The goal is to desaturate
+  /// near-clipped highlights *before* they reach `bound::encode_srgb`'s per-channel clamp, so a
+  /// highlight whose channels clip unevenly trends toward neutral instead of freezing into
+  /// magenta/cyan. It is a pure identity pass-through when `false`, so flipping it off is
+  /// bit-for-bit identical to today's output. Kotlin passes this field (default `true`), so the
+  /// pipeline runs with it on unless Kotlin requests `false` (`FOTLAB-RENDER-000001` R3/C6).
   #[uniffi(default = true)]
   pub oklab_highlight_compress: bool,
 }
