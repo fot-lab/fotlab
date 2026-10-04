@@ -112,7 +112,9 @@
     <string name="studio_cd_oklab">OKLab highlight compression</string>
     <string name="studio_label_oklab">Highlight</string>
     <string name="studio_oklab_title">Highlight compression</string>
-    <string name="studio_oklab_body">Compress chroma in OKLab on near-clipped sRGB highlights, so the per-channel clamp no longer freezes a hue error</string>
+    <string name="studio_oklab_body">Compress chroma in OKLab on near-clipped highlights (sRGB presentation / ProPhoto editing) so the per-channel clamp no longer freezes a hue error. Toggle each branch separately.</string>
+    <string name="studio_oklab_srgb">sRGB highlight roll-off</string>
+    <string name="studio_oklab_prophoto">ProPhoto highlight roll-off</string>
     <string name="studio_label_log">LOG</string>
     <string name="studio_label_lut">LUT</string>
     <string name="studio_exposure_title">Exposure (EV)</string>

@@ -98,11 +98,11 @@ Every forward step is undone by its exact inverse in reverse order — `∛` ↔
 ## Acceptance Criteria
 
 - **AC1** — A new `DevelopParams` flag toggles the bypass; with it off, the full image (all working spaces) is byte-for-byte identical to the current output (no matrix change, no extra allocation).
-- **AC2** — With the flag on and a non-zero strength, a synthetic non-neutral near-clipped highlight (e.g. camera RGB that maps to `sRGB ≈ [1.00, 0.78, 1.00]`) renders with measurably **lower chroma / closer-to-neutral hue** after the sRGB clamp than without the block, **for both the `SrgbD65` and `ProPhotoD50` branches** (both consume the same post-roll-off camera buffer before their respective `cam2rgb`).
+- **AC2** — With the relevant branch gate on and a non-zero strength, a synthetic non-neutral near-clipped highlight (e.g. camera RGB that maps to `sRGB ≈ [1.00, 0.78, 1.00]`) renders with measurably **lower chroma / closer-to-neutral hue** after the sRGB clamp than without the block, **on whichever branch is enabled** (default: sRGB on, ProPhoto off). Both branches consume the same post-roll-off camera buffer before their respective `cam2rgb`, so when the ProPhoto gate is on it is desaturated identically.
 - **AC3** — A neutral saturated highlight (`camera (k,k,k)`, k≥white level) is preserved as neutral (within rounding) by the block — no introduced hue shift.
 - **AC4** — With the flag on and strength 0, output equals the flag-off output (R4 invariant), verified by a unit test comparing both paths on a fixed fixture.
 - **AC5** — The block is proven per-pixel parallel (rayon) with no cross-pixel state; a `cargo test` exists exercising `cam2xyz·xyz2cam ≈ I` and the OKLab round-trip `XYZ→OKLab→XYZ ≈ I`.
-- **AC6** — The `ProPhotoD50` branch is **now enabled** on the same camera-space bypass as `SrgbD65`: with the flag on, that branch gets the same OKLab highlight roll-off (chroma reduced, hue preserved) before its `cam2rgb` maps it to ProPhoto D50. No Bradford bridge is required (C2). With the flag off it is the exact identity pass-through (AC1/AC4).
+- **AC6** — The `ProPhotoD50` branch shares the same camera-space bypass as `SrgbD65`; with `oklab_highlight_compress_prophoto` on, that branch gets the same OKLab highlight roll-off (chroma reduced, hue preserved) before its `cam2rgb` maps it to ProPhoto D50. No Bradford bridge is required (C2). **Default off** — the editing branch is the exact identity pass-through unless Kotlin enables it (AC1/AC4).
 
 ## Impacted Modules
 

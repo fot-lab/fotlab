@@ -327,21 +327,28 @@ pub struct DevelopParams {
   /// → `DEFAULT_LCP_FOCAL_MM`.
   #[uniffi(default = None)]
   pub raw_focal_length_mm: Option<f32>,
-  /// OKLab highlight-chroma compression bypass (`rules/DESIGN/detail/FOTLAB-RENDER-000001`).
-  /// When `true` (the default), a camera-space-in / camera-space-out OKLab block runs right
-  /// after white balance and *before* the sRGB/ProPhoto split: camera → XYZ(D65) → OKLab →
-  /// lightness-driven chroma roll-off → XYZ(D65) → camera. Because the round trip is
-  /// camera-space in/out and the OKLab step is anchored on XYZ(D65), it applies to BOTH the
-  /// `SrgbD65` presentation path and the `ProPhotoD50` editing path — the desaturated camera
-  /// values are only mapped to the destination primaries afterwards, so ProPhotoD50 output is
-  /// affected exactly as sRGB is (no D50↔D65 adaptation needed). The goal is to desaturate
-  /// near-clipped highlights *before* they reach `bound::encode_srgb`'s per-channel clamp, so a
-  /// highlight whose channels clip unevenly trends toward neutral instead of freezing into
-  /// magenta/cyan. It is a pure identity pass-through when `false`, so flipping it off is
-  /// bit-for-bit identical to today's output. Kotlin passes this field (default `true`), so the
-  /// pipeline runs with it on unless Kotlin requests `false` (`FOTLAB-RENDER-000001` R3/C6).
+  /// OKLab highlight-chroma compression — `SrgbD65` presentation branch
+  /// (`rules/DESIGN/detail/FOTLAB-RENDER-000001`). When `true` (the default), a
+  /// camera-space-in / camera-space-out OKLab block runs right after white balance and *before*
+  /// the camera→working `cam2rgb` multiply: camera → XYZ(D65) → OKLab → lightness-driven chroma
+  /// roll-off → XYZ(D65) → camera. Because the round trip is camera-space in/out and anchored on
+  /// XYZ(D65), it desaturates near-clipped highlights *before* they reach `bound::encode_srgb`'s
+  /// per-channel clamp, trending a highlight whose channels clip unevenly toward neutral instead
+  /// of freezing into magenta/cyan. It is transparent to the destination primaries (no D50↔D65
+  /// Bradford bridge), so the math is identical to the `ProPhotoD50` twin below. It is a pure
+  /// identity pass-through when `false` (bit-for-bit identical to today's output). The enable gate
+  /// is **per branch**: this flag covers only the `SrgbD65` presentation path; the `ProPhotoD50`
+  /// editing path is gated by `oklab_highlight_compress_prophoto` (`FOTLAB-RENDER-000001` R3/C6).
   #[uniffi(default = true)]
-  pub oklab_highlight_compress: bool,
+  pub oklab_highlight_compress_srgb: bool,
+  /// OKLab highlight-chroma compression — `ProPhotoD50` editing branch (twin of
+  /// `oklab_highlight_compress_srgb`). Same camera-space D65-anchored round trip, applied to the
+  /// editing branch so rawalchemy receives a desaturated (not clamped) near-clipped-highlight
+  /// buffer. **Default `false`** (off) — the editing branch leaves the ProPhoto buffer untouched
+  /// by default; the Studio OKLab dialog's second switch controls it. Identity pass-through when
+  /// `false`. The gate is selected in `develop_image` from `space` (`FOTLAB-RENDER-000001` R3/C6).
+  #[uniffi(default = false)]
+  pub oklab_highlight_compress_prophoto: bool,
 }
 
 /// Grading parameters supplied by Kotlin for [`develop_and_grade`].
@@ -658,7 +665,14 @@ pub(crate) fn develop_image(
   // per-pixel/rect-selection operations, so order is numerically equivalent,
   // but keeping the identical order means the crop coordinates resolve
   // exactly the way upstream resolves them.
-  let linear = calibrate(intermediate, &image, wb, space, params.oklab_highlight_compress)?;
+  // Per-branch OKLab highlight-compression gate: sRGB presentation vs ProPhoto editing each have
+  // their own switch (defaults: sRGB on, ProPhoto off). The OKLab math in `calibrate` is D65-
+  // anchored and identical for both; only the enable differs by destination (`FOTLAB-RENDER-000001`).
+  let oklab_compress = match space {
+    WorkingSpace::SrgbD65 => params.oklab_highlight_compress_srgb,
+    WorkingSpace::ProPhotoD50 => params.oklab_highlight_compress_prophoto,
+  };
+  let linear = calibrate(intermediate, &image, wb, space, oklab_compress)?;
   let mut linear = crop_default(&image, linear)?;
 
   // Out-of-gamut clipping (the Studio "Clipping" switch) — the LAST step of the

@@ -118,12 +118,15 @@ pub(crate) fn calibrate(
   let cam2rgb = pseudo_inverse(rgb2cam);
 
   // --- OKLab highlight-compression bypass (`FOTLAB-RENDER-000001`) -----------------
-  // Runs *before* the sRGB/ProPhoto split: the roll-off is a camera-space-in /
-  // camera-space-out round trip (camera → XYZ(D65) → OKLab → XYZ(D65) → camera), so it
-  // is applied to BOTH working spaces. OKLab is defined in XYZ(D65); after the round
-  // trip we are back in camera space and only then mapped to sRGB(D65) or ProPhoto(D50)
-  // by the per-pixel `cam2rgb` below — enabling it on ProPhotoD50 does NOT touch the D50
-  // output (the OKLab step is transparent to the destination primaries).
+  // Enabled *per branch* — the gate is selected in `develop_image` from `space`:
+  // `oklab_highlight_compress_srgb` for the `SrgbD65` presentation path,
+  // `oklab_highlight_compress_prophoto` for the `ProPhotoD50` editing path (defaults: sRGB on,
+  // ProPhoto off). The block itself runs in camera space *before* the final camera→working
+  // `cam2rgb` multiply — a camera-space-in / camera-space-out round trip
+  // (camera → XYZ(D65) → OKLab → XYZ(D65) → camera) — so for whichever branch is enabled it
+  // desaturates near-clipped highlights transparently. OKLab is defined in XYZ(D65) and the round
+  // trip is anchored on D65, so enabling it does NOT require a D50↔D65 Bradford bridge on the
+  // ProPhotoD50 branch (the step is invisible to the destination primaries).
   //
   // The two fixed 3×3 maps camera ↔ XYZ(D65) are built from the *same* factors the loop
   // already uses — the effective 3×3 of the D65-anchored `cam2rgb` and the sRGB→XYZ(D65)

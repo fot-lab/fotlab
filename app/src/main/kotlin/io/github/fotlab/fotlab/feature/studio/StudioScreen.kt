@@ -260,7 +260,8 @@ fun StudioScreen() {
     // frozen sRGB-clamp hue error); OFF leaves the pipeline untouched (bit-for-bit identity for the
     // rest of the image). Mirrors the Clipping dialog's switch-only pattern.
     var showOklabDialog by remember { mutableStateOf(false) }
-    var oklabHighlightEnabled by remember { mutableStateOf(true) }
+    var oklabSrgbEnabled by remember { mutableStateOf(true) }
+    var oklabProphotoEnabled by remember { mutableStateOf(false) }
 
     // Per-stage enable toggles for the develop dialogs. The switch has priority over the numeric
     // value: OFF skips the stage regardless of the field (the engine writes `null`, the native stage
@@ -539,7 +540,8 @@ fun StudioScreen() {
                             showLcpFocalDialog = true
                         },
                         onOklabHighlight = {
-                            oklabHighlightEnabled = StudioEngine.currentOklabHighlightCompress()
+                            oklabSrgbEnabled = StudioEngine.currentOklabHighlightCompressSrgb()
+                            oklabProphotoEnabled = StudioEngine.currentOklabHighlightCompressProphoto()
                             showOklabDialog = true
                         },
                     )
@@ -751,7 +753,8 @@ fun StudioScreen() {
             confirmButton = {
                 TextButton(
                     onClick = {
-                        StudioEngine.setOklabHighlightCompress(oklabHighlightEnabled)
+                        StudioEngine.setOklabHighlightCompressSrgb(oklabSrgbEnabled)
+                        StudioEngine.setOklabHighlightCompressProphoto(oklabProphotoEnabled)
                         showOklabDialog = false
                     },
                 ) {
@@ -767,11 +770,17 @@ fun StudioScreen() {
             text = {
                 Column {
                     Text(text = stringResource(id = R.string.studio_oklab_body))
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(text = stringResource(id = R.string.studio_oklab_srgb))
+                        Spacer(modifier = Modifier.weight(1f))
+                        Switch(checked = oklabSrgbEnabled, onCheckedChange = { oklabSrgbEnabled = it })
+                    }
                     Spacer(modifier = Modifier.height(8.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(text = stringResource(id = R.string.studio_enable_stage))
+                        Text(text = stringResource(id = R.string.studio_oklab_prophoto))
                         Spacer(modifier = Modifier.weight(1f))
-                        Switch(checked = oklabHighlightEnabled, onCheckedChange = { oklabHighlightEnabled = it })
+                        Switch(checked = oklabProphotoEnabled, onCheckedChange = { oklabProphotoEnabled = it })
                     }
                 }
             },

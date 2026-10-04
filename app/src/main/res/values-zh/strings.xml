@@ -117,7 +117,9 @@
     <string name="studio_cd_oklab">OKLab 高光压缩</string>
     <string name="studio_label_oklab">高光</string>
     <string name="studio_oklab_title">高光压缩</string>
-    <string name="studio_oklab_body">在 OKLab 空间对接近溢出的 sRGB 高光做色度压缩，使逐通道截断不再冻结色相误差</string>
+    <string name="studio_oklab_body">在 OKLab 空间对接近溢出的高光做色度压缩（sRGB 呈现 / ProPhoto 编辑），使逐通道截断不再冻结色相误差。两个分支分别开关。</string>
+    <string name="studio_oklab_srgb">sRGB 高光滚降</string>
+    <string name="studio_oklab_prophoto">ProPhoto 高光滚降</string>
     <string name="studio_ca_auto_label">自动拟合</string>
     <string name="studio_ca_red_hint">红色径向强度（0 关闭）</string>
     <string name="studio_ca_blue_hint">蓝色径向强度（0 关闭）</string>

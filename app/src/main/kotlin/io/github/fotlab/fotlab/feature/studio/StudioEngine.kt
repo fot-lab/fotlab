@@ -221,7 +221,8 @@ object StudioEngine {
             lensProfile = lensProfileState.value,
             rawFocalLengthMm = rawFocalLengthMmState.value,
                         downsample = downsampleState.value,
-            oklabHighlightCompress = currentOklabHighlightCompress,
+            oklabHighlightCompressSrgb = currentOklabHighlightCompressSrgb,
+            oklabHighlightCompressProphoto = currentOklabHighlightCompressProphoto,
                     ),
                 ) ?: return StudioRenderResult.Unsupported
                 currentFormat = r.format
@@ -544,7 +545,8 @@ object StudioEngine {
             cameraProfile = cameraProfileState.value,
             lensProfile = lensProfileState.value,
             rawFocalLengthMm = rawFocalLengthMmState.value,
-            oklabHighlightCompress = currentOklabHighlightCompress,
+            oklabHighlightCompressSrgb = currentOklabHighlightCompressSrgb,
+            oklabHighlightCompressProphoto = currentOklabHighlightCompressProphoto,
             // The grade fork develops through the same pipeline, so it honours the switch too —
             // grading a quarter-resolution frame is simply grading fewer pixels.
             downsample = downsampleState.value,
@@ -831,7 +833,8 @@ object StudioEngine {
             cameraProfile = cameraProfileState.value,
             lensProfile = lensProfileState.value,
             rawFocalLengthMm = rawFocalLengthMmState.value,
-            oklabHighlightCompress = currentOklabHighlightCompress,
+            oklabHighlightCompressSrgb = currentOklabHighlightCompressSrgb,
+            oklabHighlightCompressProphoto = currentOklabHighlightCompressProphoto,
             downsample = downsampleState.value,
         )
         // `metered` is the offset relative to the current image; add the recorded applied exposure
@@ -879,24 +882,45 @@ object StudioEngine {
     fun currentClipToGamut(): Boolean = currentClipToGamut
 
     /**
-     * Whether the OKLab highlight-compression bypass is active for the next render (the Studio
-     * OKLab dialog's switch). It only affects the **sRGB presentation** fork — a lightness-driven
-     * chroma roll-off in OKLab desaturates near-clipped highlights so the per-channel sRGB clamp no
-     * longer freezes a hue error. The ProPhoto-D50 editing fork is unaffected (the bypass is a
-     * no-op there), and OFF is a bit-for-bit identity for the rest of the image.
+     * Whether the OKLab highlight-compression bypass is active for the **sRGB presentation** fork
+     * on the next render (the Studio OKLab dialog's first switch). A lightness-driven chroma
+     * roll-off in OKLab desaturates near-clipped highlights so the per-channel sRGB clamp no longer
+     * freezes a hue error. Default **on**. OFF is a bit-for-bit identity for the rest of the image.
      */
-    private var currentOklabHighlightCompress: Boolean = true
-
-    /** The current OKLab highlight-compression switch; the UI prefills the OKLab dialog from this. */
-    fun currentOklabHighlightCompress(): Boolean = currentOklabHighlightCompress
+    private var currentOklabHighlightCompressSrgb: Boolean = true
 
     /**
-     * Re-develop the current RAW with OKLab highlight compression [enabled] (Studio OKLab dialog).
-     * The switch changes the sRGB presentation PNG (the only fork the bypass touches), so this goes
-     * through [reDevelop] rather than [reGrade].
+     * Whether the OKLab highlight-compression bypass is active for the **ProPhoto-D50 editing** fork
+     * on the next render (the Studio OKLab dialog's second switch). Same D65-anchored camera-space
+     * round trip as the sRGB twin, so rawalchemy receives a desaturated (not clamped) near-clipped
+     * highlight buffer. Default **off** — the editing branch leaves the ProPhoto buffer untouched
+     * unless the UI enables it. OFF is a bit-for-bit identity.
      */
-    fun setOklabHighlightCompress(enabled: Boolean) {
-        currentOklabHighlightCompress = enabled
+    private var currentOklabHighlightCompressProphoto: Boolean = false
+
+    /** Current sRGB OKLab highlight-compression switch; the UI prefills the OKLab dialog from this. */
+    fun currentOklabHighlightCompressSrgb(): Boolean = currentOklabHighlightCompressSrgb
+
+    /** Current ProPhoto OKLab highlight-compression switch; the UI prefills the OKLab dialog from this. */
+    fun currentOklabHighlightCompressProphoto(): Boolean = currentOklabHighlightCompressProphoto
+
+    /**
+     * Re-develop the current RAW with OKLab highlight compression [enabled] for the sRGB
+     * presentation fork (Studio OKLab dialog). The switch changes the sRGB presentation PNG (the
+     * fork this gate touches), so this goes through [reDevelop] rather than [reGrade].
+     */
+    fun setOklabHighlightCompressSrgb(enabled: Boolean) {
+        currentOklabHighlightCompressSrgb = enabled
+        reDevelop()
+    }
+
+    /**
+     * Re-develop the current RAW with OKLab highlight compression [enabled] for the ProPhoto-D50
+     * editing fork (Studio OKLab dialog). The switch changes the ProPhoto buffer rawalchemy
+     * receives, so this goes through [reDevelop] (which re-renders the editing fork too).
+     */
+    fun setOklabHighlightCompressProphoto(enabled: Boolean) {
+        currentOklabHighlightCompressProphoto = enabled
         reDevelop()
     }
 
@@ -1128,7 +1152,8 @@ object StudioEngine {
             lensProfile = lensProfileState.value,
             rawFocalLengthMm = rawFocalLengthMmState.value,
                         downsample = downsample,
-            oklabHighlightCompress = currentOklabHighlightCompress,
+            oklabHighlightCompressSrgb = currentOklabHighlightCompressSrgb,
+            oklabHighlightCompressProphoto = currentOklabHighlightCompressProphoto,
                     ),
                     wbKelvin,
                 )
@@ -1155,7 +1180,8 @@ object StudioEngine {
             lensProfile = lensProfileState.value,
             rawFocalLengthMm = rawFocalLengthMmState.value,
                         downsample = downsample,
-            oklabHighlightCompress = currentOklabHighlightCompress,
+            oklabHighlightCompressSrgb = currentOklabHighlightCompressSrgb,
+            oklabHighlightCompressProphoto = currentOklabHighlightCompressProphoto,
                     ),
                 )
             }
