@@ -221,6 +221,7 @@ object StudioEngine {
             lensProfile = lensProfileState.value,
             rawFocalLengthMm = rawFocalLengthMmState.value,
                         downsample = downsampleState.value,
+            oklabHighlightCompress = currentOklabHighlightCompress,
                     ),
                 ) ?: return StudioRenderResult.Unsupported
                 currentFormat = r.format
@@ -543,6 +544,7 @@ object StudioEngine {
             cameraProfile = cameraProfileState.value,
             lensProfile = lensProfileState.value,
             rawFocalLengthMm = rawFocalLengthMmState.value,
+            oklabHighlightCompress = currentOklabHighlightCompress,
             // The grade fork develops through the same pipeline, so it honours the switch too —
             // grading a quarter-resolution frame is simply grading fewer pixels.
             downsample = downsampleState.value,
@@ -829,6 +831,7 @@ object StudioEngine {
             cameraProfile = cameraProfileState.value,
             lensProfile = lensProfileState.value,
             rawFocalLengthMm = rawFocalLengthMmState.value,
+            oklabHighlightCompress = currentOklabHighlightCompress,
             downsample = downsampleState.value,
         )
         // `metered` is the offset relative to the current image; add the recorded applied exposure
@@ -874,6 +877,28 @@ object StudioEngine {
 
     /** The current out-of-gamut clipping switch; the UI prefills the Clipping dialog from this. */
     fun currentClipToGamut(): Boolean = currentClipToGamut
+
+    /**
+     * Whether the OKLab highlight-compression bypass is active for the next render (the Studio
+     * OKLab dialog's switch). It only affects the **sRGB presentation** fork — a lightness-driven
+     * chroma roll-off in OKLab desaturates near-clipped highlights so the per-channel sRGB clamp no
+     * longer freezes a hue error. The ProPhoto-D50 editing fork is unaffected (the bypass is a
+     * no-op there), and OFF is a bit-for-bit identity for the rest of the image.
+     */
+    private var currentOklabHighlightCompress: Boolean = true
+
+    /** The current OKLab highlight-compression switch; the UI prefills the OKLab dialog from this. */
+    fun currentOklabHighlightCompress(): Boolean = currentOklabHighlightCompress
+
+    /**
+     * Re-develop the current RAW with OKLab highlight compression [enabled] (Studio OKLab dialog).
+     * The switch changes the sRGB presentation PNG (the only fork the bypass touches), so this goes
+     * through [reDevelop] rather than [reGrade].
+     */
+    fun setOklabHighlightCompress(enabled: Boolean) {
+        currentOklabHighlightCompress = enabled
+        reDevelop()
+    }
 
     /**
      * The DCP camera profile retained for the next develop re-render; null = off (no camera
@@ -1103,6 +1128,7 @@ object StudioEngine {
             lensProfile = lensProfileState.value,
             rawFocalLengthMm = rawFocalLengthMmState.value,
                         downsample = downsample,
+            oklabHighlightCompress = currentOklabHighlightCompress,
                     ),
                     wbKelvin,
                 )
@@ -1129,6 +1155,7 @@ object StudioEngine {
             lensProfile = lensProfileState.value,
             rawFocalLengthMm = rawFocalLengthMmState.value,
                         downsample = downsample,
+            oklabHighlightCompress = currentOklabHighlightCompress,
                     ),
                 )
             }
