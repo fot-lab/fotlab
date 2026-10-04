@@ -50,6 +50,7 @@ import androidx.compose.material.icons.filled.Grain
 import androidx.compose.material.icons.filled.WbAuto
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Camera
+import androidx.compose.material.icons.filled.Flare
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -252,6 +253,14 @@ fun StudioScreen() {
     var showLcpFocalDialog by remember { mutableStateOf(false) }
     var lcpFocalInput by remember { mutableStateOf("") }
     var clipToGamutEnabled by remember { mutableStateOf(true) }
+
+    // OKLab highlight-compression dialog state (opened by the Flare icon, the last button of the
+    // DevelopFilm operation bar). The switch IS the parameter — ON inserts a lightness-driven chroma
+    // roll-off in OKLab on the sRGB presentation fork's near-clipped highlights (desaturating the
+    // frozen sRGB-clamp hue error); OFF leaves the pipeline untouched (bit-for-bit identity for the
+    // rest of the image). Mirrors the Clipping dialog's switch-only pattern.
+    var showOklabDialog by remember { mutableStateOf(false) }
+    var oklabHighlightEnabled by remember { mutableStateOf(true) }
 
     // Per-stage enable toggles for the develop dialogs. The switch has priority over the numeric
     // value: OFF skips the stage regardless of the field (the engine writes `null`, the native stage
@@ -529,6 +538,10 @@ fun StudioScreen() {
                             lcpFocalInput = userLcpFocalLengthMm?.let { "%.0f".format(it) } ?: ""
                             showLcpFocalDialog = true
                         },
+                        onOklabHighlight = {
+                            oklabHighlightEnabled = StudioEngine.currentOklabHighlightCompress()
+                            showOklabDialog = true
+                        },
                     )
                     // Grade tools (Contrast/Saturation/LOG/LUT) are RAW-only, like the former grade bar.
                     StudioOpBar.TuneImage -> StudioOperationBarTuneImage(
@@ -721,6 +734,44 @@ fun StudioScreen() {
                         Text(text = stringResource(id = R.string.studio_enable_stage))
                         Spacer(modifier = Modifier.weight(1f))
                         Switch(checked = clipToGamutEnabled, onCheckedChange = { clipToGamutEnabled = it })
+                    }
+                }
+            },
+        )
+    }
+
+    // OKLab highlight-compression dialog: the switch IS the parameter — there is no numeric field,
+    // and OK is always enabled. The body states what the switch does in the engine's own terms: it
+    // inserts a perceptual chroma roll-off on near-clipped sRGB highlights (in OKLab) so the
+    // per-channel clamp no longer freezes a hue error. OFF is a pure identity for the rest of the
+    // image, and the ProPhoto-D50 editing fork is untouched.
+    if (showOklabDialog) {
+        AlertDialog(
+            onDismissRequest = { showOklabDialog = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        StudioEngine.setOklabHighlightCompress(oklabHighlightEnabled)
+                        showOklabDialog = false
+                    },
+                ) {
+                    Text(text = stringResource(id = R.string.common_action_ok))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showOklabDialog = false }) {
+                    Text(text = stringResource(id = R.string.common_action_cancel))
+                }
+            },
+            title = { Text(text = stringResource(id = R.string.studio_oklab_title)) },
+            text = {
+                Column {
+                    Text(text = stringResource(id = R.string.studio_oklab_body))
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(text = stringResource(id = R.string.studio_enable_stage))
+                        Spacer(modifier = Modifier.weight(1f))
+                        Switch(checked = oklabHighlightEnabled, onCheckedChange = { oklabHighlightEnabled = it })
                     }
                 }
             },
@@ -1474,6 +1525,28 @@ private fun ClippingButton(
 }
 
 /**
+ * OKLab highlight-compression switch (opens the OKLab dialog owned by StudioScreen).
+ *
+ * Material's *flare* glyph marks the perceptual highlight glow this tool tames: it inserts a
+ * lightness-driven chroma roll-off in OKLab on the sRGB presentation fork's near-clipped
+ * highlights, so the per-channel sRGB clamp no longer freezes a hue error. Like the other
+ * DevelopFilm-bar tools it carries no state of its own — the dialog's switch is the only control
+ * (`FOTLAB-UIXDES-000002`: the screen owns the dialogs).
+ */
+@Composable
+private fun OklabHighlightButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    IconButton(onClick = onClick, modifier = modifier) {
+        Icon(
+            imageVector = Icons.Filled.Flare,
+            contentDescription = stringResource(id = R.string.studio_cd_oklab),
+        )
+    }
+}
+
+/**
  * Contrast parameter of the boost group. Primary tint while configured. Opens
  * [BoostParameterDialog]; the boost switch itself is derived (either parameter configured).
  */
@@ -1789,6 +1862,7 @@ private fun StudioOperationBarDevelopFilm(
     onLensProfilePick: () -> Unit,
     onLensProfileClear: () -> Unit,
     onLensProfileFocal: () -> Unit,
+    onOklabHighlight: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     HorizontalOperationBar(
@@ -1826,6 +1900,10 @@ private fun StudioOperationBarDevelopFilm(
                 id = "wb",
                 label = stringResource(id = R.string.studio_label_whitebalance),
             ) { WhiteBalanceButton(onWhiteBalance) },
+            OperationalButton(
+                id = "oklab",
+                label = stringResource(id = R.string.studio_label_oklab),
+            ) { OklabHighlightButton(onOklabHighlight) },
         ),
     )
 }
