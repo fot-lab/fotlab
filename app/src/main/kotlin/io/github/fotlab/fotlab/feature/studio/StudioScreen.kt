@@ -243,7 +243,7 @@ fun StudioScreen() {
     var caRedInput by remember { mutableStateOf("") }
     var caBlueInput by remember { mutableStateOf("") }
 
-    // Clipping dialog state (opened by the DevelopFilm bar Clipping icon, the AllOut glyph).
+    // Clipping dialog state (opened by the Clipping icon, the AllOut glyph).
     // The switch IS the tool — there is no numeric parameter: ON clamps every component of the
     // linear ProPhoto-D50 buffer into 0..1 as the last native step (before rawalchemy), OFF
     // leaves the editing branch wide-gamut and unclamped. The sRGB presentation PNG is
@@ -510,10 +510,6 @@ fun StudioScreen() {
                                 if (kelvin > 0f) kelvin.roundToInt().toString() else ""
                             showWhiteBalanceDialog = true
                         },
-                        onClipping = {
-                            clipToGamutEnabled = StudioEngine.currentClipToGamut()
-                            showClippingDialog = true
-                        },
                         cameraProfileActive = cameraProfile != null,
                         lensProfileActive = lensProfile != null,
                         lensProfileUserFocal = userLcpFocalLengthMm,
@@ -536,6 +532,10 @@ fun StudioScreen() {
                     )
                     // Grade tools (Contrast/Saturation/LOG/LUT) are RAW-only, like the former grade bar.
                     StudioOpBar.TuneImage -> StudioOperationBarTuneImage(
+                        onClipping = {
+                            clipToGamutEnabled = StudioEngine.currentClipToGamut()
+                            showClippingDialog = true
+                        },
                         contrast = gradeSelection.contrast,
                         saturation = gradeSelection.saturation,
                         onContrast = StudioEngine::setGradeContrast,
@@ -1781,7 +1781,6 @@ private fun StudioOperationBarDevelopFilm(
     onCa: () -> Unit,
     onExposure: () -> Unit,
     onWhiteBalance: () -> Unit,
-    onClipping: () -> Unit,
     cameraProfileActive: Boolean = false,
     lensProfileActive: Boolean = false,
     lensProfileUserFocal: Float? = null,
@@ -1827,10 +1826,6 @@ private fun StudioOperationBarDevelopFilm(
                 id = "wb",
                 label = stringResource(id = R.string.studio_label_whitebalance),
             ) { WhiteBalanceButton(onWhiteBalance) },
-            OperationalButton(
-                id = "clipping",
-                label = stringResource(id = R.string.studio_label_clipping),
-            ) { ClippingButton(onClipping) },
         ),
     )
 }
@@ -1838,6 +1833,7 @@ private fun StudioOperationBarDevelopFilm(
 /** TuneImage bar — the boost group: Contrast and Saturation parameter inputs. */
 @Composable
 private fun StudioOperationBarTuneImage(
+    onClipping: () -> Unit,
     contrast: Float?,
     saturation: Float?,
     onContrast: (Float?) -> Unit,
@@ -1847,6 +1843,10 @@ private fun StudioOperationBarTuneImage(
     HorizontalOperationBar(
         modifier = modifier,
         items = listOf(
+            OperationalButton(
+                id = "clipping",
+                label = stringResource(id = R.string.studio_label_clipping),
+            ) { ClippingButton(onClipping) },
             OperationalButton(
                 id = "contrast",
                 label = stringResource(id = R.string.studio_cd_contrast),
