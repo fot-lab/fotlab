@@ -184,7 +184,7 @@ pub(crate) fn calibrate(
         let (r, g, b) = if bypass_active {
           oklab_highlight_compress_pixel([r, g, b], &cam2xyz, &xyz2cam_eff, &m1_inv, &m2_inv)
         } else {
-          (r, g, b)
+          [r, g, b]
         };
         let mapped = [
           cam2rgb[0][0] * r + cam2rgb[0][1] * g + cam2rgb[0][2] * b,
