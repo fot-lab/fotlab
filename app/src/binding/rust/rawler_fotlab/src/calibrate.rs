@@ -365,9 +365,10 @@ fn oklab_to_xyz(lab: [f32; 3], m2_inv: &[[f32; 3]; 3], m1_inv: &[[f32; 3]; 3]) -
 /// `cam2xyz` / `xyz2cam_eff` are the 3×3 maps built in [`calibrate`] from the same factors the
 /// pipeline uses, so for any pixel the compression leaves untouched the round-trip is the *exact*
 /// identity (camera → XYZ → OKLab → XYZ → camera = I). Pixels with `L ≤ OKLAB_KNEE_START` (and
-/// neutral pixels) are returned unchanged with no OKLab round-trip at all, so the bypass perturbs
-/// *only* near-clipped highlights and leaves the rest of the image bit-identical to the bypass-off
-/// path.
+/// *perceptually*-neutral pixels — zero OKLab chroma, e.g. the white point — **not** merely equal
+/// XYZ channels, which carry chroma in OKLab) are returned unchanged with no OKLab round-trip at
+/// all, so the bypass perturbs *only* near-clipped highlights and leaves the rest of the image
+/// bit-identical to the bypass-off path.
 #[inline(always)]
 fn oklab_highlight_compress_pixel(
   cam: [f32; 3],
@@ -434,13 +435,22 @@ mod oklab_tests {
     let xyz2cam_eff = [[1.0_f32, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
     let m1_inv = pseudo_inverse(OKLAB_M1);
     let m2_inv = pseudo_inverse(OKLAB_M2);
-    // Neutral (equal channels) bright pixel → chroma 0 → exact identity.
+    // A *perceptually* neutral bright pixel (OKLab chroma ≈ 0). Equal XYZ channels are NOT neutral
+    // in OKLab — only zero OKLab chroma is — so we build the neutral point by inverting a neutral
+    // lab. With zero chroma the bypass short-circuits (or round-trips to ~machine precision) and
+    // returns the pixel unchanged, leaving the white point exactly where the matrix put it.
+    let neutral_xyz = oklab_to_xyz([0.95_f32, 0.0, 0.0], &m2_inv, &m1_inv);
     let out =
-      oklab_highlight_compress_pixel([0.95, 0.95, 0.95], &cam2xyz, &xyz2cam_eff, &m1_inv, &m2_inv);
+      oklab_highlight_compress_pixel(neutral_xyz, &cam2xyz, &xyz2cam_eff, &m1_inv, &m2_inv);
     for i in 0..3 {
-      assert!((out[i] - 0.95).abs() < 1e-5, "neutral not preserved: {:?}", out);
+      assert!(
+        (out[i] - neutral_xyz[i]).abs() < 1e-5,
+        "neutral not preserved: {:?} vs {:?}",
+        out,
+        neutral_xyz
+      );
     }
-    // Below the knee, non-neutral → identity (no round trip, no f32 drift).
+    // Below the knee, any pixel → identity (no round trip, no f32 drift).
     let out2 =
       oklab_highlight_compress_pixel([0.3, 0.1, 0.2], &cam2xyz, &xyz2cam_eff, &m1_inv, &m2_inv);
     assert!(
