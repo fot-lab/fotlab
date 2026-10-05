@@ -257,6 +257,53 @@ class PngEndToEndFlowTest {
             }
             step("orphan", "child=$childId sibling=$siblingId bothSurvived=$childSurvived")
             assertTrue("nodes under a live parent must survive the sweep", childSurvived)
+
+            // The relation table is many-to-many, and the node and relation verdicts differ on
+            // purpose: removing one parent of a two-parent child must sweep that one dead edge
+            // and keep the live one, and the child — having a live parent left — must survive
+            // both the delete recursion and the reconcile. A child of the removed parent
+            // *only* has no live parent left, so it goes with it.
+            val probes = runBlocking {
+                val shared = LibraryCore.createCollection(LibraryRoot.ID, "mp-child")
+                val lone = LibraryCore.createCollection(LibraryRoot.ID, "mp-lone")
+                val parentA = LibraryCore.createCollection(LibraryRoot.ID, "mp-parent-a")
+                val parentB = LibraryCore.createCollection(LibraryRoot.ID, "mp-parent-b")
+                LibraryCore.link(shared, parentA)
+                LibraryCore.link(shared, parentB)
+                LibraryCore.link(lone, parentA)
+                listOf(shared, lone, parentA, parentB)
+            }
+            val (sharedId, loneId, removedParentId, keptParentId) = probes
+            runBlocking {
+                LibraryCore.enterSelectionMode(removedParentId)
+                LibraryCore.deleteSelected()
+                LibraryCore.refresh()
+            }
+            val underKept = runBlocking { LibraryCore.childrenOf(keptParentId).first() }
+                .mapNotNull { it.fsNodeId }
+            val underRemoved = runBlocking { LibraryCore.childrenOf(removedParentId).first() }
+                .mapNotNull { it.fsNodeId }
+            val alive = runBlocking { LibraryCore.collections().first() }
+                .mapNotNull { it.fsNodeId }
+                .toSet()
+            step(
+                "multi-parent",
+                "shared=$sharedId lone=$loneId underKept=${sharedId in underKept} " +
+                    "underRemoved=${sharedId in underRemoved} sharedAlive=${sharedId in alive}",
+            )
+            assertTrue("a child keeps the edge to its surviving parent", sharedId in underKept)
+            assertTrue("a child with one live parent left stays alive", sharedId in alive)
+            assertTrue("a child whose only parent was removed goes with it", loneId !in alive)
+            assertTrue(
+                "the dead edge is swept, so the removed parent lists nothing",
+                underRemoved.isEmpty(),
+            )
+            runBlocking {
+                LibraryCore.enterSelectionMode(sharedId)
+                LibraryCore.selection.toggle(keptParentId)
+                LibraryCore.deleteSelected()
+            }
+
             val cleanedUp = runBlocking {
                 LibraryCore.enterSelectionMode(childId)
                 LibraryCore.selection.toggle(siblingId)

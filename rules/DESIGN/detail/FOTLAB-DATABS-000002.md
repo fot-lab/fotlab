@@ -95,10 +95,24 @@ Indexes:
   live parent link* — no parent edge at all, an edge naming a `NULL` parent, or an edge whose parent
   node is itself soft-deleted. A live edge counts only when it names a non-null parent **and** that
   parent node is live. A node is therefore never reaped merely for being parentless.
-- **Orphan relations are sweepable too**: a live relation whose parent is `NULL` or whose parent
-  node is soft-deleted describes no reachable place in the tree, so the reconcile stamps it
-  (`time_deleted`, never a physical drop, R10) under its own batch timestamp — it belongs to no
-  deleted node's subtree walk, so it does not share the node sweep's batch.
+- **Many-to-many, so the node verdict and the relation verdict are separate questions.** The
+  relation table is not a tree: a node may sit under several parents, and one of them going away
+  says nothing about the node. Therefore
+  - a *relation* is swept **per record**: a live edge whose parent is `NULL` or soft-deleted is
+    stamped, and the same child's other, live edges are left untouched
+    (`stampRelationsWithDeadParent`; the `NOT EXISTS` covers both cases, since a `NULL` parent
+    matches no parent row);
+  - a *node* is an orphan only when **all** of its parent links are invalid — it has no effective
+    live parent link left, where "live" means the edge is live, names a non-null parent, and that
+    parent node is itself live ([orphanNodeIds]). While any live parent remains, the node is
+    alive, and a delete of one parent leaves it exactly where it is (R12 step 2c).
+  - The delete recursion counts live *edges* rather than live parent nodes on purpose: the parent
+    it is deleting is stamped in the same transaction, so a parent-aware test would still call it
+    alive and the child would outlive the delete. A node orphaned by an earlier inconsistency is
+    the reconcile sweep's business.
+- **Orphan relations are sweepable**, stamped under their own batch timestamp — they belong to no
+  deleted node's subtree walk, so they must not join the node sweep's batch (a delete is one
+  atomic unit that can be undone as one unit).
 - This supersedes the earlier "root is implicit (`NULL` parent)" decision, which turned out to make
   the top level second-class: `= NULL` never matches in SQL, so every root-level lookup (the delete
   gate above all) silently missed, and the unique index over `(child, parent)` could not dedupe
@@ -370,3 +384,4 @@ node reached by two paths in one operation is processed once.
 - 2026-10-05 — Root kind and no-backward-compatibility (human decision, same day as the revision above). Two follow-ups to it: (1) the root's `type_mime` is its own kind `application/folder-root`, not `application/folder` — the root is not something the user created or can delete, it is the tree's anchor, so the single MIME discriminator now tells three kinds apart and both non-file sweeps (`observeCollections`, `fileEntryNodes`) exclude the root by that comparison instead of a special-cased id. (2) Backward compatibility is dropped: `ensureRoot()` only inserts the root row when missing — no `NULL`-parent edge is re-pointed, no data is migrated, and a library written under the earlier decision is not repaired. Reinstalling is the migration path. No schema change and no Room version bump either way.
 - 2026-10-05 — Root protection is by node kind (human decision, same day). Every gate that could act on the root now tests its `type_mime` against `application/folder-root` instead of relying on "the root is the parentless one" or on a hard-coded id: the delete and delete-forever paths admit only `idsExcludingRootKind`, the refresh orphan sweep excludes that kind, and the two listings exclude it by the same comparison. A node is never deleted or swept for being parentless — only for having lost every edge it had — and any future node of that kind inherits the protection.
 - 2026-10-05 — Orphan semantics stated and implemented (human decision, same day). A node is an orphan when it has no *effective live parent link*: no parent edge, an edge naming a `NULL` parent, or an edge whose parent node is itself soft-deleted — the last being the original algorithm's semantics, which the earlier `orphanNodeIds` had lost by never joining the parent's `time_deleted`. The query now requires, for a link to count as live, a non-null parent whose node row is itself live. Orphan *relations* became sweepable in the same pass: a live edge whose parent is `NULL` or soft-deleted is stamped by `stampRelationsWithDeadParent` (one `NOT EXISTS` predicate covers both cases, since a `NULL` parent matches no parent row), under its own batch timestamp because it belongs to no deleted node's subtree walk.
+- 2026-10-05 — Many-to-many made explicit (human decision, same day). The relation table is not a tree, so a node can sit under several parents and losing one says nothing about the node. The two verdicts are therefore stated separately and must not be unified: `stampRelationsWithDeadParent` is **per relation** (only the dead edge is stamped; a sibling live edge of the same child is untouched), while `orphanNodeIds` is **per node** (orphan only when *every* parent link is invalid). The delete recursion's `activeParentCount` stays an edge count on purpose — the parent it is deleting is stamped in the same transaction, so a parent-aware test would call it alive and the child would survive its own parent's delete. Pinned by an instrumented test that builds a two-parent child and a one-parent child through the public API: removing one parent sweeps that edge only, the shared child stays listed under its surviving parent, and the lone child goes with its only parent.

@@ -240,7 +240,18 @@ class LibraryRepository(private val database: LibraryDatabase) {
         for (relation in relationDao.relationsWithParent(nodeId)) {
             relationDao.update(relation.copy(timeDeleted = now))
             val childId = relation.fsNodeIdChild
-            // Still has a live parent: it stays exactly where it is (R12 step 2c).
+            // Many-to-many: a child can sit under several parents, and only this one edge just
+            // died. If any other parent link is still live the child itself is alive and stays
+            // exactly where it is (R12 step 2c); the child joins this delete only once its last
+            // live parent link is gone.
+            //
+            // The count is over *edges*, deliberately, and that is not the same test the
+            // reconcile's orphan sweep uses. Here the parent whose edge was just stamped is
+            // being deleted in this very transaction, so asking "does the parent node still look
+            // alive" would still answer yes for a parent that is about to be stamped, and the
+            // child would outlive the delete until the next sweep. Counting the edge we just
+            // stamped instead makes the recursion self-consistent; a node that was already
+            // orphaned by some *earlier* inconsistency is the sweep's business, not ours.
             if (relationDao.activeParentCount(childId) == 0) {
                 pending.addLast(childId)
             }

@@ -137,8 +137,12 @@ interface FsNodeRelationDao {
      * itself soft-deleted. One predicate covers both — a `NULL` parent matches no parent row at
      * all, so the `NOT EXISTS` is already true for it.
      *
-     * Such a record describes no reachable place in the tree, so the reconcile sweeps it the
-     * same way it sweeps an orphan node: a `time_deleted` stamp, never a physical drop (R10).
+     * The relation table is many-to-many, so this is deliberately **per relation, never per
+     * child**: a child that also sits under a live parent keeps that edge, and only the dead
+     * one is stamped. The child's own verdict is a separate question, answered by
+     * [orphanNodeIds] — a child is only an orphan once *every* parent link is gone.
+     *
+     * Swept like any other removal: a `time_deleted` stamp, never a physical drop (R10).
      */
     @Query(
         "UPDATE fs_node_relation SET time_deleted = :timeDeleted " +
