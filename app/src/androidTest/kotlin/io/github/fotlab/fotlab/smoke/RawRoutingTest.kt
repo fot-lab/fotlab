@@ -24,6 +24,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.test.espresso.intent.Intents
 import androidx.test.espresso.intent.Intents.intended
 import androidx.test.espresso.intent.Intents.intending
@@ -1293,27 +1294,28 @@ class RawRoutingTest {
         }
     }
 
-    /** Grade operation bars (Tune/StyleFilter) are RAW-only: the Coil/PNG route must keep them empty. */
+    /**
+     * Grade operation bars (Tune) are RAW-only: on the Coil/PNG route the Contrast/Saturation tools
+     * stay on screen but self-disable (they depend on a loaded RAW), rather than the whole bar being
+     * hidden. This is the per-tool gate — see the design note against the bar-level RAW guard.
+     */
     @Test
     fun gradeBarIsHiddenOnPngRoute() {
         journey(pngControl(), expectRawler = false)
         hostContent { AppTheme { StudioScreen() } }
         composeRule.waitForIdle()
-        // Dock the TuneImage bar — for a PNG it must not render the boost-group icons.
+        // Dock the TuneImage bar — for a PNG it must render the boost-group icons, but disabled.
         val tuneCd = context.getString(R.string.studio_cd_tune_image)
         composeRule.waitUntil(30_000) {
             composeRule.onAllNodesWithContentDescription(tuneCd).fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNodeWithContentDescription(tuneCd).performClick()
         composeRule.waitForIdle()
-        assertTrue(
-            "no Contrast/Saturation icons may exist for the PNG/Coil route (grade is RAW-only)",
-            composeRule.onAllNodesWithContentDescription(context.getString(R.string.studio_cd_contrast)).fetchSemanticsNodes().isEmpty(),
-        )
-        assertTrue(
-            "no Contrast/Saturation icons may exist for the PNG/Coil route (grade is RAW-only)",
-            composeRule.onAllNodesWithContentDescription(context.getString(R.string.studio_cd_saturation)).fetchSemanticsNodes().isEmpty(),
-        )
+        // The grade tools must be present (self-gated, not hidden) but disabled on the PNG/Coil route.
+        composeRule.onNodeWithContentDescription(context.getString(R.string.studio_cd_contrast))
+            .assertIsNotEnabled()
+        composeRule.onNodeWithContentDescription(context.getString(R.string.studio_cd_saturation))
+            .assertIsNotEnabled()
         assertFalse("isRawLoaded must stay false for the PNG/Coil route", StudioEngine.isRawLoaded.value)
     }
 
