@@ -7,7 +7,6 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.DocumentsContract
-import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -82,7 +81,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -449,16 +447,7 @@ fun StudioScreen() {
                             model = ImageRequest.Builder(context).data((displayed as StudioRenderResult.Ready).model).build(),
                             contentDescription = null,
                             state = zoomState,
-                            modifier = Modifier.fillMaxSize().then(
-                                // Frost the held frame while a re-render is in flight (real
-                                // gaussian blur via RenderEffect on API >= S; a translucent scrim
-                                // below provides the frosted look on older APIs).
-                                if (isPipelineRunning && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                                    Modifier.blur(radius = 14.dp)
-                                } else {
-                                    Modifier
-                                },
-                            ),
+                            modifier = Modifier.fillMaxSize(),
                         )
                     } else if (!isPipelineRunning) {
                         // No held frame and not running: show the idle / first-decode prompt.
@@ -477,8 +466,10 @@ fun StudioScreen() {
                         }
                     }
                     // A separate overlay layer (NOT the canvas) signals an in-flight render: a
-                    // translucent scrim plus the "Processing" text. It is removed the instant a
-                    // new frame lands or the user stops the pipeline, restoring the held image.
+                    // translucent scrim frosts the held frame and a "Processing" text sits on top.
+                    // It is removed the instant a new frame lands or the user stops the pipeline,
+                    // restoring the held image. A uniform translucent mask is used on every API
+                    // level (no RenderEffect gaussian blur).
                     if (isPipelineRunning) {
                         Box(
                             modifier = Modifier
