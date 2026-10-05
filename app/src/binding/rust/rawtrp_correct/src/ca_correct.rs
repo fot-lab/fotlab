@@ -65,7 +65,10 @@ const BORDER2: i32 = 16; // 2*border
 const POLYORD: usize = 4; // order of the 2-D polynomial fit
 const EPS: f32 = 1e-5; // division guard (normalised domain)
 const SQR: f64 = 2.0; // upstream `constexpr float SQR = 2.f;`
-const BS_LIM: f64 = 3.99; // max allowed CA shift (upstream `bslim`)
+#[allow(dead_code)] // retained only as the historical +/-px cap reference now that the
+                    // auto-path clamp is disabled (see the per-block `ls` eval below). Unused
+                    // but kept intentionally so the original threshold stays documented.
+const BS_LIM: f64 = 3.99; // historical max allowed CA shift (upstream `bslim`)
 const EPS2: f32 = 1e-10; // pass-1 fit division guard (upstream `eps2`)
 const CA_AUTOSTRENGTH: f32 = 8.0; // pass-1 outlier gate (upstream `caAutostrength`)
 
@@ -518,10 +521,20 @@ pub fn correct_ca_bayer(
                         }
                         pow_v *= vblock as f64;
                     }
-                    ls[0][0] = ls[0][0].clamp(-BS_LIM, BS_LIM);
-                    ls[0][1] = ls[0][1].clamp(-BS_LIM, BS_LIM);
-                    ls[1][0] = ls[1][0].clamp(-BS_LIM, BS_LIM);
-                    ls[1][1] = ls[1][1].clamp(-BS_LIM, BS_LIM);
+                    // REMOVED per project decision: do NOT clamp the per-block CA shift to
+                    // +/-BS_LIM. A clamped shift leaves *residual* CA on strong lenses at high
+                    // pixel densities / frame corners (delta_px grows with sqrt(MP) and easily
+                    // exceeds 4px there), i.e. a half-fixed image. We would rather let the
+                    // correction run to its measured value and let the user disable LCA entirely
+                    // if the result looks bad, than ship a clamped partial fix.
+                    // SAFETY NOTE: the first apply loop below runs `rr in 4..(rr1-4)` (4px margin);
+                    // an unclamped |shift| > 4.0 makes `rgb1[(rr+shift)*ts+..]` go out of bounds and
+                    // PANIC. To actually support large shifts safely, widen this margin (and BORDER)
+                    // instead of re-clamping. Original clamp preserved for reference:
+                    // ls[0][0] = ls[0][0].clamp(-BS_LIM, BS_LIM);
+                    // ls[0][1] = ls[0][1].clamp(-BS_LIM, BS_LIM);
+                    // ls[1][0] = ls[1][0].clamp(-BS_LIM, BS_LIM);
+                    // ls[1][1] = ls[1][1].clamp(-BS_LIM, BS_LIM);
                     ls
                 } else {
                     let hfrac = -((hblock as f64 - 0.5) / (hblsz as f64 - 2.0) - 0.5);
