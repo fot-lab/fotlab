@@ -228,6 +228,16 @@ class PngEndToEndFlowTest {
             runBlocking { LibraryCore.refresh() }
             val rootAfterRefresh = runBlocking { LibraryCore.rootNode() }
             assertNotNull("refresh must not take the root node away", rootAfterRefresh)
+
+            // The delete gate is the node's kind, so even a selection that names the root
+            // outright must be refused — the root is never a deletable item.
+            runBlocking {
+                LibraryCore.enterSelectionMode(LibraryRoot.ID)
+                LibraryCore.deleteSelected()
+            }
+            val rootAfterDelete = runBlocking { LibraryCore.rootNode() }
+            step("root", "root after a delete aimed at it: $rootAfterDelete")
+            assertNotNull("a delete naming the root must not remove it", rootAfterDelete)
         } finally {
             runBlocking { LibraryCore.exitSelectionMode() }
             sourceUri?.let(::deleteSource)

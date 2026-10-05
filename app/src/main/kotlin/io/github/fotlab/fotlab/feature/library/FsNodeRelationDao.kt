@@ -108,16 +108,18 @@ interface FsNodeRelationDao {
     /**
      * Live nodes with no live parent relation at all — recycled by refresh.
      *
-     * The root is excluded: it is the one node that legitimately has no parent edge (nothing
-     * sits above it), so without this filter every refresh would soft-delete the root row the
-     * moment the app started.
+     * The root kind is excluded by its MIME (`LibraryRoot.MIME`): the root is the one node that
+     * legitimately has no parent edge, so without this filter every refresh would soft-delete
+     * the library's anchor. Note the test is on the node's *kind*, not on the absence of a
+     * parent — a node is never swept for being parentless, only for having lost every edge it
+     * had.
      */
     @Query(
         "SELECT fs_node_id FROM fs_node_object " +
-            "WHERE time_deleted IS NULL AND fs_node_id <> :rootId " +
+            "WHERE time_deleted IS NULL AND type_mime <> :rootMime " +
             "AND fs_node_id NOT IN (SELECT DISTINCT fs_node_id_child FROM fs_node_relation WHERE time_deleted IS NULL)",
     )
-    suspend fun orphanNodeIds(rootId: Long): List<Long?>
+    suspend fun orphanNodeIds(rootMime: String): List<Long?>
 
     /** All edges soft-deleted in the batch stamped at [time] — the batch's own subtree edges. */
     @Query("SELECT * FROM fs_node_relation WHERE time_deleted = :time")

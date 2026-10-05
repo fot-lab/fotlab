@@ -150,7 +150,17 @@ class LibraryRepository(private val database: LibraryDatabase) {
 
     /** All live orphan nodes (no live parent relation); recycled by refresh (R10, revised). */
     suspend fun orphanNodeIds(): List<Long?> =
-        database.nodeRelationDao().orphanNodeIds(LibraryRoot.ID)
+        database.nodeRelationDao().orphanNodeIds(LibraryRoot.MIME)
+
+    /**
+     * The subset of [ids] the delete gates may act on: everything whose node kind is not the
+     * root's. The root is refused by its kind (`LibraryRoot.MIME`) rather than by its id, so
+     * the protection is a property of the node, not a hard-coded key.
+     */
+    private suspend fun deletableIds(ids: Collection<Long>): List<Long> {
+        if (ids.isEmpty()) return emptyList()
+        return database.nodeObjectDao().idsExcludingRootKind(ids.toList(), LibraryRoot.MIME)
+    }
 
     // --- Soft deletion (`FOTLAB-DATABS-000002` R9–R13, `FOTLAB-UIXDES-000004` R10, revised) ---
 
@@ -166,9 +176,9 @@ class LibraryRepository(private val database: LibraryDatabase) {
      * interrupted delete leaves either the complete batch or nothing (R13).
      */
     suspend fun deleteNodes(nodeIds: Collection<Long>) {
-        // The root is the tree's anchor, never a deletable item: it is what every other node
-        // hangs from, and it is the one node the UI never lists as a child of anything.
-        val targets = nodeIds.filter { it != LibraryRoot.ID }
+        // The gate is the node's kind: the root is what every other node hangs from, so it is
+        // never a deletable item, and only its own MIME (`LibraryRoot.MIME`) says so.
+        val targets = deletableIds(nodeIds)
         if (targets.isEmpty()) return
         val now = System.currentTimeMillis()
         database.withTransaction {
@@ -268,8 +278,8 @@ class LibraryRepository(private val database: LibraryDatabase) {
      * explicit edge delete covers the rest, so no dangling edge survives. Runs in one transaction.
      */
     suspend fun deleteForever(ids: List<Long>) {
-        // The root is not a bin item and can never be one; refuse it explicitly.
-        val targets = ids.filter { it != LibraryRoot.ID }
+        // Same kind gate as the soft delete: the root is not a bin item and can never be one.
+        val targets = deletableIds(ids)
         if (targets.isEmpty()) return
         val objectDao = database.nodeObjectDao()
         database.withTransaction {

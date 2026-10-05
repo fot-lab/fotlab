@@ -73,6 +73,20 @@ interface FsNodeObjectDao {
     )
     suspend fun fileEntryNodes(folderMime: String, rootMime: String): List<FsNodeObject>
 
+    /**
+     * The ids of [ids] that are **not** the root node kind.
+     *
+     * The delete gates ask this instead of comparing against the root's id: the root is
+     * whatever carries [LibraryRoot.MIME], so the protection follows the node's kind rather
+     * than a hard-coded primary key, and a second node of that kind would be covered too.
+     * Ids that do not exist are simply absent from the result.
+     */
+    @Query(
+        "SELECT fs_node_id FROM fs_node_object " +
+            "WHERE fs_node_id IN (:ids) AND type_mime <> :rootMime",
+    )
+    suspend fun idsExcludingRootKind(ids: List<Long>, rootMime: String): List<Long>
+
     /** Distinct soft-delete timestamps, newest first — one virtual batch folder per value. */
     @Query(
         "SELECT DISTINCT time_deleted FROM fs_node_object " +
