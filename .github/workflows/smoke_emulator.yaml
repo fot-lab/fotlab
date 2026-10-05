@@ -347,10 +347,9 @@ jobs:
     timeout-minutes: 75
     env:
       # Native develop-entry boundary; one develop-through-menu journey per RAW
-      # brand; the every-menu-option + exposure recompute proof; the drawer's
-      # quarter-resolution switch (preference semantics, no re-render on toggle,
-      # both axes halved on BOTH the develop and the rawalchemy grade fork, and
-      # the byte-identical round trip back to full resolution).
+      # brand; the every-menu-option + exposure recompute proof; superpixel as a
+      # demosaic entry (both axes halved on BOTH the develop and the rawalchemy
+      # grade fork, and the byte-identical round trip back to full resolution).
       TEST_FILTER: >-
         io.github.fotlab.fotlab.smoke.RawlerNativeSmokeTest#developOfNonRawBytesReturnsNull,
         io.github.fotlab.fotlab.smoke.RawlerNativeSmokeTest#developOfPngSurvives,
@@ -363,7 +362,7 @@ jobs:
         io.github.fotlab.fotlab.smoke.RawRoutingTest#everyDemosaicMenuOptionRedevelopsOnBayerAndExposureRecomputes,
         io.github.fotlab.fotlab.smoke.RawRoutingTest#manualKelvinWhiteBalanceRedevelopsWithoutBlack,
         io.github.fotlab.fotlab.smoke.RawRoutingTest#fullResolutionDevelopKeepsBothAxesAboveThePreviewFloor,
-        io.github.fotlab.fotlab.smoke.RawRoutingTest#downsampleSwitchHalvesBothAxesOnDevelopAndGradeWithoutReRendering
+        io.github.fotlab.fotlab.smoke.RawRoutingTest#superpixelHalvesBothAxesOnDevelopAndGrade
     steps:
       # Checkout must precede the local action — see the test-app-smoke shard above.
       - name: Check out

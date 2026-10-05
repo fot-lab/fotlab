@@ -148,17 +148,19 @@
     <string name="studio_unsupported_title">Unsupported Format</string>
     <string name="studio_unsupported_format">Unsupported format!</string>
 
-    <!-- Studio top-bar demosaic dropdown algorithm picker. -->
+    <!-- Studio top-bar demosaic dropdown algorithm picker. Every entry but the default is
+         prefixed at runtime with its source library (RAWLER / RAWTRP) from
+         studio_demosaic_source_prefix, so the source name stays one fact rather than being
+         repeated inside each translated algorithm name. -->
     <string name="studio_demosaic_default">Default (CFA auto)</string>
     <string name="studio_demosaic_ppg">PPG</string>
     <string name="studio_demosaic_bilinear4">Bilinear 4-channel</string>
     <string name="studio_demosaic_xtrans">X-Trans Bilinear</string>
-
-    <!-- Studio drawer: the quarter-resolution develop switch (a persisted preference, so its
-         summary line has to say that the change lands on the next develop, not immediately). -->
-    <string name="studio_drawer_downsample">Downsample preview (1/4)</string>
-    <string name="studio_drawer_downsample_summary">Quarter resolution; applies on the next develop</string>
-    <string name="studio_drawer_downsample_unavailable">This sensor\'s mosaic cannot be downsampled</string>
+    <string name="studio_demosaic_superpixel">Superpixel (quarter resolution)</string>
+    <!-- %1$s is the source library the catalogue reported (RAWLER / RAWTRP); it is a proper
+         noun and is not translated, so only the separator between it and the algorithm name
+         is localisable. -->
+    <string name="studio_demosaic_source_prefix" translatable="false">%1$s</string>
 
     <!-- Studio grade fork (rawalchemy): boost group (Contrast/Saturation) / LOG / LUT. -->
     <string name="studio_grade_none">none</string>

@@ -36,11 +36,10 @@
 //!     colour-independent, so they are applied directly to the CFA mosaic by
 //!     reusing RawTherapee's `LCPMapper`. Runs *before* exposure on the scaled
 //!     mosaic (`FOTLAB-NATIVE-000005` B3/B4).
-//! 4. `demosaic`    — selectable debayer + Fuji rotate + active-area crop (ROI). When
-//!    `downsample` is set this stage runs rawler's **superpixel** debayer instead: same
-//!    input (the exposed mosaic), same slot, but the result is quarter-resolution. The
-//!    switch chooses between two producers of the *same* `Intermediate`, so it never
-//!    reaches the stages below (`rules/REVIEW/detail/OPTIMZ-PERFRM-000010.md`).
+//! 4. `demosaic`    — selectable debayer + Fuji rotate + active-area crop (ROI). One algorithm
+//!    slot: `DemosaicAlgorithm::Superpixel` is rawler's quarter-resolution debayer, so choosing it
+//!    makes this stage return an intermediate at half the linear dimensions and every later stage
+//!    simply processes fewer pixels (`rules/REVIEW/detail/OPTIMZ-PERFRM-000010.md`).
 //! 5. `calibrate`   — white balance + cam→working-space matrix (exposure already
 //!    applied); `WorkingSpace` selects sRGB D65 (presentation) or ProPhoto D50
 //!    (editing). **No clipping** — out-of-[0,1] is kept for the editing branch.
@@ -92,12 +91,12 @@ pub const DEFAULT_LCP_FOCAL_MM: f32 = 50.0;
 /// `rgb` is row-major linear RGB float, length `width * height * 3`.
 ///
 /// **Path-independent by contract.** There is one of these regardless of which
-/// demosaic path ran — full-resolution PPG/bilinear/X-Trans, or the
-/// quarter-resolution superpixel switch. `width`/`height` are the dimensions of
-/// the buffer actually produced (post-crop), nothing else records the choice, and
+/// demosaic path ran — full-resolution PPG/bilinear/X-Trans, or
+/// quarter-resolution superpixel. `width`/`height` are the dimensions of the
+/// buffer actually produced (post-crop), nothing else records the choice, and
 /// no consumer may infer or branch on it: calibrate, crop, the PNG encoder and
 /// the rawalchemy grade all see the same structure with the same invariants and
-/// simply process fewer pixels when the switch is on
+/// simply process fewer pixels when superpixel ran
 /// (`rules/REVIEW/detail/OPTIMZ-PERFRM-000010.md`).
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct RawlerImageDeveloped {
@@ -179,20 +178,6 @@ pub struct LensProfileParams {
 pub struct DevelopParams {
   /// Demosaic algorithm selection (defaults to rawler's CFA-appropriate choice).
   pub demosaic_algorithm: DemosaicAlgorithm,
-  /// Quarter-resolution preview switch — the Studio drawer's persisted downsampling
-  /// preference. `true` replaces the demosaic stage with rawler's superpixel debayer: each
-  /// 2×2 CFA block collapses into one RGB(E) pixel, so every later stage (calibrate, crop,
-  /// PNG encode, rawalchemy grade) runs on a quarter of the pixels, i.e. the same picture
-  /// at half the linear dimensions. This is a *different demosaic*, not a post-demosaic
-  /// resize (`rules/REVIEW/detail/OPTIMZ-PERFRM-000010.md`).
-  ///
-  /// Ignored — the requested [`DemosaicAlgorithm`] runs at full resolution instead — when
-  /// the sensor cannot use superpixel: X-Trans, a CFA that is neither the RGGB family nor
-  /// four-colour, a Fuji-rotated sensor, or pre-coloured (non-CFA) input.
-  /// `RawlerImageLoaded::supports_downsample` answers the capability in advance so the UI
-  /// can disable the switch rather than let it silently do nothing.
-  #[uniffi(default = false)]
-  pub downsample: bool,
   /// Exposure compensation in stops; applied as the linear multiplier
   /// `2^exposure_ev` (the linear `exp_scale`) to the scaled mosaic *before*
   /// demosaic (single-channel). `None` = as-shot: no compensation, unity gain —
@@ -672,12 +657,12 @@ pub(crate) fn develop_image(
   let pixels = correct_loca(pixels, image.width, image.height, params.loca.as_ref(), cfa);
 
   // Demosaic stage — its ROI is already active_area, exactly like rawler's
-  // Demosaic + FujiRotate + CropActiveArea steps. `params.downsample` picks the superpixel
-  // producer instead of the selected algorithm; both return one `Intermediate`, which is the
-  // convergence point of the two paths: from here on nothing knows which one ran, and every
-  // pixel-count-dependent number (`pixels` above is the only full-resolution buffer left) is
-  // simply whatever the intermediate's dimensions say.
-  let intermediate = demosaic(&image, pixels, params.demosaic_algorithm, params.downsample)?;
+  // Demosaic + FujiRotate + CropActiveArea steps. The algorithm alone picks the producer
+  // (including quarter-resolution superpixel, `DemosaicAlgorithm::Superpixel`); all of them
+  // return one `Intermediate`, which is the convergence point: from here on nothing knows which
+  // one ran, and every pixel-count-dependent number is simply whatever the intermediate's
+  // dimensions say.
+  let intermediate = demosaic(&image, pixels, params.demosaic_algorithm)?;
 
   let wb = params.wb.as_ref().map(|v| {
     let mut a = [1.0f32; 4];
@@ -765,12 +750,11 @@ fn take_scaled_pixels(image: &mut RawImage) -> Result<Vec<f32>, RawlerFotlabErro
 /// showed "Unsupported Format". When `active_area` is `None` the demosaic ROI
 /// was the full frame, so no re-basing happens — matching upstream.
 ///
-/// SCALE fix (the downsample switch's own trap): the intermediate can be a
-/// **decimated** view of that ROI — the downsampling switch runs rawler's
-/// superpixel debayer, which emits one output pixel per 2×2 CFA block, so a
-/// half-size buffer carries the ROI's coordinates at half scale. The crop
-/// rectangle has to be brought into the buffer's coordinate space before it is
-/// sliced.
+/// SCALE fix (superpixel's own trap): the intermediate can be a
+/// **decimated** view of that ROI — rawler's superpixel debayer emits one
+/// output pixel per 2×2 CFA block, so a half-size buffer carries the ROI's
+/// coordinates at half scale. The crop rectangle has to be brought into the
+/// buffer's coordinate space before it is sliced.
 ///
 /// The factor is **derived from the dimensions that actually came back** — never
 /// from a "was superpixel used" flag threaded down from the caller, and never

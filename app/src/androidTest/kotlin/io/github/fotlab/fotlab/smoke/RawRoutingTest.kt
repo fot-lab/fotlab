@@ -46,8 +46,7 @@ import androidx.compose.ui.Modifier
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import io.github.fotlab.fotlab_rawler.DemosaicAlgorithm
-import io.github.fotlab.fotlab_rawler.RawlerFotlabBridge
+import io.github.fotlab.fotlab_rawler.DemosaicCandidate
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -62,7 +61,6 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Before
@@ -145,12 +143,17 @@ class RawRoutingTest {
     @After
     fun tearDown() {
         runCatching { StudioEngine.setCurrentNode(null) }
-        // The downsampling switch is a PERSISTED preference, so a test that leaves it on would
-        // change every later test's frame dimensions in this process — including dropping them
-        // below the full-frame floor `waitForDevelopedFrame` asserts. Reset the in-memory value
-        // (and the store) here rather than trusting test order.
-        runCatching { StudioEngine.setDownsample(false) }
+        // The demosaic pick is a PERSISTED preference, so a test that left superpixel selected would
+        // change every later test's frame dimensions in this process — including dropping them below
+        // the full-frame floor `waitForDevelopedFrame` asserts. Reset to the default pick here rather
+        // than trusting test order.
+        runCatching { StudioEngine.develop(demosaicCandidate(StudioEngine.DEFAULT_DEMOSAIC_ID)) }
     }
+
+    /** The catalogue entry for [id], failing loudly if the native list no longer offers it. */
+    private fun demosaicCandidate(id: String): DemosaicCandidate =
+        StudioEngine.demosaicCandidates.firstOrNull { it.id == id }
+            ?: error("native demosaic catalogue has no '$id' entry")
 
     // ---------------------------------------------------------------- corpus
 
@@ -477,21 +480,29 @@ class RawRoutingTest {
         step("studio", "as-shot DEFAULT frame = ${initialBytes.size} bytes")
         assertDevelopedIsColor(initialBytes, "Sony ILCE-7R as-shot DEFAULT")
 
-        for (algo in listOf(
-            DemosaicAlgorithm.DEFAULT,
-            DemosaicAlgorithm.PPG,
-            DemosaicAlgorithm.BILINEAR4_CHANNEL,
-            DemosaicAlgorithm.X_TRANS_BILINEAR,
-        )) {
-            StudioEngine.develop(algo)
+        // The full-resolution RAWLER entries, taken from the catalogue by id rather than by naming the
+        // variant, so this also proves the native `demosaic_candidates()` menu is reachable from
+        // Kotlin. Every entry is named explicitly EXCEPT superpixel, which is covered by
+        // `superpixelHalvesBothAxesOnDevelopAndGrade`: it is quarter-resolution by construction, so
+        // it cannot reproduce the full-resolution frame and would fail the byte-equality below.
+        val fullResolutionRawler = listOf(
+            "rawler:default",
+            "rawler:ppg",
+            "rawler:bilinear4",
+            "rawler:xtrans_bilinear",
+        )
+        for (id in fullResolutionRawler) {
+            val candidate = demosaicCandidate(id)
+            StudioEngine.develop(candidate)
             val developed = runBlocking {
                 withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame() }
             }
-            step("develop", "$algo -> ${developed.outWidth}x${developed.outHeight} (${developed.bytes.size} bytes)")
-            assertDevelopedIsColor(developed.bytes, "Sony ILCE-7R $algo")
-            // Bayer: all four rawler options resolve/fall back to PPG → deterministic identical output.
+            step("develop", "${candidate.label} -> ${developed.outWidth}x${developed.outHeight} (${developed.bytes.size} bytes)")
+            assertDevelopedIsColor(developed.bytes, "Sony ILCE-7R ${candidate.label}")
+            // Bayer: all four full-resolution rawler options resolve/fall back to PPG → deterministic
+            // identical output.
             assertTrue(
-                "$algo on Bayer must resolve/fall back to PPG and reproduce the DEFAULT frame",
+                "${candidate.label} on Bayer must resolve/fall back to PPG and reproduce the DEFAULT frame",
                 developed.bytes.contentEquals(initialBytes),
             )
         }
@@ -500,9 +511,9 @@ class RawRoutingTest {
         // also proves the native `demosaic_candidates()` menu is reachable from Kotlin and that its
         // ids/algorithm pairing is the one the pipeline dispatches on. Unlike the four above, this
         // kernel must move pixels: it is a different debayer, not a fallback to PPG.
-        val rawtrpVng4 = RawlerFotlabBridge.demosaicAlgorithms().first { it.id == "rawtrp:vng4" }
+        val rawtrpVng4 = demosaicCandidate("rawtrp:vng4")
         step("catalogue", "rawtrp:vng4 -> ${rawtrpVng4.algorithm} ('${rawtrpVng4.label}', ${rawtrpVng4.kind})")
-        StudioEngine.develop(rawtrpVng4.algorithm)
+        StudioEngine.develop(rawtrpVng4)
         val rawtrp = runBlocking {
             withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame(requireDifferentFrom = initialBytes) }
         }
@@ -514,7 +525,7 @@ class RawRoutingTest {
 
         // The exposure block below compares against the as-shot frame, so the algorithm has to go back
         // to the default first (StudioEngine is a process-wide singleton).
-        StudioEngine.develop(DemosaicAlgorithm.DEFAULT)
+        StudioEngine.develop(demosaicCandidate(StudioEngine.DEFAULT_DEMOSAIC_ID))
         runBlocking { withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame() } }
 
         // +1 EV doubles linear light before clipping; a meaningful share of (dark) pixels must move,
@@ -589,115 +600,101 @@ class RawRoutingTest {
     // stage: every downstream fork inherits it, and a fork that failed to inherit it would quietly
     // keep rendering full-resolution frames.
 
-    /** 无降采样: the persisted default must leave a plain open at full resolution on both axes. */
+    /** The default demosaic must leave a plain open at full resolution on both axes. */
     @Test
     fun fullResolutionDevelopKeepsBothAxesAboveThePreviewFloor() {
-        // Adding the switch must not have changed what a plain open produces: the preference
-        // defaults to OFF, so the canvas is the full frame. "> 3000 px on each axis" is the
-        // no-downsampling criterion — an embedded preview is at most ~2k px across.
+        // Adding superpixel to the menu must not have changed what a plain open produces: the
+        // persisted default is still rawler's CFA-driven choice, so the canvas is the full frame.
+        // "> 3000 px on each axis" is the full-resolution criterion — an embedded preview is at most
+        // ~2k px across.
         val frame = openResident(sonyArw7r)
-        assertFalse(
-            "the downsampling preference must default to OFF (a plain open stays full resolution)",
-            StudioEngine.downsample.value,
+        assertTrue(
+            "a Bayer RGB RAW must report that it can be downsampled, so the menu offers superpixel",
+            StudioEngine.superpixelSupported.value == true,
         )
         assertTrue(
-            "a Bayer RGB RAW must report that it can be downsampled, so the drawer offers the switch",
-            StudioEngine.downsampleSupported.value == true,
-        )
-        assertTrue(
-            "no-downsample frame is ${frame.outWidth}x${frame.outHeight} — the width must stay above " +
+            "full-resolution frame is ${frame.outWidth}x${frame.outHeight} — the width must stay above " +
                 "$FULL_FRAME_MIN_WIDTH px",
             frame.outWidth > FULL_FRAME_MIN_WIDTH,
         )
         assertTrue(
-            "no-downsample frame is ${frame.outWidth}x${frame.outHeight} — the height must stay above " +
+            "full-resolution frame is ${frame.outWidth}x${frame.outHeight} — the height must stay above " +
                 "$FULL_FRAME_MIN_WIDTH px",
             frame.outHeight > FULL_FRAME_MIN_WIDTH,
         )
-        assertDevelopedIsColor(frame.bytes, "Sony ILCE-7R full-resolution (switch OFF)")
+        assertDevelopedIsColor(frame.bytes, "Sony ILCE-7R full-resolution (default demosaic)")
     }
 
     /**
-     * 有降采样: the switch, end to end on the resident image
-     * (`rules/REVIEW/detail/OPTIMZ-PERFRM-000010.md`). ONE ARW only, on purpose — the switch
-     * selects the debayer producer rather than a per-brand behaviour, so running the other four
-     * corpus samples would cost emulator minutes without adding coverage.
+     * superpixel end to end on the resident image, now that it is a demosaic *entry* rather than a
+     * switch (`rules/REVIEW/detail/OPTIMZ-PERFRM-000010.md`). ONE ARW only, on purpose — it is an
+     * algorithm in the same menu as PPG, not a per-brand behaviour, so running the other four corpus
+     * samples would cost emulator minutes without adding coverage.
      *
      *  1. the decode reports that it CAN be downsampled — the native capability query that decides
-     *     whether the drawer offers the switch or disables it with a reason;
-     *  2. both switch-OFF baselines are taken FIRST — develop, then grade — so each fork gets a
-     *     genuine before/after of its own with the switch as the only variable;
-     *  3. flipping the switch re-renders NOTHING. A preference is not a render trigger, so the
-     *     canvas must still hold the very same frame object afterwards — not merely an equal frame;
-     *  4. the NEXT develop, and then the next grade, each halve both axes (rawler's superpixel
-     *     debayer: one output pixel per 2×2 CFA block) and both stay COLOR frames, so
+     *     whether the menu offers the superpixel entry or greys it out;
+     *  2. both full-resolution baselines are taken FIRST — develop, then grade — so each fork gets a
+     *     genuine before/after of its own with the algorithm as the only variable;
+     *  3. picking it from the menu produces a full-resolution develop like any other entry, and
+     *     persists the pick (it is a preference, like every other develop parameter);
+     *  4. the picked develop, and then a grade, each halve both axes (rawler's superpixel debayer:
+     *     one output pixel per 2×2 CFA block) and both stay COLOR frames, so
      *     calibrate/white-balance/crop ran on the smaller buffer rather than erroring out;
-     *  5. flipping it back and redeveloping reproduces the full-resolution as-shot frame byte for
-     *     byte — the convergence proof: the switch only selects a different producer of the debayer
-     *     result, and calibrate / crop / PNG are identical for both.
+     *  5. picking the default again reproduces the full-resolution as-shot frame byte for byte —
+     *     the convergence proof: the two only select a different producer of the debayer result, and
+     *     calibrate / crop / PNG are identical for both.
      *
-     * Step 4 is also the regression for the crop trap this switch steps into: a quarter-resolution
+     * Step 4 is also the regression for the crop trap superpixel steps into: a quarter-resolution
      * intermediate carries ROI coordinates at half scale, so a crop rectangle that is not decimated
      * with it runs off the end of the buffer and the panic surfaces as "Unsupported Format".
      */
     @Test
-    fun downsampleSwitchHalvesBothAxesOnDevelopAndGradeWithoutReRendering() {
+    fun superpixelHalvesBothAxesOnDevelopAndGrade() {
+        val superpixel = demosaicCandidate(SUPERPIXEL_ID)
         val developFull = openResident(sonyArw7r)
-        assertFalse("the switch must start OFF", StudioEngine.downsample.value)
         assertTrue(
             "a Bayer RGB RAW must report that it can be downsampled",
-            StudioEngine.downsampleSupported.value == true,
+            StudioEngine.superpixelSupported.value == true,
         )
 
-        StudioEngine.setGradeContrast(1.25f) // grade fork, switch OFF
+        StudioEngine.setGradeContrast(1.25f) // grade fork, default demosaic
         val gradeFull = runBlocking {
             withTimeout(DECODE_TIMEOUT_MS) {
                 waitForDevelopedFrame(requireDifferentFrom = developFull.bytes)
             }
         }
         step(
-            "downsample",
-            "switch OFF baselines: develop=${developFull.outWidth}x${developFull.outHeight}, " +
+            "superpixel",
+            "full-resolution baselines: develop=${developFull.outWidth}x${developFull.outHeight}, " +
                 "grade=${gradeFull.outWidth}x${gradeFull.outHeight}",
         )
         assertEquals(
-            "grading re-develops the same frame, so both switch-OFF baselines must share dimensions",
+            "grading re-develops the same frame, so both full-resolution baselines must share dimensions",
             developFull.outWidth to developFull.outHeight,
             gradeFull.outWidth to gradeFull.outHeight,
         )
         assertTrue(
-            "the switch-OFF grade baseline must be full resolution too " +
+            "the default-demosaic grade baseline must be full resolution too " +
                 "(${gradeFull.outWidth}x${gradeFull.outHeight})",
             gradeFull.outWidth > FULL_FRAME_MIN_WIDTH && gradeFull.outHeight > FULL_FRAME_MIN_WIDTH,
         )
 
-        // Flipping the switch stores a preference and nothing else — same frame OBJECT, still Ready.
-        val before = StudioEngine.renderResult.value
-        StudioEngine.setDownsample(true)
-        assertTrue("the switch value must be readable back", StudioEngine.downsample.value)
-        assertSame(
-            "flipping the downsampling switch must not re-render the canvas",
-            before,
-            StudioEngine.renderResult.value,
-        )
-        step("downsample", "switch ON — canvas untouched: no Loading, same Ready frame")
-
-        // ---- develop fork, switch ON ----
-        StudioEngine.develop(DemosaicAlgorithm.DEFAULT)
+        // ---- develop fork, superpixel picked from the menu ----
+        StudioEngine.develop(superpixel)
         val quarterDevelop = runBlocking {
             withTimeout(DECODE_TIMEOUT_MS) {
                 waitForDevelopedFrame(requireDifferentFrom = developFull.bytes, minWidth = 1)
             }
         }
         step(
-            "downsample",
-            "switch ON develop -> ${quarterDevelop.outWidth}x${quarterDevelop.outHeight} " +
+            "superpixel",
+            "'${superpixel.label}' -> ${quarterDevelop.outWidth}x${quarterDevelop.outHeight} " +
                 "(${quarterDevelop.bytes.size} bytes)",
         )
         assertDownsampledBothAxes("develop (superpixel)", quarterDevelop, developFull)
-        assertDevelopedIsColor(quarterDevelop.bytes, "Sony ILCE-7R downsampled develop")
+        assertDevelopedIsColor(quarterDevelop.bytes, "Sony ILCE-7R superpixel develop")
 
-        // ---- rawalchemy grade fork, switch ON — same contrast, so only the switch moved ----
+        // ---- rawalchemy grade fork, same demosaic — same contrast, so only the demosaic moved ----
         StudioEngine.setGradeContrast(1.25f)
         val quarterGraded = runBlocking {
             withTimeout(DECODE_TIMEOUT_MS) {
@@ -705,16 +702,16 @@ class RawRoutingTest {
             }
         }
         step(
-            "downsample",
-            "switch ON grade -> ${quarterGraded.outWidth}x${quarterGraded.outHeight} " +
+            "superpixel",
+            "grade -> ${quarterGraded.outWidth}x${quarterGraded.outHeight} " +
                 "(${quarterGraded.bytes.size} bytes)",
         )
-        assertNull("the downsampled grade must not surface a grade error", StudioEngine.gradeError.value)
+        assertNull("the quarter-resolution grade must not surface a grade error", StudioEngine.gradeError.value)
         assertDownsampledBothAxes("rawalchemy grade (superpixel)", quarterGraded, gradeFull)
-        assertDevelopedIsColor(quarterGraded.bytes, "Sony ILCE-7R downsampled grade")
+        assertDevelopedIsColor(quarterGraded.bytes, "Sony ILCE-7R superpixel grade")
 
-        // ---- back OFF: identical downstream stages, so the full-resolution frame returns exactly ----
-        StudioEngine.setDownsample(false)
+        // ---- back to the default pick: identical downstream stages, so the full frame returns exactly ----
+        StudioEngine.develop(demosaicCandidate(StudioEngine.DEFAULT_DEMOSAIC_ID))
         StudioEngine.setGradeContrast(null) // all-"none" returns the canvas to the develop fork
         val restored = runBlocking {
             withTimeout(DECODE_TIMEOUT_MS) {
@@ -722,20 +719,20 @@ class RawRoutingTest {
             }
         }
         step(
-            "downsample",
-            "switch OFF restore -> ${restored.outWidth}x${restored.outHeight} (${restored.bytes.size} bytes)",
+            "superpixel",
+            "default restored -> ${restored.outWidth}x${restored.outHeight} (${restored.bytes.size} bytes)",
         )
         assertTrue(
-            "switch OFF must reproduce the full-resolution as-shot frame byte for byte",
+            "the default pick must reproduce the full-resolution as-shot frame byte for byte",
             restored.bytes.contentEquals(developFull.bytes),
         )
     }
 
     /**
      * The "有降采样" criterion, applied to one fork: both axes must land strictly BELOW
-     * [DOWNSAMPLE_MAX_EDGE_RATIO] of that fork's own switch-OFF baseline (superpixel halves each
+     * [DOWNSAMPLE_MAX_EDGE_RATIO] of that fork's own full-resolution baseline (superpixel halves each
      * axis, so 50 % is the expected landing point), and still above [DOWNSAMPLE_MIN_EDGE_RATIO] so a
-     * frame truncated into a thin strip cannot pass a one-sided "smaller than 55 %" test.
+     * frame truncated into a thin strip cannot pass a one-sided "smaller than 55%" test.
      */
     private fun assertDownsampledBothAxes(label: String, frame: DevelopedFrame, baseline: DevelopedFrame) {
         val maxW = (baseline.outWidth * DOWNSAMPLE_MAX_EDGE_RATIO).toInt()
@@ -743,18 +740,18 @@ class RawRoutingTest {
         val minW = (baseline.outWidth * DOWNSAMPLE_MIN_EDGE_RATIO).toInt()
         val minH = (baseline.outHeight * DOWNSAMPLE_MIN_EDGE_RATIO).toInt()
         assertTrue(
-            "$label: downsampled frame is ${frame.outWidth}x${frame.outHeight} — both axes must be " +
+            "$label: quarter-resolution frame is ${frame.outWidth}x${frame.outHeight} — both axes must be " +
                 "below 55% of the ${baseline.outWidth}x${baseline.outHeight} same-fork baseline " +
                 "(ceiling ${maxW}x${maxH})",
             frame.outWidth < maxW && frame.outHeight < maxH,
         )
         assertTrue(
-            "$label: downsampled frame is ${frame.outWidth}x${frame.outHeight} — below the " +
+            "$label: quarter-resolution frame is ${frame.outWidth}x${frame.outHeight} — below the " +
                 "${minW}x${minH} sanity floor, which means a truncated strip rather than a half-scale frame",
             frame.outWidth > minW && frame.outHeight > minH,
         )
         step(
-            "downsample",
+            "superpixel",
             "$label: ${frame.outWidth}x${frame.outHeight} vs ${baseline.outWidth}x${baseline.outHeight} " +
                 "= ${"%.1f".format(100.0 * frame.outWidth / baseline.outWidth)}% x " +
                 "${"%.1f".format(100.0 * frame.outHeight / baseline.outHeight)}%",
@@ -1560,15 +1557,22 @@ class RawRoutingTest {
         const val COLOR_COLORED_MIN_FRACTION = 50
 
         /**
-         * Downsampling pass line: with the switch ON every axis must land strictly BELOW this
-         * fraction of that fork's switch-OFF baseline. Superpixel halves each axis, so the expected
-         * landing point is 50 % and 55 % leaves room for the odd-dimension truncation.
+         * The quarter-resolution demosaic's catalogue id. Spelled here rather than taken from
+         * `StudioScreen` (a private Composable-file constant): this is the pipeline-side name the
+         * native catalogue mints, and the UI's copy is a presentation detail.
+         */
+        const val SUPERPIXEL_ID = "rawler:superpixel"
+
+        /**
+         * Superpixel pass line: every axis must land strictly BELOW this fraction of that fork's
+         * full-resolution baseline. Superpixel halves each axis, so the expected landing point is
+         * 50 % and 55 % leaves room for the odd-dimension truncation.
          */
         const val DOWNSAMPLE_MAX_EDGE_RATIO = 0.55
 
         /**
-         * Downsampling sanity floor: a genuine half-scale frame sits near 50 %, so a frame below
-         * 40 % is a truncated strip rather than a downsampled photograph — a one-sided
+         * Quarter-resolution sanity floor: a genuine half-scale frame sits near 50 %, so a frame
+         * below 40 % is a truncated strip rather than a downsampled photograph — a one-sided
          * "smaller than the ceiling" test would accept it.
          */
         const val DOWNSAMPLE_MIN_EDGE_RATIO = 0.40

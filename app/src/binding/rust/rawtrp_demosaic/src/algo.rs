@@ -37,11 +37,19 @@ pub struct AlgoName {
 }
 
 /// RAWLER dictionary — rawler's own demosaics, original name -> standard name.
+///
+/// `Superpixel` is one of them like any other: upstream ships it as a `Demosaic`
+/// impl (`rawler::imgop::sensor::bayer::superpixel`), so it is catalogued and
+/// advertised here exactly like `Ppg`. Its one non-obvious property is that it
+/// emits **half the linear dimensions** (a 2x2 combine) — but that is a property
+/// of the algorithm, not a separate pipeline mode, which is precisely why it
+/// belongs in this list rather than in a switch next to it.
 pub const RAWLER_NAMES: &[AlgoName] = &[
   AlgoName { original: "Default", standard: "RAWLER Default" },
   AlgoName { original: "Ppg", standard: "RAWLER Ppg" },
   AlgoName { original: "Bilinear4Channel", standard: "RAWLER Bilinear4Channel" },
   AlgoName { original: "XTransBilinear", standard: "RAWLER XTransBilinear" },
+  AlgoName { original: "Superpixel", standard: "RAWLER Superpixel" },
 ];
 
 /// RAWTRP dictionary — ported Bayer kernels, upstream method string -> standard
@@ -283,6 +291,11 @@ pub fn candidates() -> Vec<Candidate> {
       "Ppg" => ("rawler:ppg", SensorKind::Bayer),
       "Bilinear4Channel" => ("rawler:bilinear4", SensorKind::Bayer),
       "XTransBilinear" => ("rawler:xtrans_bilinear", SensorKind::XTrans),
+      // Quarter-resolution 2x2 combine. `SensorKind::Bayer` is the honest
+      // applicability: `superpixel_algo` refuses anything that is not a Bayer
+      // sensor, so on X-Trans it resolves to the CFA default just like an
+      // incompatible rawler pick.
+      "Superpixel" => ("rawler:superpixel", SensorKind::Bayer),
       other => (other, SensorKind::Bayer),
     };
     out.push(Candidate { id, label: e.standard, kind });

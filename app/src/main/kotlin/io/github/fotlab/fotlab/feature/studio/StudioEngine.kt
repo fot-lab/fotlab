@@ -59,14 +59,23 @@ import kotlin.jvm.Volatile
  * ([RawlerFotlabDecoder]); when `librawler_fotlab.so` is absent it returns null and the source falls
  * through to [StudioRenderResult.Unsupported] (FOTLAB-STUDIO-000001).
  *
- * Develop parameters that are **preferences** rather than render state are held as `StateFlow`s
- * here — today the quarter-resolution downsampling switch ([downsample] / [setDownsample]). Setting
- * one stores the choice and deliberately re-renders nothing; every later develop (a new file, a
- * demosaic/exposure/WB change, a grade change) reads it and passes it to the native pipeline, which
- * picks rawler's superpixel debayer instead of the selected algorithm
+ * Develop parameters that are **preferences** rather than render state are held here — today the
+ * chosen demosaic algorithm ([develop]). Selecting one stores the choice and re-develops; the
+ * canvas keeps the frame it has until something else develops, and every later develop (a new
+ * file, an exposure/WB change, a grade change) reads it and passes it to the native pipeline
  * (`rules/REVIEW/detail/OPTIMZ-PERFRM-000010.md`).
  */
 object StudioEngine {
+
+    /**
+     * The demosaic a fresh install develops with, as a catalogue id: rawler's own CFA-driven choice.
+     *
+     * The single source of that default — [StudioDevelopPreference] deliberately returns `null`
+     * rather than a literal, so this cannot drift into a second copy. It is an *id* rather than the
+     * enum because the persisted value is an id too, and [defaultAlgorithm] resolves both through the
+     * one catalogue lookup.
+     */
+    const val DEFAULT_DEMOSAIC_ID = "rawler:default"
 
     /** Prepare process-wide state; call once from the application context. */
     fun prepare(context: Context) {
@@ -77,15 +86,15 @@ object StudioEngine {
         // The sniff timeout is a user preference (R8 / Q6). Reading it here keeps the sniffer free of
         // preference plumbing and lets the future settings screen change the bound with no code change.
         mediaPreference = MediaPreference(appContext)
-        // The quarter-resolution develop preference, loaded once so the very first open already
-        // develops with the user's last choice (`OPTIMZ-PERFRM-000010`). A broken store must not
-        // block Studio, hence `runCatching` + the `false` (full resolution) default.
+        // The develop pipeline's demosaic choice, loaded once so the very first open already
+        // develops with the user's last pick (`OPTIMZ-PERFRM-000010`). A broken store must not
+        // block Studio, hence `runCatching` + the `null` (nothing stored) fallback.
         developPreference = StudioDevelopPreference(appContext)
         scope.launch {
-            val persisted = runCatching { developPreference.downsample.first() }.getOrDefault(false)
-            // A toggle that landed while the store was still being read wins: the switch is a user
+            val persisted = runCatching { developPreference.demosaicId.first() }.getOrNull()
+            // A pick that landed while the store was still being read wins: the menu is a user
             // action and must never be silently reverted by a slower disk read.
-            if (!downsampleTouched) downsampleState.value = persisted
+            if (!demosaicTouched) applyPersistedDemosaic(persisted)
         }
     }
 
@@ -162,9 +171,9 @@ object StudioEngine {
         rawFocalLengthMmState.value = null
         userLcpFocalLengthMmState.value = null
         // The quarter-resolution capability is a property of the decode, so it is re-answered for
-        // the new file (null = nothing resident yet). The switch's own value is a preference and
+        // the new file (null = nothing resident yet). The chosen algorithm is a preference and
         // deliberately survives the file switch.
-        downsampleSupportedState.value = null
+        superpixelSupportedState.value = null
         val token = loadNonce.incrementAndGet()
         currentNodeUriState.value = uri
         if (uri == null) {
@@ -225,23 +234,23 @@ object StudioEngine {
                 // A newer node was opened while we decoded: discard so we never clobber the new file's state.
                 if (loadNonce.get() != token) return StudioRenderResult.Unsupported
                 loadedImage = loaded
-                // Ask the decode itself whether the quarter-resolution switch can apply to it, so
-                // the drawer can disable the switch instead of leaving it inert on a sensor that
-                // cannot use superpixel (`OPTIMZ-PERFRM-000010`).
-                downsampleSupportedState.value = RawlerFotlabBridge.supportsDownsample(loaded)
+                // Ask the decode itself whether quarter resolution is available for it, so the menu
+                // can disable the superpixel entry instead of leaving it inert on a sensor that
+                // cannot run it (`OPTIMZ-PERFRM-000010`).
+                superpixelSupportedState.value = RawlerFotlabBridge.supportsDownsample(loaded)
                 // Capture focal length (mm) decoded from the RAW EXIF — 2nd LCP priority (tier-2). UniFFI
                 // maps Option<f64> to a nullable Double?, so null means the file carried no focal.
                 rawFocalLengthMmState.value = loaded.focalLengthMm()?.toFloat()
                 // Develop once with as-shot params: pass `null` for both `exposureEv` and `wb` so the
                 // pipeline adopts the decoded as-shot values (rawler's `RawDevelop::default()`, which
                 // dnglab uses for its DNG thumbnail and applies no exposure step — FOTLAB-RAWLER-000004
-                // §as-shot). Later develops reuse this same object. The downsampling preference does
-                // apply here: opening the file is a develop, so the frame it lands on already honours
-                // the switch.
+                // §as-shot). Later develops reuse this same object. The demosaic choice does apply
+                // here: opening the file is a develop, so the frame it lands on already honours the
+                // user's pick (or the default when they have never picked one).
                 val png = RawlerFotlabBridge.developRawlerImage(
                     loaded,
                     DevelopParams(
-                        demosaicAlgorithm = DemosaicAlgorithm.DEFAULT,
+                        demosaicAlgorithm = currentAlgorithm,
                         exposureEv = null,
                         wb = null,
                         denoiseStrength = currentDenoiseStrength,
@@ -257,7 +266,6 @@ object StudioEngine {
             cameraProfile = cameraProfileState.value,
             lensProfile = lensProfileState.value,
             rawFocalLengthMm = rawFocalLengthMmState.value,
-                        downsample = downsampleState.value,
             oklabHighlightCompressSrgb = currentOklabHighlightCompressSrgb,
             oklabHighlightCompressProphoto = currentOklabHighlightCompressProphoto,
                     ),
@@ -318,46 +326,69 @@ object StudioEngine {
     }
 
     /**
-     * The quarter-resolution develop switch — a **preference**, not render state: flipping it
-     * deliberately re-renders nothing (`rules/REVIEW/detail/OPTIMZ-PERFRM-000010.md`). The value is
-     * handed to the next develop call (opening another file, a demosaic/exposure/WB change, a grade
-     * change), where the native pipeline runs rawler's superpixel debayer instead of the selected
-     * demosaic algorithm. The canvas therefore keeps the frame it has until something else
-     * develops, which is exactly the contract the drawer documents.
+     * Set once the user has picked from the demosaic menu, so the one-shot store read in [prepare]
+     * can never revert a choice the user made while it was still reading.
      */
-    private val downsampleState = MutableStateFlow(false)
-
-    /** The switch state the drawer binds to; see [downsampleState]. */
-    val downsample: StateFlow<Boolean> = downsampleState.asStateFlow()
-
-    /**
-     * Set once the user has toggled, so the one-shot store read in [prepare] can never revert a
-     * choice the user made while it was still reading.
-     */
-    @Volatile private var downsampleTouched = false
+    @Volatile private var demosaicTouched = false
 
     /**
      * Whether the resident RAW can be developed at quarter resolution, decided by the native
-     * sensor/CFA guard; `null` while no routed RAW is resident (the switch is a preference and
-     * stays settable, it just has nothing to apply to yet). The drawer disables the switch on
-     * `false`, so a sensor that cannot downsample (X-Trans, Fuji-rotated) is *stated* instead of
-     * the switch silently doing nothing.
+     * sensor/CFA guard; `null` while no routed RAW is resident. The menu disables the superpixel
+     * entry on `false`, so a sensor that cannot run it (X-Trans, Fuji-rotated) is *stated* instead
+     * of the pick silently resolving to something else.
      */
-    private val downsampleSupportedState = MutableStateFlow<Boolean?>(null)
-    val downsampleSupported: StateFlow<Boolean?> = downsampleSupportedState.asStateFlow()
+    private val superpixelSupportedState = MutableStateFlow<Boolean?>(null)
+    val superpixelSupported: StateFlow<Boolean?> = superpixelSupportedState.asStateFlow()
 
     /**
-     * Record the drawer's downsampling choice and persist it. Persisting is all this does — see
-     * [downsampleState] for why no develop is triggered here.
+     * The demosaic algorithm retained for the next develop re-render (set when the user picks one).
+     *
+     * Starts at [defaultAlgorithm] — rawler's CFA-driven choice, which is what a fresh install has
+     * always developed with. [applyPersistedDemosaic] replaces it with the last pick once the store
+     * has been read.
      */
-    fun setDownsample(enabled: Boolean) {
-        downsampleTouched = true
-        downsampleState.value = enabled
-        scope.launch { runCatching { developPreference.setDownsample(enabled) } }
+    private var currentAlgorithm: DemosaicAlgorithm = defaultAlgorithm()
+
+    /**
+     * Record the user's pick from the demosaic menu, persist it, and re-develop.
+     *
+     * The id is persisted rather than the enum so the stored value stays meaningful across
+     * renames and locales; an id the catalogue no longer knows (a kernel withdrawn in a later
+     * version) simply does not resolve and the pick falls back to the default.
+     */
+    fun develop(candidate: DemosaicCandidate) {
+        demosaicTouched = true
+        currentAlgorithm = candidate.algorithm
+        scope.launch { runCatching { developPreference.setDemosaicId(candidate.id) } }
+        reDevelop()
     }
 
-    /** The demosaic algorithm retained for the next develop re-render (set when the user picks one). */
-    private var currentAlgorithm: DemosaicAlgorithm = DemosaicAlgorithm.DEFAULT
+    /**
+     * Resolve a persisted id onto the algorithm to develop with, falling back to [defaultAlgorithm]
+     * when the id is absent or unknown.
+     *
+     * An unknown id is not an error worth surfacing: it means the catalogue moved on since the
+     * value was written, and the honest outcome is the default the user would have got anyway.
+     */
+    private fun applyPersistedDemosaic(id: String?) {
+        currentAlgorithm = id
+            ?.let { wanted -> demosaicCandidates.firstOrNull { it.id == wanted } }
+            ?.algorithm
+            ?: defaultAlgorithm()
+    }
+
+    /**
+     * [DEFAULT_DEMOSAIC_ID] resolved through the catalogue, so the default is named in exactly one
+     * place and still travels the same id → algorithm path a persisted pick does.
+     *
+     * Falls back to [DemosaicAlgorithm.DEFAULT] rather than throwing when the catalogue is empty —
+     * it *is* empty on a build without `librawler_fotlab.so`, and this runs while the object is still
+     * initialising. That is the same algorithm the id names, so nothing is lost; a genuinely missing
+     * entry (a catalogue regression) would still develop, just without the lookup.
+     */
+    private fun defaultAlgorithm(): DemosaicAlgorithm =
+        demosaicCandidates.firstOrNull { it.id == DEFAULT_DEMOSAIC_ID }?.algorithm
+            ?: DemosaicAlgorithm.DEFAULT
 
     /**
      * The demosaic algorithms the DevelopFilm bar offers, in catalogue order.
@@ -590,9 +621,6 @@ object StudioEngine {
             rawFocalLengthMm = rawFocalLengthMmState.value,
             oklabHighlightCompressSrgb = currentOklabHighlightCompressSrgb,
             oklabHighlightCompressProphoto = currentOklabHighlightCompressProphoto,
-            // The grade fork develops through the same pipeline, so it honours the switch too —
-            // grading a quarter-resolution frame is simply grading fewer pixels.
-            downsample = downsampleState.value,
         )
         // Only the three grade-bar controls are wired. The boost group assembles here: the switch
         // is derived (either parameter configured), and an unconfigured sibling falls back to 1.0
@@ -807,18 +835,6 @@ object StudioEngine {
     }
 
     /**
-     * Re-develop the current RAW with the demosaic [algorithm] the user picked from the Studio
-     * top-bar gradient dropdown, and push the resulting **linear** PNG to the canvas. It keeps the
-     * currently set exposure compensation, then re-runs the full develop pipeline through the
-     * native bridge (the decode is reused from the resident handle). No-op if nothing is open or
-     * the source is not a routed raw.
-     */
-    fun develop(algorithm: DemosaicAlgorithm) {
-        currentAlgorithm = algorithm
-        reDevelop()
-    }
-
-    /**
      * Re-develop the current RAW with a new exposure-stage configuration from the Studio Exposure
      * dialog: [ev] in stops (applied as the `2^ev` linear gain) plus the clip bounds [clipLower] /
      * [clipUpper] (0..1) applied to the scaled mosaic immediately *before* the gain and fused into
@@ -878,7 +894,6 @@ object StudioEngine {
             rawFocalLengthMm = rawFocalLengthMmState.value,
             oklabHighlightCompressSrgb = currentOklabHighlightCompressSrgb,
             oklabHighlightCompressProphoto = currentOklabHighlightCompressProphoto,
-            downsample = downsampleState.value,
         )
         // `metered` is the offset relative to the current image; add the recorded applied exposure
         // so the dialog's field receives an absolute value on the same scale.
@@ -1191,9 +1206,6 @@ object StudioEngine {
         // If the file was switched while we were about to develop, bail — never develop a different
         // file's pixels (FOTLAB-RAWLER-000004 §lifecycle: exactly one handle per current file).
         if (loadNonce.get() != token) return StudioRenderResult.Unsupported
-        // The downsampling preference is read here, i.e. at render time: the drawer only stores it,
-        // so this is where the switch actually reaches the pipeline (either branch below).
-        val downsample = downsampleState.value
         // Reuse the resident decoded image; fall back to a stateless re-decode only if it is absent.
         val loaded = loadedImage
         val png = if (loaded != null) {
@@ -1219,7 +1231,6 @@ object StudioEngine {
             cameraProfile = cameraProfileState.value,
             lensProfile = lensProfileState.value,
             rawFocalLengthMm = rawFocalLengthMmState.value,
-                        downsample = downsample,
             oklabHighlightCompressSrgb = currentOklabHighlightCompressSrgb,
             oklabHighlightCompressProphoto = currentOklabHighlightCompressProphoto,
                     ),
@@ -1247,14 +1258,13 @@ object StudioEngine {
             cameraProfile = cameraProfileState.value,
             lensProfile = lensProfileState.value,
             rawFocalLengthMm = rawFocalLengthMmState.value,
-                        downsample = downsample,
             oklabHighlightCompressSrgb = currentOklabHighlightCompressSrgb,
             oklabHighlightCompressProphoto = currentOklabHighlightCompressProphoto,
                     ),
                 )
             }
         } else {
-            rawDecoder.developToPng(currentFormat ?: "", algorithm, exposureEv, downsample) {
+            rawDecoder.developToPng(currentFormat ?: "", algorithm, exposureEv) {
                 resolver.openInputStream(uri) ?: error("cannot open source")
             }
         }

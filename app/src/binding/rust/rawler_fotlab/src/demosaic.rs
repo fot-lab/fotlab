@@ -11,12 +11,12 @@
 //! demosaic. A user selection that is incompatible with the CFA falls back to
 //! the CFA-appropriate default (and logs).
 //!
-//! The stage also owns the **quarter-resolution** switch: when `downsample` is
-//! set, rawler's superpixel debayer (a different `Demosaic` implementation, not
-//! a resize) replaces the selected algorithm and this stage returns an
-//! intermediate at *half* the linear dimensions. Everything downstream —
-//! calibrate, crop, PNG encode, the rawalchemy grade — sees only that smaller
-//! `Intermediate` / `RawlerImageDeveloped`, so the branch is invisible to them
+//! The stage also owns **rawler's superpixel debayer**, which is a quarter-resolution
+//! *demosaic* rather than a resize: it collapses each 2×2 CFA block into one RGB(E) pixel, so
+//! this stage returns an intermediate at *half* the linear dimensions. It is
+//! [`DemosaicAlgorithm::Superpixel`] — one entry in the same list as every other algorithm — and
+//! everything downstream (calibrate, crop, PNG encode, the rawalchemy grade) sees only the smaller
+//! `Intermediate` / `RawlerImageDeveloped`, so the choice is invisible to them
 //! (`rules/REVIEW/detail/OPTIMZ-PERFRM-000010.md`).
 //!
 //! Fuji rotation and active-area crop are part of this stage because they are
@@ -120,6 +120,20 @@ pub enum DemosaicAlgorithm {
   RawtrpXTransOnePass,
   /// X-Trans fast (`fast_xtrans_interpolate`).
   RawtrpXTransFast,
+  /// rawler's **superpixel** 2×2 combine — a quarter-resolution *demosaic*.
+  ///
+  /// Appended last, like every variant here, so the existing ones keep their
+  /// positions. It used to be a separate `downsample: bool` on `DevelopParams`
+  /// that overrode the algorithm choice; it is an ordinary `Demosaic` impl
+  /// upstream, so it is an ordinary entry in this list
+  /// (`OPTIMZ-PERFRM-000010` Impact). The one thing that stays true about it is
+  /// that its output is half the linear dimensions, which every later stage
+  /// simply sees as a smaller image.
+  ///
+  /// Resolves through [`superpixel_algo`], so a sensor it does not support
+  /// (X-Trans, Fuji-rotated, a CFA outside the RGGB family) falls back to the
+  /// CFA default exactly like an incompatible rawler pick.
+  Superpixel,
 }
 
 impl DemosaicAlgorithm {
@@ -224,11 +238,11 @@ enum Algo {
 /// block of rawler's `RawDevelop::develop_intermediate` (minus the later
 /// calibrate / SRgb steps).
 ///
-/// `downsample` swaps the resolved algorithm for rawler's superpixel debayer —
-/// a quarter-resolution *demosaic*, not a resize — when the sensor supports it
-/// (see [`superpixel_algo`]); otherwise it has no effect and `algo` runs at full
-/// resolution. Either way the return value is one `Intermediate`, which is what
-/// makes the switch invisible to the calibrate stage and beyond.
+/// The algorithm is chosen solely by `algo`. rawler's superpixel — a
+/// quarter-resolution *demosaic*, not a resize — is
+/// [`DemosaicAlgorithm::Superpixel`] in that same list rather than a switch that
+/// overrides it, so there is nothing to combine and no precedence to define
+/// (see [`superpixel_algo`], which resolves it per sensor).
 ///
 /// `data` is the scaled f32 pixel buffer, MOVED OUT of the `RawImage` by the
 /// caller (zero-copy) so it is not duplicated: on a 50 MP frame this buffer is
@@ -240,7 +254,6 @@ pub(crate) fn demosaic(
   image: &RawImage,
   data: Vec<f32>,
   algo: DemosaicAlgorithm,
-  downsample: bool,
 ) -> Result<Intermediate, RawlerFotlabError> {
   let (w, h) = (image.width, image.height);
 
@@ -272,16 +285,8 @@ pub(crate) fn demosaic(
         pixels.rect()
       };
 
-      // The downsampling switch takes precedence over the algorithm selection, so that the
-      // drawer's preference and the Demosaic dropdown stay independent knobs: with the switch
-      // ON the image is quarter-resolution; with it OFF the picked algorithm runs. A sensor that
-      // cannot use superpixel keeps the picked algorithm — the switch degrades, it never fails.
-      // (Pre-coloured input never reaches here: it has no CFA and is returned untouched below.)
-      let chosen = match downsample.then(|| superpixel_algo(image, config)).flatten() {
-        Some(superpixel) => Algo::Rawler(superpixel),
-        None => effective_algorithm(config, algo),
-      };
-      let next = match chosen {
+      // Pre-coloured input never reaches here: it has no CFA and is returned untouched below.
+      let next = match effective_algorithm(image, config, algo) {
         Algo::Rawler(rawler) => run_rawler_algo(rawler, pixels, config, roi, image),
         Algo::RawtrpBayer(kernel) => run_rawtrp_bayer(kernel, pixels, config, roi, image),
         Algo::RawtrpXTrans(kernel) => run_rawtrp_xtrans(kernel, pixels, config, roi, image),
@@ -513,9 +518,8 @@ pub(crate) fn bayer_cfa_desc(cfa: &CFA, roi: Rect) -> Option<rawtrp_demosaic::Cf
   Some(rawtrp_demosaic::CfaDesc::bayer_from_2x2(pattern))
 }
 
-/// Resolve the superpixel (quarter-resolution) variant for this sensor, or `None` when the
-/// quarter-resolution path cannot run and the caller must fall back to a full-resolution
-/// algorithm.
+/// Resolve the quarter-resolution superpixel variant for this sensor, or `None` when this
+/// sensor cannot run it and the caller must fall back to a full-resolution algorithm.
 ///
 /// The guards are hard requirements of the upstream primitives, not policy:
 /// * `Superpixel3Channel` matches the CFA **name** against the four RGGB-family patterns and
@@ -536,10 +540,13 @@ fn superpixel_algo(image: &RawImage, config: &CFAConfig) -> Option<RawlerAlgo> {
   }
 }
 
-/// Whether this decoded image can be developed at quarter resolution — the question the Studio
-/// drawer's downsampling switch asks before offering itself. Same guard as [`superpixel_algo`], so
-/// the answer and the pipeline's behaviour cannot drift apart: `false` also covers pre-coloured
-/// (non-CFA) input, which has no mosaic to combine and is passed through untouched.
+/// Whether this decoded image can be developed at quarter resolution — i.e. whether
+/// [`DemosaicAlgorithm::Superpixel`] would actually resolve to superpixel for it rather than
+/// falling back. Answered from the decoded metadata (sensor type, CFA pattern, Fuji rotation).
+/// Same guard as [`superpixel_algo`], so the answer and the pipeline's behaviour cannot drift
+/// apart: `false` also covers pre-coloured (non-CFA) input, which has no mosaic to combine and is
+/// passed through untouched. The Studio menu greys the entry out on `false` rather than letting the
+/// pick silently do nothing.
 pub(crate) fn supports_downsample(image: &RawImage) -> bool {
   match &image.photometric {
     RawPhotometricInterpretation::Cfa(config) => superpixel_algo(image, config).is_some(),
@@ -549,7 +556,11 @@ pub(crate) fn supports_downsample(image: &RawImage) -> bool {
 
 /// Resolve a user selection against the sensor CFA, falling back to the
 /// CFA-appropriate default when the request is incompatible.
-fn effective_algorithm(config: &CFAConfig, algo: DemosaicAlgorithm) -> Algo {
+///
+/// `image` is needed only by [`DemosaicAlgorithm::Superpixel`], whose guards
+/// look at more than the CFA config (a Fuji-rotated sensor is excluded); every
+/// other arm resolves from `config` alone.
+fn effective_algorithm(image: &RawImage, config: &CFAConfig, algo: DemosaicAlgorithm) -> Algo {
   let is_bayer = config.sensor == SensorType::Bayer;
   let is_xtrans = config.sensor == SensorType::Xtrans;
   let four_color = config.cfa.unique_colors() == 4;
@@ -571,6 +582,14 @@ fn effective_algorithm(config: &CFAConfig, algo: DemosaicAlgorithm) -> Algo {
         Algo::Rawler(RawlerAlgo::Ppg)
       }
     }
+    // Superpixel is a rawler algorithm like `Ppg` above, so it resolves the same
+    // way: through its own guard, and to the CFA default when that guard says
+    // this sensor cannot use it. It is NOT a fallback-free path — picking it on
+    // an X-Trans gives the X-Trans default, exactly as picking `Ppg` there does.
+    DemosaicAlgorithm::Superpixel => match superpixel_algo(image, config) {
+      Some(quarter) => Algo::Rawler(quarter),
+      None => Algo::Rawler(cfa_default_algo(config)),
+    },
     // RAWTRP Bayer kernels are RawTherapee's Bayer debayers: a three-colour
     // 2x2 CFA is their whole input contract. Upstream RT falls back to IGV on
     // a four-colour CFA, but its IGV indexes `rgb[3]` for one — that fallback

@@ -63,10 +63,11 @@ object RawlerFotlabBridge {
 
     /**
      * Whether a resident decode can be developed at quarter resolution — i.e. whether
-     * [DevelopParams.downsample] will have any effect on it. Answered natively from the decoded
-     * sensor/CFA metadata, using the same guard the develop pipeline itself applies, so the drawer
-     * switch can be disabled instead of silently producing a full-resolution frame. `false` on an
-     * absent library, which keeps the switch inert rather than promising something it cannot do.
+     * `DemosaicAlgorithm.SUPERPIXEL` will actually resolve to superpixel for it rather than falling
+     * back to the CFA default. Answered natively from the decoded sensor/CFA metadata, using the same
+     * guard the develop pipeline itself applies, so the Studio menu can grey that entry out instead of
+     * letting the pick quietly render something else. `false` on an absent library, which keeps the
+     * entry disabled rather than promising something it cannot do.
      */
     fun supportsDownsample(loaded: RawlerImageLoaded): Boolean =
         runCatching { loaded.supportsDownsample() }.getOrDefault(false)

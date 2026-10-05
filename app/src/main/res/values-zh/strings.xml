@@ -136,11 +136,13 @@
     <string name="studio_unsupported_title">不支持的格式</string>
     <string name="studio_unsupported_format">不支持的格式！</string>
 
-    <!-- Studio top-bar demosaic dropdown algorithm picker. -->
+    <!-- Studio top-bar demosaic dropdown algorithm picker. 除默认项外，运行时会在算法名前
+         加上来源库前缀（RAWLER / RAWTRP），见 values/strings.xml 的同名说明。 -->
     <string name="studio_demosaic_default">默认（CFA 自动）</string>
     <string name="studio_demosaic_ppg">PPG</string>
     <string name="studio_demosaic_bilinear4">双线性 4 通道</string>
     <string name="studio_demosaic_xtrans">X-Trans 双线性</string>
+    <string name="studio_demosaic_superpixel">Superpixel（1/4 分辨率）</string>
 
     <!-- Studio grade fork (rawalchemy): boost group (Contrast/Saturation) / LOG / LUT. -->
     <string name="studio_grade_none">无</string>

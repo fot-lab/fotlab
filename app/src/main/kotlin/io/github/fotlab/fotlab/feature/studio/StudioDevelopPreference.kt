@@ -1,15 +1,15 @@
 package io.github.fotlab.fotlab.feature.studio
 
 import android.content.Context
-import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
 /**
- * Durable user preference for the Studio **develop pipeline** — currently the quarter-resolution
- * downsampling switch in the Studio drawer (`rules/REVIEW/detail/OPTIMZ-PERFRM-000010.md`).
+ * Durable user preference for the Studio **develop pipeline** — currently which demosaic
+ * algorithm the pipeline uses (`rules/REVIEW/detail/OPTIMZ-PERFRM-000010.md`).
  *
  * Its own `DataStore` file: it is an editing-pipeline setting, not a media-layer one
  * ([io.github.fotlab.fotlab.media.MediaPreference] already owns `studio_prefs` — two
@@ -21,24 +21,28 @@ import kotlinx.coroutines.flow.map
 private val Context.studioDevelopDataStore by preferencesDataStore(name = "studio_develop_prefs")
 
 /**
- * Whether the develop pipeline should run its demosaic stage at quarter resolution (rawler's
- * superpixel debayer) instead of full resolution.
+ * The last demosaic the user picked, as the catalogue's own id (`rawler:default`,
+ * `rawler:superpixel`, `rawtrp:vng4`, …) — never the enum name and never a translated label, so a
+ * rename or a new locale cannot orphan the stored value.
  *
- * A *preference*, not a per-render parameter: `StudioEngine` keeps the live value and passes it
- * into every develop call, so flipping the switch re-renders nothing by itself — the next develop
- * (a parameter change, a grade change or opening another file) picks it up.
+ * Storing the id rather than a boolean is what lets the pick *be* the algorithm: superpixel used
+ * to be a separate `downsample` switch that overrode the pick, so the two knobs could contradict
+ * each other and "what will this render as" was unanswerable from the choice alone.
+ *
+ * Absent (not defaulted) when nothing has been stored — [StudioEngine] resolves it, so the default
+ * lives in one place instead of being duplicated as a literal here.
  */
-private val KEY_DOWNSAMPLE = booleanPreferencesKey("studio_develop_downsample")
+private val KEY_DEMOSAIC_ID = stringPreferencesKey("studio_develop_demosaic_id")
 
 class StudioDevelopPreference(context: Context) {
 
     private val store = context.applicationContext.studioDevelopDataStore
 
-    /** The persisted switch; `true` (quarter resolution) when nothing has been stored yet. */
-    val downsample: Flow<Boolean> = store.data.map { prefs -> prefs[KEY_DOWNSAMPLE] ?: true }
+    /** The persisted candidate id, or `null` when the user has never picked one. */
+    val demosaicId: Flow<String?> = store.data.map { prefs -> prefs[KEY_DEMOSAIC_ID] }
 
-    /** Persist the switch so the next launch starts from the same choice. */
-    suspend fun setDownsample(enabled: Boolean) {
-        store.edit { prefs -> prefs[KEY_DOWNSAMPLE] = enabled }
+    /** Persist [id] so the next launch starts from the same choice. */
+    suspend fun setDemosaicId(id: String) {
+        store.edit { prefs -> prefs[KEY_DEMOSAIC_ID] = id }
     }
 }

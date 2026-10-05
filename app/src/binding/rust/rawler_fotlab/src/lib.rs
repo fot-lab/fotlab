@@ -288,6 +288,7 @@ fn algorithm_for_candidate(candidate: &rawtrp_demosaic::Candidate) -> Option<Dem
         "rawler:ppg" => DemosaicAlgorithm::Ppg,
         "rawler:bilinear4" => DemosaicAlgorithm::Bilinear4Channel,
         "rawler:xtrans_bilinear" => DemosaicAlgorithm::XTransBilinear,
+        "rawler:superpixel" => DemosaicAlgorithm::Superpixel,
         _ => return None,
     })
 }
@@ -314,12 +315,15 @@ mod tests {
         assert_eq!(demosaic_candidates().len(), advertised.len());
     }
 
-    /// The rawler four keep their meaning: they were the whole menu before the
+    /// The rawler entries keep their meaning: they were the whole menu before the
     /// RAWTRP variants were appended, so their ids must still resolve to the
     /// original variants (`FOTLAB-NATIVE-000004` D5 — appended, never interleaved).
+    /// Superpixel is the one that joined later, when the `downsample` switch became
+    /// an ordinary entry (`OPTIMZ-PERFRM-000010`).
     #[test]
-    fn the_rawler_four_keep_their_original_variants() {
-        assert_eq!(rawtrp_demosaic::candidates().iter().filter(|c| c.label.starts_with("RAWLER ")).count(), 4);
+    fn the_rawler_entries_keep_their_original_variants() {
+        let rawler = || rawtrp_demosaic::candidates().into_iter().filter(|c| c.label.starts_with("RAWLER ")).count();
+        assert_eq!(rawler(), 5);
         assert_eq!(algorithm_for_candidate(&candidate("rawler:default")), Some(DemosaicAlgorithm::Default));
         assert_eq!(algorithm_for_candidate(&candidate("rawler:ppg")), Some(DemosaicAlgorithm::Ppg));
         assert_eq!(
@@ -330,6 +334,17 @@ mod tests {
             algorithm_for_candidate(&candidate("rawler:xtrans_bilinear")),
             Some(DemosaicAlgorithm::XTransBilinear)
         );
+        assert_eq!(algorithm_for_candidate(&candidate("rawler:superpixel")), Some(DemosaicAlgorithm::Superpixel));
+    }
+
+    /// Superpixel is advertised as a plain RAWLER algorithm, so the menu and the
+    /// dispatch must agree on it exactly as they do for the other four — the pick
+    /// reaches `demosaic::effective_algorithm`, which resolves it per sensor.
+    #[test]
+    fn superpixel_is_an_ordinary_rawler_candidate() {
+        let sp = candidate("rawler:superpixel");
+        assert!(sp.label.starts_with("RAWLER "), "superpixel lost its source name: {}", sp.label);
+        assert_eq!(sp.kind, rawtrp_demosaic::SensorKind::Bayer);
     }
 
     /// The RAWTRP ids resolve to the appended variants, and the two `fast`s are

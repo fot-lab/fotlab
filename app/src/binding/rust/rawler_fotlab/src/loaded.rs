@@ -148,12 +148,13 @@ impl RawlerImageLoaded {
         crate::wb::as_shot_color_temp_kelvin(&self.inner)
     }
 
-    /// Whether this decode can be developed at **quarter resolution** — i.e. whether the Studio
-    /// drawer's downsampling switch will have any effect on it. Answered from the decoded
-    /// metadata (sensor type, CFA pattern, Fuji rotation), so the UI can disable the switch
-    /// instead of letting it silently produce a full-resolution frame. The guard is shared with
-    /// the pipeline itself (`demosaic::supports_downsample`), so the answer and the behaviour
-    /// cannot drift apart. `false` for a non-CFA (pre-coloured) image as well.
+    /// Whether this decode can be developed at **quarter resolution** — i.e. whether
+    /// `DemosaicAlgorithm::Superpixel` will actually resolve to superpixel for it rather than
+    /// falling back to the CFA default. Answered from the decoded metadata (sensor type, CFA
+    /// pattern, Fuji rotation), so the UI can grey that entry out instead of letting the pick
+    /// silently produce a full-resolution frame. The guard is shared with the pipeline itself
+    /// (`demosaic::supports_downsample`), so the answer and the behaviour cannot drift apart.
+    /// `false` for a non-CFA (pre-coloured) image as well.
     /// See `rules/REVIEW/detail/OPTIMZ-PERFRM-000010.md`.
     pub fn supports_downsample(&self) -> bool {
         crate::demosaic::supports_downsample(&self.inner)

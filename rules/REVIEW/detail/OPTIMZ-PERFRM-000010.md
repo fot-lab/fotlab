@@ -51,24 +51,40 @@
 
 ## Impact / Conflict
 
-- **与 `FOTLAB-RAWLER-000003` §A/§C 的建模分歧（人工已按本条实现拍板）**：该设计把 superpixel 建模为 `DemosaicAlgo::Superpixel` 枚举分支 + 正交的 `ScaleMode`。人工本次明确要求**独立布尔开关**（drawer 偏好），因此 `DemosaicAlgorithm` **没有**新增变体：「降采样」与「算法选择」是两个互不耦合的旋钮——ON 走 superpixel，OFF 走所选算法。那份文档保留为历史提案，未按新形状改写。
+- **★ 2026-10-05 人工改判：独立布尔开关已废除，superpixel 改为平级算法项。** 上面 Background 记录的「独立布尔开关」是 2026-09-22 的人工决策；本次人工明确要求 superpixel 与其它解马赛克算法平级、可在 Kotlin 侧解马赛克菜单中选用，**默认算法仍为 rawler 的 CFA 默认（不改动）**。本条目因此改回 `FOTLAB-RAWLER-000003` §C 的原始建模，`DemosaicAlgorithm` 新增 `Superpixel` 变体，`DevelopParams.downsample: bool` **已删除**，Studio drawer 的降采样开关行**已删除**。
+  - **Rust**：`rawtrp_demosaic::algo` 的 `RAWLER_NAMES` 增加 `Superpixel`（label `RAWLER Superpixel`），`candidates()` 铸 id `rawler:superpixel`（`SensorKind::Bayer`）；`demosaic.rs` 的 `DemosaicAlgorithm` **末尾追加** `Superpixel` 变体（既有变体位置不动），`effective_algorithm` 新增 `image` 形参以便该变体经 `superpixel_algo()` 解析；`demosaic()` 去掉 `downsample` 形参与「开关优先」的分支；`develop.rs` 删除 `DevelopParams.downsample`。
+  - **守卫不变**：`superpixel_algo()` / `supports_downsample()` 一个字未改，所以「X-Trans / Fuji 旋转 / 非 RGGB 族 CFA / 预着色输入回落到 CFA 默认」与「能力答复与管线行为不可能漂移」这两条契约原样保留。区别只是**回落的落点**：从「保留所选算法」变成「回落 CFA 默认」——与 `Ppg` 在同一传感器上的回落行为一致，且这是唯一自洽的选择（否则菜单里的 superpixel 与用户所选算法会两个都生效）。
+  - **crop 抽取的修正方式完全不变**：`decimation_factor` 依旧由实际 ROI 与 buffer 维度推导，不依赖任何标志位（Finding 3 的全部理由仍然成立）。
+  - **偏好从 boolean 改为候选 id**：`StudioDevelopPreference` 存 `studio_develop_demosaic_id`（字符串），`StudioEngine.DEFAULT_DEMOSAIC_ID = "rawler:default"` 为新装默认。**不迁移**旧的 `studio_develop_downsample` 键——旧键变成孤儿，新装/升级后按默认走全分辨率 CFA 默认。人工已确认「默认为 RAWLER default，然后持久化用户最近一次选择的算法」。
+  - **Kotlin**：`RawDecoder` / `RawlerFotlabDecoder` / `StubRawDecoder` 的 `developToPng` 去掉 `downsample` 形参；`StudioEngine.develop` 改收 `DemosaicCandidate`（同时拿到 id 与 algorithm，持久化 id、派发 algorithm，不必维护反向表）；`downsampleSupported` 更名 `superpixelSupported`，用于把 superpixel 菜单项**置灰**（能力为 `false` 时）而不是禁用一个开关。
+  - **选择语义的变化（重要）**：旧契约「拨动开关不触发渲染」随开关一起消失。superpixel 现在是菜单项，选取即触发一次 develop——与 PPG、vng4 等所有其它算法项一致。
+- **★ 名称映射补齐（人工要求）**：菜单现在**除默认项外每一项都带算法来源名**。此前 `StudioScreen.demosaicLabel()` 把四个 `rawler:*` id 覆盖成本地化裸名（"PPG"、"双线性 4 通道"），而 RAWTRP 走 `else -> candidate.label` 显示 "RAWTRP vng4"——**同一菜单里只有 RAWTRP 系看得出来源**。现在 RAWLER 系拼上 catalogue label 的来源前缀（`RAWLER PPG`、`RAWLER 双线性 4 通道`、`RAWLER X-Trans 双线性`、`RAWLER Superpixel（1/4 分辨率）`），RAWTRP 系保持原 label。默认项**不加**前缀：它不是算法而是「按 CFA 自动选」，无来源可指。前缀取自 `candidate.label.substringBefore(' ')` 并经 `studio_demosaic_source_prefix`（`translatable="false"`，因为 "RAWLER"/"RAWTRP" 是专名）拼接——来源名保持**一处事实**，不复制进五条翻译串。
+- **与 `FOTLAB-RAWLER-000003` §A/§C 的建模分歧（已消解）**：该设计原本就把 superpixel 建模为 `DemosaicAlgo::Superpixel` 枚举分支；本条目 2026-09-22 的「独立布尔开关」是偏离，2026-10-05 人工改判后回归该建模。
 - **crop 抽取不再由"标志"驱动，也不写死倍数**：`crop_default` 从**实际 ROI 与 buffer 维度**推导整数抽取倍数（`decimation_factor`），再按整数除法缩放矩形（见 Finding 3）。这是"路径无关"在实现层的落点：尺寸就是唯一事实源，crop 不可能与 buffer 不一致；识别不出倍数时**显式报错**而非静默切成越界。
-- **与 `OPTIMZ-PERFRM-000007` 收益互斥**：预览降到 1/4 后，并行化与编译优化带来的绝对收益同比缩小（1/4）。
-- **`OPTIMZ-PERFRM-000001` 的 C4（画质契约）就此结案**：降分辨率不再需要"擅自降级"的许可，而是用户显式、默认关闭、随时可关的开关。
+- **与 `OPTIMZ-PERFRM-000007` 收益互斥**：superpixel 降到 1/4 后，并行化与编译优化带来的绝对收益同比缩小（1/4）。
+- **`OPTIMZ-PERFRM-000001` 的 C4（画质契约）**：降分辨率不再是"擅自降级"，而是用户在算法菜单里的一次显式选择。
 - **Coil 侧未动**：本条目只减小 native 的产出；`OPTIMZ-PERFRM-000003` 的「三处调用未给解码尺寸」仍独立存在，两者叠加才是完整的预览提速。
-- **开关有可见延迟（按人工契约）**：因为不触发渲染，拨动后画面保持原样，直到下一次 develop（换文件、改 demosaic/曝光/白平衡、改 grade 都会触发）。drawer 的说明文案已写明"applies on the next develop"。
-- **不可降采样时选择"禁用并说明"而不是"静默忽略"**：新增 `RawlerImageLoaded::supports_downsample`，与管线**共用同一守卫函数**（`demosaic::supports_downsample`），因此能力答复与管线行为不可能漂移。drawer 在 `false` 时禁用开关并给出原因文案。
-- **回退是静默的**：X-Trans、Fuji 旋转、非 4 平面的非 RGGB 族 CFA、以及非 CFA（预着色）输入都会退回全分辨率 + 所选算法。管线内部没有日志（本 crate 未依赖 `log`，而新增依赖需要改 `Cargo.lock`，当前无本地 Rust 工具链 ⇒ 不做）。UI 侧由 `supportsDownsample` 兜住，但"管线为何回退"目前只体现在本条文档与代码注释里。
-- **`grading` 分支同样生效**：grade fork 与 develop fork 走同一条 develop 管线，开关 ON 时 rawalchemy 也是在被降分辨率的 buffer 上运算（更少的像素，同样的算法）。
+- **不可用时"置灰并说明"而不是"静默忽略"**：`RawlerImageLoaded::supports_downsample` 与管线共用同一守卫函数，能力为 `false` 时 superpixel 菜单项 `enabled = false`。
+- **回退是静默的**：X-Trans、Fuji 旋转、非 4 平面的非 RGGB 族 CFA、以及非 CFA（预着色）输入都会回落到 CFA 默认（管线内无日志）。UI 侧由 `superpixelSupported` 兜住。
+- **`grading` 分支同样生效**：grade fork 与 develop fork 走同一条 develop 管线，选中 superpixel 时 rawalchemy 也是在 1/4 分辨率 buffer 上运算（更少的像素，同样的算法）。
+
 
 ## Recommendation
 
 1. 收益量化接 `OPTIMZ-PERFRM-000009` 的打点：同一张 RAW 在开关两态下的端到端耗时与峰值 RSS（预期 demosaic 之后的所有环节同比变快，而解码不变）。
 2. `OPTIMZ-PERFRM-000003` 的另一半（给 Coil 指定解码尺寸）仍待做。
-3. 若日后确实要"全分辨率 demosaic + demosaic 后 2×2 bin"，它是开关的**第三种取值**，届时应把布尔改成枚举（`Off/Quarter`），**不要再加第二个布尔**。
+3. ~~若日后确实要"全分辨率 demosaic + demosaic 后 2×2 bin"，它是开关的**第三种取值**，届时应把布尔改成枚举（`Off/Quarter`）~~ —— **2026-10-05 已以另一种方式解决**：布尔已删除，superpixel 本身成为枚举变体。若日后要加"全分辨率 demosaic 之后再 2×2 bin"，那是**另一个算法**（`FOTLAB-RAWLER-000003` §C 的 `ScaleMode::Quarter`），应作为新的 `DemosaicAlgorithm` 变体加入同一列表，**不要再引入任何布尔或正交模式**。
 4. Fuji X-Trans 的 1/4 预览（若产品需要）需要上游提供 6×6 的 superpixel 原语，或退化为 demosaic 后的 bin —— 属上游改动，需按 `FOTLAB-NATIVE-000001` R4 走 recorded patch。
 
 ## Change History
+
+- 2026-10-05（人工改判）— **superpixel 从独立布尔开关改为平级解马赛克算法**：
+  - **决策**：人工要求 superpixel 与其它解马赛克算法平级、可在 Kotlin 侧算法菜单中选用；**默认算法仍为 rawler 的 CFA 默认，不改动**；持久化用户最近一次选择的算法（默认 `rawler:default`）；**删除** `DevelopParams.downsample` 字段。本条目 Background 记录的 2026-09-22「独立布尔开关」决策被本次改判取代，`FOTLAB-RAWLER-000003` §C 的原始建模恢复。
+  - **Rust**：`algo.rs` 的 `RAWLER_NAMES` 增 `Superpixel`（`RAWLER Superpixel`）、`candidates()` 铸 `rawler:superpixel`（Bayer）；`demosaic.rs` 末尾追加 `DemosaicAlgorithm::Superpixel`（既有变体位置不动）、`effective_algorithm` 加 `image` 形参并新增该变体臂（经 `superpixel_algo()` 解析，不支持则回落 CFA 默认）、`demosaic()` 去掉 `downsample` 形参与优先级分支；`develop.rs` 删 `DevelopParams.downsample`；`lib.rs` 的 `algorithm_for_candidate` 加 `rawler:superpixel` 映射。**`superpixel_algo` / `supports_downsample` / `decimation_factor` 三者一字未改**。
+  - **Kotlin**：`StudioDevelopPreference` 由 boolean 改为 `studio_develop_demosaic_id`（字符串，**不迁移**旧 boolean 键）；`StudioEngine` 新增 `DEFAULT_DEMOSAIC_ID` + `defaultAlgorithm()` / `applyPersistedDemosaic()`，`develop(candidate: DemosaicCandidate)` 改签名并落盘 id，`downsampleSupported` 更名 `superpixelSupported`；`RawDecoder` 及两个实现去掉 `downsample` 形参；`StudioScreen` 删抽屉开关行、删 `DemosaicAlgorithm` import、`DemosaicButton` 增 `superpixelSupported` 置灰 superpixel 项、`demosaicLabel` 改为「除默认项外都带来源名」。文案：新增 `studio_demosaic_superpixel` 与 `studio_demosaic_source_prefix`（两种语言），删除三条 `studio_drawer_downsample*`。
+  - **测试**：`RawRoutingTest#downsampleSwitchHalvesBothAxesOnDevelopAndGradeWithoutReRendering` → `#superpixelHalvesBothAxesOnDevelopAndGrade`（改为经候选驱动，去掉「拨开关不换帧对象」一步——选取即重渲，与其它算法项一致）；`fullResolutionDevelopKeepsBothAxesAboveThePreviewFloor` 去掉开关默认值断言；`everyDemosaicMenuOptionRedevelopsOnBayerAndExposureRecomputes` 的四项循环改为按 id 取候选（**故意不含 superpixel**：它按构造就是 1/4 分辨率，无法逐字节复现全分辨率帧，另由上面那条测试覆盖）；`tearDown` 复位改为回默认 pick；新增 `demosaicCandidate(id)` 辅助与 `SUPERPIXEL_ID` 常量。`smoke_emulator.yaml` 的 `test_image_develop` 分片 `TEST_FILTER` 同步改名，用例数 **12 → 12**（改名非新增）。
+  - **守卫测试**：`rawler_fotlab` 的 `the_rawler_four_keep_their_original_variants` → `#the_rawler_entries_keep_their_original_variants`（rawler 四项→五项），新增 `#superpixel_is_an_ordinary_rawler_candidate`（label 带来源名 + kind 为 Bayer）。本地 `cargo test --no-default-features --lib` 36 通过、`rawtrp_demosaic` 103 通过。
+  - **未做**：Kotlin 侧一行未编译（按人工指令禁止本地 Gradle 编译），正确性来自机械核对（调用点 / 未用 import / 字符串引用全仓扫描）；`develop(candidate)` 签名变更与 UniFFI 新变体 `SUPERPIXEL` 需 CI 首次运行确认。
 
 - 2026-09-22 — 创建并实现。Rust：`demosaic.rs` 新增 `Algo::Superpixel`/`Algo::Superpixel4` 与守卫 `superpixel_algo`/`supports_downsample`，`demosaic()` 增加 `downsample` 形参（开关优先于算法选择，不支持时回退并保留所选算法）；`develop.rs` 的 `DevelopParams` 增加 `downsample: bool`（`#[uniffi(default = false)]`），`crop_default` 增加由实际维度推导的半尺度 crop 缩放（修掉越界陷阱），`RawlerImageDeveloped` 补写路径无关契约；`loaded.rs` 新增 `supports_downsample` 能力查询。Kotlin：新增 `StudioDevelopPreference`（独立 DataStore `studio_develop_prefs`，`studio_prefs` 已被 `MediaPreference` 占用，同名会抛异常），`StudioEngine` 暴露 `downsample`/`downsampleSupported` 与 `setDownsample`（只写偏好、**不触发渲染**），在 open-time develop 与 `runDevelop`/`runGrade` 全部传入该值，`RawDecoder` 接口同步加 `downsample` 形参。UI：Studio drawer 新增开关行（不支持时禁用并说明），新增 3 条字符串。测试：`RawRoutingTest#downsampleSwitchReRendersNothingAndHalvesBothAxesOnNextDevelop`（能力查询为真、拨开关不换帧对象、下一次 develop 两轴各减半且仍为彩色帧、关掉后逐字节回到 as-shot），并入 `smoke_emulator.yaml` 的 `test_image_develop`（该分片 10 → 11 个用例）；`tearDown` 复位开关，避免持久化偏好影响同进程内后续用例。
 - 2026-09-22（同日人工复核后改写）— **crop 抽取方式与测试口径按人工意见重做**：
