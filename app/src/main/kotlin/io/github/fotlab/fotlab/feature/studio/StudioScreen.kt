@@ -549,25 +549,6 @@ fun StudioScreen() {
                                 if (kelvin > 0f) kelvin.roundToInt().toString() else ""
                             showWhiteBalanceDialog = true
                         },
-                        cameraProfileActive = cameraProfile != null,
-                        lensProfileActive = lensProfile != null,
-                        lensProfileUserFocal = userLcpFocalLengthMm,
-                        onCameraProfilePick = {
-                            dcpPickerLauncher.launch(
-                                openDocumentIntent(arrayOf("*/*"), lastDcpUri?.let { Uri.parse(it) }),
-                            )
-                        },
-                        onCameraProfileClear = StudioEngine::clearCameraProfile,
-                        onLensProfilePick = {
-                            lcpPickerLauncher.launch(
-                                openDocumentIntent(arrayOf("*/*"), lastLcpUri?.let { Uri.parse(it) }),
-                            )
-                        },
-                        onLensProfileClear = StudioEngine::clearLensProfile,
-                        onLensProfileFocal = {
-                            lcpFocalInput = userLcpFocalLengthMm?.let { "%.0f".format(it) } ?: ""
-                            showLcpFocalDialog = true
-                        },
                         onOklabHighlight = {
                             oklabSrgbEnabled = StudioEngine.currentOklabHighlightCompressSrgb()
                             oklabProphotoEnabled = StudioEngine.currentOklabHighlightCompressProphoto()
@@ -597,14 +578,41 @@ fun StudioScreen() {
                         },
                         onClearLut = StudioEngine::clearGradeLut,
                     )
-                    // Basic bar: the floor — its first (and currently only) slot is the read-only
-                    // RAW status indicator; more content may be filled later.
+                    // Basic bar: the floor — a read-only RAW status indicator followed by the
+                    // camera/lens profile controls (DCP/LCP), which are global to any loaded image.
                     StudioOpBar.Basic -> HorizontalOperationBar(
                         items = listOf(
                             OperationalButton(id = "raw_status") { slotModifier ->
                                 RawStatusButton(
                                     isOn = displayedResult != null && rawLoaded,
                                     modifier = slotModifier,
+                                )
+                            },
+                            OperationalButton(id = "lcp") {
+                                LcpButton(
+                                    active = lensProfile != null,
+                                    onPick = {
+                                        lcpPickerLauncher.launch(
+                                            openDocumentIntent(arrayOf("*/*"), lastLcpUri?.let { Uri.parse(it) }),
+                                        )
+                                    },
+                                    onClear = StudioEngine::clearLensProfile,
+                                    onFocal = {
+                                        lcpFocalInput = userLcpFocalLengthMm?.let { "%.0f".format(it) } ?: ""
+                                        showLcpFocalDialog = true
+                                    },
+                                    currentUserFocal = userLcpFocalLengthMm,
+                                )
+                            },
+                            OperationalButton(id = "dcp") {
+                                DcpButton(
+                                    active = cameraProfile != null,
+                                    onPick = {
+                                        dcpPickerLauncher.launch(
+                                            openDocumentIntent(arrayOf("*/*"), lastDcpUri?.let { Uri.parse(it) }),
+                                        )
+                                    },
+                                    onClear = StudioEngine::clearCameraProfile,
                                 )
                             },
                         ),
@@ -1920,24 +1928,12 @@ private fun StudioOperationBarDevelopFilm(
     onCa: () -> Unit,
     onExposure: () -> Unit,
     onWhiteBalance: () -> Unit,
-    cameraProfileActive: Boolean = false,
-    lensProfileActive: Boolean = false,
-    lensProfileUserFocal: Float? = null,
-    onCameraProfilePick: () -> Unit,
-    onCameraProfileClear: () -> Unit,
-    onLensProfilePick: () -> Unit,
-    onLensProfileClear: () -> Unit,
-    onLensProfileFocal: () -> Unit,
     onOklabHighlight: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     HorizontalOperationBar(
         modifier = modifier,
         items = listOf(
-            OperationalButton(
-                id = "lcp",
-                label = stringResource(id = R.string.studio_label_lcp),
-            ) { LcpButton(active = lensProfileActive, onPick = onLensProfilePick, onClear = onLensProfileClear, onFocal = onLensProfileFocal, currentUserFocal = lensProfileUserFocal) },
             OperationalButton(
                 id = "exposure",
                 label = stringResource(id = R.string.studio_label_exposure),
@@ -1954,10 +1950,6 @@ private fun StudioOperationBarDevelopFilm(
                 id = "dehaze",
                 label = stringResource(id = R.string.studio_label_dehaze),
             ) { DehazeButton(onDehaze) },
-            OperationalButton(
-                id = "dcp",
-                label = stringResource(id = R.string.studio_label_dcp),
-            ) { DcpButton(active = cameraProfileActive, onPick = onCameraProfilePick, onClear = onCameraProfileClear) },
             OperationalButton(
                 id = "demosaic",
                 label = stringResource(id = R.string.studio_label_demosaic),
