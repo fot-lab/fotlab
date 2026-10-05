@@ -130,6 +130,7 @@
     <string name="studio_dehaze_radius_guide_hint">引导滤波窗半径（子栅格像素，默认 8）</string>
     <string name="studio_enable_stage">启用</string>
     <string name="studio_decoding">解码中…</string>
+    <string name="studio_processing">处理中…</string>
     <string name="studio_unsupported_title">不支持的格式</string>
     <string name="studio_unsupported_format">不支持的格式！</string>
 

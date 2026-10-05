@@ -7,6 +7,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.DocumentsContract
+import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -25,8 +26,10 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.matchParentSize
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AllOut
@@ -79,6 +82,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -445,9 +449,20 @@ fun StudioScreen() {
                             model = ImageRequest.Builder(context).data((displayed as StudioRenderResult.Ready).model).build(),
                             contentDescription = null,
                             state = zoomState,
-                            modifier = Modifier.fillMaxSize(),
+                            modifier = Modifier.fillMaxSize().then(
+                                // Frost the held frame while a re-render is in flight (real
+                                // gaussian blur via RenderEffect on API >= S; a translucent scrim
+                                // below provides the frosted look on older APIs).
+                                if (isPipelineRunning && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                    Modifier.blur(radius = 14.dp)
+                                } else {
+                                    Modifier
+                                },
+                            ),
                         )
-                    } else {
+                    } else if (!isPipelineRunning) {
+                        // No held frame and not running: show the idle / first-decode prompt.
+                        // (While running with no frame yet, the processing overlay below covers it.)
                         when {
                             renderResult is StudioRenderResult.Loading -> Text(
                                 text = stringResource(id = R.string.studio_decoding),
@@ -458,6 +473,26 @@ fun StudioScreen() {
                                 text = stringResource(id = R.string.studio_open_prompt),
                                 style = MaterialTheme.typography.bodyLarge,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    // A separate overlay layer (NOT the canvas) signals an in-flight render: a
+                    // translucent scrim plus the "Processing" text. It is removed the instant a
+                    // new frame lands or the user stops the pipeline, restoring the held image.
+                    if (isPipelineRunning) {
+                        Box(
+                            modifier = Modifier
+                                .matchParentSize()
+                                .background(
+                                    color = MaterialTheme.colorScheme.surface
+                                        .copy(alpha = 0.5f),
+                                ),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = stringResource(id = R.string.studio_processing),
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurface,
                             )
                         }
                     }
