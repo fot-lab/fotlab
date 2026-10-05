@@ -60,8 +60,15 @@ struct Pass1Shared {
 
 const TS: usize = 128; // tile size
 const TSH: usize = 64; // half tile (R/B planes are half-res)
-const BORDER: i32 = 8; // tile border
-const BORDER2: i32 = 16; // 2*border
+// Max CA shift (px) the auto path is designed to apply before the user should disable LCA.
+// Drives the tile border margin so the resample loops stay inside the TS*TS green buffer.
+// Chosen to cover strong wide-angle lenses at high pixel densities (delta_px grows with
+// sqrt(MP); ~12px at 45MP frame corners, ~17px at 100MP). Beyond this, the shifted source
+// index is *saturated* to the buffer edge (see the first apply loop) so the render never
+// panics — but the result there is approximate and the user may disable LCA.
+const CA_SHIFT_MAX: i32 = 16;
+const BORDER: i32 = 2 * CA_SHIFT_MAX; // tile mirror border (px) on each side
+const BORDER2: i32 = 2 * BORDER; // 2*border (block-grid step; must stay < TS)
 const POLYORD: usize = 4; // order of the 2-D polynomial fit
 const EPS: f32 = 1e-5; // division guard (normalised domain)
 const SQR: f64 = 2.0; // upstream `constexpr float SQR = 2.f;`
@@ -527,10 +534,13 @@ pub fn correct_ca_bayer(
                     // exceeds 4px there), i.e. a half-fixed image. We would rather let the
                     // correction run to its measured value and let the user disable LCA entirely
                     // if the result looks bad, than ship a clamped partial fix.
-                    // SAFETY NOTE: the first apply loop below runs `rr in 4..(rr1-4)` (4px margin);
-                    // an unclamped |shift| > 4.0 makes `rgb1[(rr+shift)*ts+..]` go out of bounds and
-                    // PANIC. To actually support large shifts safely, widen this margin (and BORDER)
-                    // instead of re-clamping. Original clamp preserved for reference:
+                    // SAFETY: BORDER is now 2*CA_SHIFT_MAX and the first apply loop runs
+                    // `rr in CA_SHIFT_MAX..(rr1-CA_SHIFT_MAX)` (margin = CA_SHIFT_MAX), so the
+                    // shifted source read `rgb1[(rr+shift)*ts + (cc+shift)]` stays inside the TS*TS
+                    // green buffer for any measured |shift| <= CA_SHIFT_MAX — no clamp needed up to
+                    // that point. The shifted indices are ALSO saturated to [0, TS-1] as a hard
+                    // safety net, so a pathological >CA_SHIFT_MAX measurement can never panic the
+                    // render (it just reads the buffer edge). Original clamp preserved for reference:
                     // ls[0][0] = ls[0][0].clamp(-BS_LIM, BS_LIM);
                     // ls[0][1] = ls[0][1].clamp(-BS_LIM, BS_LIM);
                     // ls[1][0] = ls[1][0].clamp(-BS_LIM, BS_LIM);
@@ -581,15 +591,25 @@ pub fn correct_ca_bayer(
                 }
 
                 // ---- first apply loop: G at shifted R/B positions -> grbdiff/gshift ----
-                for rr in 4..(rr1 - 4) {
-                    let mut cc = 4 + (fc(rr, 2) & 1);
-                    while cc < cc1 - 4 {
+                // Margin = CA_SHIFT_MAX: with BORDER = 2*CA_SHIFT_MAX the shifted source read
+                // stays inside the TS*TS green buffer for any |shift| <= CA_SHIFT_MAX.
+                for rr in CA_SHIFT_MAX..(rr1 - CA_SHIFT_MAX) {
+                    let mut cc = CA_SHIFT_MAX + (fc(rr, 2) & 1);
+                    while cc < cc1 - CA_SHIFT_MAX {
                         let c = fc(rr, cc) as usize;
                         let indx = ((rr * ts + cc) >> 1) as usize;
-                        let indxfc = (((rr + shiftvfloor[c]) * ts + cc + shifthceil[c])) as usize;
-                        let indxff = (((rr + shiftvfloor[c]) * ts + cc + shifthfloor[c])) as usize;
-                        let indxcc = (((rr + shiftvceil[c]) * ts + cc + shifthceil[c])) as usize;
-                        let indxcf = (((rr + shiftvceil[c]) * ts + cc + shifthfloor[c])) as usize;
+                        // Saturate the shifted source indices to the TS*TS buffer so a
+                        // >CA_SHIFT_MAX measurement can never read out of bounds (panic). The
+                        // interpolation fraction still uses the true shift, so normal corrections
+                        // (|shift| <= CA_SHIFT_MAX) are untouched by this clamp.
+                        let rvf = (rr + shiftvfloor[c]).clamp(0, ts - 1);
+                        let rvc = (rr + shiftvceil[c]).clamp(0, ts - 1);
+                        let chc = (cc + shifthceil[c]).clamp(0, ts - 1);
+                        let chf = (cc + shifthfloor[c]).clamp(0, ts - 1);
+                        let indxfc = (rvf * ts + chc) as usize;
+                        let indxff = (rvf * ts + chf) as usize;
+                        let indxcc = (rvc * ts + chc) as usize;
+                        let indxcf = (rvc * ts + chf) as usize;
                         let ginthfloor = intp(shifthfrac[c], rgb1[indxfc], rgb1[indxff]);
                         let ginthceil = intp(shifthfrac[c], rgb1[indxcc], rgb1[indxcf]);
                         let gint = intp(shiftvfrac[c], ginthceil, ginthfloor);
@@ -601,9 +621,12 @@ pub fn correct_ca_bayer(
                 }
 
                 // ---- second apply loop: reconstruct R/B from interpolated grbdiff ----
-                for rr in 8..(rr1 - 8) {
-                    let mut cc = 8 + (fc(rr, 2) & 1);
-                    while cc < cc1 - 8 {
+                // Margin = BORDER (== 2*CA_SHIFT_MAX): matches the copy-back region below so
+                // only real, non-mirror rows are written out; also safely covers the ±2 directional
+                // G kernel reads.
+                for rr in BORDER..(rr1 - BORDER) {
+                    let mut cc = BORDER + (fc(rr, 2) & 1);
+                    while cc < cc1 - BORDER {
                         let c = fc(rr, cc) as usize;
                         let grbdir0 = grbdir[0][c];
                         let grbdir1 = grbdir[1][c];
