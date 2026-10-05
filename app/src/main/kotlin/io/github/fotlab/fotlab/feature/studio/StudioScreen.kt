@@ -481,20 +481,21 @@ fun StudioScreen() {
                 }
 
                 // Active operation bar (the former grade-bar slot, directly above the fun bar).
-                // The three develop/grade groups are HorizontalOperationBars selected by the
-                // fun-bar category icons; only one (or none) is shown at a time. reGrade() is a
-                // safe no-op for non-RAW images (loadedImage == null), so the bar is shown for any
-                // rendered image and the buttons govern their own applicability.
-                // Exactly one operation bar is shown at all times — Basic is the floor. When no
-                // develop/adjustment/grade bar is open, or the open one cannot apply to the current
-                // image (e.g. Tune/Style on a non-RAW), Basic is docked. The bar is always shown so
-                // the fun-bar menu has a stable close target, and buttons govern their own applicability.
+                // The develop / adjustment / style groups are HorizontalOperationBars selected by
+                // the fun-bar category icons; exactly one is shown at a time. The bar is purely a
+                // container — it is docked whenever its category is active and an image is loaded;
+                // it is NEVER gated by whether a feature applies. Applicability is each tool's own
+                // concern: every grade control (Contrast / Saturation / LOG / LUT / clipping /
+                // OKLab) depends on a prior RAW decode, so each one disables itself via the shared
+                // `rawLoaded` precondition rather than hiding the whole bar. Basic is the floor
+                // only when no image is loaded (displayedResult == null) so the fun-bar menu keeps
+                // a stable close target.
                 val dockedBar = if (displayedResult != null) {
                     when (activeBar) {
                         StudioOpBar.Basic -> StudioOpBar.Basic
                         StudioOpBar.DevelopFilm -> StudioOpBar.DevelopFilm
-                        StudioOpBar.TuneImage -> if (rawLoaded) StudioOpBar.TuneImage else StudioOpBar.Basic
-                        StudioOpBar.StyleFilter -> if (rawLoaded) StudioOpBar.StyleFilter else StudioOpBar.Basic
+                        StudioOpBar.TuneImage -> StudioOpBar.TuneImage
+                        StudioOpBar.StyleFilter -> StudioOpBar.StyleFilter
                     }
                 } else {
                     StudioOpBar.Basic
@@ -550,8 +551,11 @@ fun StudioScreen() {
                             showWhiteBalanceDialog = true
                         },
                     )
-                    // Grade tools (Contrast/Saturation/LOG/LUT) are RAW-only, like the former grade bar.
+                    // Grade tools (Contrast/Saturation/LOG/LUT) depend on a prior RAW decode; each
+                    // button self-disables via rawLoaded, so the bar stays docked and the tools
+                    // govern their own applicability.
                     StudioOpBar.TuneImage -> StudioOperationBarTuneImage(
+                        rawLoaded = rawLoaded,
                         onOklabHighlight = {
                             oklabSrgbEnabled = StudioEngine.currentOklabHighlightCompressSrgb()
                             oklabProphotoEnabled = StudioEngine.currentOklabHighlightCompressProphoto()
@@ -567,6 +571,7 @@ fun StudioScreen() {
                         onSaturation = StudioEngine::setGradeSaturation,
                     )
                     StudioOpBar.StyleFilter -> StudioOperationBarStyleFilter(
+                        rawLoaded = rawLoaded,
                         logSpace = gradeSelection.logSpace,
                         lutName = gradeSelection.lutName,
                         logSpaces = logSpaces,
@@ -1587,12 +1592,14 @@ private fun CaButton(
 @Composable
 private fun ClippingButton(
     onClick: () -> Unit,
+    enabled: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
-    IconButton(onClick = onClick, modifier = modifier) {
+    IconButton(onClick = onClick, enabled = enabled, modifier = modifier) {
         Icon(
             imageVector = Icons.Filled.AllOut,
             contentDescription = stringResource(id = R.string.studio_cd_clipping),
+            tint = operationIconTint(enabled = enabled, active = false),
         )
     }
 }
@@ -1606,15 +1613,34 @@ private fun ClippingButton(
  * tools it carries no state of its own — the dialog's switch is the only control
  * (`FOTLAB-UIXDES-000002`: the screen owns the dialogs).
  */
+
+/**
+ * Shared icon tint for operation buttons. [active] (the tool is currently applied) tints primary,
+ * otherwise the default onSurfaceVariant; [enabled = false] — the tool's precondition (e.g. a
+ * prior RAW decode) is not met — forces the standard Material disabled alpha so the button reads
+ * as unavailable rather than merely inactive, instead of the whole bar hiding it.
+ */
+@Composable
+private fun operationIconTint(enabled: Boolean, active: Boolean) =
+    if (!enabled) {
+        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+    } else if (active) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
 @Composable
 private fun OklabHighlightButton(
     onClick: () -> Unit,
+    enabled: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
-    IconButton(onClick = onClick, modifier = modifier) {
+    IconButton(onClick = onClick, enabled = enabled, modifier = modifier) {
         Icon(
             imageVector = Icons.Filled.Flare,
             contentDescription = stringResource(id = R.string.studio_cd_oklab),
+            tint = operationIconTint(enabled = enabled, active = false),
         )
     }
 }
@@ -1627,18 +1653,15 @@ private fun OklabHighlightButton(
 private fun ContrastButton(
     contrast: Float?,
     onContrast: (Float?) -> Unit,
+    enabled: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     var open by remember { mutableStateOf(false) }
-    IconButton(onClick = { open = true }, modifier = modifier) {
+    IconButton(onClick = { open = true }, enabled = enabled, modifier = modifier) {
         Icon(
             imageVector = Icons.Filled.Contrast,
             contentDescription = stringResource(id = R.string.studio_cd_contrast),
-            tint = if (contrast != null) {
-                MaterialTheme.colorScheme.primary
-            } else {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            },
+            tint = operationIconTint(enabled = enabled, active = contrast != null),
         )
     }
     if (open) {
@@ -1658,18 +1681,16 @@ private fun ContrastButton(
 private fun SaturationButton(
     saturation: Float?,
     onSaturation: (Float?) -> Unit,
+    enabled: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
+
     var open by remember { mutableStateOf(false) }
-    IconButton(onClick = { open = true }, modifier = modifier) {
+    IconButton(onClick = { open = true }, enabled = enabled, modifier = modifier) {
         Icon(
             imageVector = Icons.Filled.Tonality,
             contentDescription = stringResource(id = R.string.studio_cd_saturation),
-            tint = if (saturation != null) {
-                MaterialTheme.colorScheme.primary
-            } else {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            },
+            tint = operationIconTint(enabled = enabled, active = saturation != null),
         )
     }
     if (open) {
@@ -1747,20 +1768,17 @@ private fun LogButton(
     logSpace: String?,
     logSpaces: List<String>,
     onLogSpace: (String?) -> Unit,
+    enabled: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     var open by remember { mutableStateOf(false) }
     val none = stringResource(id = R.string.studio_grade_none)
     Box(modifier = modifier) {
-        IconButton(onClick = { open = true }) {
+        IconButton(onClick = { open = true }, enabled = enabled) {
             Icon(
                 imageVector = CustomMaterialStyleIcons.Filled.MovieEdit,
                 contentDescription = stringResource(id = R.string.studio_cd_log),
-                tint = if (logSpace != null) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
+                tint = operationIconTint(enabled = enabled, active = logSpace != null),
             )
         }
         DropdownMenu(
@@ -1790,19 +1808,16 @@ private fun LutButton(
     lutName: String?,
     onPick: () -> Unit,
     onClear: () -> Unit,
+    enabled: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     var open by remember { mutableStateOf(false) }
     Box(modifier = modifier) {
-        IconButton(onClick = { open = true }) {
+        IconButton(onClick = { open = true }, enabled = enabled) {
             Icon(
                 imageVector = Icons.Filled.MovieFilter,
                 contentDescription = stringResource(id = R.string.studio_cd_lut),
-                tint = if (lutName != null) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
+                tint = operationIconTint(enabled = enabled, active = lutName != null),
             )
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
@@ -1964,6 +1979,7 @@ private fun StudioOperationBarDevelopFilm(
 /** TuneImage bar — the boost group: Contrast and Saturation parameter inputs. */
 @Composable
 private fun StudioOperationBarTuneImage(
+    rawLoaded: Boolean,
     onOklabHighlight: () -> Unit,
     onClipping: () -> Unit,
     contrast: Float?,
@@ -1978,19 +1994,19 @@ private fun StudioOperationBarTuneImage(
             OperationalButton(
                 id = "oklab",
                 label = stringResource(id = R.string.studio_label_oklab),
-            ) { OklabHighlightButton(onOklabHighlight) },
+            ) { OklabHighlightButton(onOklabHighlight, enabled = rawLoaded) },
             OperationalButton(
                 id = "clipping",
                 label = stringResource(id = R.string.studio_label_clipping),
-            ) { ClippingButton(onClipping) },
+            ) { ClippingButton(onClipping, enabled = rawLoaded) },
             OperationalButton(
                 id = "contrast",
                 label = stringResource(id = R.string.studio_cd_contrast),
-            ) { ContrastButton(contrast = contrast, onContrast = onContrast) },
+            ) { ContrastButton(contrast = contrast, onContrast = onContrast, enabled = rawLoaded) },
             OperationalButton(
                 id = "saturation",
                 label = stringResource(id = R.string.studio_cd_saturation),
-            ) { SaturationButton(saturation = saturation, onSaturation = onSaturation) },
+            ) { SaturationButton(saturation = saturation, onSaturation = onSaturation, enabled = rawLoaded) },
         ),
     )
 }
@@ -1998,6 +2014,7 @@ private fun StudioOperationBarTuneImage(
 /** StyleFilter bar — LOG and LUT. */
 @Composable
 private fun StudioOperationBarStyleFilter(
+    rawLoaded: Boolean,
     logSpace: String?,
     lutName: String?,
     logSpaces: List<String>,
@@ -2013,13 +2030,23 @@ private fun StudioOperationBarStyleFilter(
                 id = "log",
                 label = stringResource(id = R.string.studio_label_log),
             ) {
-                LogButton(logSpace = logSpace, logSpaces = logSpaces, onLogSpace = onLogSpace)
+                LogButton(
+                    logSpace = logSpace,
+                    logSpaces = logSpaces,
+                    onLogSpace = onLogSpace,
+                    enabled = rawLoaded,
+                )
             },
             OperationalButton(
                 id = "lut",
                 label = stringResource(id = R.string.studio_label_lut),
             ) {
-                LutButton(lutName = lutName, onPick = onPickLut, onClear = onClearLut)
+                LutButton(
+                    lutName = lutName,
+                    onPick = onPickLut,
+                    onClear = onClearLut,
+                    enabled = rawLoaded,
+                )
             },
         ),
     )
