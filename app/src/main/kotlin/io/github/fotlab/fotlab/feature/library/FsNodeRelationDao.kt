@@ -88,7 +88,7 @@ interface FsNodeRelationDao {
     /**
      * Live parent ids of a node — the upward edges used by cycle detection. The root holds
      * no parent edge at all, so an upward walk from it simply ends; the `IS NOT NULL` filter
-     * is kept as a guard so a stray legacy `NULL`-parent edge can never enter the walk.
+     * keeps that walk on concrete node ids.
      */
     @Query(
         "SELECT fs_node_id_parent FROM fs_node_relation " +

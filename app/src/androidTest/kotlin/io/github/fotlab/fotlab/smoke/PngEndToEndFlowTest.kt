@@ -15,7 +15,6 @@ import coil3.request.SuccessResult
 import io.github.fotlab.fotlab.feature.library.FsNodeObject
 import io.github.fotlab.fotlab.feature.library.LibraryCore
 import io.github.fotlab.fotlab.feature.library.LibraryRoot
-import io.github.fotlab.fotlab.feature.library.isCollection
 import io.github.fotlab.fotlab.feature.studio.StudioEngine
 import io.github.fotlab.fotlab.feature.studio.StudioRenderResult
 import io.github.fotlab.fotlab.media.DEFAULT_SNIFF_TIMEOUT_MS
@@ -218,14 +217,14 @@ class PngEndToEndFlowTest {
             step("delete-gate", "top level after delete lists the node $stillListed time(s)")
             assertEquals("the deleted top-level node must leave the listing", 0, stillListed)
 
-            // The root itself is a real node row (id 0, a collection) and must survive a
-            // reconcile — it is the one node with no parent edge, so an orphan sweep that
-            // does not exclude it would delete the whole library's anchor.
+            // The root itself is a real node row (id 0) with its own node kind, and it must
+            // survive a reconcile — it is the one node with no parent edge, so a sweep that
+            // treated "no parent" as garbage would delete the whole library's anchor.
             val root = runBlocking { LibraryCore.rootNode() }
             step("root", "root=$root")
             assertNotNull("the root node row must exist", root)
             assertEquals("the root node id is fixed", LibraryRoot.ID, root!!.fsNodeId)
-            assertTrue("the root must be a collection node", root.isCollection())
+            assertEquals("the root carries its own node kind", LibraryRoot.MIME, root.typeMime)
             runBlocking { LibraryCore.refresh() }
             val rootAfterRefresh = runBlocking { LibraryCore.rootNode() }
             assertNotNull("refresh must not take the root node away", rootAfterRefresh)

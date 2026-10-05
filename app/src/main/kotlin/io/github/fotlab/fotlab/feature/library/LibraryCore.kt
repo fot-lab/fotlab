@@ -47,8 +47,12 @@ object LibraryRoot {
     /** Display name of the root node. */
     const val NAME: String = "Library"
 
-    /** The root is a collection, so it renders and navigates like any other folder. */
-    const val MIME: String = MimeCollection
+    /**
+     * The root's own node kind. Distinct from [MimeCollection] on purpose: a user folder is
+     * something the user created and can delete, while the root is the anchor of the tree —
+     * it is what every other node hangs from, and it is never an item in any listing.
+     */
+    const val MIME: String = "application/folder-root"
 }
 
 /**

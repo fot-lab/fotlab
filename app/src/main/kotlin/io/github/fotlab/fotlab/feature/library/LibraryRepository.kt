@@ -21,32 +21,30 @@ class LibraryRepository(private val database: LibraryDatabase) {
         database.nodeRelationDao().parentsOf(childId)
 
     fun collections(): Flow<List<FsNodeObject>> =
-        database.nodeObjectDao().observeCollections(LibraryRoot.ID)
+        database.nodeObjectDao().observeCollections()
 
     /** The root node row; `null` only before [ensureRoot] has run. */
     suspend fun rootNode(): FsNodeObject? = database.nodeObjectDao().getById(LibraryRoot.ID)
 
     /**
-     * Make sure the root node exists, and that nothing is left pointing at a `NULL` parent.
+     * Create the root node row when it is missing.
      *
-     * The root row is created with the fixed id [LibraryRoot.ID] and is structurally identical
-     * to any other collection, so the top level needs no special casing anywhere else. Both
-     * statements are idempotent and run in one transaction: the insert is ignored when the row
-     * is already there, and the rewire is a no-op once no `NULL`-parent edge is left — which
-     * makes this safe to call on every process start, and self-healing for a library written
-     * before the root became a real row.
+     * The root is an ordinary row with the fixed id [LibraryRoot.ID] and its own node kind
+     * ([LibraryRoot.MIME]), so nothing else in the tree needs to know about it. The insert is
+     * idempotent — the primary key turns a later call into a no-op — which is what makes it
+     * safe to run on every process start.
+     *
+     * Deliberately does **not** attempt to repair a library written before the root became a
+     * real row: no edge is re-pointed, nothing is migrated. That older data is not repaired by
+     * design; reinstalling gives a clean tree.
      */
     suspend fun ensureRoot() {
-        val dao = database.nodeObjectDao()
-        database.withTransaction {
-            dao.insertRootIfAbsent(
-                rootId = LibraryRoot.ID,
-                name = LibraryRoot.NAME,
-                typeMime = LibraryRoot.MIME,
-                timeCreated = System.currentTimeMillis(),
-            )
-            dao.rewireNullParentsToRoot(LibraryRoot.ID)
-        }
+        database.nodeObjectDao().insertRootIfAbsent(
+            rootId = LibraryRoot.ID,
+            name = LibraryRoot.NAME,
+            typeMime = LibraryRoot.MIME,
+            timeCreated = System.currentTimeMillis(),
+        )
     }
 
     // --- Recycle bin reads (`FOTLAB-DATABS-000002`, per-batch soft deletion) ---
@@ -146,9 +144,9 @@ class LibraryRepository(private val database: LibraryDatabase) {
     suspend fun renameNode(id: Long, name: String) =
         database.nodeObjectDao().rename(id, name)
 
-    /** All live file-entry nodes (non-folder); the refresh check filters out the missing ones (R10). */
+    /** All live file-entry nodes (neither a collection nor the root); the refresh check filters out the missing ones (R10). */
     suspend fun fileEntryNodes(): List<FsNodeObject> =
-        database.nodeObjectDao().fileEntryNodes(MimeCollection)
+        database.nodeObjectDao().fileEntryNodes(MimeCollection, LibraryRoot.MIME)
 
     /** All live orphan nodes (no live parent relation); recycled by refresh (R10, revised). */
     suspend fun orphanNodeIds(): List<Long?> =

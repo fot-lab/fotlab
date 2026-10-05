@@ -39,7 +39,7 @@ The schema has exactly two tables.
 | --- | --- | --- | --- |
 | `fs_node_id` | INTEGER PRIMARY KEY | yes | Row identity; no `AUTOINCREMENT` (see R6) |
 | `name_display` | TEXT | yes | Display name (collection name or file name) |
-| `type_mime` | TEXT | yes | `application/folder` marks a collection; any other value is the file's MIME type |
+| `type_mime` | TEXT | yes | `application/folder` = user collection, `application/folder-root` = the root (R5), any other value = the file's MIME type |
 | `uri_storage` | TEXT | no | File reference (`content://` URI); `NULL` for a collection |
 | `time_modified` | INTEGER | no | Last modification timestamp |
 | `time_created` | INTEGER | yes | Node creation timestamp |
@@ -67,39 +67,41 @@ Indexes:
 
 ### R4 — Node kinds distinguished by MIME convention
 
-- A collection (directory / virtual folder) is a node whose `type_mime` is the fixed value
-  `application/folder`.
-- Any other `type_mime` value denotes a file entry and that value is the file's MIME type.
-- This one discriminator lets the UI and queries tell collections from files without a separate kind
-  column; the root is a collection like any other (R5).
+- `type_mime = 'application/folder'` marks a **user collection** (a directory / virtual folder
+  the user created); any other value denotes a file entry and that value is the file's MIME type.
+- `type_mime = 'application/folder-root'` marks **the root** (R5) and nothing else.
+- This one discriminator lets the UI and queries tell the kinds apart without a separate kind
+  column: `fileEntryNodes` excludes both non-file kinds by MIME, and `observeCollections` (user
+  folders only) excludes the root by the same comparison rather than by a special-cased id.
 
 ### R5 — Root is a real node: `fs_node_id = 0`, created at database initialisation
 
 - The root is an ordinary row in `fs_node_object` with the fixed primary key **`fs_node_id = 0`**,
-  `type_mime = 'application/folder'`, `uri_storage = NULL`, created when the database is first
-  initialised. It is structurally indistinguishable from any other collection node.
+  `type_mime = 'application/folder-root'`, `uri_storage = NULL`, created when the database is first
+  initialised. It has its own node kind because it is not a user folder: it is what every other
+  node hangs from, and it is never an item in any listing.
 - Every other node reaches the root through a normal relation row whose `fs_node_id_parent` is `0`
   — a concrete node id, matched with plain `=`. There is no "root-level" marker anywhere: the top
-  level of the UI is simply `childrenOf(0)`, and the root is a parent like any other collection.
-- A null parent means exactly one thing: **the root has no parent**. The root therefore has no
-  relation row at all, and it is the only node for which "no parent edge" is normal rather than a
-  defect. (The column stays nullable so the invariant is expressible, but no code path writes a
-  null parent: every stored edge names a real parent node.)
-- Because the root is a real node, it is excluded explicitly where a "no parent" node must not be
-  treated as data: the orphan sweep (`orphanNodeIds`, which would otherwise soft-delete the whole
-  library's anchor on the first refresh) and the collection listing (`observeCollections`, where
-  the root is the tree's top level, not a folder inside it). It is likewise refused by the delete
-  and delete-forever paths.
+  level of the UI is simply `childrenOf(0)`, and the root is a parent like any other node.
+- A null parent means exactly one thing: **a node that has no parent**. The root is the only such
+  node, so it carries no relation row at all. (The column stays nullable so the invariant is
+  expressible, but no code path writes a null parent: every stored edge names a real parent.)
+- Because the root has no parent edge, it is excluded where a parentless node must not be treated
+  as data: the orphan sweep (`orphanNodeIds`, which would otherwise soft-delete the whole library's
+  anchor on the first refresh). Its own MIME kind excludes it from the collection listing and from
+  the file-entry sweep on its own. The delete and delete-forever paths refuse it as well.
 - This supersedes the earlier "root is implicit (`NULL` parent)" decision, which turned out to make
   the top level second-class: `= NULL` never matches in SQL, so every root-level lookup (the delete
   gate above all) silently missed, and the unique index over `(child, parent)` could not dedupe
   `(child, NULL)` rows — which is what forced the `NOT EXISTS` insert guard and the dual-branch
   `IS NULL` predicates that this revision deletes. It restores the "explicit root collection"
-  option of `FOTLAB-IMGMGR-000001` Q2, with a fixed id instead of an arbitrary one.
-- Compatibility: a library written under the previous decision is repaired on start by
-  `LibraryRepository.ensureRoot()` — idempotent, one transaction — which inserts the root row if
-  missing and re-points every legacy `NULL`-parent edge at it. No schema change and no Room version
-  bump are involved: the column nullability is unchanged.
+  option of `FOTLAB-IMGMGR-000001` Q2, with a fixed id and a distinct kind instead of an arbitrary
+  one.
+- No backward compatibility: a library written under the previous decision is **not** repaired — no
+  edge is re-pointed and no data is migrated, because that legacy state was never a valid tree.
+  Reinstalling is the migration path (`LibraryRepository.ensureRoot` only inserts the root row if
+  it is missing, which is what makes it safe to call on every process start). No schema change and
+  no Room version bump are involved: the column nullability is unchanged.
 
 ### R6 — `INTEGER PRIMARY KEY` reuse semantics (no `AUTOINCREMENT`)
 
@@ -356,3 +358,4 @@ node reached by two paths in one operation is processed once.
   and open questions Q7–Q9 updated accordingly; AC4–AC13 reworded from "archives" to "stamps
   `time_deleted`".
 - 2026-10-05 — Root revision (human decision). R5 rewritten: the root is a real `fs_node_object` row with the fixed id `0`, created at database initialisation and structurally identical to any other collection, instead of the implicit "`NULL` parent means top level" convention. Every stored edge now names a concrete parent (`0` at the top level), so `childrenOf(0)` lists the top level, the delete gate compares against a real id, and the unique `(child, parent)` index dedupes the top level like any other. The `insertRootLinkIfAbsent` NOT EXISTS guard, `reviveRootLink` and the dual-branch `IS NULL` predicates are deleted — they existed only to work around `= NULL` never matching and SQLite treating NULLs as distinct under UNIQUE. `null` now means solely "the root has no parent", and the root carries no relation row at all. Two exclusion points added where a parentless node must not be treated as data: `orphanNodeIds` (otherwise the first refresh soft-deletes the anchor) and `observeCollections` (the root is the top level, not a folder in a listing); the delete and delete-forever paths refuse it too. No schema change and no Room version bump: `LibraryRepository.ensureRoot()` runs once per process start in a single transaction, inserting the root row if absent and re-pointing legacy `NULL`-parent edges at it, so an existing library repairs itself. The audit trail records that the previous decision (rev 2026-09-10 and earlier) was an AI-authored reading rather than a product requirement.
+- 2026-10-05 — Root kind and no-backward-compatibility (human decision, same day as the revision above). Two follow-ups to it: (1) the root's `type_mime` is its own kind `application/folder-root`, not `application/folder` — the root is not something the user created or can delete, it is the tree's anchor, so the single MIME discriminator now tells three kinds apart and both non-file sweeps (`observeCollections`, `fileEntryNodes`) exclude the root by that comparison instead of a special-cased id. (2) Backward compatibility is dropped: `ensureRoot()` only inserts the root row when missing — no `NULL`-parent edge is re-pointed, no data is migrated, and a library written under the earlier decision is not repaired. Reinstalling is the migration path. No schema change and no Room version bump either way.

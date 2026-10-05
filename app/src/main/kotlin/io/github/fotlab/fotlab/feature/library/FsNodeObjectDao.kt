@@ -36,14 +36,6 @@ interface FsNodeObjectDao {
     suspend fun insertRootIfAbsent(rootId: Long, name: String, typeMime: String, timeCreated: Long)
 
     /**
-     * Re-point every legacy `NULL`-parent edge at the root node, so a library written before
-     * the root became a real row becomes reachable through [getRelation] / [childrenOf] with
-     * a plain equality. Idempotent; a no-op once no such edge exists.
-     */
-    @Query("UPDATE fs_node_relation SET fs_node_id_parent = :rootId WHERE fs_node_id_parent IS NULL")
-    suspend fun rewireNullParentsToRoot(rootId: Long)
-
-    /**
      * Find any node with this URI regardless of soft-delete status. Used by `importUris` to
      * revive a soft-deleted node when the same file is re-imported, instead of hitting the
      * UNIQUE index on `uri_storage` with a duplicate INSERT.
@@ -60,21 +52,26 @@ interface FsNodeObjectDao {
     suspend fun rename(id: Long, name: String)
 
     /**
-     * Every live collection node except the root — the root is the tree's top level, not a
-     * member of it, so it must never show up as a folder inside another listing.
+     * Every live user collection, ordered by name. The root is excluded by its own MIME kind
+     * (`LibraryRoot.MIME`): it is the tree's top level, not a folder sitting inside it, and it
+     * is not something the user created or can delete.
      */
     @Query(
         "SELECT * FROM fs_node_object WHERE type_mime = 'application/folder' " +
-            "AND time_deleted IS NULL AND fs_node_id <> :rootId ORDER BY name_display",
+            "AND time_deleted IS NULL ORDER BY name_display",
     )
-    fun observeCollections(rootId: Long): Flow<List<FsNodeObject>>
+    fun observeCollections(): Flow<List<FsNodeObject>>
 
     /**
-     * All live file-entry nodes (everything that is not a virtual folder); used by refresh.
-     * The root is a folder, so it is excluded by the mime comparison as well.
+     * All live file-entry nodes — what the refresh reconcile treats as a real file. Both
+     * non-file kinds are excluded by their MIME: a user collection and the root, which carries
+     * its own kind (`LibraryRoot.MIME`) precisely so it is never mistaken for a file.
      */
-    @Query("SELECT * FROM fs_node_object WHERE type_mime <> :folderMime AND time_deleted IS NULL")
-    suspend fun fileEntryNodes(folderMime: String): List<FsNodeObject>
+    @Query(
+        "SELECT * FROM fs_node_object WHERE time_deleted IS NULL " +
+            "AND type_mime <> :folderMime AND type_mime <> :rootMime",
+    )
+    suspend fun fileEntryNodes(folderMime: String, rootMime: String): List<FsNodeObject>
 
     /** Distinct soft-delete timestamps, newest first — one virtual batch folder per value. */
     @Query(
