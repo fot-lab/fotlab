@@ -131,6 +131,8 @@
     <string name="studio_enable_stage">启用</string>
     <string name="studio_decoding">解码中…</string>
     <string name="studio_processing">处理中…</string>
+    <string name="studio_cd_raw_on">已加载 RAW 图片</string>
+    <string name="studio_cd_raw_off">非 RAW 图片</string>
     <string name="studio_unsupported_title">不支持的格式</string>
     <string name="studio_unsupported_format">不支持的格式！</string>
 

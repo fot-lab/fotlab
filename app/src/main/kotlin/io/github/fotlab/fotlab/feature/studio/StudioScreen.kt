@@ -39,6 +39,8 @@ import androidx.compose.material.icons.filled.IosShare
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.RawOff
+import androidx.compose.material.icons.filled.RawOn
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Contrast
 import androidx.compose.material.icons.filled.MovieFilter
@@ -604,8 +606,18 @@ fun StudioScreen() {
                         },
                         onClearLut = StudioEngine::clearGradeLut,
                     )
-                    // Basic bar: the floor — an empty placeholder slot; content to be filled later.
-                    StudioOpBar.Basic -> HorizontalOperationBar(items = emptyList<OperationalButton>())
+                    // Basic bar: the floor — its first (and currently only) slot is the read-only
+                    // RAW status indicator; more content may be filled later.
+                    StudioOpBar.Basic -> HorizontalOperationBar(
+                        items = listOf(
+                            OperationalButton(id = "raw_status") { slotModifier ->
+                                RawStatusButton(
+                                    isOn = displayedResult != null && rawLoaded,
+                                    modifier = slotModifier,
+                                )
+                            },
+                        ),
+                    )
                 }
             }
         }
@@ -1482,6 +1494,29 @@ private fun demosaicLabel(candidate: DemosaicCandidate): String = when (candidat
     "rawler:bilinear4" -> stringResource(id = R.string.studio_demosaic_bilinear4)
     "rawler:xtrans_bilinear" -> stringResource(id = R.string.studio_demosaic_xtrans)
     else -> candidate.label
+}
+
+/**
+ * Read-only RAW status indicator for the Basic bar's first slot.
+ *
+ * Shows the Material `RawOn` glyph only when an image is actually held AND the
+ * format sniffer routed it to the rawler RAW path ([StudioEngine.isRawLoaded]);
+ * every other case — no image, or a sniffed jpeg/png handled by Coil — shows
+ * `RawOff`. It is a pure status readout, so it renders a bare [Icon] (no
+ * IconButton / no click handling).
+ */
+@Composable
+private fun RawStatusButton(
+    isOn: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Icon(
+        imageVector = if (isOn) Icons.Filled.RawOn else Icons.Filled.RawOff,
+        contentDescription = stringResource(
+            id = if (isOn) R.string.studio_cd_raw_on else R.string.studio_cd_raw_off,
+        ),
+        modifier = modifier,
+    )
 }
 
 /** Exposure stops input (opens the EV dialog owned by StudioScreen). */

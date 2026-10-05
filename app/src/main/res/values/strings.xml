@@ -143,6 +143,8 @@
     <string name="studio_enable_stage">Enable</string>
     <string name="studio_decoding">Decoding…</string>
     <string name="studio_processing">Processing…</string>
+    <string name="studio_cd_raw_on">RAW image loaded</string>
+    <string name="studio_cd_raw_off">Not a RAW image</string>
     <string name="studio_unsupported_title">Unsupported Format</string>
     <string name="studio_unsupported_format">Unsupported format!</string>
 
