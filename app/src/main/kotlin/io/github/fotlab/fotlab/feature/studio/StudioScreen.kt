@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.Exposure
 import androidx.compose.material.icons.filled.Gradient
 import androidx.compose.material.icons.filled.IosShare
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
@@ -158,6 +159,8 @@ fun StudioScreen() {
 
     val zoomState = rememberZoomState()
     val renderResult by StudioEngine.renderResult.collectAsState()
+    val displayedResult by StudioEngine.displayedResult.collectAsState()
+    val isPipelineRunning by StudioEngine.pipelineRunning.collectAsState()
     // Boost/LOG/LUT grade-fork state.
     val gradeSelection by StudioEngine.gradeSelection.collectAsState()
     val gradeError by StudioEngine.gradeError.collectAsState()
@@ -173,7 +176,9 @@ fun StudioScreen() {
     var showUnsupported by remember { mutableStateOf(false) }
     LaunchedEffect(renderResult) {
         showUnsupported = renderResult is StudioRenderResult.Unsupported
-        if (renderResult is StudioRenderResult.Ready) zoomState.reset()
+    }
+    LaunchedEffect(displayedResult) {
+        if (displayedResult != null) zoomState.reset()
     }
     // Zoom / pan live here so the overflow menu's "Reset view" can snap back to the default; the
     // shared state is what makes the canvas behave exactly like the Library viewer.
@@ -336,7 +341,7 @@ fun StudioScreen() {
             // Remember write access across process death so the next export opens here.
             persistUriPermission(context, target, write = true)
             scope.launch { mediaPref.setLastExportUri(target.toString()) }
-            val current = renderResult
+            val current = displayedResult
             scope.launch(Dispatchers.IO) {
                 runCatching {
                     val bytes = when (val r = current) {
@@ -413,7 +418,9 @@ fun StudioScreen() {
                             createDocumentIntent("image/png", "$stamp.png", lastExportUri?.let { Uri.parse(it) }),
                         )
                     },
-                    showShare = renderResult is StudioRenderResult.Ready,
+                    hasImage = displayedResult != null,
+                    isPipelineRunning = isPipelineRunning,
+                    onStopPipeline = { StudioEngine.stopPipeline() },
                     onResetView = { zoomState.reset() },
                     onDevelopFilm = { activeBar = activeBar.toggle(StudioOpBar.DevelopFilm) },
                     onTuneImage = { activeBar = activeBar.toggle(StudioOpBar.TuneImage) },
@@ -431,24 +438,28 @@ fun StudioScreen() {
                     modifier = Modifier.fillMaxWidth().weight(1f),
                     contentAlignment = Alignment.Center,
                 ) {
-                    when (val result = renderResult) {
-                        is StudioRenderResult.Ready -> ZoomableAsyncImage(
+                    val displayed = displayedResult
+                    if (displayed != null) {
+                        ZoomableAsyncImage(
                             // rawler path -> decoded PNG ByteBuffer; Coil path -> original Uri.
-                            model = ImageRequest.Builder(context).data(result.model).build(),
+                            model = ImageRequest.Builder(context).data((displayed as StudioRenderResult.Ready).model).build(),
                             contentDescription = null,
                             state = zoomState,
                             modifier = Modifier.fillMaxSize(),
                         )
-                        is StudioRenderResult.Loading -> Text(
-                            text = stringResource(id = R.string.studio_decoding),
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        else -> Text(
-                            text = stringResource(id = R.string.studio_open_prompt),
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                    } else {
+                        when {
+                            renderResult is StudioRenderResult.Loading -> Text(
+                                text = stringResource(id = R.string.studio_decoding),
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            else -> Text(
+                                text = stringResource(id = R.string.studio_open_prompt),
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
 
@@ -461,7 +472,7 @@ fun StudioScreen() {
                 // develop/adjustment/grade bar is open, or the open one cannot apply to the current
                 // image (e.g. Tune/Style on a non-RAW), Basic is docked. The bar is always shown so
                 // the fun-bar menu has a stable close target, and buttons govern their own applicability.
-                val dockedBar = if (renderResult is StudioRenderResult.Ready) {
+                val dockedBar = if (displayedResult != null) {
                     when (activeBar) {
                         StudioOpBar.Basic -> StudioOpBar.Basic
                         StudioOpBar.DevelopFilm -> StudioOpBar.DevelopFilm
@@ -1172,7 +1183,9 @@ private fun StudioScreenFunBar(
     onExitBar: () -> Unit,
     onOpenFile: () -> Unit,
     onShareFile: () -> Unit,
-    showShare: Boolean,
+    hasImage: Boolean,
+    isPipelineRunning: Boolean,
+    onStopPipeline: () -> Unit,
     onResetView: () -> Unit,
     onDevelopFilm: () -> Unit,
     onTuneImage: () -> Unit,
@@ -1223,7 +1236,15 @@ private fun StudioScreenFunBar(
 
             Spacer(modifier = Modifier.weight(1f))
 
-            if (showShare) {
+            if (isPipelineRunning) {
+                // A render is in flight: the slot becomes a square Stop button that cancels it.
+                IconButton(onClick = onStopPipeline) {
+                    Icon(
+                        imageVector = Icons.Filled.Stop,
+                        contentDescription = stringResource(id = R.string.studio_cd_stop_pipeline),
+                    )
+                }
+            } else if (hasImage) {
                 // An image is resident: the open-file slot becomes share-as-PNG.
                 IconButton(onClick = onShareFile) {
                     Icon(

@@ -38,6 +38,8 @@ import java.io.InputStream
 import java.nio.ByteBuffer
 import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.Job
 import kotlin.jvm.Volatile
 
 /**
@@ -98,6 +100,31 @@ object StudioEngine {
     private val renderResultState = MutableStateFlow<StudioRenderResult>(StudioRenderResult.Idle)
     val renderResult: StateFlow<StudioRenderResult> = renderResultState.asStateFlow()
 
+    /**
+     * The last successfully rendered frame, retained across re-render Loading states so the canvas
+     * keeps showing the previous image until a new one arrives. Holds a [StudioRenderResult.Ready]
+     * or null; it is cleared only when the node is switched/closed ([setCurrentNode]) — never on
+     * Loading — which is exactly the "don't release the old bitmap until the new one lands" contract.
+     */
+    private val displayedResultState = MutableStateFlow<StudioRenderResult?>(null)
+    val displayedResult: StateFlow<StudioRenderResult?> = displayedResultState.asStateFlow()
+
+    /**
+     * Whether a render pipeline is currently in flight (open-file decode, or a develop/grade
+     * re-render). Drives the fun-bar slot: while running it shows a Stop button instead of
+     * share/add. Derived from the in-flight job count, not from the transient Loading state, so it
+     * stays accurate across the cooperative-discard stop.
+     */
+    private val pipelineRunningState = MutableStateFlow(false)
+    val pipelineRunning: StateFlow<Boolean> = pipelineRunningState.asStateFlow()
+
+    /** Number of render jobs currently in flight; gates [pipelineRunning] so overlapping re-renders
+     * (e.g. a slider dragging exposure) don't flip the flag off prematurely. */
+    private val inFlight = AtomicInteger(0)
+
+    /** The most recently launched render job; the stop button cancels it (best-effort). */
+    private var runningJob: Job? = null
+
     /** The RAW->PNG decoder. Wired to the native rawler/UniFFI bridge by [prepare]. */
     var rawDecoder: RawDecoder = StubRawDecoder
 
@@ -122,6 +149,9 @@ object StudioEngine {
         // Release any previously-held decoded RAW and invalidate in-flight work before switching
         // (FOTLAB-RAWLER-000004 §lifecycle: exactly one handle per loaded file, at most).
         loadedImage = null
+        // The held frame belongs to the previous node: drop it so we never show a different
+        // file's image while the new one decodes; the new Ready replaces it on arrival.
+        displayedResultState.value = null
         // The Boost/LOG/LUT selection belongs to the previous file's grade fork — every new node
         // starts at all-"none" (the regular sRGB develop presentation).
         gradeSelectionState.value = GradeSelection()
@@ -149,10 +179,17 @@ object StudioEngine {
         currentUri = parsed
         currentWhiteBalanceKelvin = null
         renderResultState.value = StudioRenderResult.Loading
-        scope.launch {
+        inFlight.incrementAndGet()
+        pipelineRunningState.value = true
+        val job = scope.launch {
             val result = runPipeline(appContext.contentResolver, parsed, token)
-            if (loadNonce.get() == token) renderResultState.value = result
+            if (loadNonce.get() == token) {
+                renderResultState.value = result
+                if (result is StudioRenderResult.Ready) displayedResultState.value = result
+            }
         }
+        runningJob = job
+        job.invokeOnCompletion { if (inFlight.decrementAndGet() == 0) pipelineRunningState.value = false }
     }
 
     private suspend fun runPipeline(resolver: ContentResolver, uri: Uri, token: Long): StudioRenderResult {
@@ -509,11 +546,15 @@ object StudioEngine {
         if (loadedImage == null) return
         val token = loadNonce.get()
         renderResultState.value = StudioRenderResult.Loading
-        scope.launch {
+        inFlight.incrementAndGet()
+        pipelineRunningState.value = true
+        val job = scope.launch {
             val png = runGrade(token, selection)
             if (loadNonce.get() != token) return@launch
             if (png != null) {
-                renderResultState.value = StudioRenderResult.Ready(ByteBuffer.wrap(png))
+                val ready = StudioRenderResult.Ready(ByteBuffer.wrap(png))
+                renderResultState.value = ready
+                displayedResultState.value = ready
             } else {
                 // The grader rejected the inputs (almost always a bad LUT): surface the reason once
                 // and keep the canvas usable by falling back to the sRGB develop presentation.
@@ -521,6 +562,8 @@ object StudioEngine {
                 reDevelop()
             }
         }
+        runningJob = job
+        job.invokeOnCompletion { if (inFlight.decrementAndGet() == 0) pipelineRunningState.value = false }
     }
 
     private fun runGrade(token: Long, selection: GradeSelection): ByteArray? {
@@ -1106,10 +1149,35 @@ object StudioEngine {
         val uri = currentUri ?: return
         val token = loadNonce.get()
         renderResultState.value = StudioRenderResult.Loading
-        scope.launch {
+        inFlight.incrementAndGet()
+        pipelineRunningState.value = true
+        val job = scope.launch {
             val result = runDevelop(appContext.contentResolver, uri, token, currentAlgorithm, currentExposureEv, wbKelvin)
-            if (loadNonce.get() == token) renderResultState.value = result
+            if (loadNonce.get() == token) {
+                renderResultState.value = result
+                if (result is StudioRenderResult.Ready) displayedResultState.value = result
+            }
         }
+        runningJob = job
+        job.invokeOnCompletion { if (inFlight.decrementAndGet() == 0) pipelineRunningState.value = false }
+    }
+
+    /**
+     * Cooperatively stop the in-flight render. The native decode is a blocking call that cannot be
+     * interrupted mid-execution, so this does not abort the native compute — it invalidates the
+     * in-flight token (via [loadNonce]) so the finished result is never applied, cancels the
+     * coroutine, and drops the running flag. The canvas keeps showing [displayedResult], i.e. the
+     * last good frame that was not replaced, which is exactly the pre-stop image.
+     */
+    fun stopPipeline() {
+        if (inFlight.get() == 0) return
+        loadNonce.incrementAndGet()
+        runningJob?.cancel()
+        // The cancelled / invalidated jobs' invokeOnCompletion drives inFlight back to 0 and clears
+        // pipelineRunning; the held frame is intentionally kept so the stop restores the last image.
+        // If nothing was held (a stop pressed mid initial decode), fall back to Idle so the canvas
+        // shows the open prompt instead of a stuck "decoding" state.
+        if (displayedResultState.value == null) renderResultState.value = StudioRenderResult.Idle
     }
 
     private suspend fun runDevelop(
