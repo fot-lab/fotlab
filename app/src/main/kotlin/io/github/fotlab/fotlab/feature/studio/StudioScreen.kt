@@ -2071,6 +2071,10 @@ private fun StudioOperationBarStyleFilter(
  * quantization hint, and Android's JPEG encoder keeps its own chroma subsampling — `compress`
  * exposes no sampling-factor control, so 4:4:4 vs 4:2:0 is the platform's call, not ours.
  */
+/** `quality` for the JPEG branch (the platform ignores it for PNG). 95 is the conventional
+ * "visually near-lossless" JPEG setting; the chroma subsampling is the encoder's own choice. */
+private const val JPG_QUALITY: Int = 95
+
 private enum class StudioExportFormat(
     val labelRes: Int,
     val mimeType: String,
@@ -2081,14 +2085,6 @@ private enum class StudioExportFormat(
     Png(R.string.studio_export_png, "image/png", "png", Bitmap.CompressFormat.PNG, 100),
     Jpg(R.string.studio_export_jpg, "image/jpeg", "jpg", Bitmap.CompressFormat.JPEG, JPG_QUALITY),
     ;
-
-    companion object {
-        /**
-         * `quality` for the JPEG branch (the platform ignores it for PNG). 95 is the conventional
-         * "visually near-lossless" JPEG setting; the chroma subsampling is the encoder's own choice.
-         */
-        const val JPG_QUALITY: Int = 95
-    }
 }
 
 /**
@@ -2101,9 +2097,10 @@ private enum class StudioExportFormat(
  */
 private fun encodeExport(
     context: Context,
-    result: StudioRenderResult,
+    result: StudioRenderResult?,
     format: StudioExportFormat,
 ): ByteArray? {
+    result ?: return null
     val bitmap = when (val r = result) {
         is StudioRenderResult.Ready -> when (val model = r.model) {
             is ByteBuffer -> BitmapFactory.decodeByteArray(model.array(), 0, model.array().size)
