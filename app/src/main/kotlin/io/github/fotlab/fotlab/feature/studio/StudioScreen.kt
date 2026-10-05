@@ -326,49 +326,28 @@ fun StudioScreen() {
         }
     }
 
-    // Share-as-PNG: while an image is resident on the canvas the fun bar's open-file slot becomes
-    // a share action. CreateDocument hands the user the system file manager to choose the save
-    // location and name (prefilled with the tap-time timestamp); the callback re-reads the canvas
-    // state and writes it as a *compressed* PNG. The engine delivers an uncompressed PNG (rawler
-    // path) or a source Uri (Coil path); both branches decode and re-encode through Android's
-    // native PNG encoder so the exported file is actually zlib-compressed instead of huge.
-    // (PNG quality is ignored by the platform, so this is the strongest lossless compression the
-    // native API offers — there is no public Android API to force zlib level 9.)
+    // Share: while an image is resident on the canvas the fun bar's open-file slot becomes a share
+    // action whose drop-up menu picks the export format. CreateDocument hands the user the system
+    // file manager to choose the save location and name (prefilled with the tap-time timestamp plus
+    // the format's extension); the callback re-reads the canvas state and writes it through
+    // Android's native bitmap encoder. The engine delivers an uncompressed PNG (rawler path) or a
+    // source Uri (Coil path); both branches decode and re-encode via `Bitmap.compress`, which is the
+    // platform's compression + container step. The SAF round-trip is asynchronous, so the picked
+    // format is parked here and read back when the document returns.
+    var pendingExportFormat by remember { mutableStateOf(StudioExportFormat.Png) }
     val shareLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult(),
     ) { result ->
         val target = result.takeIf { it.resultCode == Activity.RESULT_OK }?.data?.data
         if (target != null) {
+            val format = pendingExportFormat
             // Remember write access across process death so the next export opens here.
             persistUriPermission(context, target, write = true)
             scope.launch { mediaPref.setLastExportUri(target.toString()) }
             val current = displayedResult
             scope.launch(Dispatchers.IO) {
                 runCatching {
-                    val bytes = when (val r = current) {
-                        is StudioRenderResult.Ready -> when (val model = r.model) {
-                            // rawler path: Rust PNG bytes are uncompressed — decode and re-encode
-                            // through the native encoder to apply zlib compression.
-                            is ByteBuffer -> BitmapFactory.decodeByteArray(model.array(), 0, model.array().size)
-                                ?.let { bmp ->
-                                    ByteArrayOutputStream().use { out ->
-                                        bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
-                                        out.toByteArray()
-                                    }
-                                }
-                            // Coil path: decode the source and re-encode with the native encoder.
-                            is Uri -> context.contentResolver.openInputStream(model)?.use { input ->
-                                BitmapFactory.decodeStream(input)?.let { bmp ->
-                                    ByteArrayOutputStream().use { out ->
-                                        bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
-                                        out.toByteArray()
-                                    }
-                                }
-                            }
-                            else -> null
-                        }
-                        else -> null
-                    }
+                    val bytes = encodeExport(context, current, format)
                     if (bytes != null) {
                         context.contentResolver.openOutputStream(target)?.use { it.write(bytes) }
                     }
@@ -403,12 +382,17 @@ fun StudioScreen() {
                             openDocumentIntent(arrayOf("*/*"), lastImportUri?.let { Uri.parse(it) }),
                         )
                     },
-                    onShareFile = {
+                    onShareFile = { format ->
                         // Prefill the system file manager with the tap-time timestamp, and start it
-                        // in the folder the last PNG export landed in (rather than the global SAF one).
+                        // in the folder the last export landed in (rather than the global SAF one).
                         val stamp = SimpleDateFormat("yyyy-MM-dd-HH-mm-ss", Locale.US).format(Date())
+                        pendingExportFormat = format
                         shareLauncher.launch(
-                            createDocumentIntent("image/png", "$stamp.png", lastExportUri?.let { Uri.parse(it) }),
+                            createDocumentIntent(
+                                format.mimeType,
+                                "$stamp.${format.extension}",
+                                lastExportUri?.let { Uri.parse(it) },
+                            ),
                         )
                     },
                     hasImage = displayedResult != null,
@@ -1215,7 +1199,8 @@ private val StudioScreenFunBarHeight = 64.dp
  * file-open action and the overflow (three-dot) at the far right. The develop/grade tools
  * themselves no longer live here — they are `OperationalButton`s inside the operation bars, so
  * reordering them only touches the bar's list. The bar renders no title text
- * (`FOTLAB-UIXDES-000004` R6). Anchored at the bottom edge, every dropdown opens upward.
+ * (`FOTLAB-UIXDES-000004` R6). Anchored at the bottom edge, every dropdown opens upward — including
+ * the share action's format menu, which lists the two [StudioExportFormat] branches.
  */
 @Composable
 private fun StudioScreenFunBar(
@@ -1223,7 +1208,7 @@ private fun StudioScreenFunBar(
     onOpenDrawer: () -> Unit,
     onExitBar: () -> Unit,
     onOpenFile: () -> Unit,
-    onShareFile: () -> Unit,
+    onShareFile: (StudioExportFormat) -> Unit,
     hasImage: Boolean,
     isPipelineRunning: Boolean,
     onStopPipeline: () -> Unit,
@@ -1286,12 +1271,31 @@ private fun StudioScreenFunBar(
                     )
                 }
             } else if (hasImage) {
-                // An image is resident: the open-file slot becomes share-as-PNG.
-                IconButton(onClick = onShareFile) {
-                    Icon(
-                        imageVector = Icons.Filled.IosShare,
-                        contentDescription = stringResource(id = R.string.studio_cd_share),
-                    )
+                // An image is resident: the open-file slot becomes the share action. Its drop-up menu
+                // picks the format (PNG / JPG); the two branches are parallel — the bar hands the
+                // choice back and the launcher encodes exactly that one.
+                var shareMenuOpen by remember { mutableStateOf(false) }
+                Box {
+                    IconButton(onClick = { shareMenuOpen = true }) {
+                        Icon(
+                            imageVector = Icons.Filled.IosShare,
+                            contentDescription = stringResource(id = R.string.studio_cd_share),
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = shareMenuOpen,
+                        onDismissRequest = { shareMenuOpen = false },
+                    ) {
+                        StudioExportFormat.entries.forEach { format ->
+                            DropdownMenuItem(
+                                text = { Text(text = stringResource(id = format.labelRes)) },
+                                onClick = {
+                                    shareMenuOpen = false
+                                    onShareFile(format)
+                                },
+                            )
+                        }
+                    }
                 }
             } else {
                 IconButton(onClick = onOpenFile) {
@@ -2053,6 +2057,70 @@ private fun StudioOperationBarStyleFilter(
 }
 
 // ---------------------------------------------------------------------------
+// Export — the share action's format choices
+// ---------------------------------------------------------------------------
+
+/**
+ * The two formats the fun bar's share menu offers. They are parallel branches, not a
+ * quality/format axis: the user picks one, and the export runs exactly that encoder.
+ *
+ * Both go through `Bitmap.compress`, the platform's own compression + container step, so the two
+ * differ only in the [Bitmap.CompressFormat] handed to it and the file's extension / MIME type.
+ * PNG is lossless (the platform ignores `quality` there — 100 is the strongest deflate the public
+ * API offers, as there is no API to force a zlib level). JPG is lossy: [JPG_QUALITY] is the
+ * quantization hint, and Android's JPEG encoder keeps its own chroma subsampling — `compress`
+ * exposes no sampling-factor control, so 4:4:4 vs 4:2:0 is the platform's call, not ours.
+ */
+private enum class StudioExportFormat(
+    val labelRes: Int,
+    val mimeType: String,
+    val extension: String,
+    val compressFormat: Bitmap.CompressFormat,
+    val quality: Int,
+) {
+    Png(R.string.studio_export_png, "image/png", "png", Bitmap.CompressFormat.PNG, 100),
+    Jpg(R.string.studio_export_jpg, "image/jpeg", "jpg", Bitmap.CompressFormat.JPEG, JPG_QUALITY),
+    ;
+
+    companion object {
+        /**
+         * `quality` for the JPEG branch (the platform ignores it for PNG). 95 is the conventional
+         * "visually near-lossless" JPEG setting; the chroma subsampling is the encoder's own choice.
+         */
+        const val JPG_QUALITY: Int = 95
+    }
+}
+
+/**
+ * Decode whatever the canvas is currently showing and re-encode it as [format], returning the
+ * file bytes, or null when nothing decodable is resident.
+ *
+ * The engine hands back either uncompressed PNG bytes (rawler path) or the source [Uri] (Coil
+ * path); both are decoded to a [Bitmap] first, then handed to `Bitmap.compress` so the file the
+ * user gets is a real compressed image rather than raw samples.
+ */
+private fun encodeExport(
+    context: Context,
+    result: StudioRenderResult,
+    format: StudioExportFormat,
+): ByteArray? {
+    val bitmap = when (val r = result) {
+        is StudioRenderResult.Ready -> when (val model = r.model) {
+            is ByteBuffer -> BitmapFactory.decodeByteArray(model.array(), 0, model.array().size)
+            is Uri -> context.contentResolver.openInputStream(model)?.use { input ->
+                BitmapFactory.decodeStream(input)
+            }
+            else -> null
+        }
+        else -> null
+    } ?: return null
+    return ByteArrayOutputStream().use { out ->
+        bitmap.compress(format.compressFormat, format.quality, out)
+        out.toByteArray()
+    }
+}
+
+// ---------------------------------------------------------------------------
 // SAF helpers — per-call "remember my last folder"
 // ---------------------------------------------------------------------------
 
@@ -2072,9 +2140,10 @@ private fun openDocumentIntent(mimeTypes: Array<String>, initialUri: Uri?): Inte
     }
 
 /**
- * Build an `ACTION_CREATE_DOCUMENT` intent (PNG export / ios_share) that prefills the file name via
+ * Build an `ACTION_CREATE_DOCUMENT` intent (the share export) that prefills the file name via
  * [Intent.EXTRA_TITLE] and, when [initialUri] is non-null, opens the picker in that export's parent
- * folder so repeated exports stay put.
+ * folder so repeated exports stay put. [mimeType] and the title's extension both come from the
+ * chosen [StudioExportFormat].
  */
 private fun createDocumentIntent(mimeType: String, title: String, initialUri: Uri?): Intent =
     Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
