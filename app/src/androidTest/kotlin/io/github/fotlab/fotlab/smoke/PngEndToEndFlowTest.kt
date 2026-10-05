@@ -272,6 +272,12 @@ class PngEndToEndFlowTest {
                 LibraryCore.link(shared, parentA)
                 LibraryCore.link(shared, parentB)
                 LibraryCore.link(lone, parentA)
+                // `createCollection` already hung both children off the root, and `link` only
+                // *adds* an edge, so `lone` still has that root edge. It is a "lone" child only
+                // once the root edge is dropped — without this it has two live parents and would
+                // (correctly) survive its second parent's removal, which is the many-to-many rule
+                // this whole block exists to pin.
+                LibraryCore.unlink(lone, LibraryRoot.ID)
                 listOf(shared, lone, parentA, parentB)
             }
             val (sharedId, loneId, removedParentId, keptParentId) = probes
@@ -294,6 +300,8 @@ class PngEndToEndFlowTest {
             )
             assertTrue("a child keeps the edge to its surviving parent", sharedId in underKept)
             assertTrue("a child with one live parent left stays alive", sharedId in alive)
+            // Only reachable because of the `unlink` above: with the root edge still present
+            // this node has a second live parent and must survive.
             assertTrue("a child whose only parent was removed goes with it", loneId !in alive)
             assertTrue(
                 "the dead edge is swept, so the removed parent lists nothing",
