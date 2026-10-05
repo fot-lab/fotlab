@@ -238,6 +238,36 @@ class PngEndToEndFlowTest {
             val rootAfterDelete = runBlocking { LibraryCore.rootNode() }
             step("root", "root after a delete aimed at it: $rootAfterDelete")
             assertNotNull("a delete naming the root must not remove it", rootAfterDelete)
+
+            // Orphan semantics: a node is an orphan when it has no effective live parent link —
+            // no edge at all, an edge naming a null parent, or an edge whose parent node is
+            // itself removed. The reachability that matters most is the negative half: a node
+            // that *does* hang under a live parent must never be reaped. That is exactly what a
+            // sweep written as "no live parent edge" (without asking whether the parent node is
+            // alive) would get wrong, and what one written as "no parent edge at all" would
+            // also get wrong. The null-parent and dead-parent cases cannot be produced through
+            // the public API any more (nothing writes a null parent, and deleting a parent
+            // stamps its child edges), so they are asserted by the DAO's own predicate.
+            val (childId, siblingId, childSurvived) = runBlocking {
+                val child = LibraryCore.createCollection(LibraryRoot.ID, "orphan-probe")
+                val sibling = LibraryCore.createCollection(LibraryRoot.ID, "sibling-probe")
+                LibraryCore.refresh()
+                val survivors = LibraryCore.collections().first().mapNotNull { it.fsNodeId }.toSet()
+                Triple(child, sibling, child in survivors && sibling in survivors)
+            }
+            step("orphan", "child=$childId sibling=$siblingId bothSurvived=$childSurvived")
+            assertTrue("nodes under a live parent must survive the sweep", childSurvived)
+            val cleanedUp = runBlocking {
+                LibraryCore.enterSelectionMode(childId)
+                LibraryCore.selection.toggle(siblingId)
+                LibraryCore.deleteSelected()
+                LibraryCore.collections().first().mapNotNull { it.fsNodeId }.toSet()
+            }
+            step("orphan", "probe nodes cleaned up=${childId !in cleanedUp && siblingId !in cleanedUp}")
+            assertTrue(
+                "the probe nodes must be removable again afterwards",
+                childId !in cleanedUp && siblingId !in cleanedUp,
+            )
         } finally {
             runBlocking { LibraryCore.exitSelectionMode() }
             sourceUri?.let(::deleteSource)

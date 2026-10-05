@@ -106,20 +106,47 @@ interface FsNodeRelationDao {
     suspend fun activeParentCount(childId: Long): Int
 
     /**
-     * Live nodes with no live parent relation at all — recycled by refresh.
+     * Live nodes that have no effective live parent edge — the orphans the refresh reconcile
+     * reaps. An edge counts as a live parent link only when it is itself live, names a
+     * **non-null** parent, and that parent node is still live; so all three of these are
+     * orphans:
+     *
+     *  - the node has no parent edge at all;
+     *  - its only parent edge is a `NULL`-parent edge (the shape the old implicit-root scheme
+     *    wrote, kept sweepable rather than trusted);
+     *  - its parent edge is live but the parent node is soft-deleted (a dead parent leaves a
+     *    dead relationship).
      *
      * The root kind is excluded by its MIME (`LibraryRoot.MIME`): the root is the one node that
-     * legitimately has no parent edge, so without this filter every refresh would soft-delete
-     * the library's anchor. Note the test is on the node's *kind*, not on the absence of a
-     * parent — a node is never swept for being parentless, only for having lost every edge it
-     * had.
+     * legitimately has no parent, so it is protected by what it *is*, never by being swept for
+     * what it lacks. A node is only ever reaped for having lost every effective parent link.
      */
     @Query(
         "SELECT fs_node_id FROM fs_node_object " +
             "WHERE time_deleted IS NULL AND type_mime <> :rootMime " +
-            "AND fs_node_id NOT IN (SELECT DISTINCT fs_node_id_child FROM fs_node_relation WHERE time_deleted IS NULL)",
+            "AND fs_node_id NOT IN (" +
+            "SELECT r.fs_node_id_child FROM fs_node_relation AS r " +
+            "WHERE r.time_deleted IS NULL AND r.fs_node_id_parent IS NOT NULL " +
+            "AND EXISTS (SELECT 1 FROM fs_node_object AS p " +
+            "WHERE p.fs_node_id = r.fs_node_id_parent AND p.time_deleted IS NULL))",
     )
     suspend fun orphanNodeIds(rootMime: String): List<Long?>
+
+    /**
+     * Stamp every live relation whose parent is gone: a `NULL` parent, or a parent node that is
+     * itself soft-deleted. One predicate covers both — a `NULL` parent matches no parent row at
+     * all, so the `NOT EXISTS` is already true for it.
+     *
+     * Such a record describes no reachable place in the tree, so the reconcile sweeps it the
+     * same way it sweeps an orphan node: a `time_deleted` stamp, never a physical drop (R10).
+     */
+    @Query(
+        "UPDATE fs_node_relation SET time_deleted = :timeDeleted " +
+            "WHERE time_deleted IS NULL AND NOT EXISTS (" +
+            "SELECT 1 FROM fs_node_object AS p " +
+            "WHERE p.fs_node_id = fs_node_relation.fs_node_id_parent AND p.time_deleted IS NULL)",
+    )
+    suspend fun stampRelationsWithDeadParent(timeDeleted: Long): Int
 
     /** All edges soft-deleted in the batch stamped at [time] — the batch's own subtree edges. */
     @Query("SELECT * FROM fs_node_relation WHERE time_deleted = :time")

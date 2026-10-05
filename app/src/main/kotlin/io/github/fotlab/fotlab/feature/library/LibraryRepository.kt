@@ -148,9 +148,18 @@ class LibraryRepository(private val database: LibraryDatabase) {
     suspend fun fileEntryNodes(): List<FsNodeObject> =
         database.nodeObjectDao().fileEntryNodes(MimeCollection, LibraryRoot.MIME)
 
-    /** All live orphan nodes (no live parent relation); recycled by refresh (R10, revised). */
+    /** All live orphan nodes (no effective live parent edge); reaped by refresh (R10, revised). */
     suspend fun orphanNodeIds(): List<Long?> =
         database.nodeRelationDao().orphanNodeIds(LibraryRoot.MIME)
+
+    /**
+     * Sweep the relation records that no longer describe a place in the tree: a live edge whose
+     * parent is `NULL`, or whose parent node is itself soft-deleted. Stamped, never dropped
+     * (R10), and batched under [timeDeleted] like every other removal so it can be recognised —
+     * and undone — as one unit.
+     */
+    suspend fun sweepOrphanRelations(timeDeleted: Long): Int =
+        database.nodeRelationDao().stampRelationsWithDeadParent(timeDeleted)
 
     /**
      * The subset of [ids] the delete gates may act on: everything whose node kind is not the

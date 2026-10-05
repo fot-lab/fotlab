@@ -237,6 +237,10 @@ object LibraryCore {
      * the delete path so they share one `time_deleted` timestamp. No physical row is removed and
      * no `VACUUM` is needed — soft deletion leaves the page in place (`FOTLAB-DATABS-000002` R10/R14,
      * revised).
+     *
+     * The same pass also sweeps the orphan *relations*: a live edge whose parent is `NULL` or
+     * whose parent node is itself removed points at nothing that exists, so it is stamped too —
+     * under its own batch timestamp, since it belongs to no deleted node's subtree walk.
      */
     suspend fun refresh() {
         val missing = repo().fileEntryNodes().filter { node ->
@@ -247,6 +251,7 @@ object LibraryCore {
         if (toDelete.isNotEmpty()) {
             repo().deleteNodes(toDelete)
         }
+        repo().sweepOrphanRelations(System.currentTimeMillis())
     }
 
     /**
