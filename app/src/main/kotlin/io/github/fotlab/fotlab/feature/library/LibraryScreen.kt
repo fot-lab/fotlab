@@ -44,7 +44,6 @@ import androidx.compose.material.icons.filled.IosShare
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.AddPhotoAlternate
-import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material3.AlertDialog
@@ -227,7 +226,9 @@ fun LibraryScreen(
                         selectionSize = selectedIds.size,
                         candidateIds = children.mapNotNull { it.fsNodeId },
                         onCycleLayout = { scope.launch { LibraryCore.cycleLayoutMode() } },
-                        onRefresh = { scope.launch { LibraryCore.refresh() } },
+                        // Handed over un-launched: the icon owns the sweep's lifetime so its
+                        // rotation can be scoped to it (R11).
+                        onRefresh = { LibraryCore.refresh() },
                         onOpenDrawer = { scope.launch { drawerState.open() } },
                         onImport = { importLauncher.launch(arrayOf("*/*")) },
                         onCreateCollection = {
@@ -334,7 +335,7 @@ fun LibraryScreen(
                         LibraryRecycleScreen(
                             onOpenDrawer = { scope.launch { drawerState.open() } },
                             onCycleLayout = { scope.launch { LibraryCore.cycleLayoutMode() } },
-                            onRefresh = { scope.launch { LibraryCore.refresh() } },
+                            onRefresh = { LibraryCore.refresh() },
                             onOpenViewer = onOpenViewer,
                         )
                     }
@@ -509,7 +510,9 @@ private fun LibraryScreenFunBar(
     selectionSize: Int,
     candidateIds: List<Long>,
     onCycleLayout: () -> Unit,
-    onRefresh: () -> Unit,
+    // Suspending, not a plain callback: the icon's rotation is scoped to this sweep, so it has to
+    // be able to await the sweep's end and stop on it (`FOTLAB-UIXDES-000004` R11).
+    onRefresh: suspend () -> Unit,
     onOpenDrawer: () -> Unit,
     onImport: () -> Unit,
     onCreateCollection: () -> Unit,
@@ -557,12 +560,10 @@ private fun LibraryScreenFunBar(
                             contentDescription = stringResource(id = R.string.library_cd_layout_mode),
                         )
                     }
-                    IconButton(onClick = onRefresh) {
-                        Icon(
-                            imageVector = Icons.Filled.Sync,
-                            contentDescription = stringResource(id = R.string.library_cd_sync),
-                        )
-                    }
+                    // The refresh icon spins for the length of the reconcile it starts, and
+                    // stops on whichever comes first: the reconcile returning, or its one-minute
+                    // animation ceiling (`FOTLAB-UIXDES-000004` R10/R11).
+                    SweepSyncIcon(onSweep = onRefresh)
                 }
             } else {
                 Row {

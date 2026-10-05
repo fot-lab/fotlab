@@ -22,7 +22,6 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.RestoreFromTrash
 import androidx.compose.material.icons.filled.SelectAll
-import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -93,7 +92,8 @@ private sealed interface RecycleLocation {
 fun LibraryRecycleScreen(
     onOpenDrawer: () -> Unit,
     onCycleLayout: () -> Unit,
-    onRefresh: () -> Unit,
+    // Suspending, so the sync icon can await this sweep and stop its rotation on it (R11).
+    onRefresh: suspend () -> Unit,
     onOpenViewer: () -> Unit,
 ) {
     var location by remember { mutableStateOf<RecycleLocation>(RecycleLocation.Root) }
@@ -245,7 +245,8 @@ private fun RecycleScreenFunBar(
     candidateIds: List<Long>,
     onOpenDrawer: () -> Unit,
     onCycleLayout: () -> Unit,
-    onRefresh: () -> Unit,
+    // Suspending, for the same reason as on the bin screen above (R11).
+    onRefresh: suspend () -> Unit,
     onExitSelection: () -> Unit,
     onRestore: () -> Unit,
     onDeleteForever: () -> Unit,
@@ -281,12 +282,9 @@ private fun RecycleScreenFunBar(
                             contentDescription = stringResource(id = R.string.library_cd_layout_mode),
                         )
                     }
-                    IconButton(onClick = onRefresh) {
-                        Icon(
-                            imageVector = Icons.Filled.Sync,
-                            contentDescription = stringResource(id = R.string.library_cd_sync),
-                        )
-                    }
+                    // Same icon and same spin as the Library bar — one shared composable, so the
+                    // ceiling and the early stop cannot drift apart between the two bars (R11).
+                    SweepSyncIcon(onSweep = onRefresh)
                 }
             } else {
                 Row {

@@ -287,6 +287,31 @@ selection or the current directory.
   `deleteNodes` archive path (so missing files and orphans land in the recycle tables under one
   batch id) and then calls `vacuum()`. The screen only fires it; it performs no logic of its own.
 
+### R11 — The refresh icon spins for the length of its sweep, up to a one-minute ceiling
+
+The refresh icon rotates while the reconcile it started is running, and stops when that reconcile
+returns. The rotation is the one piece of feedback the action has — the reconcile is silent and
+usually finishes in well under a second — so it is what tells the user the press registered.
+
+- **The spin stops on the sweep's completion, not on a timer.** The icon resumes its rest
+  orientation as soon as `refresh()` returns. A sweep that takes 200 ms spins for 200 ms.
+- **The one-minute ceiling bounds the animation, never the reconcile.** A sweep that has not
+  returned after one minute stops the icon, but the sweep itself keeps running to its natural end.
+  This is why the ceiling is a separate timer that only clears the icon's state and *not* a
+  `withTimeout` wrapped around `refresh()`: cancelling the reconcile at the ceiling would end it
+  half-applied, with some nodes archived under the batch id and the rest not, which is exactly the
+  incoherent state the single-batch-id rule of R10 exists to prevent. A hung sweep must cost the
+  user a stale icon at worst, never a half-archived library.
+- **The icon is a re-entrancy guard, so a press during a spin is ignored** rather than queued. The
+  reconcile is idempotent — a second run finds nothing left to archive — but stacking one would
+  race the first for the same rows and make the icon's stop time meaningless.
+- **Rest orientation is upright.** A spin stopped mid-turn eases forward to the next whole turn
+  rather than freezing at a random tilt, which would read as a rendering glitch.
+- **Both fun bars share one implementation.** The Library bar and the Recycle Bin bar each carry
+  this icon and each fire the same `LibraryCore.refresh()`; they render the same `SweepSyncIcon`
+  composable, so the ceiling and the early stop cannot drift apart between them. The state is
+  per-composable, and since only one bar is ever on screen, each bar owns its own sweep.
+
 ## Constraints
 
 - C1 — The skeleton of `FOTLAB-UIXDES-000002` is binding: three-line icon leftmost, three-dot icon
@@ -316,6 +341,10 @@ selection or the current directory.
   tables under one batch id reused by `deleteNodes`, then vacuums the database (R10). It is
   icon-only and carries a `contentDescription` from resources (`library_cd_refresh`). Refresh never
   changes the selection or the current directory.
+- C12 — The refresh icon's rotation is a bounded busy indicator, not a progress report: it spans
+  the sweep it started and is capped at one minute (R11). The cap applies to the animation alone —
+  it never cancels or truncates a reconcile, because a half-applied sweep would break R10's
+  single-batch-id guarantee. A press while the icon is spinning is ignored, not queued.
 
 ## Acceptance Criteria
 
@@ -365,6 +394,14 @@ selection or the current directory.
 - AC22 — All nodes archived by one refresh share a single `recycle_id`, identical in meaning to the
   `recycle_id` of one delete action (`FOTLAB-DATABS-000002` R10/R13); after archiving, the database
   is vacuumed.
+- AC23 — Tapping refresh rotates the refresh icon, and the icon resumes its rest orientation as
+  soon as the reconcile returns — a sweep that completes quickly spins only for its own duration
+  (R11).
+- AC24 — A sweep still running after one minute stops the icon's rotation while the sweep itself
+  continues to completion, archiving its nodes under the single batch id of AC22; the icon never
+  keeps rotating past the ceiling (R11/C12).
+- AC25 — Pressing refresh again while the icon is spinning starts no second sweep and leaves the
+  first one's outcome and the icon's single start/stop unchanged (R11).
 - AC11 — Every icon in the top bar and every dropdown entry exposes a non-null content description
   or text resolved from resources.
 - AC12 — With the drawer expanded, the bottom navigation region stays visible and interactive, and
@@ -480,3 +517,4 @@ their icons are fixed in R5 and recorded with their Chinese and English names in
 - 2026-09-10 — R5 fixed the three selection entries and their icons: **Select all → `Icons.Default.SelectAll`, Invert selection → `Icons.Default.FlipToBack`, Deselect all → `Icons.Default.Deselect`**, always in that order. "Clear selection" became **"Deselect all"** (`library_menu_deselect_all`, replacing `library_menu_clear`), and `SwapHoriz` / `Clear` are no longer used for these entries; `CheckCircle` / `CheckCircleOutline` stay reserved for a single item's checked state. Q3 (the invert icon) is retired; AC4/AC5 and the copy list of R8 follow the new wording.
 - 2026-09-10 — The interaction around this selection is no longer defined here alone: `FOTLAB-UIXDES-000006` now owns how selection mode is entered (long press), what the top bar shows in it (close (X) at the left, count in the middle), how it is left (close or back) and where the batch actions live. This item keeps what the selection **is** (R2/R3), what the slots mean (R4) and what the overflow menu holds (R5); whether the library adopts an explicit mode flag or keeps deriving it from a non-empty selection is `FOTLAB-UIXDES-000006` Q1.
 - 2026-09-11 — Docs aligned with the shipped Library implementation: the title slot renders empty (R6) with the selection count surfaced in the leading cluster and a rename pencil for a single selection (R6); the layout-toggle and refresh icons are shown in browse mode only, hidden in selection mode (R1); refresh uses `Icons.Filled.Sync` / `library_cd_sync` and new collection uses `Icons.Filled.CreateNewFolder`, both recorded in `FOTLAB-UIXDES-000005` R3 (R1/R4). R8 copy keys follow the implementation (`library_cd_sync`, `library_cd_rename`; `library_title` unused). Q9 reworded to the empty-title choice; Q10 added for the per-mode glyph and the `Sync` / `Refresh` refresh glyph.
+- 2026-10-05 — Added R11, C12 and AC23–AC25 (human request, same day): the refresh icon now rotates for as long as the reconcile it fires, and an added composable `SweepSyncIcon` carries the animation for both fun bars. The one minute is a **ceiling on the animation only** and is deliberately a separate timer that just clears the spinning flag, *not* a `withTimeout` around `refresh()` — cancelling the reconcile at the ceiling would archive part of the sweep under its batch id and abandon the rest, breaking R10's single-batch-id guarantee, so a hung sweep costs a stale icon at worst and never a half-archived library. Whichever arrives first stops the icon: the sweep returning, or the ceiling. A press during a spin is ignored (the reconcile is idempotent, and stacking one would make the stop time meaningless), and a spin stopped mid-turn eases forward to the next whole turn so the icon never rests at a random tilt. The two bars share the composable so the ceiling and the early stop cannot drift between them; the state is per-composable, and as only one bar is ever on screen each bar owns its own sweep. `onRefresh` became a `suspend` lambda on both fun bars, since the icon now owns the sweep's lifetime.
