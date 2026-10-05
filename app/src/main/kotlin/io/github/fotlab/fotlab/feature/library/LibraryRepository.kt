@@ -310,13 +310,20 @@ class LibraryRepository(private val database: LibraryDatabase) {
                 val batch = objectDao.getById(id)?.timeDeleted ?: continue
                 queue.addLast(id to batch)
             }
-            while (queue.isNotEmpty()) {
-                val (node, batch) = queue.removeFirst()
-                if (!toDelete.add(node)) continue
-                for (childId in relationDao.batchChildIdsOf(node, batch)) {
-                    if (childId !in toDelete) queue.addLast(childId to batch)
+        while (queue.isNotEmpty()) {
+            val (node, batch) = queue.removeFirst()
+            if (!toDelete.add(node)) continue
+            for (childId in relationDao.batchChildIdsOf(node, batch)) {
+                // Only follow into a child that is itself part of this delete batch — i.e. its
+                // node row is soft-deleted with the same timestamp. A child that still has a live
+                // parent elsewhere is NOT stamped with [batch], so it must survive the hard delete;
+                // pulling it in here would wrongly destroy a node and the edges that belong to the
+                // live library (this is exactly the contract stated in this function's doc).
+                if (childId !in toDelete && objectDao.getById(childId)?.timeDeleted == batch) {
+                    queue.addLast(childId to batch)
                 }
             }
+        }
             relationDao.deleteRelationsForever(toDelete.toList())
             objectDao.deleteNodesForever(toDelete.toList())
         }

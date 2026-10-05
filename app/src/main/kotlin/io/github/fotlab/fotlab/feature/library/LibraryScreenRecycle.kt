@@ -153,7 +153,11 @@ fun LibraryRecycleScreen(
                 onRefresh = onRefresh,
                 onExitSelection = { exitSelection() },
                 onRestore = {
-                    scope.launch { LibraryCore.restoreFromBin(selectedIds.toList()) }
+                    // Capture the selection up front: the restore runs in a coroutine and
+                    // `exitSelection()` below clears `selectedIds`, so reading it lazily inside
+                    // the launch would see an empty set and restore nothing.
+                    val ids = selectedIds.toList()
+                    scope.launch { LibraryCore.restoreFromBin(ids) }
                     exitSelection()
                 },
                 onDeleteForever = { deleteForeverConfirm = true },
@@ -213,7 +217,12 @@ fun LibraryRecycleScreen(
                 TextButton(
                     onClick = {
                         deleteForeverConfirm = false
-                        scope.launch { LibraryCore.deleteForever(selectedIds.toList()) }
+                        // Capture the selection up front for the same reason as restore: the
+                        // delete runs in a coroutine and `exitSelection()` clears `selectedIds`,
+                        // so reading it lazily would hand `deleteForever` an empty list and
+                        // leave the node standing in the bin.
+                        val ids = selectedIds.toList()
+                        scope.launch { LibraryCore.deleteForever(ids) }
                         exitSelection()
                     },
                 ) { Text(text = stringResource(id = R.string.common_action_ok)) }

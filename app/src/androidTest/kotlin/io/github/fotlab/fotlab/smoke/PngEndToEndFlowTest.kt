@@ -330,6 +330,54 @@ class PngEndToEndFlowTest {
         }
     }
 
+    // ---------------------------------------------------------- delete-forever correctness
+
+    /**
+     * Regression for the recycle-bin "delete forever" path: a collection [c] is soft-deleted, and
+     * one of its children [f] also hangs under a *live* collection [d]. Permanent-deleting [c] from
+     * the bin must hard-delete [c] only — [f] keeps its live edge to [d] and must survive. The
+     * subtree walk must not pull [f] in via the stamped `f->c` edge just because that edge shares
+     * [c]'s batch stamp.
+     */
+    @Test
+    fun deleteForeverKeepsLiveSiblingChildren() {
+        val (c, d, f) = runBlocking {
+            val cId = LibraryCore.createCollection(LibraryRoot.ID, "dfc-parent")
+            val dId = LibraryCore.createCollection(LibraryRoot.ID, "dfc-keep")
+            val fId = LibraryCore.createCollection(cId, "dfc-child")
+            LibraryCore.link(fId, dId) // f now has two live parents: cId and dId
+            Triple(cId, dId, fId)
+        }
+
+        try {
+            // Soft-delete only [c] (the node a user would pick in the bin).
+            runBlocking {
+                LibraryCore.enterSelectionMode(c)
+                LibraryCore.deleteSelected()
+            }
+
+            // Permanent-delete [c] from the bin.
+            runBlocking { LibraryCore.deleteForever(listOf(c)) }
+
+            val live = runBlocking { LibraryCore.collections().first() }
+                .mapNotNull { it.fsNodeId }.toSet()
+            val fParents = runBlocking { LibraryCore.parentsOf(f).first() }
+                .mapNotNull { it.fsNodeId }.toSet()
+
+            assertTrue("the permanently deleted collection must be gone", c !in live)
+            assertTrue("a child with a surviving live parent must not be hard-deleted", f in live)
+            assertTrue("the surviving live edge must remain attached", d in fParents)
+        } finally {
+            // [c] is already hard-deleted; sweep the two probes to keep the DB clean.
+            runBlocking {
+                LibraryCore.enterSelectionMode(f)
+                LibraryCore.selection.toggle(d)
+                LibraryCore.deleteSelected()
+                LibraryCore.exitSelectionMode()
+            }
+        }
+    }
+
     // ---------------------------------------------------------------- 1+2: import & mapping
 
     /** Journey steps 1–2: import via the real entry, then prove the virtual mapping round-trips. */
