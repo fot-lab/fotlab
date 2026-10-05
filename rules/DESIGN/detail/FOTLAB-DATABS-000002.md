@@ -55,7 +55,7 @@ Indexes:
 | Column | Type | Required | Meaning |
 | --- | --- | --- | --- |
 | `fs_node_id_child` | INTEGER (FK → `fs_node_object.fs_node_id`) | yes | Child node ID |
-| `fs_node_id_parent` | INTEGER (FK → `fs_node_object.fs_node_id`) | no | Parent node ID; `NULL` means a root-level node (see R5) |
+| `fs_node_id_parent` | INTEGER (FK → `fs_node_object.fs_node_id`) | no | Parent node ID; a real id in every stored edge (`0` = the root, see R5). A null parent means only that the node itself has no parent, i.e. the root carries no edge |
 | `time_deleted` | INTEGER | no | Soft-delete timestamp; `NULL` = live edge, non-null = removed (see R10) |
 
 - Primary key: the composite `(fs_node_id_child, fs_node_id_parent)` — the same edge cannot be
@@ -70,18 +70,36 @@ Indexes:
 - A collection (directory / virtual folder) is a node whose `type_mime` is the fixed value
   `application/folder`.
 - Any other `type_mime` value denotes a file entry and that value is the file's MIME type.
-- Root-level convenience aside (R5), this one discriminator lets the UI and queries tell
-  collections from files without a separate kind column.
+- This one discriminator lets the UI and queries tell collections from files without a separate kind
+  column; the root is a collection like any other (R5).
 
-### R5 — Root is implicit: a `NULL` parent means a root-level node
+### R5 — Root is a real node: `fs_node_id = 0`, created at database initialisation
 
-- There is **no** stored root row. A node whose relation row has `fs_node_id_parent = NULL` is a
-  top-level node of the virtual tree.
-- This supersedes the "explicit root collection" option of `FOTLAB-IMGMGR-000001` Q2: the virtual
-  root is the set of rows with a `NULL` parent, giving the view a single conceptual top without an
-  artificial node.
-- Because the composite primary key includes the parent, a `NULL` parent participates in the key
-  normally; only one "child under root" row per child can exist.
+- The root is an ordinary row in `fs_node_object` with the fixed primary key **`fs_node_id = 0`**,
+  `type_mime = 'application/folder'`, `uri_storage = NULL`, created when the database is first
+  initialised. It is structurally indistinguishable from any other collection node.
+- Every other node reaches the root through a normal relation row whose `fs_node_id_parent` is `0`
+  — a concrete node id, matched with plain `=`. There is no "root-level" marker anywhere: the top
+  level of the UI is simply `childrenOf(0)`, and the root is a parent like any other collection.
+- A null parent means exactly one thing: **the root has no parent**. The root therefore has no
+  relation row at all, and it is the only node for which "no parent edge" is normal rather than a
+  defect. (The column stays nullable so the invariant is expressible, but no code path writes a
+  null parent: every stored edge names a real parent node.)
+- Because the root is a real node, it is excluded explicitly where a "no parent" node must not be
+  treated as data: the orphan sweep (`orphanNodeIds`, which would otherwise soft-delete the whole
+  library's anchor on the first refresh) and the collection listing (`observeCollections`, where
+  the root is the tree's top level, not a folder inside it). It is likewise refused by the delete
+  and delete-forever paths.
+- This supersedes the earlier "root is implicit (`NULL` parent)" decision, which turned out to make
+  the top level second-class: `= NULL` never matches in SQL, so every root-level lookup (the delete
+  gate above all) silently missed, and the unique index over `(child, parent)` could not dedupe
+  `(child, NULL)` rows — which is what forced the `NOT EXISTS` insert guard and the dual-branch
+  `IS NULL` predicates that this revision deletes. It restores the "explicit root collection"
+  option of `FOTLAB-IMGMGR-000001` Q2, with a fixed id instead of an arbitrary one.
+- Compatibility: a library written under the previous decision is repaired on start by
+  `LibraryRepository.ensureRoot()` — idempotent, one transaction — which inserts the root row if
+  missing and re-points every legacy `NULL`-parent edge at it. No schema change and no Room version
+  bump are involved: the column nullability is unchanged.
 
 ### R6 — `INTEGER PRIMARY KEY` reuse semantics (no `AUTOINCREMENT`)
 
@@ -151,8 +169,8 @@ Removing a node or a relation **stamps** it instead:
   on every node and relation the operation removes, so the whole batch shares one value
   (`FOTLAB-DATABS-000002` R13). It replaces the old `id_recycle` batch id of the recycle tables,
   which are removed by this revision.
-- A `NULL` parent (root node, R5) needs no sentinel in `fs_node_relation`: the column is an ordinary
-  nullable `INTEGER`, so the `FsNodeParentRootId` sentinel once used by the recycle table is gone.
+- No parent sentinel is needed anywhere: the root is the node row `0` (R5), so every stored edge
+  names a real parent and the old `FsNodeParentRootId` sentinel stays gone.
 
 ### R12 — The delete algorithm
 
@@ -225,8 +243,9 @@ node reached by two paths in one operation is processed once.
   nullability, indexes, composite primary key and cascading foreign keys.
 - AC2 — Inserting the same physical file reference twice fails on the UNIQUE `uri_storage` index;
   the file is recorded as one `fs_node_object` row regardless of how many relations reference it.
-- AC3 — A node with a `NULL`-parent relation row appears as a top-level node, and no separate root
-  row exists in `fs_node_object`.
+- AC3 — The root is a real `fs_node_object` row with `fs_node_id = 0`, created at database
+  initialisation; a node appears at the top level exactly when its relation row names `0` as its
+  parent, and no stored edge has a null parent.
 - AC4 — Removing a node stamps it (`time_deleted`) and every live relation row that references it as
   child (R9–R12); nothing is dropped silently and no other node's relations are altered.
 - AC5 — After a row is deleted by a hard path, a later insert may reuse its freed ID (no
@@ -336,3 +355,4 @@ node reached by two paths in one operation is processed once.
   tables); the `VACUUM` after delete/refresh is removed (R14). Rules R10–R14, R2/R3 columns, C6, C8
   and open questions Q7–Q9 updated accordingly; AC4–AC13 reworded from "archives" to "stamps
   `time_deleted`".
+- 2026-10-05 — Root revision (human decision). R5 rewritten: the root is a real `fs_node_object` row with the fixed id `0`, created at database initialisation and structurally identical to any other collection, instead of the implicit "`NULL` parent means top level" convention. Every stored edge now names a concrete parent (`0` at the top level), so `childrenOf(0)` lists the top level, the delete gate compares against a real id, and the unique `(child, parent)` index dedupes the top level like any other. The `insertRootLinkIfAbsent` NOT EXISTS guard, `reviveRootLink` and the dual-branch `IS NULL` predicates are deleted — they existed only to work around `= NULL` never matching and SQLite treating NULLs as distinct under UNIQUE. `null` now means solely "the root has no parent", and the root carries no relation row at all. Two exclusion points added where a parentless node must not be treated as data: `orphanNodeIds` (otherwise the first refresh soft-deletes the anchor) and `observeCollections` (the root is the top level, not a folder in a listing); the delete and delete-forever paths refuse it too. No schema change and no Room version bump: `LibraryRepository.ensureRoot()` runs once per process start in a single transaction, inserting the root row if absent and re-pointing legacy `NULL`-parent edges at it, so an existing library repairs itself. The audit trail records that the previous decision (rev 2026-09-10 and earlier) was an AI-authored reading rather than a product requirement.

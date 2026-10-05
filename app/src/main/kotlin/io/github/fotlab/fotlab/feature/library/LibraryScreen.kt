@@ -156,7 +156,10 @@ fun LibraryScreen(
     onOpenViewer: () -> Unit,
 ) {
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
-    var currentDirectory by remember { mutableStateOf<FsNodeObject?>(null) }
+    // The directory the user is looking at, as a real node id. The top level is the root node
+    // (LibraryRoot.ID), not a null "no directory" sentinel — so the same code path lists the
+    // root and any folder, and every action (delete gate, import, new folder) names a real parent.
+    var currentDirectoryId by remember { mutableStateOf(LibraryRoot.ID) }
     // Which top-level view the drawer selected; defaults to the Source Library (built so far).
     var viewMode by remember { mutableStateOf(LibraryViewMode.Library) }
     var deleteConfirmation by remember { mutableStateOf(false) }
@@ -175,27 +178,26 @@ fun LibraryScreen(
 
     // Publish the directory the user is currently viewing (normal Library view, never Recycle) so
     // other screens can import into it (`FOTLAB-UIXDES-000004`).
-    LaunchedEffect(currentDirectory) {
-        LibraryCore.setCurrentDirectory(currentDirectory?.fsNodeId)
+    LaunchedEffect(currentDirectoryId) {
+        LibraryCore.setCurrentDirectory(currentDirectoryId)
     }
 
-    val children by remember(currentDirectory) {
-        val parentId = currentDirectory?.fsNodeId
-        if (parentId == null) LibraryCore.rootChildren() else LibraryCore.childrenOf(parentId)
+    val children by remember(currentDirectoryId) {
+        LibraryCore.childrenOf(currentDirectoryId)
     }.collectAsState(initial = emptyList())
 
     val importLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments(),
     ) { uris ->
         if (uris.isNotEmpty()) {
-            scope.launch { LibraryCore.importUris(currentDirectory?.fsNodeId, uris) }
+            scope.launch { LibraryCore.importUris(currentDirectoryId, uris) }
         }
     }
 
     // Drawer first, then the directory: back closes the drawer before leaving a folder.
     // The directory back is only for the Library view; the Recycle Bin drives its own back stack.
     BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
-    BackHandler(enabled = !drawerState.isOpen && viewMode == LibraryViewMode.Library && currentDirectory != null) { currentDirectory = null }
+    BackHandler(enabled = !drawerState.isOpen && viewMode == LibraryViewMode.Library && currentDirectoryId != LibraryRoot.ID) { currentDirectoryId = LibraryRoot.ID }
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -231,7 +233,7 @@ fun LibraryScreen(
                         onCreateCollection = {
                             scope.launch {
                                 LibraryCore.createCollection(
-                                    parentId = currentDirectory?.fsNodeId,
+                                    parentId = currentDirectoryId,
                                     name = newCollectionName,
                                 )
                             }
@@ -259,7 +261,7 @@ fun LibraryScreen(
                             scope.launch {
                                 // Gate: only nodes directly under the directory on screen may be deleted
                                 // from here; recursion into subfolders is not re-checked (`FOTLAB-UIXDES-000004`).
-                                if (LibraryCore.selectionDirectlyUnder(currentDirectory?.fsNodeId)) {
+                                if (LibraryCore.selectionDirectlyUnder(currentDirectoryId)) {
                                     deleteConfirmation = true
                                 } else {
                                     deleteInvalid = true
@@ -288,7 +290,7 @@ fun LibraryScreen(
                             onNodeClick = { node ->
                                 node.fsNodeId?.let { id ->
                                     when {
-                                        node.isCollection() -> currentDirectory = node
+                                        node.isCollection() -> node.fsNodeId?.let { currentDirectoryId = it }
                                         isMedia(node.typeMime) -> {
                                             // Open the full-screen viewer on the tapped media, paging
                                             // through the folder's media in its current sort order. The

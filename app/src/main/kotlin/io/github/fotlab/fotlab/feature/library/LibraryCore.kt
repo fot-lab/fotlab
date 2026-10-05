@@ -29,6 +29,29 @@ private const val MimeUnknown = "application/octet-stream"
 fun FsNodeObject.isCollection(): Boolean = typeMime == MimeCollection
 
 /**
+ * The library's root node (`FOTLAB-DATABS-000002` R5, revised).
+ *
+ * The root is an ordinary row in `fs_node_object`, created when the database is first
+ * initialised, with the fixed id [ID] — not a derived "top level" and not a `NULL` parent.
+ * Every other node reaches it through a normal relation edge whose parent is this id, so the
+ * whole tree is one uniform structure: the top level is simply [childrenOf] of this node, and
+ * the root can be a parent like any other collection.
+ *
+ * The root is the one node with **no** parent edge at all — nothing sits above it. That is
+ * the only meaning a null parent ever carries; it is never a marker for "top level".
+ */
+object LibraryRoot {
+    /** The root's fixed primary key. */
+    const val ID: Long = 0L
+
+    /** Display name of the root node. */
+    const val NAME: String = "Library"
+
+    /** The root is a collection, so it renders and navigates like any other folder. */
+    const val MIME: String = MimeCollection
+}
+
+/**
  * Lower layer of the library feature (`FOTLAB-STRUCT-000001`).
  *
  * Builds and owns the library's Room database (the two-table `fs_node` schema of
@@ -84,9 +107,9 @@ object LibraryCore {
      * screen (e.g. Studio's open action) lands here; the recycle-bin view never writes to it
      * (`FOTLAB-UIXDES-000004`). Process-scoped like [selection].
      */
-    private val currentDirectoryIdState = MutableStateFlow<Long?>(null)
-    val currentDirectoryId: StateFlow<Long?> = currentDirectoryIdState.asStateFlow()
-    fun setCurrentDirectory(id: Long?) { currentDirectoryIdState.value = id }
+    private val currentDirectoryIdState = MutableStateFlow(LibraryRoot.ID)
+    val currentDirectoryId: StateFlow<Long> = currentDirectoryIdState.asStateFlow()
+    fun setCurrentDirectory(id: Long) { currentDirectoryIdState.value = id }
 
     private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private lateinit var layoutPreference: LibraryLayoutPreference
@@ -107,6 +130,9 @@ object LibraryCore {
             .build()
         repository = LibraryRepository(database)
         layoutPreference = LibraryLayoutPreference(applicationContext)
+        // The root node must exist before anything links under it. Idempotent, so a library
+        // that already has one (every start after the first) pays a single ignored insert.
+        runBlocking(Dispatchers.IO) { repository?.ensureRoot() }
         // Restore the persisted mode once at start; default is Grid 3 (R9).
         layoutModeState.value = runBlocking(Dispatchers.IO) { layoutPreference.mode.first() }
     }
@@ -116,9 +142,11 @@ object LibraryCore {
 
     // --- Tree queries, delegated to the repository ---
 
-    fun rootChildren(): Flow<List<FsNodeObject>> = repo().rootChildren()
-
+    /** The root node row itself; the tree's top level is [childrenOf] of it. */
     fun childrenOf(parentId: Long): Flow<List<FsNodeObject>> = repo().childrenOf(parentId)
+
+    /** The root node row, or `null` before the database has been initialised. */
+    suspend fun rootNode(): FsNodeObject? = repo().rootNode()
 
     fun parentsOf(childId: Long): Flow<List<FsNodeObject>> = repo().parentsOf(childId)
 
@@ -149,16 +177,17 @@ object LibraryCore {
         timeModified: Long? = null,
     ): Long = repo().addNode(nameDisplay, typeMime, uriStorage, timeCreated, timeModified)
 
-    suspend fun link(childId: Long, parentId: Long?) = repo().link(childId, parentId)
+    suspend fun link(childId: Long, parentId: Long) = repo().link(childId, parentId)
 
-    suspend fun unlink(childId: Long, parentId: Long?) = repo().unlink(childId, parentId)
+    suspend fun unlink(childId: Long, parentId: Long) = repo().unlink(childId, parentId)
 
     /**
      * True if linking [childId] under [parentId] would create a cycle in the virtual tree
-     * (`FOTLAB-DATABS-000002`, cycle invariant). Read-only; callers decide what to do with the
-     * result. A `null` [parentId] (root) never cycles; linking a node under itself does.
+     * (`FOTLAB-DATABS-000002`, cycle invariant). Read-only; callers decide what to do with
+     * the result. Linking a node under itself is a cycle; the root has no parent edge, so
+     * nothing under it can ever close a loop.
      */
-    suspend fun wouldCreateCycle(childId: Long, parentId: Long?): Boolean =
+    suspend fun wouldCreateCycle(childId: Long, parentId: Long): Boolean =
         repo().wouldCreateCycle(childId, parentId)
 
     suspend fun removeNode(node: FsNodeObject) = repo().removeNode(node)
@@ -236,10 +265,10 @@ object LibraryCore {
     // --- Top bar actions (`FOTLAB-UIXDES-000004` R7) ---
 
     /**
-     * Create one collection node under [parentId] (`null` = the virtual root).
+     * Create one collection node under [parentId] (pass [LibraryRoot.ID] for the top level).
      * One node row plus one relation row; no physical folder is created.
      */
-    suspend fun createCollection(parentId: Long?, name: String): Long {
+    suspend fun createCollection(parentId: Long, name: String): Long {
         val id = repo().addNode(
             nameDisplay = name,
             typeMime = MimeCollection,
@@ -256,7 +285,7 @@ object LibraryCore {
      * `uri_storage` points at the original location, and the same physical file is
      * recorded once thanks to the UNIQUE index (`FOTLAB-DATABS-000002` R7).
      */
-    suspend fun importUris(parentId: Long?, uris: List<Uri>) {
+    suspend fun importUris(parentId: Long, uris: List<Uri>) {
         for (uri in uris) {
             takeReadPermission(uri)
             val text = uri.toString()
@@ -298,11 +327,12 @@ object LibraryCore {
     }
 
     /**
-     * Gate for the delete press: every selected node must be a direct child of [parentId]
-     * (null = root) — i.e. belong to the directory currently on screen. Only the selected
-     * level is checked; recursively removed descendants are not re-validated.
+     * Gate for the delete press: every selected node must be a direct child of [parentId] —
+     * i.e. belong to the directory currently on screen ([LibraryRoot.ID] for the top level).
+     * Only the selected level is checked; recursively removed descendants are not
+     * re-validated.
      */
-    suspend fun selectionDirectlyUnder(parentId: Long?): Boolean {
+    suspend fun selectionDirectlyUnder(parentId: Long): Boolean {
         val ids = selection.selected.value
         if (ids.isEmpty()) return false
         return repo().selectedDirectlyUnder(ids, parentId)

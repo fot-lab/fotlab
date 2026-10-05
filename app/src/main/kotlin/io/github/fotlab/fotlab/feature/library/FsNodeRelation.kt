@@ -8,22 +8,18 @@ import androidx.room.PrimaryKey
 
 /**
  * An edge of the virtual file tree (`FOTLAB-DATABS-000002`): "child is directly
- * under parent".
+ * under parent". Both foreign keys cascade, so deleting a node cleans up every relation
+ * that references it (R3/R8).
  *
- * `NULL` parent denotes a root-level node (`FOTLAB-DATABS-000002` R5). Both foreign
- * keys cascade, so deleting a node cleans up every relation that references it
- * (R3/R8).
+ * The parent is always a real node id: the top level of the tree is the root node
+ * [LibraryRoot.ID], a normal row like any other, so a stored edge never needs a
+ * "no parent" marker. The root is the single node that has no parent edge at all.
  *
- * Room forbids nullable columns in a `@PrimaryKey`, so the original composite key
- * `(fs_node_id_child, fs_node_id_parent)` cannot be expressed directly (a `NULL`
- * parent is a first-class value here). Instead a surrogate auto-generated `id` is
- * the primary key and the `(fs_node_id_child, fs_node_id_parent)` pair is guarded by
- * a UNIQUE index, preserving "the same edge cannot be inserted twice" (R3). Note:
- * SQLite treats `NULL`s as distinct under a UNIQUE index, so two `(child, NULL)`
- * rows are NOT rejected by the index — root edges must go through
- * [FsNodeRelationDao.insertRootLinkIfAbsent], whose `NOT EXISTS` guard makes the
- * root link idempotent (a plain IGNORE insert let a re-imported root file appear
- * twice in the root listing).
+ * Room forbids a nullable column in a `@PrimaryKey`, so instead of a composite
+ * `(child, parent)` key the pair is guarded by a UNIQUE index over both columns
+ * (plus a surrogate auto-generated `id` as the primary key), which preserves "the
+ * same edge cannot be inserted twice" (R3) and, because neither column is ever
+ * `NULL`, deduplicates the top level as reliably as any other level.
  */
 @Entity(
     tableName = "fs_node_relation",
@@ -49,7 +45,7 @@ import androidx.room.PrimaryKey
 )
 data class FsNodeRelation(
     @ColumnInfo(name = "fs_node_id_child") val fsNodeIdChild: Long,
-    @ColumnInfo(name = "fs_node_id_parent") val fsNodeIdParent: Long?,
+    @ColumnInfo(name = "fs_node_id_parent") val fsNodeIdParent: Long,
     /**
      * Soft-delete timestamp (`FOTLAB-DATABS-000002` R10, revised): `NULL` means the edge is
      * live; a non-null value marks it removed. Deleting a node stamps every relation that

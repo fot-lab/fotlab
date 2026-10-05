@@ -11,17 +11,17 @@ import kotlinx.coroutines.flow.Flow
 interface FsNodeRelationDao {
 
     /**
-     * IGNORE keeps the "same edge cannot be inserted twice" guarantee of the composite
-     * primary key usable from code: re-linking an existing child/parent pair is a no-op
-     * instead of an abort (`FOTLAB-DATABS-000002` R3). It also covers the root case,
-     * where a `NULL` parent cannot be matched with `=` in a query.
+     * IGNORE keeps the "same edge cannot be inserted twice" guarantee of the unique
+     * `(child, parent)` index usable from code: re-linking an existing child/parent pair
+     * is a no-op instead of an abort (`FOTLAB-DATABS-000002` R3). Every stored edge names
+     * a real parent node — the root is the node row `LibraryRoot.ID`, not a `NULL`.
      */
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(relation: FsNodeRelation)
 
     /**
      * Clear the soft-delete stamp on an existing dead edge between this child/parent pair, so a
-     * re-imported node is reattached where it used to live. Without this the dead row's primary
+     * re-imported node is reattached where it used to live. Without this the dead row's unique
      * key makes the IGNORE [insert] a no-op and the revived node stays an orphan (its live node
      * row JOINs no live edge, so the grid/directory never lists it).
      */
@@ -32,35 +32,13 @@ interface FsNodeRelationDao {
     )
     suspend fun reviveRelation(childId: Long, parentId: Long)
 
-    /** Root-edge variant of [reviveRelation]: `= NULL` never matches, so the NULL parent needs `IS NULL`. */
-    @Query(
-        "UPDATE fs_node_relation SET time_deleted = NULL " +
-            "WHERE fs_node_id_child = :childId AND fs_node_id_parent IS NULL " +
-            "AND time_deleted IS NOT NULL",
-    )
-    suspend fun reviveRootLink(childId: Long)
-
-    /**
-     * Insert a root edge (`NULL` parent) only when the child has no live root edge yet.
-     * The UNIQUE index cannot deduplicate `(child, NULL)` rows because SQLite treats
-     * `NULL`s as distinct, so a plain `OnConflictStrategy.IGNORE` insert would let a
-     * re-imported root file be listed twice by [rootChildren] (verified by the
-     * `pngImportAndVirtualMapping` instrumented test). This guard makes the root link
-     * idempotent (`FOTLAB-DATABS-000002` R3).
-     */
-    @Query(
-        "INSERT INTO fs_node_relation (fs_node_id_child, fs_node_id_parent, time_deleted) " +
-            "SELECT :childId, NULL, NULL " +
-            "WHERE NOT EXISTS (" +
-            "SELECT 1 FROM fs_node_relation WHERE fs_node_id_child = :childId " +
-            "AND fs_node_id_parent IS NULL)",
-    )
-    suspend fun insertRootLinkIfAbsent(childId: Long)
-
     @Update
     suspend fun update(relation: FsNodeRelation)
 
-    /** Children of a non-root parent (high-frequency: loading a directory). */
+    /**
+     * Children of a parent — the top level is the root node, queried by its own id
+     * ([LibraryRoot.ID]) like any other directory, so there is no separate root listing.
+     */
     @Query(
         "SELECT child.* FROM fs_node_object AS child " +
             "JOIN fs_node_relation AS r ON child.fs_node_id = r.fs_node_id_child " +
@@ -69,16 +47,6 @@ interface FsNodeRelationDao {
             "ORDER BY child.time_created",
     )
     fun childrenOf(parentId: Long): Flow<List<FsNodeObject>>
-
-    /** Children of the implicit root (rows whose parent is NULL). */
-    @Query(
-        "SELECT child.* FROM fs_node_object AS child " +
-            "JOIN fs_node_relation AS r ON child.fs_node_id = r.fs_node_id_child " +
-            "WHERE r.fs_node_id_parent IS NULL AND r.time_deleted IS NULL " +
-            "AND child.time_deleted IS NULL " +
-            "ORDER BY child.time_created",
-    )
-    fun rootChildren(): Flow<List<FsNodeObject>>
 
     /** All parents of a node (high-frequency: which collections contain a file). */
     @Query(
@@ -90,33 +58,37 @@ interface FsNodeRelationDao {
     )
     fun parentsOf(childId: Long): Flow<List<FsNodeObject>>
 
+    /**
+     * The live edge between [childId] and its parent [parentId], or null when there is none.
+     * The parent is always a real node id ([LibraryRoot.ID] at the top level), so the
+     * predicate is a plain equality.
+     */
     @Query(
         "SELECT * FROM fs_node_relation " +
             "WHERE fs_node_id_child = :childId AND fs_node_id_parent = :parentId " +
             "AND time_deleted IS NULL",
     )
-    suspend fun getRelation(childId: Long, parentId: Long?): FsNodeRelation?
+    suspend fun getRelation(childId: Long, parentId: Long): FsNodeRelation?
 
     /**
      * Unlink a child from a parent by soft-deleting the edge (`FOTLAB-DATABS-000002` R10,
      * revised): the row stays but its `time_deleted` is stamped, so the node id space is
-     * never touched. `NULL` parent needs the `IS NULL` branch because `= NULL` never matches.
+     * never touched.
      */
     @Query(
         "UPDATE fs_node_relation SET time_deleted = :timeDeleted " +
-            "WHERE fs_node_id_child = :childId AND " +
-            "(fs_node_id_parent = :parentId OR (fs_node_id_parent IS NULL AND :parentId IS NULL))",
+            "WHERE fs_node_id_child = :childId AND fs_node_id_parent = :parentId",
     )
-    suspend fun removeRelation(childId: Long, parentId: Long?, timeDeleted: Long)
+    suspend fun removeRelation(childId: Long, parentId: Long, timeDeleted: Long)
 
     /** Relations where the node is the child — its own links to its parents (live only). */
     @Query("SELECT * FROM fs_node_relation WHERE fs_node_id_child = :childId AND time_deleted IS NULL")
     suspend fun relationsWithChild(childId: Long): List<FsNodeRelation>
 
     /**
-     * Live, non-null parent ids of a node — the upward edges used by cycle detection.
-     * `NULL` parents (root edges) are excluded because they terminate an upward walk
-     * without forming a cycle.
+     * Live parent ids of a node — the upward edges used by cycle detection. The root holds
+     * no parent edge at all, so an upward walk from it simply ends; the `IS NOT NULL` filter
+     * is kept as a guard so a stray legacy `NULL`-parent edge can never enter the walk.
      */
     @Query(
         "SELECT fs_node_id_parent FROM fs_node_relation " +
@@ -133,13 +105,19 @@ interface FsNodeRelationDao {
     @Query("SELECT COUNT(*) FROM fs_node_relation WHERE fs_node_id_child = :childId AND time_deleted IS NULL")
     suspend fun activeParentCount(childId: Long): Int
 
-    /** Live nodes with no live parent relation at all — neither root nor nested; recycled by refresh. */
+    /**
+     * Live nodes with no live parent relation at all — recycled by refresh.
+     *
+     * The root is excluded: it is the one node that legitimately has no parent edge (nothing
+     * sits above it), so without this filter every refresh would soft-delete the root row the
+     * moment the app started.
+     */
     @Query(
         "SELECT fs_node_id FROM fs_node_object " +
-            "WHERE time_deleted IS NULL " +
+            "WHERE time_deleted IS NULL AND fs_node_id <> :rootId " +
             "AND fs_node_id NOT IN (SELECT DISTINCT fs_node_id_child FROM fs_node_relation WHERE time_deleted IS NULL)",
     )
-    suspend fun orphanNodeIds(): List<Long?>
+    suspend fun orphanNodeIds(rootId: Long): List<Long?>
 
     /** All edges soft-deleted in the batch stamped at [time] — the batch's own subtree edges. */
     @Query("SELECT * FROM fs_node_relation WHERE time_deleted = :time")

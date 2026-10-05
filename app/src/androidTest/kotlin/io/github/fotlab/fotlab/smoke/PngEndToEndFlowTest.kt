@@ -14,6 +14,8 @@ import coil3.request.ImageRequest
 import coil3.request.SuccessResult
 import io.github.fotlab.fotlab.feature.library.FsNodeObject
 import io.github.fotlab.fotlab.feature.library.LibraryCore
+import io.github.fotlab.fotlab.feature.library.LibraryRoot
+import io.github.fotlab.fotlab.feature.library.isCollection
 import io.github.fotlab.fotlab.feature.studio.StudioEngine
 import io.github.fotlab.fotlab.feature.studio.StudioRenderResult
 import io.github.fotlab.fotlab.media.DEFAULT_SNIFF_TIMEOUT_MS
@@ -159,7 +161,7 @@ class PngEndToEndFlowTest {
     private fun importAtRoot(uri: Uri): FsNodeObject =
         runBlocking {
             val t = System.nanoTime()
-            LibraryCore.importUris(parentId = null, uris = listOf(uri))
+            LibraryCore.importUris(parentId = LibraryRoot.ID, uris = listOf(uri))
             step("import", "importUris done in ${(System.nanoTime() - t) / 1_000_000} ms")
             val node = LibraryCore.getByUri(uri.toString())
                 ?: run {
@@ -173,6 +175,65 @@ class PngEndToEndFlowTest {
             )
             node
         }
+
+    /**
+     * Regression: a node listed at the virtual root must pass the delete gate.
+     *
+     * The gate ([LibraryCore.selectionDirectlyUnder]) asked the DAO for the live edge
+     * between the node and the directory on screen with `fs_node_id_parent = :parentId`.
+     * At the root that parameter is `null` (there is no root node row), and SQL `= NULL`
+     * never matches, so the lookup always missed and the UI answered "cannot delete" for
+     * a file that was plainly in front of the user. Pinned here at the level the delete
+     * press actually calls it, together with the negative case the gate must still reject.
+     */
+    @Test
+    fun rootChildPassesTheDeleteGate() {
+        startClock()
+        val (uri, _) = createSourcePng()
+        sourceUri = uri
+        try {
+            val node = importAtRoot(uri)
+            val id = requireNotNull(node.fsNodeId)
+
+            runBlocking {
+                LibraryCore.enterSelectionMode(id)
+
+                // Exactly the call LibraryScreen's delete press makes at the top level.
+                val atRoot = LibraryCore.selectionDirectlyUnder(LibraryRoot.ID)
+                step("delete-gate", "top-level child fsNodeId=$id gate(root)=${atRoot}")
+                assertTrue("a node listed at the top level must pass the delete gate", atRoot)
+
+                // The gate must stay a gate: an unrelated parent is still a rejection.
+                val unrelatedParent = id + 1_000_000L
+                val elsewhere = LibraryCore.selectionDirectlyUnder(unrelatedParent)
+                step("delete-gate", "gate(parentId=$unrelatedParent)=$elsewhere")
+                assertFalse("a node must not pass the gate for an unrelated parent", elsewhere)
+
+                // And the accepted delete really removes it from the top-level listing.
+                LibraryCore.deleteSelected()
+            }
+
+            val after = runBlocking { LibraryCore.childrenOf(LibraryRoot.ID).first() }
+            val stillListed = after.count { it.uriStorage == uri.toString() }
+            step("delete-gate", "top level after delete lists the node $stillListed time(s)")
+            assertEquals("the deleted top-level node must leave the listing", 0, stillListed)
+
+            // The root itself is a real node row (id 0, a collection) and must survive a
+            // reconcile — it is the one node with no parent edge, so an orphan sweep that
+            // does not exclude it would delete the whole library's anchor.
+            val root = runBlocking { LibraryCore.rootNode() }
+            step("root", "root=$root")
+            assertNotNull("the root node row must exist", root)
+            assertEquals("the root node id is fixed", LibraryRoot.ID, root!!.fsNodeId)
+            assertTrue("the root must be a collection node", root.isCollection())
+            runBlocking { LibraryCore.refresh() }
+            val rootAfterRefresh = runBlocking { LibraryCore.rootNode() }
+            assertNotNull("refresh must not take the root node away", rootAfterRefresh)
+        } finally {
+            runBlocking { LibraryCore.exitSelectionMode() }
+            sourceUri?.let(::deleteSource)
+        }
+    }
 
     // ---------------------------------------------------------------- 1+2: import & mapping
 
@@ -216,9 +277,9 @@ class PngEndToEndFlowTest {
             assertEquals("re-import must reuse the existing node", node.fsNodeId, again?.fsNodeId)
 
             // The node must be listed at the virtual root.
-            val roots = runBlocking { LibraryCore.rootChildren().first() }
+            val roots = runBlocking { LibraryCore.childrenOf(LibraryRoot.ID).first() }
             val matching = roots.count { it.uriStorage == uri.toString() }
-            step("mapping", "rootChildren listing contains the node $matching time(s)")
+            step("mapping", "top-level listing contains the node $matching time(s)")
             assertEquals("node must appear exactly once at root", 1, matching)
         } finally {
             sourceUri?.let(::deleteSource)

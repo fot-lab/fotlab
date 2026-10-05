@@ -24,6 +24,26 @@ interface FsNodeObjectDao {
     suspend fun getByUri(uri: String): FsNodeObject?
 
     /**
+     * Create the root node row when it is missing. Idempotent, so it is safe to call on every
+     * process start: the `fs_node_id` primary key turns a second call into a no-op rather than
+     * a constraint failure.
+     */
+    @Query(
+        "INSERT OR IGNORE INTO fs_node_object " +
+            "(fs_node_id, name_display, type_mime, uri_storage, time_modified, time_created, time_deleted) " +
+            "VALUES (:rootId, :name, :typeMime, NULL, NULL, :timeCreated, NULL)",
+    )
+    suspend fun insertRootIfAbsent(rootId: Long, name: String, typeMime: String, timeCreated: Long)
+
+    /**
+     * Re-point every legacy `NULL`-parent edge at the root node, so a library written before
+     * the root became a real row becomes reachable through [getRelation] / [childrenOf] with
+     * a plain equality. Idempotent; a no-op once no such edge exists.
+     */
+    @Query("UPDATE fs_node_relation SET fs_node_id_parent = :rootId WHERE fs_node_id_parent IS NULL")
+    suspend fun rewireNullParentsToRoot(rootId: Long)
+
+    /**
      * Find any node with this URI regardless of soft-delete status. Used by `importUris` to
      * revive a soft-deleted node when the same file is re-imported, instead of hitting the
      * UNIQUE index on `uri_storage` with a duplicate INSERT.
@@ -39,10 +59,20 @@ interface FsNodeObjectDao {
     @Query("UPDATE fs_node_object SET name_display = :name WHERE fs_node_id = :id")
     suspend fun rename(id: Long, name: String)
 
-    @Query("SELECT * FROM fs_node_object WHERE type_mime = 'application/folder' AND time_deleted IS NULL ORDER BY name_display")
-    fun observeCollections(): Flow<List<FsNodeObject>>
+    /**
+     * Every live collection node except the root — the root is the tree's top level, not a
+     * member of it, so it must never show up as a folder inside another listing.
+     */
+    @Query(
+        "SELECT * FROM fs_node_object WHERE type_mime = 'application/folder' " +
+            "AND time_deleted IS NULL AND fs_node_id <> :rootId ORDER BY name_display",
+    )
+    fun observeCollections(rootId: Long): Flow<List<FsNodeObject>>
 
-    /** All live file-entry nodes (everything that is not a virtual folder); used by refresh. */
+    /**
+     * All live file-entry nodes (everything that is not a virtual folder); used by refresh.
+     * The root is a folder, so it is excluded by the mime comparison as well.
+     */
     @Query("SELECT * FROM fs_node_object WHERE type_mime <> :folderMime AND time_deleted IS NULL")
     suspend fun fileEntryNodes(folderMime: String): List<FsNodeObject>
 

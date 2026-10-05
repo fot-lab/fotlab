@@ -17,14 +17,37 @@ class LibraryRepository(private val database: LibraryDatabase) {
     fun childrenOf(parentId: Long): Flow<List<FsNodeObject>> =
         database.nodeRelationDao().childrenOf(parentId)
 
-    fun rootChildren(): Flow<List<FsNodeObject>> =
-        database.nodeRelationDao().rootChildren()
-
     fun parentsOf(childId: Long): Flow<List<FsNodeObject>> =
         database.nodeRelationDao().parentsOf(childId)
 
     fun collections(): Flow<List<FsNodeObject>> =
-        database.nodeObjectDao().observeCollections()
+        database.nodeObjectDao().observeCollections(LibraryRoot.ID)
+
+    /** The root node row; `null` only before [ensureRoot] has run. */
+    suspend fun rootNode(): FsNodeObject? = database.nodeObjectDao().getById(LibraryRoot.ID)
+
+    /**
+     * Make sure the root node exists, and that nothing is left pointing at a `NULL` parent.
+     *
+     * The root row is created with the fixed id [LibraryRoot.ID] and is structurally identical
+     * to any other collection, so the top level needs no special casing anywhere else. Both
+     * statements are idempotent and run in one transaction: the insert is ignored when the row
+     * is already there, and the rewire is a no-op once no `NULL`-parent edge is left — which
+     * makes this safe to call on every process start, and self-healing for a library written
+     * before the root became a real row.
+     */
+    suspend fun ensureRoot() {
+        val dao = database.nodeObjectDao()
+        database.withTransaction {
+            dao.insertRootIfAbsent(
+                rootId = LibraryRoot.ID,
+                name = LibraryRoot.NAME,
+                typeMime = LibraryRoot.MIME,
+                timeCreated = System.currentTimeMillis(),
+            )
+            dao.rewireNullParentsToRoot(LibraryRoot.ID)
+        }
+    }
 
     // --- Recycle bin reads (`FOTLAB-DATABS-000002`, per-batch soft deletion) ---
 
@@ -60,27 +83,20 @@ class LibraryRepository(private val database: LibraryDatabase) {
         ),
     )
 
-    /** Add an edge (child under parent); use `parentId = null` for a root node. */
-    suspend fun link(childId: Long, parentId: Long?) {
+    /** Add an edge (child under parent); the root is the parent node [LibraryRoot.ID]. */
+    suspend fun link(childId: Long, parentId: Long) {
         database.withTransaction {
             val dao = database.nodeRelationDao()
-            if (parentId == null) {
-                // A re-imported (revived) node keeps its old, soft-deleted root edge: revive it
-                // first, otherwise the NOT EXISTS guard below sees the dead row and skips insert,
-                // leaving the live node an orphan the grid never lists.
-                dao.reviveRootLink(childId)
-                // Root edges need the NOT EXISTS guard: SQLite's UNIQUE index treats
-                // NULLs as distinct, so a plain IGNORE insert cannot deduplicate them.
-                dao.insertRootLinkIfAbsent(childId)
-            } else {
-                dao.reviveRelation(childId, parentId)
-                dao.insert(FsNodeRelation(childId, parentId))
-            }
+            // A re-imported (revived) node keeps its old, soft-deleted edge: revive it first,
+            // otherwise the unique index rejects the insert and the live node would stay an
+            // orphan the grid never lists.
+            dao.reviveRelation(childId, parentId)
+            dao.insert(FsNodeRelation(childId, parentId))
         }
     }
 
     /** Unlink a child from a parent; the edge is soft-deleted, never physically removed (R10, revised). */
-    suspend fun unlink(childId: Long, parentId: Long?) {
+    suspend fun unlink(childId: Long, parentId: Long) {
         database.nodeRelationDao().removeRelation(childId, parentId, System.currentTimeMillis())
     }
 
@@ -90,15 +106,14 @@ class LibraryRepository(private val database: LibraryDatabase) {
      * Edges are directed (`child → parent`, "child is under parent"). A cycle appears exactly
      * when the current graph already contains a directed path from [parentId] to [childId] along
      * those upward edges — i.e. [childId] is a (transitive) ancestor of [parentId]. Linking then
-     * closes the loop. A `NULL` [parentId] is the root and can never close a cycle; a node linked
-     * under itself is a trivial self-cycle.
+     * closes the loop. The root has no parent edge, so a walk up from it ends immediately and
+     * linking under the root can never cycle; a node linked under itself is a trivial self-cycle.
      *
      * The loose design allows a node to have several parents, so the upward walk is a BFS over all
      * live parent links rather than a single chain. The walk is purely read-only; it does not add
      * any edge (`FOTLAB-DATABS-000002`, cycle invariant, to be enforced by callers).
      */
-    suspend fun wouldCreateCycle(childId: Long, parentId: Long?): Boolean {
-        if (parentId == null) return false
+    suspend fun wouldCreateCycle(childId: Long, parentId: Long): Boolean {
         val relationDao = database.nodeRelationDao()
         val visited = mutableSetOf<Long>()
         val queue = ArrayDeque<Long>().apply { add(parentId) }
@@ -137,7 +152,7 @@ class LibraryRepository(private val database: LibraryDatabase) {
 
     /** All live orphan nodes (no live parent relation); recycled by refresh (R10, revised). */
     suspend fun orphanNodeIds(): List<Long?> =
-        database.nodeRelationDao().orphanNodeIds()
+        database.nodeRelationDao().orphanNodeIds(LibraryRoot.ID)
 
     // --- Soft deletion (`FOTLAB-DATABS-000002` R9–R13, `FOTLAB-UIXDES-000004` R10, revised) ---
 
@@ -153,10 +168,14 @@ class LibraryRepository(private val database: LibraryDatabase) {
      * interrupted delete leaves either the complete batch or nothing (R13).
      */
     suspend fun deleteNodes(nodeIds: Collection<Long>) {
+        // The root is the tree's anchor, never a deletable item: it is what every other node
+        // hangs from, and it is the one node the UI never lists as a child of anything.
+        val targets = nodeIds.filter { it != LibraryRoot.ID }
+        if (targets.isEmpty()) return
         val now = System.currentTimeMillis()
         database.withTransaction {
             val pending = ArrayDeque<Long>()
-            pending.addAll(nodeIds)
+            pending.addAll(targets)
             while (pending.isNotEmpty()) {
                 markDeleted(pending.removeLast(), now, pending)
             }
@@ -164,11 +183,12 @@ class LibraryRepository(private val database: LibraryDatabase) {
     }
 
     /**
-     * True when every id is a direct, live child of [parentId] (null = the implicit root).
+     * True when every id is a direct, live child of [parentId] — i.e. belongs to the directory
+     * currently on screen ([LibraryRoot.ID] for the top level).
      * Used to gate deletion on the delete press: only the selected level is checked, the
      * subtree removed by recursion is not re-validated (`FOTLAB-UIXDES-000004` R10, guard).
      */
-    suspend fun selectedDirectlyUnder(ids: Collection<Long>, parentId: Long?): Boolean {
+    suspend fun selectedDirectlyUnder(ids: Collection<Long>, parentId: Long): Boolean {
         val relationDao = database.nodeRelationDao()
         return ids.all { id -> relationDao.getRelation(id, parentId) != null }
     }
@@ -250,13 +270,15 @@ class LibraryRepository(private val database: LibraryDatabase) {
      * explicit edge delete covers the rest, so no dangling edge survives. Runs in one transaction.
      */
     suspend fun deleteForever(ids: List<Long>) {
-        if (ids.isEmpty()) return
+        // The root is not a bin item and can never be one; refuse it explicitly.
+        val targets = ids.filter { it != LibraryRoot.ID }
+        if (targets.isEmpty()) return
         val objectDao = database.nodeObjectDao()
         database.withTransaction {
             val relationDao = database.nodeRelationDao()
             val toDelete = mutableSetOf<Long>()
             val queue = ArrayDeque<Pair<Long, Long>>()
-            for (id in ids) {
+            for (id in targets) {
                 val batch = objectDao.getById(id)?.timeDeleted ?: continue
                 queue.addLast(id to batch)
             }

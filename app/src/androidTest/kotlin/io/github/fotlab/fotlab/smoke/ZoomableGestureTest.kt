@@ -30,6 +30,7 @@ import io.github.fotlab.fotlab.MainActivity
 import io.github.fotlab.fotlab.R
 import io.github.fotlab.fotlab.feature.library.FsNodeObject
 import io.github.fotlab.fotlab.feature.library.LibraryCore
+import io.github.fotlab.fotlab.feature.library.LibraryRoot
 import io.github.fotlab.fotlab.feature.library.LibraryScreen
 import io.github.fotlab.fotlab.feature.library.LibraryViewerScreen
 import io.github.fotlab.fotlab.ui.theme.AppTheme
@@ -443,14 +444,14 @@ class ZoomableGestureTest {
         // Import the fixture at the library root, like a picker import would.
         val source: Uri = sourceUri
         val t = System.nanoTime()
-        runBlocking { LibraryCore.importUris(parentId = null, uris = listOf(source)) }
+        runBlocking { LibraryCore.importUris(parentId = LibraryRoot.ID, uris = listOf(source)) }
         step("import", "importUris(${source}) done in ${(System.nanoTime() - t) / 1_000_000} ms")
 
         // Split the two possible failure modes before waiting: an empty row set means the
         // import/flow never reached the DB, a non-empty one means only the on-screen text is
         // missing (truncation, wrong query) — the log says which.
-        val children = runBlocking { LibraryCore.rootChildren().first() }
-        step("import", "rootChildren=${children.size}: ${children.joinToString { it.nameDisplay }}")
+        val children = runBlocking { LibraryCore.childrenOf(LibraryRoot.ID).first() }
+        step("import", "topLevel=${children.size}: ${children.joinToString { it.nameDisplay }}")
 
         val closeDesc = context.getString(R.string.library_viewer_cd_close)
         hostContent {
@@ -466,7 +467,7 @@ class ZoomableGestureTest {
             }
         }
 
-        // Wait for the real rootChildren flow to emit the imported node into the grid.
+        // Wait for the real top-level flow to emit the imported node into the grid.
         composeRule.waitUntil(15_000) {
             composeRule.onAllNodesWithText(pngName, substring = true)
                 .fetchSemanticsNodes().isNotEmpty()

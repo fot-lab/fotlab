@@ -33,6 +33,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import io.github.fotlab.fotlab.MainActivity
 import io.github.fotlab.fotlab.R
 import io.github.fotlab.fotlab.feature.library.LibraryCore
+import io.github.fotlab.fotlab.feature.library.LibraryRoot
 import io.github.fotlab.fotlab.feature.library.LibraryScreen
 import io.github.fotlab.fotlab.feature.library.LibraryViewerScreen
 import io.github.fotlab.fotlab.feature.studio.StudioEngine
@@ -228,7 +229,7 @@ class RawRoutingTest {
         )
 
         // ---- 2) import at the library root, exactly as the picker's callback does ----
-        runBlocking { LibraryCore.importUris(parentId = null, uris = listOf(uri)) }
+        runBlocking { LibraryCore.importUris(parentId = LibraryRoot.ID, uris = listOf(uri)) }
         val node = runBlocking { LibraryCore.getByUri(uri.toString()) }
             ?: throw AssertionError("import produced no fs_node for $uri")
         step("import", "node id=${node.fsNodeId} name='${node.nameDisplay}' mime='${node.typeMime}'")
@@ -460,7 +461,7 @@ class RawRoutingTest {
         val uri = indexAndFind(sonyArw7r)
             ?: throw AssertionError("Sony ARW not on the SD card at /sdcard/Pictures/rawdb/${sonyArw7r.file}")
         step("sdcard", "source=${sonyArw7r.file}")
-        runBlocking { LibraryCore.importUris(parentId = null, uris = listOf(uri)) }
+        runBlocking { LibraryCore.importUris(parentId = LibraryRoot.ID, uris = listOf(uri)) }
         val node = runBlocking { LibraryCore.getByUri(uri.toString()) }!!
         StudioEngine.setCurrentNode(node.uriStorage)
 
@@ -547,7 +548,7 @@ class RawRoutingTest {
     fun manualKelvinWhiteBalanceRedevelopsWithoutBlack() {
         val uri = indexAndFind(sonyArw7r)
             ?: throw AssertionError("Sony ARW not on the SD card at /sdcard/Pictures/rawdb/${sonyArw7r.file}")
-        runBlocking { LibraryCore.importUris(parentId = null, uris = listOf(uri)) }
+        runBlocking { LibraryCore.importUris(parentId = LibraryRoot.ID, uris = listOf(uri)) }
         val node = runBlocking { LibraryCore.getByUri(uri.toString()) }!!
         StudioEngine.setCurrentNode(node.uriStorage)
 
@@ -771,7 +772,7 @@ class RawRoutingTest {
         val uri = indexAndFind(sample)
             ?: throw AssertionError("${sample.label} not on the SD card at /sdcard/Pictures/rawdb/${sample.file}")
         step("sdcard", "source=${sample.file}")
-        runBlocking { LibraryCore.importUris(parentId = null, uris = listOf(uri)) }
+        runBlocking { LibraryCore.importUris(parentId = LibraryRoot.ID, uris = listOf(uri)) }
         val node = runBlocking { LibraryCore.getByUri(uri.toString()) }
             ?: throw AssertionError("import produced no fs_node for $uri")
         StudioEngine.setCurrentNode(node.uriStorage)
@@ -830,7 +831,7 @@ class RawRoutingTest {
     fun boostAndLogGradesReRenderThroughEngineAndNoneRestoresDevelop() {
         val uri = indexAndFind(sonyArw7r)
             ?: throw AssertionError("Sony ARW not on the SD card at /sdcard/Pictures/rawdb/${sonyArw7r.file}")
-        runBlocking { LibraryCore.importUris(parentId = null, uris = listOf(uri)) }
+        runBlocking { LibraryCore.importUris(parentId = LibraryRoot.ID, uris = listOf(uri)) }
         val node = runBlocking { LibraryCore.getByUri(uri.toString()) }!!
         StudioEngine.setCurrentNode(node.uriStorage)
 
@@ -1054,7 +1055,7 @@ class RawRoutingTest {
     fun panasonicVLogAndDownloadedLutCubeBothTakeEffect() {
         val uri = indexAndFind(panasonicRw2)
             ?: throw AssertionError("Panasonic RW2 not on the SD card at /sdcard/Pictures/rawdb/${panasonicRw2.file}")
-        runBlocking { LibraryCore.importUris(parentId = null, uris = listOf(uri)) }
+        runBlocking { LibraryCore.importUris(parentId = LibraryRoot.ID, uris = listOf(uri)) }
         val node = runBlocking { LibraryCore.getByUri(uri.toString()) }!!
         StudioEngine.setCurrentNode(node.uriStorage)
 
@@ -1219,7 +1220,7 @@ class RawRoutingTest {
         // is already covered by the other tests and each RAW develop costs emulator minutes).
         val uri = indexAndFind(panasonicRw2)
             ?: throw AssertionError("Panasonic RW2 not on the SD card at /sdcard/Pictures/rawdb/${panasonicRw2.file}")
-        runBlocking { LibraryCore.importUris(parentId = null, uris = listOf(uri)) }
+        runBlocking { LibraryCore.importUris(parentId = LibraryRoot.ID, uris = listOf(uri)) }
         val node = runBlocking { LibraryCore.getByUri(uri.toString()) }!!
         StudioEngine.setCurrentNode(node.uriStorage)
         val initial = runBlocking {
@@ -1484,9 +1485,9 @@ class RawRoutingTest {
         return result
     }
 
-    /** Remove every live node so each test starts from an empty library grid. */
+    /** Remove every live node so each test starts from an empty library grid (the root stays). */
     private suspend fun clearLibrary() {
-        LibraryCore.rootChildren().first().forEach { LibraryCore.removeNode(it) }
+        LibraryCore.childrenOf(LibraryRoot.ID).first().forEach { LibraryCore.removeNode(it) }
         LibraryCore.collections().first().forEach { LibraryCore.removeNode(it) }
     }
 
