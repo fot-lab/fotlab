@@ -549,14 +549,14 @@ fun StudioScreen() {
                                 if (kelvin > 0f) kelvin.roundToInt().toString() else ""
                             showWhiteBalanceDialog = true
                         },
+                    )
+                    // Grade tools (Contrast/Saturation/LOG/LUT) are RAW-only, like the former grade bar.
+                    StudioOpBar.TuneImage -> StudioOperationBarTuneImage(
                         onOklabHighlight = {
                             oklabSrgbEnabled = StudioEngine.currentOklabHighlightCompressSrgb()
                             oklabProphotoEnabled = StudioEngine.currentOklabHighlightCompressProphoto()
                             showOklabDialog = true
                         },
-                    )
-                    // Grade tools (Contrast/Saturation/LOG/LUT) are RAW-only, like the former grade bar.
-                    StudioOpBar.TuneImage -> StudioOperationBarTuneImage(
                         onClipping = {
                             clipToGamutEnabled = StudioEngine.currentClipToGamut()
                             showClippingDialog = true
@@ -1603,7 +1603,7 @@ private fun ClippingButton(
  * Material's *flare* glyph marks the perceptual highlight glow this tool tames: it inserts a
  * lightness-driven chroma roll-off in OKLab on the sRGB presentation fork's near-clipped
  * highlights, so the per-channel sRGB clamp no longer freezes a hue error. Like the other
- * DevelopFilm-bar tools it carries no state of its own — the dialog's switch is the only control
+ * tools it carries no state of its own — the dialog's switch is the only control
  * (`FOTLAB-UIXDES-000002`: the screen owns the dialogs).
  */
 @Composable
@@ -1928,7 +1928,6 @@ private fun StudioOperationBarDevelopFilm(
     onCa: () -> Unit,
     onExposure: () -> Unit,
     onWhiteBalance: () -> Unit,
-    onOklabHighlight: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     HorizontalOperationBar(
@@ -1958,10 +1957,6 @@ private fun StudioOperationBarDevelopFilm(
                 id = "wb",
                 label = stringResource(id = R.string.studio_label_whitebalance),
             ) { WhiteBalanceButton(onWhiteBalance) },
-            OperationalButton(
-                id = "oklab",
-                label = stringResource(id = R.string.studio_label_oklab),
-            ) { OklabHighlightButton(onOklabHighlight) },
         ),
     )
 }
@@ -1969,6 +1964,7 @@ private fun StudioOperationBarDevelopFilm(
 /** TuneImage bar — the boost group: Contrast and Saturation parameter inputs. */
 @Composable
 private fun StudioOperationBarTuneImage(
+    onOklabHighlight: () -> Unit,
     onClipping: () -> Unit,
     contrast: Float?,
     saturation: Float?,
@@ -1979,6 +1975,10 @@ private fun StudioOperationBarTuneImage(
     HorizontalOperationBar(
         modifier = modifier,
         items = listOf(
+            OperationalButton(
+                id = "oklab",
+                label = stringResource(id = R.string.studio_label_oklab),
+            ) { OklabHighlightButton(onOklabHighlight) },
             OperationalButton(
                 id = "clipping",
                 label = stringResource(id = R.string.studio_label_clipping),
