@@ -70,6 +70,7 @@ use rawler::rawimage::{RawImageData, RawPhotometricInterpretation};
 use rawler::RawImage;
 
 use crate::ca::{correct_ca, CaSettings};
+use crate::loca::{correct_loca, LocaSettings};
 use crate::calibrate::{calibrate, WorkingSpace};
 use crate::decode::decode_to_rawimage;
 use crate::dehaze::dehaze;
@@ -293,6 +294,25 @@ pub struct DevelopParams {
   /// Bayer CFAs are supported — other CFAs degrade to the uncorrected mosaic.
   #[uniffi(default = None)]
   pub ca: Option<CaSettings>,
+  /// Longitudinal-CA (LoCA) fringe-correction settings (the Studio LoCA
+  /// stage), applied **before** exposure on the full-frame scaled mosaic,
+  /// **immediately after** the lateral-CA (`ca`) stage and before demosaic — the
+  /// FotLab first-party `rawtrp_correct::correct_loca_bayer`
+  /// (`rules/DESIGN/detail/FOTLAB-RENDER-000003.md`). `None` = the stage is off
+  /// (identity; the default); `LocaSettings.enabled == false` (the master
+  /// switch) short-circuits identically. Runs its OWN high-contrast edge
+  /// detection on every render and does NOT reuse the LCA detector, so LoCA
+  /// works whether or not LCA is enabled. Two PEER criteria+behaviour branches
+  /// under the master switch, both acting on the **G plane only** (R/B are
+  /// never touched): the 去紫边 pair (magenta: R and B both exceed G at a bright
+  /// edge) **raises G** — chosen over desaturating R/B because it avoids the
+  /// dull "dark-gray edge" (tradeoff: a little more false colour); the 去绿边
+  /// pair (G exceeds both R and B at a bright edge) **lowers G** (mirror risk: a
+  /// darker edge). Each pair has its own switch and its own luminance threshold
+  /// (default 0.5). Only 2×2 Bayer CFAs are supported — other CFAs degrade to
+  /// the uncorrected mosaic.
+  #[uniffi(default = None)]
+  pub loca: Option<LocaSettings>,
   /// **Out-of-gamut clipping** switch for the *editing* branch (the Studio
   /// "Clipping" tool). When `true`, every component of the finished linear
   /// **ProPhoto-D50** image is clamped into `[0,1]` (above 1 → 1, below 0 → 0)
@@ -643,6 +663,13 @@ pub(crate) fn develop_image(
   // corrected source values). `None` is the identity; non-Bayer CFAs and kernel
   // failures degrade to the uncorrected mosaic (see `ca.rs`).
   let pixels = correct_ca(pixels, image.width, image.height, params.ca.as_ref(), cfa);
+
+  // LoCA / purple-fringe correction: pre-demosaic, immediately after the lateral-CA
+  // stage. Runs its own edge detection (never reuses `correct_ca`'s detector) so it
+  // is correct whether or not LCA is enabled; raises G near magenta/bright edges to
+  // neutralise the fringe. `None` is the identity; non-Bayer CFAs and kernel
+  // failures degrade to the uncorrected mosaic (see `loca.rs`).
+  let pixels = correct_loca(pixels, image.width, image.height, params.loca.as_ref(), cfa);
 
   // Demosaic stage — its ROI is already active_area, exactly like rawler's
   // Demosaic + FujiRotate + CropActiveArea steps. `params.downsample` picks the superpixel
