@@ -343,11 +343,20 @@ object StudioEngine {
     /**
      * The demosaic algorithm retained for the next develop re-render (set when the user picks one).
      *
-     * Starts at [defaultAlgorithm] — rawler's CFA-driven choice, which is what a fresh install has
-     * always developed with. [applyPersistedDemosaic] replaces it with the last pick once the store
-     * has been read.
+     * Starts at [DemosaicAlgorithm.DEFAULT] — rawler's CFA-driven choice, the same algorithm
+     * [DEFAULT_DEMOSAIC_ID] names, which is what a fresh install has always developed with.
+     * [applyPersistedDemosaic] replaces it with the last pick once the store has been read.
+     *
+     * It is spelled as the enum constant rather than as `defaultAlgorithm()` on purpose. A field
+     * initialiser runs inside the object's `<clinit>`, in *declaration order*, and
+     * [demosaicCandidatesCache] is a `by lazy` delegate declared further down — so reading it from
+     * here dereferences a field that has not been assigned yet and throws
+     * `NullPointerException: … kotlin.Lazy.getValue() on a null object reference`, which surfaces as
+     * a process-wide `ExceptionInInitializerError` from `MainApplication.onCreate`. The id → algorithm
+     * lookup therefore happens in [prepare], long after `<clinit>` has finished. Do not "simplify"
+     * this back into a call.
      */
-    private var currentAlgorithm: DemosaicAlgorithm = defaultAlgorithm()
+    private var currentAlgorithm: DemosaicAlgorithm = DemosaicAlgorithm.DEFAULT
 
     /**
      * Record the user's pick from the demosaic menu, persist it, and re-develop.
@@ -381,10 +390,12 @@ object StudioEngine {
      * [DEFAULT_DEMOSAIC_ID] resolved through the catalogue, so the default is named in exactly one
      * place and still travels the same id → algorithm path a persisted pick does.
      *
-     * Falls back to [DemosaicAlgorithm.DEFAULT] rather than throwing when the catalogue is empty —
-     * it *is* empty on a build without `librawler_fotlab.so`, and this runs while the object is still
-     * initialising. That is the same algorithm the id names, so nothing is lost; a genuinely missing
-     * entry (a catalogue regression) would still develop, just without the lookup.
+     * Must only be called once `<clinit>` has finished (i.e. from [prepare] and later), because it
+     * reads the [demosaicCandidatesCache] lazy delegate — see [currentAlgorithm].
+     *
+     * Falls back to [DemosaicAlgorithm.DEFAULT] when the catalogue has no such entry, which is the
+     * case on a build without `librawler_fotlab.so` ([RawlerFotlabBridge.demosaicAlgorithms] returns
+     * an empty list there). That is the same algorithm the id names, so nothing is lost.
      */
     private fun defaultAlgorithm(): DemosaicAlgorithm =
         demosaicCandidates.firstOrNull { it.id == DEFAULT_DEMOSAIC_ID }?.algorithm
