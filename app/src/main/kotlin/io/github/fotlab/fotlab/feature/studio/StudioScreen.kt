@@ -1996,7 +1996,7 @@ private fun LutButton(
 }
 
 /**
- * DCP camera-profile picker — "Choose file…" (SAF) / "None (remove camera correction)". Primary
+ * DCP camera-profile picker — "Choose profile…" (SAF) / "None (remove camera correction)". Primary
  * tint while a profile is loaded (the [active] flag).
  */
 @Composable
@@ -2033,7 +2033,7 @@ private fun DcpButton(
 }
 
 /**
- * LCP lens-profile picker — "Choose file…" (SAF) / "None (remove lens correction)". Primary tint
+ * LCP lens-profile picker — "Choose profile…" (SAF) / "None (remove lens correction)". Primary tint
  * while a profile is loaded (the [active] flag). The bar sits just above the fun bar, so Material3
  * opens this dropdown upward automatically.
  */

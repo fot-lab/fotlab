@@ -104,8 +104,8 @@
     <string name="studio_label_dehaze">Dehaze</string>
     <string name="studio_label_lca">LCA</string>
     <string name="studio_label_clipping">Clipping</string>
-    <string name="studio_label_dcp">DCP</string>
-    <string name="studio_label_lcp">LCP</string>
+    <string name="studio_label_dcp">Camera</string>
+    <string name="studio_label_lcp">Lens</string>
     <string name="studio_label_format">Format</string>
     <string name="studio_ca_title">LCA (chromatic aberration)</string>
     <string name="studio_ca_auto_label">Auto-fit</string>
@@ -185,9 +185,9 @@
     <string name="studio_grade_lut_pick">Choose file…</string>
     <string name="studio_grade_lut_clear">None (remove LUT)</string>
     <!-- DCP / LCP profile dropdowns (mirror the LUT picker; SAF file chooser + a "none" reset). -->
-    <string name="studio_dcp_pick">Choose file…</string>
+    <string name="studio_dcp_pick">Choose profile…</string>
     <string name="studio_dcp_clear">None (remove camera correction)</string>
-    <string name="studio_lcp_pick">Choose file…</string>
+    <string name="studio_lcp_pick">Choose profile…</string>
     <string name="studio_lcp_clear">None (remove lens correction)</string>
     <string name="studio_dcp_error_copy">Could not read the picked file. Choose another DCP.</string>
     <string name="studio_lcp_error_copy">Could not read the picked file. Choose another LCP.</string>

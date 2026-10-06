@@ -114,8 +114,8 @@
     <string name="studio_cd_clipping">截断（超出色域的颜色）</string>
     <string name="studio_label_lca">LCA</string>
     <string name="studio_label_clipping">截断</string>
-    <string name="studio_label_dcp">DCP</string>
-    <string name="studio_label_lcp">LCP</string>
+    <string name="studio_label_dcp">相机</string>
+    <string name="studio_label_lcp">镜头</string>
     <string name="studio_label_format">格式</string>
     <string name="studio_ca_title">LCA（径向色差校正）</string>
     <string name="studio_cd_loca">LoCA（轴向色差校正）</string>
@@ -168,6 +168,9 @@
     <!-- LUT dropdown items. -->
     <string name="studio_grade_lut_pick">选择文件…</string>
     <string name="studio_grade_lut_clear">无（移除 LUT）</string>
+    <!-- DCP / LCP profile dropdowns (mirror the LUT picker). -->
+    <string name="studio_dcp_pick">选择配置文件…</string>
+    <string name="studio_lcp_pick">选择配置文件…</string>
     <!-- Grade-fork error dialog (a non-.cube / corrupt LUT, or a grader failure). -->
     <string name="studio_grade_error_title">调色失败</string>
     <string name="studio_grade_error_message">RawAlchemy 无法应用这些设置。请检查 LUT 文件——它通常是 .cube 3D LUT。</string>
