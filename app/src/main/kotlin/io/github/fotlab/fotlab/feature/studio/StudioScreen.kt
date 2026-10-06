@@ -571,7 +571,10 @@ fun StudioScreen() {
                     // camera/lens profile controls (DCP/LCP), which are global to any loaded image.
                     StudioOpBar.Basic -> HorizontalOperationBar(
                         items = listOf(
-                            OperationalButton(id = "raw_status") { slotModifier ->
+                            OperationalButton(
+                                id = "raw_status",
+                                label = stringResource(id = R.string.studio_label_format),
+                            ) { slotModifier ->
                                 RawStatusButton(
                                     isOn = displayedResult != null && rawLoaded,
                                     modifier = slotModifier,
