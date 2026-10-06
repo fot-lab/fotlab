@@ -50,6 +50,7 @@ import androidx.compose.material.icons.filled.Tonality
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Air
 import androidx.compose.material.icons.filled.ClosedCaption
+import androidx.compose.material.icons.filled.ClosedCaptionOff
 import androidx.compose.material.icons.filled.Grain
 import androidx.compose.material.icons.filled.WbAuto
 import androidx.compose.material.icons.filled.PhotoCamera
@@ -2099,6 +2100,7 @@ private fun StudioOperationBarDevelopFilm(
     onDenoise: () -> Unit,
     onDehaze: () -> Unit,
     onCa: () -> Unit,
+    onLoca: () -> Unit,
     onExposure: () -> Unit,
     onWhiteBalance: () -> Unit,
     modifier: Modifier = Modifier,
