@@ -104,6 +104,7 @@ import io.github.fotlab.fotlab.ui.operation.HorizontalOperationBar
 import io.github.fotlab.fotlab.ui.operation.OperationalButton
 import io.github.fotlab.fotlab.ui.rememberZoomState
 import io.github.fotlab.fotlab_rawler.CaSettings
+import io.github.fotlab.fotlab_rawler.LocaSettings
 import io.github.fotlab.fotlab_rawler.DehazeMergeMode
 import io.github.fotlab.fotlab_rawler.DemosaicCandidate
 import kotlinx.coroutines.Dispatchers
@@ -249,6 +250,18 @@ fun StudioScreen() {
     var caAuto by remember { mutableStateOf(true) }
     var caRedInput by remember { mutableStateOf("") }
     var caBlueInput by remember { mutableStateOf("") }
+
+    // LoCA (longitudinal-CA / axial fringe) dialog state (opened by the DevelopFilm bar LoCA icon,
+    // the ClosedCaptionOff glyph). Only the two PEER switches are exposed to the user; the master
+    // switch is derived by Kotlin: both off → loca = null (the stage is skipped), either/both on
+    // → loca = Some(...). Strength / threshold fields keep the platform defaults as placeholders.
+    var showLocaDialog by remember { mutableStateOf(false) }
+    var locaPurpleEnabled by remember { mutableStateOf(false) }
+    var locaGreenEnabled by remember { mutableStateOf(false) }
+    var locaPurpleStrengthInput by remember { mutableStateOf("") }
+    var locaGreenStrengthInput by remember { mutableStateOf("") }
+    var locaPurpleLumInput by remember { mutableStateOf("") }
+    var locaGreenLumInput by remember { mutableStateOf("") }
 
     // Clipping dialog state (opened by the Clipping icon, the AllOut glyph).
     // The switch IS the tool — there is no numeric parameter: ON clamps every component of the
@@ -520,6 +533,24 @@ fun StudioScreen() {
                             }
                             showCaDialog = true
                         },
+                        onLoca = {
+                            StudioEngine.currentLoca()?.let { loca ->
+                                locaPurpleEnabled = loca.purpleEnabled
+                                locaGreenEnabled = loca.greenEnabled
+                                locaPurpleStrengthInput = loca.purpleStrength.toString()
+                                locaGreenStrengthInput = loca.greenStrength.toString()
+                                locaPurpleLumInput = loca.purpleLumMin.toString()
+                                locaGreenLumInput = loca.greenLumMin.toString()
+                            } ?: run {
+                                locaPurpleEnabled = false
+                                locaGreenEnabled = false
+                                locaPurpleStrengthInput = ""
+                                locaGreenStrengthInput = ""
+                                locaPurpleLumInput = ""
+                                locaGreenLumInput = ""
+                            }
+                            showLocaDialog = true
+                        },
                         onExposure = {
                             exposureEnabled = StudioEngine.currentExposureEv() != null
                             exposureInput = StudioEngine.currentExposureEv()?.toString() ?: ""
@@ -741,6 +772,101 @@ fun StudioScreen() {
                         enabled = caEnabled && !caAuto,
                         singleLine = true,
                         placeholder = { Text(text = stringResource(id = R.string.studio_ca_blue_hint)) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    )
+                }
+            },
+        )
+    }
+
+    // LoCA dialog: the two PEER switches (去紫边 / 去绿边) are the only user controls; strength and
+    // luminance-threshold fields carry the platform defaults as placeholders and are editable only
+    // while their pair switch is on. The master switch is derived, not shown: both off → loca = null
+    // (identity), either/both on → loca = Some(...). OK is always enabled.
+    if (showLocaDialog) {
+        AlertDialog(
+            onDismissRequest = { showLocaDialog = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val purpleOn = locaPurpleEnabled
+                        val greenOn = locaGreenEnabled
+                        StudioEngine.setLoca(
+                            if (purpleOn || greenOn) {
+                                LocaSettings(
+                                    enabled = true,
+                                    purpleEnabled = purpleOn,
+                                    greenEnabled = greenOn,
+                                    purpleStrength = locaPurpleStrengthInput.toFloatOrNull() ?: 1.0f,
+                                    greenStrength = locaGreenStrengthInput.toFloatOrNull() ?: 1.0f,
+                                    purpleLumMin = locaPurpleLumInput.toFloatOrNull() ?: 0.5f,
+                                    greenLumMin = locaGreenLumInput.toFloatOrNull() ?: 0.5f,
+                                )
+                            } else {
+                                null
+                            },
+                        )
+                        showLocaDialog = false
+                    },
+                ) {
+                    Text(text = stringResource(id = R.string.common_action_ok))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showLocaDialog = false }) {
+                    Text(text = stringResource(id = R.string.common_action_cancel))
+                }
+            },
+            title = { Text(text = stringResource(id = R.string.studio_loca_title)) },
+            text = {
+                Column {
+                    Text(text = stringResource(id = R.string.studio_loca_body))
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(text = stringResource(id = R.string.studio_loca_purple_label))
+                        Spacer(modifier = Modifier.weight(1f))
+                        Switch(checked = locaPurpleEnabled, onCheckedChange = { locaPurpleEnabled = it })
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    TextField(
+                        value = locaPurpleStrengthInput,
+                        onValueChange = { locaPurpleStrengthInput = it },
+                        enabled = locaPurpleEnabled,
+                        singleLine = true,
+                        placeholder = { Text(text = stringResource(id = R.string.studio_loca_purple_strength_hint)) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    TextField(
+                        value = locaPurpleLumInput,
+                        onValueChange = { locaPurpleLumInput = it },
+                        enabled = locaPurpleEnabled,
+                        singleLine = true,
+                        placeholder = { Text(text = stringResource(id = R.string.studio_loca_purple_lum_hint)) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(text = stringResource(id = R.string.studio_loca_green_label))
+                        Spacer(modifier = Modifier.weight(1f))
+                        Switch(checked = locaGreenEnabled, onCheckedChange = { locaGreenEnabled = it })
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    TextField(
+                        value = locaGreenStrengthInput,
+                        onValueChange = { locaGreenStrengthInput = it },
+                        enabled = locaGreenEnabled,
+                        singleLine = true,
+                        placeholder = { Text(text = stringResource(id = R.string.studio_loca_green_strength_hint)) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    TextField(
+                        value = locaGreenLumInput,
+                        onValueChange = { locaGreenLumInput = it },
+                        enabled = locaGreenEnabled,
+                        singleLine = true,
+                        placeholder = { Text(text = stringResource(id = R.string.studio_loca_green_lum_hint)) },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     )
                 }
@@ -1595,6 +1721,25 @@ private fun CaButton(
 }
 
 /**
+ * LoCA (longitudinal / axial chromatic-aberration correction) parameter entry of the develop bar.
+ * The ClosedCaptionOff glyph is the "CC disabled" mark repurposed here as the axial-fringe tool; the
+ * caption reads LoCA in every locale. It opens the LoCA dialog, which exposes only the two peer
+ * switches (去紫边 / 去绿边) — the master switch is derived by Kotlin from them.
+ */
+@Composable
+private fun LocaButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    IconButton(onClick = onClick, modifier = modifier) {
+        Icon(
+            imageVector = Icons.Filled.ClosedCaptionOff,
+            contentDescription = stringResource(id = R.string.studio_cd_loca),
+        )
+    }
+}
+
+/**
  * Out-of-gamut clipping switch (opens the Clipping dialog owned by StudioScreen).
  *
  * Material's *all out* glyph is the deliberate choice here: it is the "pull everything inside
@@ -1969,6 +2114,10 @@ private fun StudioOperationBarDevelopFilm(
                 id = "ca",
                 label = stringResource(id = R.string.studio_label_lca),
             ) { CaButton(onCa) },
+            OperationalButton(
+                id = "loca",
+                label = stringResource(id = R.string.studio_label_loca),
+            ) { LocaButton(onLoca) },
             OperationalButton(
                 id = "denoise",
                 label = stringResource(id = R.string.studio_label_denoise),

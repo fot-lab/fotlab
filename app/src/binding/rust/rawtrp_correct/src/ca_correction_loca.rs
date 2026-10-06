@@ -95,9 +95,12 @@ const LOCA_EDGE_HI: f32 = 0.08;
 /// Parameters for [`correct_loca_bayer`].
 #[derive(Clone, Copy, Debug)]
 pub struct LocaParams {
-    /// Strength of the repair, 0..1 (1.0 = full RapidRAW-style correction).
-    /// Applies to both peer pairs.
-    pub strength: f64,
+    /// Purple-pair repair strength, 0..1 (1.0 = full RapidRAW-style correction).
+    /// Exposed to Kotlin as 去紫边强度 — the coefficient that pulls G toward R/B.
+    pub purple_strength: f64,
+    /// Green-pair repair strength, 0..1 (1.0 = full RapidRAW-style correction).
+    /// Exposed to Kotlin as 去绿边强度.
+    pub green_strength: f64,
     /// 去紫边 gate switch: run the magenta criteria + raise-G behaviour.
     pub purple_enabled: bool,
     /// 去绿边 gate switch: run the green-excess criteria + lower-G behaviour.
@@ -219,10 +222,13 @@ pub fn correct_loca_bayer(
         return Err(Error::OddWidth);
     }
 
-    let strength = (params.strength as f32).clamp(0.0, 1.0);
+    let purple_strength = (params.purple_strength as f32).clamp(0.0, 1.0);
+    let green_strength = (params.green_strength as f32).clamp(0.0, 1.0);
     // MASTER short-circuit inside the kernel too: with both peer pairs switched
-    // off (or strength 0) the stage is an identity — free.
-    if strength == 0.0 || (!params.purple_enabled && !params.green_enabled) {
+    // off (or both strengths 0) the stage is an identity — free.
+    if (purple_strength == 0.0 && green_strength == 0.0)
+        || (!params.purple_enabled && !params.green_enabled)
+    {
         return Ok(());
     }
     // The pair switches gate their own criteria+behaviour unit; the luminance
@@ -306,15 +312,21 @@ pub fn correct_loca_bayer(
                 // Each pair switch gates its own bound criteria+behaviour unit;
                 // the gates are mutually exclusive so at most one fires, but
                 // structurally neither branch contains the other.
-                let mut d = 0.0f32;
+                let mut purple_d = 0.0f32;
                 if purple_on {
-                    d += purple_delta(r, g, b, edge_w, purple_lum_min);
+                    purple_d = purple_delta(r, g, b, edge_w, purple_lum_min);
                 }
+                let mut green_d = 0.0f32;
                 if green_on {
-                    d += green_delta(r, g, b, edge_w, green_lum_min);
+                    green_d = green_delta(r, g, b, edge_w, green_lum_min);
                 }
+                // Per-pair strength: each peer's criteria+behaviour unit is scaled
+                // by its OWN coefficient (the Kotlin LoCA dialog exposes 去紫边强度 /
+                // 去绿边强度 as independent controls), so a user can, say, fully
+                // repair purple fringing while leaving green untouched.
+                let d = purple_d * purple_strength + green_d * green_strength;
                 if d != 0.0 {
-                    drow[col] = d * strength;
+                    drow[col] = d;
                 }
             }
         });
@@ -350,9 +362,10 @@ mod tests {
 
     /// Full explicit params (no Default derive — the switches must never be
     /// silently off).
-    fn p(strength: f64) -> LocaParams {
+    fn p(purple_strength: f64, green_strength: f64) -> LocaParams {
         LocaParams {
-            strength,
+            purple_strength,
+            green_strength,
             purple_enabled: true,
             green_enabled: true,
             purple_lum_min: 0.5,
@@ -375,7 +388,7 @@ mod tests {
     fn strength_zero_is_identity() {
         let mut m = make_mosaic(64usize, 64usize);
         let before = m.clone();
-        correct_loca_bayer(&mut m, &rggb(), &p(0.0)).unwrap();
+        correct_loca_bayer(&mut m, &rggb(), &p(0.0, 0.0)).unwrap();
         for row in 0..64 {
             for col in 0..64 {
                 assert!((m.at(row, col) - before.at(row, col)).abs() < 1e-6);
@@ -386,11 +399,12 @@ mod tests {
     #[test]
     fn both_pairs_off_is_identity() {
         // Criteria and behaviour are bound: with both pair switches off, the
-        // whole stage is an identity even at strength 1.
+        // whole stage is an identity even at strengths 1.
         let mut m = make_mosaic(64usize, 64usize);
         let before = m.clone();
         let params = LocaParams {
-            strength: 1.0,
+            purple_strength: 1.0,
+            green_strength: 1.0,
             purple_enabled: false,
             green_enabled: false,
             purple_lum_min: 0.5,
@@ -411,7 +425,8 @@ mod tests {
         let mut m = make_mosaic(64usize, 64usize);
         let before = m.clone();
         let params = LocaParams {
-            strength: 1.0,
+            purple_strength: 1.0,
+            green_strength: 1.0,
             purple_enabled: false,
             green_enabled: true,
             purple_lum_min: 0.5,
@@ -437,7 +452,8 @@ mod tests {
         let mut m = make_mosaic(64usize, 64usize);
         let before = m.clone();
         let params = LocaParams {
-            strength: 1.0,
+            purple_strength: 1.0,
+            green_strength: 1.0,
             purple_enabled: true,
             green_enabled: false,
             purple_lum_min: 0.5,

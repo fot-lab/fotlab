@@ -18,6 +18,7 @@ import io.github.fotlab.fotlab_rawler.DemosaicAlgorithm
 import io.github.fotlab.fotlab_rawler.DemosaicCandidate
 import io.github.fotlab.fotlab_rawler.DehazeMergeMode
 import io.github.fotlab.fotlab_rawler.CaSettings
+import io.github.fotlab.fotlab_rawler.LocaSettings
 import io.github.fotlab.fotlab_rawler.CameraProfileParams
 import io.github.fotlab.fotlab_rawler.DevelopParams
 import io.github.fotlab.fotlab_rawler.GradeParams
@@ -262,6 +263,7 @@ object StudioEngine {
             dehazeRadiusGuide = currentDehazeRadiusGuide,
             dehazeMergeMode = currentDehazeMergeMode,
             ca = currentCa,
+            loca = currentLoca,
             clipToGamut = currentClipToGamut,
             cameraProfile = cameraProfileState.value,
             lensProfile = lensProfileState.value,
@@ -626,6 +628,7 @@ object StudioEngine {
             dehazeRadiusGuide = currentDehazeRadiusGuide,
             dehazeMergeMode = currentDehazeMergeMode,
             ca = currentCa,
+            loca = currentLoca,
             clipToGamut = currentClipToGamut,
             cameraProfile = cameraProfileState.value,
             lensProfile = lensProfileState.value,
@@ -899,6 +902,7 @@ object StudioEngine {
             dehazeRadiusGuide = currentDehazeRadiusGuide,
             dehazeMergeMode = currentDehazeMergeMode,
             ca = currentCa,
+            loca = currentLoca,
             clipToGamut = currentClipToGamut,
             cameraProfile = cameraProfileState.value,
             lensProfile = lensProfileState.value,
@@ -938,6 +942,12 @@ object StudioEngine {
 
     /** The current CA settings; the UI prefills the LCA dialog from this. */
     fun currentCa(): CaSettings? = currentCa
+
+    /** The LoCA (longitudinal-CA) fringe settings retained for the next develop re-render; null = off. */
+    private var currentLoca: LocaSettings? = null
+
+    /** The current LoCA settings; the UI prefills the LoCA dialog from this. */
+    fun currentLoca(): LocaSettings? = currentLoca
 
     /**
      * Whether out-of-gamut clipping is retained for the next render (the Studio Clipping dialog's
@@ -1074,6 +1084,18 @@ object StudioEngine {
      */
     fun setCa(ca: CaSettings?) {
         currentCa = ca
+        reDevelop()
+    }
+
+    /**
+     * Re-develop the current RAW with [loca] longitudinal-CA fringe settings entered from the
+     * Studio LoCA dialog. The Kotlin dialog exposes only the two peer switches (去紫边 / 去绿边);
+     * the master switch is derived by the caller: both off → `null` (the stage is skipped,
+     * [DevelopParams.loca] is `None`), either/both on → `Some(...)`. `null` is the identity — the
+     * canvas is re-rendered from the re-developed PNG.
+     */
+    fun setLoca(loca: LocaSettings?) {
+        currentLoca = loca
         reDevelop()
     }
 
@@ -1238,6 +1260,7 @@ object StudioEngine {
             dehazeRadiusGuide = currentDehazeRadiusGuide,
             dehazeMergeMode = currentDehazeMergeMode,
             ca = currentCa,
+            loca = currentLoca,
             clipToGamut = currentClipToGamut,
             cameraProfile = cameraProfileState.value,
             lensProfile = lensProfileState.value,
@@ -1265,6 +1288,7 @@ object StudioEngine {
             dehazeRadiusGuide = currentDehazeRadiusGuide,
             dehazeMergeMode = currentDehazeMergeMode,
             ca = currentCa,
+            loca = currentLoca,
             clipToGamut = currentClipToGamut,
             cameraProfile = cameraProfileState.value,
             lensProfile = lensProfileState.value,

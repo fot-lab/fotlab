@@ -58,10 +58,14 @@ pub struct LocaSettings {
     /// LoCA never touches R/B — both pairs act on the G plane only.
     #[uniffi(default = true)]
     pub green_enabled: bool,
-    /// Strength of the repair, 0..1 (1.0 = full RapidRAW-style repair). Applies
-    /// to both pairs.
+    /// Purple-pair repair strength, 0..1 (1.0 = full RapidRAW-style correction).
+    /// The Kotlin LoCA dialog exposes this as 去紫边强度.
     #[uniffi(default = 1.0)]
-    pub strength: f32,
+    pub purple_strength: f32,
+    /// Green-pair repair strength, 0..1 (1.0 = full RapidRAW-style correction).
+    /// The Kotlin LoCA dialog exposes this as 去绿边强度.
+    #[uniffi(default = 1.0)]
+    pub green_strength: f32,
     /// Purple-pair luminance threshold (raw-linear, pre-WB). Default 0.5.
     #[uniffi(default = 0.5)]
     pub purple_lum_min: f32,
@@ -103,7 +107,8 @@ pub(crate) fn correct_loca(
     };
 
     let params = rawtrp_correct::LocaParams {
-        strength: settings.strength as f64,
+        purple_strength: settings.purple_strength as f64,
+        green_strength: settings.green_strength as f64,
         purple_enabled: settings.purple_enabled,
         green_enabled: settings.green_enabled,
         purple_lum_min: settings.purple_lum_min,
