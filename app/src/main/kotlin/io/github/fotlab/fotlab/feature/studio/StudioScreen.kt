@@ -577,7 +577,10 @@ fun StudioScreen() {
                                     modifier = slotModifier,
                                 )
                             },
-                            OperationalButton(id = "lcp") {
+                            OperationalButton(
+                                id = "lcp",
+                                label = stringResource(id = R.string.studio_label_lcp),
+                            ) {
                                 LcpButton(
                                     active = lensProfile != null,
                                     onPick = {
@@ -593,7 +596,10 @@ fun StudioScreen() {
                                     currentUserFocal = userLcpFocalLengthMm,
                                 )
                             },
-                            OperationalButton(id = "dcp") {
+                            OperationalButton(
+                                id = "dcp",
+                                label = stringResource(id = R.string.studio_label_dcp),
+                            ) {
                                 DcpButton(
                                     active = cameraProfile != null,
                                     onPick = {
