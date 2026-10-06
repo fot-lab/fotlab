@@ -48,8 +48,9 @@ use crate::demosaic::bayer_cfa_desc;
 /// 0.5 each; a passed value is used as-is, clamped to 0..1 in the kernel).
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct LocaSettings {
-    /// Master switch: `false` short-circuits the whole LoCA stage.
-    #[uniffi(default = true)]
+    /// Master switch: defaults to `false` (short-circuit / off). `true` enables
+    /// the LoCA stage; `false` short-circuits it regardless of the pair switches.
+    #[uniffi(default = false)]
     pub enabled: bool,
     /// 去紫边 pair switch: run the magenta criteria + raise-G behaviour.
     #[uniffi(default = true)]

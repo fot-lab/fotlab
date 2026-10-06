@@ -26,11 +26,18 @@ use rawler::rawimage::CFAConfig;
 use crate::demosaic::bayer_cfa_desc;
 
 /// CA correction settings from Kotlin (the Studio LCA dialog). `None` = the
-/// stage is off. Mirrors `rawtrp_correct::CaParams`; `auto = true` runs pass 1
-/// (auto-fit measurement) each render, otherwise the manual radial strengths
-/// are used.
+/// stage is off (Kotlin does not pass the param). The master `enabled` switch
+/// defaults to `false` — so **LCA is short-circuited by default**; the Kotlin
+/// side must pass `enabled = true` explicitly to opt IN. When `enabled = true`,
+/// mirrors `rawtrp_correct::CaParams`; `auto = true` runs pass 1 (auto-fit
+/// measurement) each render, otherwise the manual radial strengths are used.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct CaSettings {
+  /// Master switch: defaults to `false` (short-circuit / off). `true` enables
+  /// the LCA stage; `false` short-circuits it regardless of the other fields.
+  /// `None` (no `CaSettings` passed at all) is also the identity/off.
+  #[uniffi(default = false)]
+  pub enabled: bool,
   /// Auto-fit the residual-CA polynomial (pass 1) instead of using the manual
   /// radial red/blue strengths. `true` = auto (upstream `autoCA`).
   #[uniffi(default = true)]
@@ -59,8 +66,13 @@ pub(crate) fn correct_ca(
   cfa: Option<&CFAConfig>,
 ) -> Vec<f32> {
   let Some(settings) = settings else {
-    return pixels; // switch OFF: identity, free
+    return pixels; // param not passed: stage OFF (identity), free
   };
+  if !settings.enabled {
+    // MASTER switch off: short-circuit the entire LCA stage — no auto-fit, no
+    // manual shift — regardless of the other fields. Explicit opt-in only.
+    return pixels;
+  }
   let Some(config) = cfa else {
     return pixels; // non-CFA input: nothing to correct
   };

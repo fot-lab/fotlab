@@ -723,6 +723,7 @@ fun StudioScreen() {
                         if (caEnabled) {
                             StudioEngine.setCa(
                                 CaSettings(
+                                    enabled = caEnabled,
                                     auto = caAuto,
                                     red = caRedInput.toFloatOrNull() ?: 0f,
                                     blue = caBlueInput.toFloatOrNull() ?: 0f,
@@ -783,7 +784,9 @@ fun StudioScreen() {
     // LoCA dialog: the two PEER switches (去紫边 / 去绿边) are the only user controls; strength and
     // luminance-threshold fields carry the platform defaults as placeholders and are editable only
     // while their pair switch is on. The master switch is derived, not shown: both off → loca = null
-    // (identity), either/both on → loca = Some(...). OK is always enabled.
+    // (identity; native short-circuit), either/both on → loca = Some(...) with `enabled` set to the
+    // derived master (purpleOn || greenOn). The Rust side defaults `enabled = false` (short-circuit),
+    // so a LoCA stage only ever runs when Kotlin explicitly opts in. OK is always enabled.
     if (showLocaDialog) {
         AlertDialog(
             onDismissRequest = { showLocaDialog = false },
@@ -795,7 +798,7 @@ fun StudioScreen() {
                         StudioEngine.setLoca(
                             if (purpleOn || greenOn) {
                                 LocaSettings(
-                                    enabled = true,
+                                    enabled = purpleOn || greenOn,
                                     purpleEnabled = purpleOn,
                                     greenEnabled = greenOn,
                                     purpleStrength = locaPurpleStrengthInput.toFloatOrNull() ?: 1.0f,
