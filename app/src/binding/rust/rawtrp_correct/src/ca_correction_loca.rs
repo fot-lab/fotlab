@@ -39,7 +39,12 @@
 //! current mosaic, and is correct whether or not LCA ran. Both peer pairs share
 //! this one detector.
 //!
-//! ## Algorithm (per G position, 0..1 linear mosaic domain, pre-WB)
+//! ## Algorithm (per G position, raw-linear mosaic domain, pre-WB)
+//!
+//! The mosaic is post-exposure-EV and may carry values **greater than 1.0**; that
+//! is allowed. LoCA must not assume `[0,1]` and must not clamp — it only shifts the
+//! G plane by a signed delta, leaving R/B untouched. Clamping happens once, at the
+//! display-side PNG encode.
 //!
 //! Shared per position: estimate R and B from the 4 orthogonal CFA neighbours;
 //! edge weight = `smoothstep(LOCA_EDGE_LO, LOCA_EDGE_HI, |diagonal G gradient|)`.
@@ -342,7 +347,11 @@ pub fn correct_loca_bayer(
             }
             let d = delta[row * w + col];
             if d != 0.0 {
-                let nv = (mosaic.at(row, col) + d).clamp(0.0, 1.0);
+                // No clamp here: the mosaic is post-EV raw-linear and may
+                // legitimately exceed 1.0. Clamping G to [0,1] would clip valid
+                // highlights and shift colour. The display-side PNG encoder is
+                // the single place that clamps.
+                let nv = mosaic.at(row, col) + d;
                 mosaic.set(row, col, nv);
             }
         }
