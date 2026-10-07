@@ -92,6 +92,11 @@ import io.github.fotlab.fotlab.R
 import io.github.fotlab.fotlab.feature.studio.StudioEngine
 import kotlinx.coroutines.launch
 import android.net.Uri
+import android.app.Activity
+import android.content.Intent
+import android.provider.DocumentsContract
+import androidx.compose.ui.platform.LocalContext
+import io.github.fotlab.fotlab.media.MediaPreference
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -185,11 +190,37 @@ fun LibraryScreen(
         LibraryCore.childrenOf(currentDirectoryId)
     }.collectAsState(initial = emptyList())
 
+    val context = LocalContext.current
+    val mediaPref = remember { MediaPreference(context) }
+    // Per-SAF "last document URI" for imports. The system picker only remembers one global last
+    // directory, so import shares the same remembered location as the Studio open-file action (both
+    // are "import into the library"). Feeding it back as EXTRA_INITIAL_URI keeps the import picker
+    // from fighting the LUT / LCP / DCP / export pickers over the same starting folder.
+    val lastImportUri by mediaPref.lastImportUri.collectAsState(initial = null)
+
     val importLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenMultipleDocuments(),
-    ) { uris ->
-        if (uris.isNotEmpty()) {
-            scope.launch { LibraryCore.importUris(currentDirectoryId, uris) }
+        contract = ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val picked = mutableListOf<Uri>()
+            result.data?.clipData?.let { clip ->
+                for (i in 0 until clip.itemCount) picked += clip.getItemAt(i).uri
+            } ?: result.data?.data?.let { picked += it }
+            if (picked.isNotEmpty()) {
+                // Remember read access across process death so the next import opens here.
+                picked.forEach { uri ->
+                    runCatching {
+                        context.contentResolver.takePersistableUriPermission(
+                            uri,
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                        )
+                    }
+                }
+                scope.launch {
+                    mediaPref.setLastImportUri(picked.first().toString())
+                    LibraryCore.importUris(currentDirectoryId, picked)
+                }
+            }
         }
     }
 
@@ -230,7 +261,18 @@ fun LibraryScreen(
                         // rotation can be scoped to it (R11).
                         onRefresh = { LibraryCore.refresh() },
                         onOpenDrawer = { scope.launch { drawerState.open() } },
-                        onImport = { importLauncher.launch(arrayOf("*/*")) },
+                        onImport = {
+                            importLauncher.launch(
+                                Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                                    addCategory(Intent.CATEGORY_OPENABLE)
+                                    type = "*/*"
+                                    putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+                                    lastImportUri?.let {
+                                        putExtra(DocumentsContract.EXTRA_INITIAL_URI, Uri.parse(it))
+                                    }
+                                },
+                            )
+                        },
                         onCreateCollection = {
                             scope.launch {
                                 LibraryCore.createCollection(
