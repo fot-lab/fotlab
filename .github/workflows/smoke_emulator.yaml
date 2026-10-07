@@ -286,7 +286,7 @@ jobs:
           log-artifact-name: ${{ inputs.log-artifact-name }}
           log-retention-days: ${{ inputs.log-retention-days }}
 
-  # -------- shard 2: identify / decode / load + open routes (18 tests) --------
+  # -------- shard 2: identify / decode / load + open routes (19 tests) --------
   test-image-loader:
     name: Smoke / test_image_loader
     # Switchboard — see test-app-smoke.
@@ -327,7 +327,7 @@ jobs:
           native-artifact-name: ${{ inputs.native-artifact-name }}
           shard: loader
           test-filter: ${{ env.TEST_FILTER }}
-          expected-tests: '18'
+          expected-tests: '19'
           need-raw: 'true'
           need-lut: 'false'
           test-timeout-minutes: '35'

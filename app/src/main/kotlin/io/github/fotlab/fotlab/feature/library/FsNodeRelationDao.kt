@@ -44,7 +44,7 @@ interface FsNodeRelationDao {
             "JOIN fs_node_relation AS r ON child.fs_node_id = r.fs_node_id_child " +
             "WHERE r.fs_node_id_parent = :parentId AND r.time_deleted IS NULL " +
             "AND child.time_deleted IS NULL " +
-            "ORDER BY child.time_created",
+            "ORDER BY child.time_created DESC, child.name_display ASC",
     )
     fun childrenOf(parentId: Long): Flow<List<FsNodeObject>>
 

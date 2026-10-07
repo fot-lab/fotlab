@@ -378,6 +378,84 @@ class PngEndToEndFlowTest {
         }
     }
 
+    /**
+     * Regression for the directory sort order (UX change 2026-10-07): live children of a directory
+     * must resolve to `ORDER BY child.time_created DESC, child.name_display ASC` — newest first, and
+     * when creation times tie, alphabetical ascending by `name_display`. Three nodes with distinct
+     * creation timestamps plus a pair sharing the same timestamp are linked to the root; the returned
+     * order is asserted to descend by time_created and, within the equal-time pair, to ascend by name.
+     * The assertion filters to just these five ids, so any other rows the shared library DB already
+     * holds cannot flip it.
+     */
+    @Test
+    fun libraryChildrenOrderedByTimeCreatedDescThenNameAsc() = runBlocking {
+        val older = LibraryCore.addNode("sort-older", "image/png", null, timeCreated = 100L)
+        val middle = LibraryCore.addNode("sort-middle", "image/png", null, timeCreated = 200L)
+        val newer = LibraryCore.addNode("sort-newer", "image/png", null, timeCreated = 300L)
+        // A pair that shares the same creation time exercises the secondary alphabetical tie-break.
+        val tieA = LibraryCore.addNode("sort-tie-a", "image/png", null, timeCreated = 400L)
+        val tieB = LibraryCore.addNode("sort-tie-b", "image/png", null, timeCreated = 400L)
+        LibraryCore.link(older, LibraryRoot.ID)
+        LibraryCore.link(middle, LibraryRoot.ID)
+        LibraryCore.link(newer, LibraryRoot.ID)
+        LibraryCore.link(tieA, LibraryRoot.ID)
+        LibraryCore.link(tieB, LibraryRoot.ID)
+
+        val ids = LibraryCore.childrenOf(LibraryRoot.ID).first().mapNotNull { it.fsNodeId }
+        assertTrue("newest node must sort before oldest (DESC time_created)", ids.indexOf(newer) < ids.indexOf(older))
+        assertTrue("newest node must sort before middle", ids.indexOf(newer) < ids.indexOf(middle))
+        assertTrue("middle node must sort before oldest", ids.indexOf(middle) < ids.indexOf(older))
+        // Equal time_created -> alphabetical ascending by name_display (a before b).
+        assertTrue("equal time_created sorts alphabetically (a before b)", ids.indexOf(tieA) < ids.indexOf(tieB))
+        // The equal-time pair sits after the strictly-newer node (300 < 400).
+        assertTrue("equal-time pair after strictly-newer node", ids.indexOf(tieA) > ids.indexOf(newer))
+
+        // Sweep the five probes (soft-delete) to keep the shared DB clean.
+        LibraryCore.enterSelectionMode(newer)
+        LibraryCore.selection.toggle(middle)
+        LibraryCore.selection.toggle(older)
+        LibraryCore.selection.toggle(tieA)
+        LibraryCore.selection.toggle(tieB)
+        LibraryCore.deleteSelected()
+        LibraryCore.exitSelectionMode()
+    }
+
+    /**
+     * Regression for the recycle-bin sort order (UX change 2026-10-07): `deletedNodesAt` resolves to
+     * `ORDER BY time_deleted DESC, name_display ASC`. Nodes deleted in the same batch share one
+     * `time_deleted`, so the secondary alphabetical key is what actually orders them. Three nodes with
+     * deliberately non-alphabetical names are soft-deleted in a single batch; within that batch they
+     * must come back ordered by `name_display` ascending. The assertion filters to just these three
+     * ids across all batches, so other deleted rows already in the shared DB cannot flip it.
+     */
+    @Test
+    fun recycleBinNodesOrderedByTimeDeletedDescThenNameAsc() = runBlocking {
+        // Names deliberately non-alphabetical so the secondary sort is observable.
+        val c = LibraryCore.addNode("rb-c", "image/png", null, timeCreated = 1L)
+        val a = LibraryCore.addNode("rb-a", "image/png", null, timeCreated = 2L)
+        val b = LibraryCore.addNode("rb-b", "image/png", null, timeCreated = 3L)
+        LibraryCore.link(c, LibraryRoot.ID)
+        LibraryCore.link(a, LibraryRoot.ID)
+        LibraryCore.link(b, LibraryRoot.ID)
+
+        // Soft-delete all three in ONE batch so they share the same time_deleted stamp.
+        LibraryCore.enterSelectionMode(c)
+        LibraryCore.selection.toggle(a)
+        LibraryCore.selection.toggle(b)
+        LibraryCore.deleteSelected()
+        LibraryCore.exitSelectionMode()
+
+        // Gather every deleted node across all batches and check the relative name order of our trio.
+        val batches = LibraryCore.deletedBatchTimes().first()
+        val allDeleted = batches.flatMap { LibraryCore.recycleBatchNodes(it).first() }
+            .mapNotNull { it.fsNodeId }
+        assertTrue("recycle bin orders by name when time_deleted ties (a before b)", allDeleted.indexOf(a) < allDeleted.indexOf(b))
+        assertTrue("recycle bin orders by name when time_deleted ties (b before c)", allDeleted.indexOf(b) < allDeleted.indexOf(c))
+
+        // Hard-delete the probes to keep the shared DB clean.
+        LibraryCore.deleteForever(listOf(c, a, b))
+    }
+
     // ---------------------------------------------------------------- 1+2: import & mapping
 
     /** Journey steps 1–2: import via the real entry, then prove the virtual mapping round-trips. */

@@ -95,7 +95,10 @@ interface FsNodeObjectDao {
     fun deletedBatchTimes(): Flow<List<Long>>
 
     /** All nodes soft-deleted in the batch stamped at [time] (the batch's content). */
-    @Query("SELECT * FROM fs_node_object WHERE time_deleted = :time ORDER BY name_display")
+    @Query(
+        "SELECT * FROM fs_node_object " +
+            "WHERE time_deleted = :time ORDER BY time_deleted DESC, name_display ASC",
+    )
     fun deletedNodesAt(time: Long): Flow<List<FsNodeObject>>
 
     /**
