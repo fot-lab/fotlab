@@ -393,8 +393,10 @@ class PngEndToEndFlowTest {
         val middle = LibraryCore.addNode("sort-middle", "image/png", null, timeCreated = 200L)
         val newer = LibraryCore.addNode("sort-newer", "image/png", null, timeCreated = 300L)
         // A pair that shares the same creation time exercises the secondary alphabetical tie-break.
-        val tieA = LibraryCore.addNode("sort-tie-a", "image/png", null, timeCreated = 400L)
-        val tieB = LibraryCore.addNode("sort-tie-b", "image/png", null, timeCreated = 400L)
+        // Their timestamp (150) is strictly older than `newer` (300), so in DESC order the pair sits
+        // after `newer` and before `older` (100) — keeping the relative assertions below unambiguous.
+        val tieA = LibraryCore.addNode("sort-tie-a", "image/png", null, timeCreated = 150L)
+        val tieB = LibraryCore.addNode("sort-tie-b", "image/png", null, timeCreated = 150L)
         LibraryCore.link(older, LibraryRoot.ID)
         LibraryCore.link(middle, LibraryRoot.ID)
         LibraryCore.link(newer, LibraryRoot.ID)
@@ -407,7 +409,7 @@ class PngEndToEndFlowTest {
         assertTrue("middle node must sort before oldest", ids.indexOf(middle) < ids.indexOf(older))
         // Equal time_created -> alphabetical ascending by name_display (a before b).
         assertTrue("equal time_created sorts alphabetically (a before b)", ids.indexOf(tieA) < ids.indexOf(tieB))
-        // The equal-time pair sits after the strictly-newer node (300 < 400).
+        // The equal-time pair (150) sits after the strictly-newer node (300) in DESC order.
         assertTrue("equal-time pair after strictly-newer node", ids.indexOf(tieA) > ids.indexOf(newer))
 
         // Sweep the five probes (soft-delete) to keep the shared DB clean.
