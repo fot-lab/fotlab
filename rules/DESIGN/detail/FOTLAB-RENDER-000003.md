@@ -1,11 +1,11 @@
-# Longitudinal CA (LoCA) Fringe Correction (Purple + Green) — Pre-Demosaic, Independent Edge Detection, G-Plane-Only Repair
+# Axial CA (ACA) Fringe Correction (Purple + Green) — Pre-Demosaic, Independent Edge Detection, G-Plane-Only Repair
 
 - ID: FOTLAB-RENDER-000003
 - Status: Draft
 - Priority: P2
 - Created: 2026-10-05
 - Owner: —
-- Related: FOTLAB-RAWLER-000011 (LCA / `CA_correct_RT` port), RAWTRP-SURVEY-000005 / -000006 (public LoCA / defringe survey), FOTLAB-RENDER-000002 (highlight recovery — distinguishes LoCA from clipped-G highlight fringe)
+- Related: FOTLAB-RAWLER-000011 (LCA / `CA_correct_RT` port), RAWTRP-SURVEY-000005 / -000006 (public ACA / defringe survey), FOTLAB-RENDER-000002 (highlight recovery — distinguishes ACA from clipped-G highlight fringe)
 
 ## Background & Goal
 
@@ -27,11 +27,11 @@ desaturate-R/B repair would.
 1. **Runs after LCA.** `correct_loca` is invoked immediately after `correct_ca` in the develop
    pipeline, before demosaic (`develop.rs`, between the `ca` and `demosaic` steps). It therefore
    sees the already-laterally-corrected mosaic.
-2. **Independent edge detection — always re-run.** The fringe is strictly edge-local. LoCA runs
+2. **Independent edge detection — always re-run.** The fringe is strictly edge-local. ACA runs
    its OWN high-contrast edge detection (a local G-gradient magnitude) on every render and does
    **not** reuse the LCA `detect_ca` result. Rationale (explicit user constraint): the user may
-   toggle LCA and LoCA independently (LCA off + LoCA on, or vice versa), so LoCA must be fully
-   self-contained and correct whether or not LCA ran. Reusing LCA's detection would make LoCA's
+   toggle LCA and ACA independently (LCA off + ACA on, or vice versa), so ACA must be fully
+   self-contained and correct whether or not LCA ran. Reusing LCA's detection would make ACA's
    behaviour silently depend on LCA's switch.
 3. **Detection + repair — two BOUND criteria+behaviour pairs.** Criteria and
    behaviour are one unit: a pair switch that is off means neither its criteria
@@ -68,7 +68,7 @@ desaturate-R/B repair would.
    siblings sharing one R/B estimate and one edge weight), not nested.
    Documented as an approximation (see Constraints).
 6. **Three gate switches.** `LocaSettings` carries (all uniffi-default on):
-   `enabled` — the **master switch**: `false` short-circuits the entire LoCA
+   `enabled` — the **master switch**: `false` short-circuits the entire ACA
    stage (no edge detection, no criteria, no repair), regardless of the pair
    switches (`DevelopParams.loca == None` short-circuits identically);
    `purple_enabled` — the 去紫边 pair switch; `green_enabled` — the 去绿边 pair
@@ -78,7 +78,7 @@ desaturate-R/B repair would.
 
 ## Constraints
 
-- **Domain is pre-WB.** LoCA runs where LCA runs — after dehaze/exposure, **before** white
+- **Domain is pre-WB.** ACA runs where LCA runs — after dehaze/exposure, **before** white
   balance (WB is applied later in `calibrate`). The RapidRAW source runs post-demosaic (WB
   applied). Therefore `purple_lum_min` / `green_lum_min` (default 0.5) and the `0.8 / 0.2`
   weights are interpreted in **raw-linear, pre-WB** space: the raw (camera-native) R/B vs G
@@ -93,7 +93,7 @@ desaturate-R/B repair would.
   must not be moved): it keeps R/B intact so no chroma is injected into R or B,
   but lowering G *darkens* the fringe, so the mirror risk is a **darker/dull
   edge** at genuinely-green content — the exact disadvantage the purple raise
-  avoids. In both cases the user can disable LoCA entirely (master switch) or
+  avoids. In both cases the user can disable ACA entirely (master switch) or
   either pair individually. These tradeoffs are repeated in the module's doc
   comment and in every user-facing description.
 - **Memory.** The implementation uses one O(W·H) `f32` signed delta buffer
@@ -103,10 +103,10 @@ desaturate-R/B repair would.
   correctness issue.
 - **Parallelism / safety.** Correction deltas are computed per G position into a
   disjoint delta buffer (rayon over rows), then applied sequentially. Writes are
-  disjoint. LoCA runs strictly AFTER LCA in the pipeline (LCA rewrites R/B by
-  radial shift; LoCA only ever touches the G plane) — sequential stages, no
+  disjoint. ACA runs strictly AFTER LCA in the pipeline (LCA rewrites R/B by
+  radial shift; ACA only ever touches the G plane) — sequential stages, no
   cross-stage coupling.
-- **Independent of LCA's detector.** LoCA must not read `detect_ca` output; it recomputes
+- **Independent of LCA's detector.** ACA must not read `detect_ca` output; it recomputes
   everything from the current mosaic.
 
 ## Acceptance Criteria
@@ -117,11 +117,11 @@ desaturate-R/B repair would.
 - The mirror case: a bright two-tone edge carrying a green excess (g > max(r,b), bright) at
   G positions has those G positions lowered toward max(r,b) after `correct_loca_bayer`.
 - R/B planes are byte-identical before and after `correct_loca_bayer` in every scenario
-  (explicit user constraint — LoCA only ever touches G).
+  (explicit user constraint — ACA only ever touches G).
 - Pair switches are bound: with `purple_enabled == false` no G position is ever raised; with
   `green_enabled == false` no G position is ever lowered; with both off (or the master
   `enabled == false`, or `loca == None`) the stage is an exact identity.
-- With `loca` enabled and LCA disabled, LoCA still detects and repairs the fringe (proves the
+- With `loca` enabled and LCA disabled, ACA still detects and repairs the fringe (proves the
   detector is independent of LCA).
 - Non-Bayer / odd-width input returns `Error` and the orchestration passes the mosaic through
   unchanged (degrade, not fail).
@@ -145,18 +145,18 @@ desaturate-R/B repair would.
 ## Open Questions
 
 - **WB domain.** Thresholds are pre-WB (raw-linear). A post-WB variant would match RapidRAW
-  exactly but requires running LoCA after `calibrate` (post-demosaic), which breaks the
+  exactly but requires running ACA after `calibrate` (post-demosaic), which breaks the
   "pre-demosaic, independent-of-LCA-detection" shape and the CFA-mosaic contract. Keep pre-WB;
   revisit only if field testing shows the pre-WB gate mis-fires on strongly-WB'd sensors.
 - **Kotlin UI toggle.** The `loca` field exists and is `Option` (default `None`), so existing
   Kotlin `DevelopParams(...)` call sites stay compile-green without changes. Wiring a Studio
-  LoCA on/off control + passing `LocaSettings` is a separate UI task (out of scope here).
+  ACA on/off control + passing `LocaSettings` is a separate UI task (out of scope here).
 - **Thresholds `LOCA_EDGE_LO/HI`.** Chosen in 0..1 gradient units (0.01 / 0.08). Tunable; field
   testing on real purple-fringe samples may widen/narrow the edge band.
 
 ## Change History
 
-- 2026-10-05 — Created (Draft). Spec for the standalone LoCA / purple-fringe pre-demosaic stage:
+- 2026-10-05 — Created (Draft). Spec for the standalone ACA / purple-fringe pre-demosaic stage:
   independent edge detection (never reuses LCA's `detect_ca`), runs after LCA, RapidRAW
   min(r,b)>g + luminance gate with raise-G repair, and the documented false-colour-vs-dark-edge
   tradeoff.
@@ -167,7 +167,7 @@ desaturate-R/B repair would.
   switch `enabled` short-circuits the whole stage. Tradeoff extended to both pairs; two delta
   buffers (~800 MB @ 100 MP) noted in Memory.
 - 2026-10-05 — Revised again (Draft, user-directed). 去绿边 behaviour corrected to **lower G**
-  (was raise-R/B): LoCA never touches the R/B planes in any scenario (explicit constraint),
+  (was raise-R/B): ACA never touches the R/B planes in any scenario (explicit constraint),
   the two pairs are PEER branches under the master switch (`purple_delta`/`green_delta`
   siblings sharing one estimate + one edge weight, no deep nesting), and both evaluate at G
   positions with a single signed delta buffer (~400 MB @ 100 MP). Green-pair tradeoff

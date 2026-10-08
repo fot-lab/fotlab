@@ -5,7 +5,7 @@
 - Priority: P3
 - Created: 2026-10-08
 - Owner: —
-- Related: [`FOTLAB-RAWLER-000011`](FOTLAB-RAWLER-000011.md) (rawtrp_correct — faithful port of RawTherapee `CA_correct_RT`, both passes), [`FOTLAB-RAWLER-000020`](FOTLAB-RAWLER-000020.md) (LoCA purple/green fringe — peer CA stage sharing the same CFA-domain contract), [`FOTLAB-RAWLER-000009`](FOTLAB-RAWLER-000009.md) (pre-demosaic slot — the input domain this runs in)
+- Related: [`FOTLAB-RAWLER-000011`](FOTLAB-RAWLER-000011.md) (rawtrp_correct — faithful port of RawTherapee `CA_correct_RT`, both passes), [`FOTLAB-RAWLER-000020`](FOTLAB-RAWLER-000020.md) (ACA purple/green fringe — peer CA stage sharing the same CFA-domain contract), [`FOTLAB-RAWLER-000009`](FOTLAB-RAWLER-000009.md) (pre-demosaic slot — the input domain this runs in)
 
 ## Background & Goal
 
@@ -27,7 +27,7 @@ A separate, block-level consistency check (`ca_correction_lca.rs:1364`–`1368`)
 
 ## Impact / Conflict
 
-No conflict and no action required. The behaviour is the expected, correct design for a pre-demosaic CFA stage: luma is the green channel, and there is deliberately no YUV/LAB conversion. The only risk is a *reader* misconception — anyone expecting a YUV/LAB luma would mis-model it; this note records the actual (green-channel) definition so downstream tuning of `caAutostrength` / the `gradwt` formula reasons about the right signal. It is consistent with `FOTLAB-RAWLER-000020` (LoCA), which shares the same CFA-domain, green-as-luminance approach.
+No conflict and no action required. The behaviour is the expected, correct design for a pre-demosaic CFA stage: luma is the green channel, and there is deliberately no YUV/LAB conversion. The only risk is a *reader* misconception — anyone expecting a YUV/LAB luma would mis-model it; this note records the actual (green-channel) definition so downstream tuning of `caAutostrength` / the `gradwt` formula reasons about the right signal. It is consistent with `FOTLAB-RAWLER-000020` (ACA), which shares the same CFA-domain, green-as-luminance approach.
 
 ## Recommendation
 

@@ -26,5 +26,5 @@ This file contains **only** the item table. No statistics, no changelog — git 
 | `FOTLAB-NATIVE-000005` | RawTherapee DCP/LCP parser (extend existing `rawtherapee_fotlab` cxx) + Camera/Lens Profile correction in develop pipeline | `NATIVE` | Draft | P1 | [detail](rules/DESIGN/detail/FOTLAB-NATIVE-000005.md) |
 | `FOTLAB-RENDER-000001` | OKLab highlight-chroma compression — short-circuitable camera-space bypass in `calibrate` | `RENDER` | Draft | P1 | [detail](rules/DESIGN/detail/FOTLAB-RENDER-000001.md) |
 | `FOTLAB-RENDER-000002` | Highlight recovery (HLRecovery) port feasibility — RT five variants in two tiers; per-pixel tier fits the OKLab camera-space fold | `RENDER` | Draft | P2 | [detail](rules/DESIGN/detail/FOTLAB-RENDER-000002.md) |
-| `FOTLAB-RENDER-000003` | Longitudinal CA (LoCA) / purple-fringe — pre-demosaic, independent edge detection, RapidRAW raise-G repair | `RENDER` | Draft | P2 | [detail](rules/DESIGN/detail/FOTLAB-RENDER-000003.md) |
+| `FOTLAB-RENDER-000003` | Axial CA (ACA) / purple-fringe — pre-demosaic, independent edge detection, RapidRAW raise-G repair | `RENDER` | Draft | P2 | [detail](rules/DESIGN/detail/FOTLAB-RENDER-000003.md) |
 <!-- Next sequence per category: UIXDES 000007, DATABS 000003, NATIVE 000006, IMGMGR 000002, PIPELN 000002, RENDER 000004. Append one row per new item; never reuse or renumber IDs. -->

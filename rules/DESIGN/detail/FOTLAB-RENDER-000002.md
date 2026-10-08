@@ -5,7 +5,7 @@
 - Priority: P2
 - Created: 2026-10-04
 - Owner: —
-- Related: FOTLAB-RENDER-000001 (OKLab highlight-chroma compression bypass), FOTLAB-RAWLER-000018 (magenta root cause, REVIEW), RAWTRP-SURVEY-000005 (LOCA in the OKLab bypass, STRUCT)
+- Related: FOTLAB-RENDER-000001 (OKLab highlight-chroma compression bypass), FOTLAB-RAWLER-000018 (magenta root cause, REVIEW), RAWTRP-SURVEY-000005 (ACA in the OKLab bypass, STRUCT)
 
 ## Background & Goal
 

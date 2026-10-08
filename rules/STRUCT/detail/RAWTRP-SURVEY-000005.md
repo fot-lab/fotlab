@@ -1,20 +1,20 @@
-# External module study — LOCA (axial CA / purple-fringe) correction transposed into our OKLab/Oklch bypass
+# External module study — ACA (axial CA / purple-fringe) correction transposed into our OKLab/Oklch bypass
 
 > **Naming**: `RAWTRP-` project code (RawTherapee) + six-character `SURVEY` category. Lives under `rules/STRUCT/detail/` because `STRUCT.md` principle 5 treats `external/` modules as fixed constraints to be documented, not modified. The *subject* of the study is our own OKLab/Oklch highlight-compression bypass (`FOTLAB-RENDER-000001`), but the two reference algorithms come from RawTherapee and RapidRAW, so the `RAWTRP-` prefix stays (ID is permanent; scope can widen without renaming).
 >
-> **Scope**: research only — **no code change**. Goal: how RawTherapee (`PF_correct_RT`) and RapidRAW (`recover_clipped_pixel`) implement LOCA / purple-fringe correction, and how the *same* correction can be expressed inside our existing OKLab/Oklch camera-space bypass, where Oklab/Oklch is a better coordinate than the CIELAB/CIECAM02 the references use. Distinct from LCA (lateral CA), which is already ported.
+> **Scope**: research only — **no code change**. Goal: how RawTherapee (`PF_correct_RT`) and RapidRAW (`recover_clipped_pixel`) implement ACA / purple-fringe correction, and how the *same* correction can be expressed inside our existing OKLab/Oklch camera-space bypass, where Oklab/Oklch is a better coordinate than the CIELAB/CIECAM02 the references use. Distinct from LCA (lateral CA), which is already ported.
 
-## Background — what LOCA is, and the terminology trap
+## Background — what ACA is, and the terminology trap
 
-- **LOCA = Longitudinal / Axial Chromatic Aberration** = *axial dispersion*. Different wavelengths focus at different distances, so at a hard bright↔dark edge the in-focus wavelength band differs between the two sides of the edge. Visible as **hue fringing**: magenta on one side, green on the other, concentrated where scene contrast is high. Also called **purple/green fringing**.
+- **ACA = Axial Chromatic Aberration** = *axial dispersion*. Different wavelengths focus at different distances, so at a hard bright↔dark edge the in-focus wavelength band differs between the two sides of the edge. Visible as **hue fringing**: magenta on one side, green on the other, concentrated where scene contrast is high. Also called **purple/green fringing**.
 - **LCA = Lateral / Transverse Chromatic Aberration** = *geometric* red/blue misregistration (radial scaling difference). This is the part already ported — in RapidRAW it is `chromaticAberrationRedCyan` / `chromaticAberrationBlueYellow` (`ca_rc` / `ca_by`, `shader.wgsl:1713-1718`, applied via `apply_ca_correction`); in our tree it is the ported lateral-CA pass. **Not** the subject of this study.
 - **Colloquial "purple fringing" conflates two distinct phenomena** (important for scoping):
   1. **True axial CA** at focus edges — hue fringe with a *local chroma gradient* (edge-aware detector needed).
   2. **Clipped-highlight chromatic bleed** (sensor bloom): in a near-clipped highlight, R and B clip but G does not, leaving magenta. This is *not* axial CA; it is a highlight-encoding artifact. It is what RapidRAW's `recover_clipped_pixel` fixes, and **it is already partially covered by our bypass's global highlight-chroma roll-off** (`FOTLAB-RENDER-000001`).
 
-The value of this study: (a) the two reference algorithms give us two *families* of LOCA correction; (b) our OKLab/Oklch bypass is the ideal place to host either/both, because it is already a transparent camera-space-in/out, D65-anchored, OKLab round trip.
+The value of this study: (a) the two reference algorithms give us two *families* of ACA correction; (b) our OKLab/Oklch bypass is the ideal place to host either/both, because it is already a transparent camera-space-in/out, D65-anchored, OKLab round trip.
 
-## Chapter 1 — RawTherapee LOCA: `PF_correct_RT` ("Defringe in Lab mode")
+## Chapter 1 — RawTherapee ACA: `PF_correct_RT` ("Defringe in Lab mode")
 
 Source: `external/RawTherapee/rtengine/PF_correct_RT.cc:51-214`. (Sibling `PF_correct_RTcam` at `:217` is the identical algorithm in CIECAM02 LCh; `Badpixelscam`/`BadpixelsLab` at `:434`/`:867` reuse the same detector for chroma bad-pixel filtering.)
 
@@ -32,12 +32,12 @@ Verified step-by-step:
 
 **Takeaway**: the entire kernel is a blur-diff detector + weighted-a,b replacement. Every step operates on `(a,b)` opponent axes or on `L` alone — no CIELAB-specific constant except the *threshold calibration* (`thresh/33`, `5.0`), which is tuned for CIELAB's `a,b` magnitude (order 10²). Those constants must be re-derived for Oklab scale, but the *structure* is identical.
 
-## Chapter 2 — RapidRAW LOCA: `recover_clipped_pixel`
+## Chapter 2 — RapidRAW ACA: `recover_clipped_pixel`
 
-Source: `external/RapidRAW/src-tauri/src/raw_processing.rs:60-100+`. This is the only LOCA-adjacent routine in RapidRAW; it lives in **linear RGB**, not Lab/LCH.
+Source: `external/RapidRAW/src-tauri/src/raw_processing.rs:60-100+`. This is the only ACA-adjacent routine in RapidRAW; it lives in **linear RGB**, not Lab/LCH.
 
 - **Detector**: `let magenta = (cur_r.min(cur_b) − cur_g).max(0.0);` (`:74`). Magenta = R and B high, G low.
-- **Highlight gate**: `outer_blend = smootherstep(0.50, 1.5, max_c);` (`:72`); the correction only fires when `max_c > 0.50` (near-clipped highlight) — i.e. it targets phenomenon (2) above, the clipped-highlight bloom, not true edge LOCA.
+- **Highlight gate**: `outer_blend = smootherstep(0.50, 1.5, max_c);` (`:72`); the correction only fires when `max_c > 0.50` (near-clipped highlight) — i.e. it targets phenomenon (2) above, the clipped-highlight bloom, not true edge ACA.
 - **Correction**: lift G toward `min(R,B)*0.80 + (R+B)/2*0.20` (`:76-78`), then a residual loop (`:81-84`). This directly desaturates the magenta in RGB.
 
 Supporting evidence that RapidRAW thinks in hue bands for these colours:
@@ -46,7 +46,7 @@ Supporting evidence that RapidRAW thinks in hue bands for these colours:
 - `ca_rc` / `ca_by` (`:1713-1718`) are **lateral CA**, already ported — excluded here.
 - `shader.wgsl:1670-1698` (`halation`) is an *artistic* glow, not a correction.
 
-**Takeaway**: RapidRAW's approach is the *highlight-gated magenta suppression* family — per-pixel, RGB-domain, no edge awareness. It solves phenomenon (2) cleanly; it does not address true edge LOCA (1).
+**Takeaway**: RapidRAW's approach is the *highlight-gated magenta suppression* family — per-pixel, RGB-domain, no edge awareness. It solves phenomenon (2) cleanly; it does not address true edge ACA (1).
 
 ## Chapter 3 — Our OKLab/Oklch bypass (`FOTLAB-RENDER-000001`)
 
@@ -70,9 +70,9 @@ scale = 1 - f
 lab2 = [l, a*scale, b*scale]                   // keep L & hue, shrink C
 xyz2 = oklab_to_xyz(lab2); return xyz2cam_eff · xyz2
 ```
-The test `bypass_reduces_chroma_on_highlight` (`:476-490`) feeds XYZ `[1.0, 0.78, 1.0]` (sRGB magenta cast) and asserts `C` shrinks — i.e. **the bypass already desaturates magenta in highlights**. But it is a **global `L`-knee**, not edge-aware: it desaturates *every* high-lightness chroma pixel, not only genuine fringe. So it covers phenomenon (2) and leaves true edge LOCA (1) unaddressed.
+The test `bypass_reduces_chroma_on_highlight` (`:476-490`) feeds XYZ `[1.0, 0.78, 1.0]` (sRGB magenta cast) and asserts `C` shrinks — i.e. **the bypass already desaturates magenta in highlights**. But it is a **global `L`-knee**, not edge-aware: it desaturates *every* high-lightness chroma pixel, not only genuine fringe. So it covers phenomenon (2) and leaves true edge ACA (1) unaddressed.
 
-This is the key architectural hook: **LOCA correction is an extra stage inside the same OKLab/Oklch round trip** — after `xyz_to_oklab`, before `oklab_to_xyz` — reusing `cam2xyz`/`xyz2cam_eff`/`m1_inv`/`m2_inv`. No new colour-space machinery needed.
+This is the key architectural hook: **ACA correction is an extra stage inside the same OKLab/Oklch round trip** — after `xyz_to_oklab`, before `oklab_to_xyz` — reusing `cam2xyz`/`xyz2cam_eff`/`m1_inv`/`m2_inv`. No new colour-space machinery needed.
 
 ## Chapter 4 — Why Oklab/Oklch beats CIELAB/CIECAM02 here
 
@@ -82,7 +82,7 @@ This is the key architectural hook: **LOCA correction is an extra stage inside t
 
 ## Chapter 5 — Two design options inside the bypass
 
-### Option A — Edge-aware (RawTherapee family, true LOCA / phenomenon 1)
+### Option A — Edge-aware (RawTherapee family, true ACA / phenomenon 1)
 Add a local `(a,b)` window inside the round trip:
 1. separable Gaussian blur of Oklab `a,b` over the full image (two extra full-res `f32` buffers, the Oklab analogue of RT's `tmpa`/`tmpb`);
 2. `chroma = (a−tmpa)² + (b−tmpb)²`;
@@ -100,7 +100,7 @@ Per-pixel, fits the current design with no second pass. Add a hue gate `h ∈ [2
 > Oklab's cleaner hue does **not** remove this ambiguity — it only makes a hue *modulator* more stable. The fold's current `L`-knee is already safe (luminance-gated); if a hue gate is added it must keep the clip/edge condition as the **primary** trigger and treat hue as an `AND` qualifier only. See the corresponding constraint in `FOTLAB-RENDER-000002`.
 
 ### Hybrid (recommended research direction)
-Ship **B first** (cheap; covers clipped-highlight bloom, the most common "purple fringe" complaint) and **A later** (covers true edge LOCA). Both live in the same OKLab/Oklch round trip, so LOCA becomes one transparent stage instead of two scattered fixes.
+Ship **B first** (cheap; covers clipped-highlight bloom, the most common "purple fringe" complaint) and **A later** (covers true edge ACA). Both live in the same OKLab/Oklch round trip, so ACA becomes one transparent stage instead of two scattered fixes.
 
 ## Constraints (STRUCT.md principle 5)
 
@@ -108,13 +108,13 @@ Ship **B first** (cheap; covers clipped-highlight bloom, the most common "purple
 
 ## Open Questions
 
-- **Q1** — Which family first: B (cheap, covers bloom) or A (true edge LOCA)?
+- **Q1** — Which family first: B (cheap, covers bloom) or A (true edge ACA)?
 - **Q2** — For A, what default blur `radius` (RT's default is small, ~1–2 px)? And separable vs. box?
-- **Q3** — Should LOCA be a *sub-stage* of the existing highlight-compression bypass, or a *sibling* stage with its own gate?
+- **Q3** — Should ACA be a *sub-stage* of the existing highlight-compression bypass, or a *sibling* stage with its own gate?
 - **Q4** — True axial CA also carries a luminance envelope; RT leaves `L` alone (chromatic-only). Should we also damp `L` at detected fringe pixels?
 - **Q5** — Hue-gate window for "purple/magenta": Oklch `[260°,340°]` or wider (RapidRAW uses 280°±55 and 330°±50)?
 
 ## Change History
 
-- **2026-10-04** — Filed `RAWTRP-SURVEY-000005`. Research only (no code). Established: (1) LOCA ≠ LCA; LCA already ported, LOCA = axial/purple-fringe. (2) RT's `PF_correct_RT` (PF_correct_RT.cc:51-214) = blur-diff chroma detector + chroma-weighted a,b average, CIELAB/CIECAM02, with a `huelab_to_huehsv2` hue remap. (3) RapidRAW's `recover_clipped_pixel` (raw_processing.rs:60-100+) = RGB-domain, highlight-gated magenta suppressor (clipped-highlight bloom, not true edge LOCA); `ca_rc`/`ca_by` = lateral CA (already ported). (4) Our `FOTLAB-RENDER-000001` OKLab highlight-compression bypass (calibrate.rs:120-166,385-415) already desaturates magenta highlights via a global `L`-knee but is not edge-aware. (5) Oklab/Oklch is better for this: chroma uniformity cuts false positives, clean `h` removes the hue remap, vector-average is more perceptual. (6) Two design options — A edge-aware (RT port, needs second pass) and B hue-gated (RapidRAW-style, per-pixel) — proposed as a hybrid, both hosted in the same OKLab/Oklch round trip.
+- **2026-10-04** — Filed `RAWTRP-SURVEY-000005`. Research only (no code). Established: (1) ACA ≠ LCA; LCA already ported, ACA = axial/purple-fringe. (2) RT's `PF_correct_RT` (PF_correct_RT.cc:51-214) = blur-diff chroma detector + chroma-weighted a,b average, CIELAB/CIECAM02, with a `huelab_to_huehsv2` hue remap. (3) RapidRAW's `recover_clipped_pixel` (raw_processing.rs:60-100+) = RGB-domain, highlight-gated magenta suppressor (clipped-highlight bloom, not true edge ACA); `ca_rc`/`ca_by` = lateral CA (already ported). (4) Our `FOTLAB-RENDER-000001` OKLab highlight-compression bypass (calibrate.rs:120-166,385-415) already desaturates magenta highlights via a global `L`-knee but is not edge-aware. (5) Oklab/Oklch is better for this: chroma uniformity cuts false positives, clean `h` removes the hue remap, vector-average is more perceptual. (6) Two design options — A edge-aware (RT port, needs second pass) and B hue-gated (RapidRAW-style, per-pixel) — proposed as a hybrid, both hosted in the same OKLab/Oklch round trip.
 - **2026-10-05** — Added a caveat to Option B: a *pure* hue-band gate (`h ∈ [260°,340°]`) false-positives on legitimate purple objects; both references gate on clip/edge (RT blur-diff chroma `PF_correct_RT.cc:117` with hue only as modulator `:108`; RapidRAW `max_c>0.5` + `min(R,B)−G` signature `raw_processing.rs:64,74`, with `tagging.rs:110` purple tag being classification-only). Oklab's clean hue does not resolve the ambiguity; hue must be an AND-qualifier, never the sole trigger. Cross-linked to the new constraint in `FOTLAB-RENDER-000002`.

@@ -5,7 +5,7 @@
 - Priority: P3
 - Created: 2026-10-08
 - Owner: —
-- Related: [`FOTLAB-RAWLER-000011`](FOTLAB-RAWLER-000011.md) (pre-demosaic LCA/CA stage — our LCA lives here), [`FOTLAB-RAWLER-000021`](FOTLAB-RAWLER-000021.md) (ca_correction_lca brightness-edge survey), [`FOTLAB-RAWLER-000020`](FOTLAB-RAWLER-000020.md) (LoCA purple/green fringe — our longitudinal-CA coverage), [`FOTLAB-RAWLER-000009`](FOTLAB-RAWLER-000009.md) (pre-demosaic slot convention)
+- Related: [`FOTLAB-RAWLER-000011`](FOTLAB-RAWLER-000011.md) (pre-demosaic LCA/CA stage — our LCA lives here), [`FOTLAB-RAWLER-000021`](FOTLAB-RAWLER-000021.md) (ca_correction_lca brightness-edge survey), [`FOTLAB-RAWLER-000020`](FOTLAB-RAWLER-000020.md) (ACA purple/green fringe — our axial-CA coverage), [`FOTLAB-RAWLER-000009`](FOTLAB-RAWLER-000009.md) (pre-demosaic slot convention)
 
 ## Background & Goal
 
