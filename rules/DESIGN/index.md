@@ -27,4 +27,5 @@ This file contains **only** the item table. No statistics, no changelog — git 
 | `FOTLAB-RENDER-000001` | OKLab highlight-chroma compression — short-circuitable camera-space bypass in `calibrate` | `RENDER` | Draft | P1 | [detail](rules/DESIGN/detail/FOTLAB-RENDER-000001.md) |
 | `FOTLAB-RENDER-000002` | Highlight recovery (HLRecovery) port feasibility — RT five variants in two tiers; per-pixel tier fits the OKLab camera-space fold | `RENDER` | Draft | P2 | [detail](rules/DESIGN/detail/FOTLAB-RENDER-000002.md) |
 | `FOTLAB-RENDER-000003` | Axial CA (ACA) / purple-fringe — pre-demosaic, independent edge detection, RapidRAW raise-G repair | `RENDER` | Draft | P2 | [detail](rules/DESIGN/detail/FOTLAB-RENDER-000003.md) |
-<!-- Next sequence per category: UIXDES 000007, DATABS 000003, NATIVE 000006, IMGMGR 000002, PIPELN 000002, RENDER 000004. Append one row per new item; never reuse or renumber IDs. -->
+| `FOTLAB-RENDER-000004` | Shearlet-domain CA correction — unified LCA + ACA, post-demosaic RGB, Li & Jin (ACCV 2020) | `RENDER` | Draft | P2 | [detail](rules/DESIGN/detail/FOTLAB-RENDER-000004.md) |
+<!-- Next sequence per category: UIXDES 000007, DATABS 000003, NATIVE 000006, IMGMGR 000002, PIPELN 000002, RENDER 000005. Append one row per new item; never reuse or renumber IDs. -->
