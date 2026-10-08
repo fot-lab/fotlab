@@ -118,9 +118,9 @@
     <string name="studio_label_lcp">镜头</string>
     <string name="studio_label_format">格式</string>
     <string name="studio_ca_title">LCA（径向色差校正）</string>
-    <string name="studio_cd_loca">LoCA（轴向色差校正）</string>
-    <string name="studio_label_loca">LoCA</string>
-    <string name="studio_loca_title">LoCA（轴向色差校正）</string>
+    <string name="studio_cd_loca">ACA（轴向色差校正）</string>
+    <string name="studio_label_loca">ACA</string>
+    <string name="studio_loca_title">ACA（轴向色差校正）</string>
     <string name="studio_loca_body">轴向色差矫正</string>
     <string name="studio_loca_purple_label">去紫边</string>
     <string name="studio_loca_green_label">去绿边</string>
