@@ -2,81 +2,29 @@ package io.github.fotlab.fotlab.feature.studio
 
 import android.app.Activity
 import android.content.Context
-import android.content.Intent
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.net.Uri
-import android.provider.DocumentsContract
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.background
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AllOut
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.AddPhotoAlternate
-import androidx.compose.material.icons.filled.Exposure
-import androidx.compose.material.icons.filled.Gradient
-import androidx.compose.material.icons.filled.IosShare
-import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.RawOff
-import androidx.compose.material.icons.filled.RawOn
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Contrast
-import androidx.compose.material.icons.filled.MovieFilter
-import androidx.compose.material.icons.filled.PhotoFilter
-import androidx.compose.material.icons.filled.Theaters
-import androidx.compose.material.icons.filled.Tonality
-import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material.icons.filled.Air
-import androidx.compose.material.icons.filled.ClosedCaption
-import androidx.compose.material.icons.filled.ClosedCaptionOff
-import androidx.compose.material.icons.filled.Grain
-import androidx.compose.material.icons.filled.WbAuto
-import androidx.compose.material.icons.filled.PhotoCamera
-import androidx.compose.material.icons.filled.Camera
-import androidx.compose.material.icons.filled.Flare
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalDrawerSheet
-import androidx.compose.material3.ModalNavigationDrawer
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TextField
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -87,7 +35,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.compose.runtime.collectAsState
 import coil3.request.ImageRequest
 import io.github.fotlab.fotlab.R
 import io.github.fotlab.fotlab.feature.library.LibraryCore
@@ -100,18 +47,14 @@ import io.github.fotlab.fotlab.ui.icons.MeteringCenterAsteriskMatrix
 import io.github.fotlab.fotlab.ui.icons.MeteringCenterWeighted
 import io.github.fotlab.fotlab.ui.icons.MeteringMatrixAverage
 import io.github.fotlab.fotlab.ui.icons.MeteringMatrixSpot
-import io.github.fotlab.fotlab.ui.icons.MovieEdit
 import io.github.fotlab.fotlab.ui.operation.HorizontalOperationBar
 import io.github.fotlab.fotlab.ui.operation.OperationalButton
 import io.github.fotlab.fotlab.ui.rememberZoomState
 import io.github.fotlab.fotlab_rawler.CaSettings
-import io.github.fotlab.fotlab_rawler.LocaSettings
 import io.github.fotlab.fotlab_rawler.DehazeMergeMode
-import io.github.fotlab.fotlab_rawler.DemosaicCandidate
+import io.github.fotlab.fotlab_rawler.LocaSettings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import java.io.ByteArrayOutputStream
-import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -653,1675 +596,234 @@ fun StudioScreen() {
     }
 
     if (showLcpFocalDialog) {
-        AlertDialog(
-            onDismissRequest = { showLcpFocalDialog = false },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        // Empty input → clear the override (fall back to decoded-RAW → LCP built-in → constant).
-                        val mm = lcpFocalInput.toFloatOrNull()
-                        StudioEngine.setLensProfileUserFocal(mm)
-                        showLcpFocalDialog = false
-                    },
-                ) {
-                    Text(text = stringResource(id = R.string.common_action_ok))
-                }
+        LcpFocalDialog(
+            value = lcpFocalInput,
+            onValueChange = { lcpFocalInput = it.filter { ch -> ch.isDigit() || ch == '.' } },
+            rawFocalLengthMm = rawFocalLengthMm,
+            onConfirm = {
+                StudioEngine.setLensProfileUserFocal(lcpFocalInput.toFloatOrNull())
+                showLcpFocalDialog = false
             },
-            dismissButton = {
-                TextButton(onClick = { showLcpFocalDialog = false }) {
-                    Text(text = stringResource(id = R.string.common_action_cancel))
-                }
-            },
-            title = { Text(text = stringResource(id = R.string.studio_lcp_focal_title)) },
-            text = {
-                Column {
-                    Text(
-                        text = stringResource(
-                            id = R.string.studio_lcp_focal_hint,
-                            rawFocalLengthMm?.let { "%.0f".format(it) }
-                                ?: stringResource(id = R.string.studio_lcp_focal_unknown),
-                            StudioEngine.defaultLcpFocalMm.toInt(),
-                        ),
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    TextField(
-                        value = lcpFocalInput,
-                        onValueChange = { lcpFocalInput = it.filter { ch -> ch.isDigit() || ch == '.' } },
-                        label = { Text(text = stringResource(id = R.string.studio_lcp_focal_unit)) },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    )
-                }
-            },
+            onDismiss = { showLcpFocalDialog = false },
         )
     }
 
     if (showUnsupported) {
-        AlertDialog(
-            onDismissRequest = { showUnsupported = false },
-            confirmButton = {
-                TextButton(onClick = { showUnsupported = false }) {
-                    Text(text = stringResource(id = R.string.common_action_ok))
-                }
-            },
-            title = { Text(text = stringResource(id = R.string.studio_unsupported_title)) },
-            text = { Text(text = stringResource(id = R.string.studio_unsupported_format)) },
-        )
+        UnsupportedDialog(onDismiss = { showUnsupported = false })
     }
 
-    // LCA dialog: the enable switch has priority over the parameters — when OFF the stage is
-    // skipped (ca = null → native identity) regardless of the fields; when ON, auto mode fits the
-    // residual-CA polynomial on the native side and the manual red/blue radial strengths are
-    // ignored. OK is always enabled: auto mode needs no numbers, and an empty manual field parses
-    // to 0 (= no shift for that channel).
     if (showCaDialog) {
-        AlertDialog(
-            onDismissRequest = { showCaDialog = false },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        if (caEnabled) {
-                            StudioEngine.setCa(
-                                CaSettings(
-                                    enabled = caEnabled,
-                                    auto = caAuto,
-                                    red = caRedInput.toFloatOrNull() ?: 0f,
-                                    blue = caBlueInput.toFloatOrNull() ?: 0f,
-                                    avoidColourshift = false,
-                                ),
-                            )
-                        } else {
-                            StudioEngine.setCa(null)
-                        }
-                        showCaDialog = false
-                    },
-                ) {
-                    Text(text = stringResource(id = R.string.common_action_ok))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showCaDialog = false }) {
-                    Text(text = stringResource(id = R.string.common_action_cancel))
-                }
-            },
-            title = { Text(text = stringResource(id = R.string.studio_ca_title)) },
-            text = {
-                Column {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(text = stringResource(id = R.string.studio_enable_stage))
-                        Spacer(modifier = Modifier.weight(1f))
-                        Switch(checked = caEnabled, onCheckedChange = { caEnabled = it })
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(text = stringResource(id = R.string.studio_ca_auto_label))
-                        Spacer(modifier = Modifier.weight(1f))
-                        Switch(checked = caAuto, onCheckedChange = { caAuto = it }, enabled = caEnabled)
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    TextField(
-                        value = caRedInput,
-                        onValueChange = { caRedInput = it },
-                        enabled = caEnabled && !caAuto,
-                        singleLine = true,
-                        placeholder = { Text(text = stringResource(id = R.string.studio_ca_red_hint)) },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+        CaDialog(
+            enabled = caEnabled,
+            onEnabledChange = { caEnabled = it },
+            auto = caAuto,
+            onAutoChange = { caAuto = it },
+            red = caRedInput,
+            onRedChange = { caRedInput = it },
+            blue = caBlueInput,
+            onBlueChange = { caBlueInput = it },
+            onConfirm = {
+                if (caEnabled) {
+                    StudioEngine.setCa(
+                        CaSettings(
+                            enabled = caEnabled,
+                            auto = caAuto,
+                            red = caRedInput.toFloatOrNull() ?: 0f,
+                            blue = caBlueInput.toFloatOrNull() ?: 0f,
+                            avoidColourshift = false,
+                        ),
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    TextField(
-                        value = caBlueInput,
-                        onValueChange = { caBlueInput = it },
-                        enabled = caEnabled && !caAuto,
-                        singleLine = true,
-                        placeholder = { Text(text = stringResource(id = R.string.studio_ca_blue_hint)) },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    )
+                } else {
+                    StudioEngine.setCa(null)
                 }
+                showCaDialog = false
             },
+            onDismiss = { showCaDialog = false },
         )
     }
 
-    // LoCA dialog: the two PEER switches (去紫边 / 去绿边) are the only user controls; strength and
-    // luminance-threshold fields carry the platform defaults as placeholders and are editable only
-    // while their pair switch is on. The master switch is derived, not shown: both off → loca = null
-    // (identity; native short-circuit), either/both on → loca = Some(...) with `enabled` set to the
-    // derived master (purpleOn || greenOn). The Rust side defaults `enabled = false` (short-circuit),
-    // so a LoCA stage only ever runs when Kotlin explicitly opts in. OK is always enabled.
     if (showLocaDialog) {
-        AlertDialog(
-            onDismissRequest = { showLocaDialog = false },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        val purpleOn = locaPurpleEnabled
-                        val greenOn = locaGreenEnabled
-                        StudioEngine.setLoca(
-                            if (purpleOn || greenOn) {
-                                LocaSettings(
-                                    enabled = purpleOn || greenOn,
-                                    purpleEnabled = purpleOn,
-                                    greenEnabled = greenOn,
-                                    purpleStrength = locaPurpleStrengthInput.toFloatOrNull() ?: 1.0f,
-                                    greenStrength = locaGreenStrengthInput.toFloatOrNull() ?: 1.0f,
-                                    purpleLumMin = locaPurpleLumInput.toFloatOrNull() ?: 0.5f,
-                                    greenLumMin = locaGreenLumInput.toFloatOrNull() ?: 0.5f,
-                                )
-                            } else {
-                                null
-                            },
+        LocaDialog(
+            purpleEnabled = locaPurpleEnabled,
+            onPurpleEnabledChange = { locaPurpleEnabled = it },
+            greenEnabled = locaGreenEnabled,
+            onGreenEnabledChange = { locaGreenEnabled = it },
+            purpleStrength = locaPurpleStrengthInput,
+            onPurpleStrengthChange = { locaPurpleStrengthInput = it },
+            greenStrength = locaGreenStrengthInput,
+            onGreenStrengthChange = { locaGreenStrengthInput = it },
+            purpleLum = locaPurpleLumInput,
+            onPurpleLumChange = { locaPurpleLumInput = it },
+            greenLum = locaGreenLumInput,
+            onGreenLumChange = { locaGreenLumInput = it },
+            onConfirm = {
+                val purpleOn = locaPurpleEnabled
+                val greenOn = locaGreenEnabled
+                StudioEngine.setLoca(
+                    if (purpleOn || greenOn) {
+                        LocaSettings(
+                            enabled = purpleOn || greenOn,
+                            purpleEnabled = purpleOn,
+                            greenEnabled = greenOn,
+                            purpleStrength = locaPurpleStrengthInput.toFloatOrNull() ?: 1.0f,
+                            greenStrength = locaGreenStrengthInput.toFloatOrNull() ?: 1.0f,
+                            purpleLumMin = locaPurpleLumInput.toFloatOrNull() ?: 0.5f,
+                            greenLumMin = locaGreenLumInput.toFloatOrNull() ?: 0.5f,
                         )
-                        showLocaDialog = false
+                    } else {
+                        null
                     },
-                ) {
-                    Text(text = stringResource(id = R.string.common_action_ok))
-                }
+                )
+                showLocaDialog = false
             },
-            dismissButton = {
-                TextButton(onClick = { showLocaDialog = false }) {
-                    Text(text = stringResource(id = R.string.common_action_cancel))
-                }
-            },
-            title = { Text(text = stringResource(id = R.string.studio_loca_title)) },
-            text = {
-                Column {
-                    Text(text = stringResource(id = R.string.studio_loca_body))
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(text = stringResource(id = R.string.studio_loca_purple_label))
-                        Spacer(modifier = Modifier.weight(1f))
-                        Switch(checked = locaPurpleEnabled, onCheckedChange = { locaPurpleEnabled = it })
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    TextField(
-                        value = locaPurpleStrengthInput,
-                        onValueChange = { locaPurpleStrengthInput = it },
-                        enabled = locaPurpleEnabled,
-                        singleLine = true,
-                        placeholder = { Text(text = stringResource(id = R.string.studio_loca_purple_strength_hint)) },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    TextField(
-                        value = locaPurpleLumInput,
-                        onValueChange = { locaPurpleLumInput = it },
-                        enabled = locaPurpleEnabled,
-                        singleLine = true,
-                        placeholder = { Text(text = stringResource(id = R.string.studio_loca_purple_lum_hint)) },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(text = stringResource(id = R.string.studio_loca_green_label))
-                        Spacer(modifier = Modifier.weight(1f))
-                        Switch(checked = locaGreenEnabled, onCheckedChange = { locaGreenEnabled = it })
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    TextField(
-                        value = locaGreenStrengthInput,
-                        onValueChange = { locaGreenStrengthInput = it },
-                        enabled = locaGreenEnabled,
-                        singleLine = true,
-                        placeholder = { Text(text = stringResource(id = R.string.studio_loca_green_strength_hint)) },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    TextField(
-                        value = locaGreenLumInput,
-                        onValueChange = { locaGreenLumInput = it },
-                        enabled = locaGreenEnabled,
-                        singleLine = true,
-                        placeholder = { Text(text = stringResource(id = R.string.studio_loca_green_lum_hint)) },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    )
-                }
-            },
+            onDismiss = { showLocaDialog = false },
         )
     }
 
-    // Clipping dialog: the switch IS the parameter — there is no numeric field, and OK is always
-    // enabled. The body states what the switch does in the engine's own terms (the boundary it
-    // clips to is the D50 ProPhoto RGB cube, i.e. the working space of the editing fork), so the
-    // user can tell that this is a *display/editing* clamp and not a raw-data change: the sRGB
-    // presentation PNG is clipped the same way either way, and only the buffer rawalchemy grades
-    // changes.
     if (showClippingDialog) {
-        AlertDialog(
-            onDismissRequest = { showClippingDialog = false },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        StudioEngine.setClipToGamut(clipToGamutEnabled)
-                        showClippingDialog = false
-                    },
-                ) {
-                    Text(text = stringResource(id = R.string.common_action_ok))
-                }
+        ClippingDialog(
+            enabled = clipToGamutEnabled,
+            onEnabledChange = { clipToGamutEnabled = it },
+            onConfirm = {
+                StudioEngine.setClipToGamut(clipToGamutEnabled)
+                showClippingDialog = false
             },
-            dismissButton = {
-                TextButton(onClick = { showClippingDialog = false }) {
-                    Text(text = stringResource(id = R.string.common_action_cancel))
-                }
-            },
-            title = { Text(text = stringResource(id = R.string.studio_clipping_title)) },
-            text = {
-                Column {
-                    Text(text = stringResource(id = R.string.studio_clipping_body))
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(text = stringResource(id = R.string.studio_enable_stage))
-                        Spacer(modifier = Modifier.weight(1f))
-                        Switch(checked = clipToGamutEnabled, onCheckedChange = { clipToGamutEnabled = it })
-                    }
-                }
-            },
+            onDismiss = { showClippingDialog = false },
         )
     }
 
-    // OKLab highlight-compression dialog: the switch IS the parameter — there is no numeric field,
-    // and OK is always enabled. The body states what the switch does in the engine's own terms: it
-    // inserts a perceptual chroma roll-off on near-clipped sRGB highlights (in OKLab) so the
-    // per-channel clamp no longer freezes a hue error. OFF is a pure identity for the rest of the
-    // image, and the ProPhoto-D50 editing fork is untouched.
     if (showOklabDialog) {
-        AlertDialog(
-            onDismissRequest = { showOklabDialog = false },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        StudioEngine.setOklabHighlightCompressSrgb(oklabSrgbEnabled)
-                        StudioEngine.setOklabHighlightCompressProphoto(oklabProphotoEnabled)
-                        showOklabDialog = false
-                    },
-                ) {
-                    Text(text = stringResource(id = R.string.common_action_ok))
-                }
+        OklabDialog(
+            srgbEnabled = oklabSrgbEnabled,
+            onSrgbEnabledChange = { oklabSrgbEnabled = it },
+            prophotoEnabled = oklabProphotoEnabled,
+            onProphotoEnabledChange = { oklabProphotoEnabled = it },
+            onConfirm = {
+                StudioEngine.setOklabHighlightCompressSrgb(oklabSrgbEnabled)
+                StudioEngine.setOklabHighlightCompressProphoto(oklabProphotoEnabled)
+                showOklabDialog = false
             },
-            dismissButton = {
-                TextButton(onClick = { showOklabDialog = false }) {
-                    Text(text = stringResource(id = R.string.common_action_cancel))
-                }
-            },
-            title = { Text(text = stringResource(id = R.string.studio_oklab_title)) },
-            text = {
-                Column {
-                    Text(text = stringResource(id = R.string.studio_oklab_body))
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(text = stringResource(id = R.string.studio_oklab_srgb))
-                        Spacer(modifier = Modifier.weight(1f))
-                        Switch(checked = oklabSrgbEnabled, onCheckedChange = { oklabSrgbEnabled = it })
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(text = stringResource(id = R.string.studio_oklab_prophoto))
-                        Spacer(modifier = Modifier.weight(1f))
-                        Switch(checked = oklabProphotoEnabled, onCheckedChange = { oklabProphotoEnabled = it })
-                    }
-                }
-            },
+            onDismiss = { showOklabDialog = false },
         )
     }
 
-    // Exposure dialog: the enable switch gates *application*, not editing — the value field is always
-    // editable (so a metered value can be tweaked even while the stage is off), while the clip-bound
-    // row between the switch and the EV field shares the switch's enabled state. On OK, when the
-    // switch is OFF the stage is skipped (exposureEv = null → native as-shot, clip included)
-    // regardless of the fields; when ON the parsed stops and clip bounds are applied. OK is disabled
-    // when the switch is ON and any of the three fields is not a parseable number.
     if (showExposureDialog) {
-        AlertDialog(
-            onDismissRequest = { showExposureDialog = false },
-            confirmButton = {
-                TextButton(
-                    enabled = !exposureEnabled || (
-                        exposureInput.toFloatOrNull() != null &&
-                            exposureClipLowerInput.toFloatOrNull() != null &&
-                            exposureClipUpperInput.toFloatOrNull() != null
-                        ),
-                    onClick = {
-                        StudioEngine.setExposure(
-                            ev = if (exposureEnabled) exposureInput.toFloatOrNull() else null,
-                            clipLower = exposureClipLowerInput.toFloatOrNull() ?: 0f,
-                            clipUpper = exposureClipUpperInput.toFloatOrNull() ?: 1f,
-                        )
-                        showExposureDialog = false
-                    },
-                ) {
-                    Text(text = stringResource(id = R.string.common_action_ok))
+        ExposureDialog(
+            enabled = exposureEnabled,
+            onEnabledChange = { exposureEnabled = it },
+            ev = exposureInput,
+            onEvChange = { exposureInput = it },
+            clipLower = exposureClipLowerInput,
+            onClipLowerChange = { exposureClipLowerInput = it },
+            clipUpper = exposureClipUpperInput,
+            onClipUpperChange = { exposureClipUpperInput = it },
+            isMetering = isMetering,
+            meteringModes = meteringModes,
+            onMeter = { mode ->
+                isMetering = true
+                scope.launch(Dispatchers.IO) {
+                    val ev = StudioEngine.meterAutoExposure(mode)
+                    isMetering = false
+                    ev?.let { exposureInput = it.toString() }
                 }
             },
-            dismissButton = {
-                TextButton(onClick = { showExposureDialog = false }) {
-                    Text(text = stringResource(id = R.string.common_action_cancel))
-                }
+            onConfirm = {
+                StudioEngine.setExposure(
+                    ev = if (exposureEnabled) exposureInput.toFloatOrNull() else null,
+                    clipLower = exposureClipLowerInput.toFloatOrNull() ?: 0f,
+                    clipUpper = exposureClipUpperInput.toFloatOrNull() ?: 1f,
+                )
+                showExposureDialog = false
             },
-            title = { Text(text = stringResource(id = R.string.studio_exposure_title)) },
-            text = {
-                Column {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(text = stringResource(id = R.string.studio_enable_stage))
-                        Spacer(modifier = Modifier.weight(1f))
-                        Switch(checked = exposureEnabled, onCheckedChange = { exposureEnabled = it })
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    // Clip-bounds row: between the enable switch and the EV field — left is the
-                    // lower bound, right the upper. Both fields share the switch's enabled state;
-                    // with the switch OFF the whole stage (clip included) is skipped on OK anyway.
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        TextField(
-                            value = exposureClipLowerInput,
-                            onValueChange = { exposureClipLowerInput = it },
-                            enabled = exposureEnabled,
-                            singleLine = true,
-                            modifier = Modifier.weight(1f),
-                            label = { Text(text = stringResource(id = R.string.studio_exposure_clip_lower)) },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        )
-                        TextField(
-                            value = exposureClipUpperInput,
-                            onValueChange = { exposureClipUpperInput = it },
-                            enabled = exposureEnabled,
-                            singleLine = true,
-                            modifier = Modifier.weight(1f),
-                            label = { Text(text = stringResource(id = R.string.studio_exposure_clip_upper)) },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    TextField(
-                        value = exposureInput,
-                        onValueChange = { exposureInput = it },
-                        singleLine = true,
-                        placeholder = { Text(text = stringResource(id = R.string.studio_exposure_hint)) },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    )
-                    // Metering buttons: each meters the current image with one rawalchemy strategy and
-                    // fills the returned EV into the field once (the user may still edit it). Metering
-                    // only proposes a value — it works regardless of the enable switch and applies
-                    // nothing; OK with the switch ON is what writes it into exposureEv.
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(text = stringResource(id = if (isMetering) R.string.studio_exposure_metering_calculating else R.string.studio_exposure_metering))
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Row(modifier = Modifier.horizontalScroll(rememberScrollState())) {
-                        meteringModes.forEach { (mode, icon) ->
-                            IconButton(
-                                onClick = {
-                                    // Metering develops + meters natively — off the main thread so the
-                                    // dialog never blocks; the result lands in the field once it returns.
-                                    isMetering = true
-                                    scope.launch(Dispatchers.IO) {
-                                        val ev = StudioEngine.meterAutoExposure(mode)
-                                        isMetering = false
-                                        ev?.let { exposureInput = it.toString() }
-                                    }
-                                },
-                            ) {
-                                Icon(
-                                    imageVector = icon,
-                                    contentDescription = mode,
-                                )
-                            }
-                        }
-                    }
-                }
-            },
+            onDismiss = { showExposureDialog = false },
         )
     }
 
-    // White-balance input dialog: opened by the top-bar WhiteBalance icon. The title carries the as-shot
-    // CCT estimated from the decoded multipliers ("As-shot: xxxx K"; "–" when unavailable); the field
-    // lets the user enter any target Kelvin, which is projected to camera multipliers natively and
-    // re-develops the resident RAW via StudioEngine.setWhiteBalanceKelvin.
     if (showWhiteBalanceDialog) {
-        val asShot = StudioEngine.asShotWhiteBalanceKelvin()
-        val asShotLabel = if (asShot > 0f) asShot.roundToInt().toString() else "–"
-        AlertDialog(
-            onDismissRequest = { showWhiteBalanceDialog = false },
-            confirmButton = {
-                TextButton(onClick = {
-                    val kelvin = whiteBalanceInput.toFloatOrNull()
-                    if (kelvin != null && kelvin > 0f) {
-                        StudioEngine.setWhiteBalanceKelvin(kelvin)
-                        showWhiteBalanceDialog = false
-                    }
-                }) {
-                    Text(text = stringResource(id = R.string.common_action_ok))
+        WhiteBalanceDialog(
+            value = whiteBalanceInput,
+            onValueChange = { whiteBalanceInput = it },
+            asShotKelvin = StudioEngine.asShotWhiteBalanceKelvin(),
+            onConfirm = {
+                val kelvin = whiteBalanceInput.toFloatOrNull()
+                if (kelvin != null && kelvin > 0f) {
+                    StudioEngine.setWhiteBalanceKelvin(kelvin)
+                    showWhiteBalanceDialog = false
                 }
             },
-            dismissButton = {
-                TextButton(onClick = { showWhiteBalanceDialog = false }) {
-                    Text(text = stringResource(id = R.string.common_action_cancel))
-                }
-            },
-            title = { Text(text = stringResource(id = R.string.studio_wb_title, asShotLabel)) },
-            text = {
-                TextField(
-                    value = whiteBalanceInput,
-                    onValueChange = { whiteBalanceInput = it },
-                    singleLine = true,
-                    placeholder = { Text(text = stringResource(id = R.string.studio_wb_hint)) },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                )
-            },
+            onDismiss = { showWhiteBalanceDialog = false },
         )
     }
 
-    // Denoise dialog: the enable switch has priority over the strength value — when OFF the stage is
-    // skipped (denoiseStrength = null → native identity) regardless of the field; when ON the parsed
-    // sensitivity multiplier is applied. OK is disabled unless the switch is ON with a parseable number.
     if (showDenoiseDialog) {
-        AlertDialog(
-            onDismissRequest = { showDenoiseDialog = false },
-            confirmButton = {
-                TextButton(
-                    enabled = (!denoiseEnabled || denoiseInput.toFloatOrNull() != null) &&
-                        (!denoiseBm3dEnabled || denoiseBm3dInput.toFloatOrNull() != null),
-                    onClick = {
-                        StudioEngine.setDenoise(
-                            if (denoiseEnabled) denoiseInput.toFloatOrNull() else null,
-                            if (denoiseBm3dEnabled) denoiseBm3dInput.toFloatOrNull() else null,
-                        )
-                        showDenoiseDialog = false
-                    },
-                ) {
-                    Text(text = stringResource(id = R.string.common_action_ok))
-                }
+        DenoiseDialog(
+            enabled = denoiseEnabled,
+            onEnabledChange = { denoiseEnabled = it },
+            strength = denoiseInput,
+            onStrengthChange = { denoiseInput = it },
+            bm3dEnabled = denoiseBm3dEnabled,
+            onBm3dEnabledChange = { denoiseBm3dEnabled = it },
+            bm3dStrength = denoiseBm3dInput,
+            onBm3dStrengthChange = { denoiseBm3dInput = it },
+            onConfirm = {
+                StudioEngine.setDenoise(
+                    if (denoiseEnabled) denoiseInput.toFloatOrNull() else null,
+                    if (denoiseBm3dEnabled) denoiseBm3dInput.toFloatOrNull() else null,
+                )
+                showDenoiseDialog = false
             },
-            dismissButton = {
-                TextButton(onClick = { showDenoiseDialog = false }) {
-                    Text(text = stringResource(id = R.string.common_action_cancel))
-                }
-            },
-            title = { Text(text = stringResource(id = R.string.studio_denoise_title)) },
-            text = {
-                Column {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(text = stringResource(id = R.string.studio_enable_stage))
-                        Spacer(modifier = Modifier.weight(1f))
-                        Switch(checked = denoiseEnabled, onCheckedChange = { denoiseEnabled = it })
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    TextField(
-                        value = denoiseInput,
-                        onValueChange = { denoiseInput = it },
-                        enabled = denoiseEnabled,
-                        singleLine = true,
-                        placeholder = { Text(text = stringResource(id = R.string.studio_denoise_hint)) },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(text = stringResource(id = R.string.studio_denoise_bm3d_label))
-                        Spacer(modifier = Modifier.weight(1f))
-                        Switch(checked = denoiseBm3dEnabled, onCheckedChange = { denoiseBm3dEnabled = it })
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    TextField(
-                        value = denoiseBm3dInput,
-                        onValueChange = { denoiseBm3dInput = it },
-                        enabled = denoiseBm3dEnabled,
-                        singleLine = true,
-                        placeholder = { Text(text = stringResource(id = R.string.studio_denoise_bm3d_hint)) },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    )
-                }
-            },
+            onDismiss = { showDenoiseDialog = false },
         )
     }
 
-    // Dehaze dialog: the enable switch has priority over the strength / percentile values — when OFF
-    // the stage is skipped (dehazeStrength = null → native identity) regardless of the fields; when ON
-    // both the blend and the haze-floor percentile are applied. OK is disabled unless the switch is ON
-    // with both fields parseable.
     if (showDehazeDialog) {
-        AlertDialog(
-            onDismissRequest = { showDehazeDialog = false },
-            confirmButton = {
-                TextButton(
-                    enabled = !dehazeEnabled ||
-                        (dehazeStrengthInput.toFloatOrNull() != null && dehazePercentileInput.toFloatOrNull() != null),
-                    onClick = {
-                        if (dehazeEnabled) {
-                            StudioEngine.setDehaze(
-                                dehazeStrengthInput.toFloatOrNull(),
-                                dehazePercentileInput.toFloatOrNull(),
-                                dehazeRadiusDarkInput.toIntOrNull(),
-                                dehazeRadiusGuideInput.toIntOrNull(),
-                                dehazeMergeModeInput,
-                            )
-                        } else {
-                            StudioEngine.setDehaze(null, null, null, null, DehazeMergeMode.MIN)
-                        }
-                        showDehazeDialog = false
-                    },
-                ) {
-                    Text(text = stringResource(id = R.string.common_action_ok))
+        DehazeDialog(
+            enabled = dehazeEnabled,
+            onEnabledChange = { dehazeEnabled = it },
+            strength = dehazeStrengthInput,
+            onStrengthChange = { dehazeStrengthInput = it },
+            percentile = dehazePercentileInput,
+            onPercentileChange = { dehazePercentileInput = it },
+            radiusDark = dehazeRadiusDarkInput,
+            onRadiusDarkChange = { dehazeRadiusDarkInput = it },
+            radiusGuide = dehazeRadiusGuideInput,
+            onRadiusGuideChange = { dehazeRadiusGuideInput = it },
+            mergeMode = dehazeMergeModeInput,
+            onMergeModeChange = { dehazeMergeModeInput = it },
+            mergeMenuOpen = dehazeMergeModeMenuOpen,
+            onMergeMenuOpenChange = { dehazeMergeModeMenuOpen = it },
+            onConfirm = {
+                if (dehazeEnabled) {
+                    StudioEngine.setDehaze(
+                        dehazeStrengthInput.toFloatOrNull(),
+                        dehazePercentileInput.toFloatOrNull(),
+                        dehazeRadiusDarkInput.toIntOrNull(),
+                        dehazeRadiusGuideInput.toIntOrNull(),
+                        dehazeMergeModeInput,
+                    )
+                } else {
+                    StudioEngine.setDehaze(null, null, null, null, DehazeMergeMode.MIN)
                 }
+                showDehazeDialog = false
             },
-            dismissButton = {
-                TextButton(onClick = { showDehazeDialog = false }) {
-                    Text(text = stringResource(id = R.string.common_action_cancel))
-                }
-            },
-            title = { Text(text = stringResource(id = R.string.studio_dehaze_title)) },
-            text = {
-                Column {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(text = stringResource(id = R.string.studio_enable_stage))
-                        Spacer(modifier = Modifier.weight(1f))
-                        Switch(checked = dehazeEnabled, onCheckedChange = { dehazeEnabled = it })
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    TextField(
-                        value = dehazeStrengthInput,
-                        onValueChange = { dehazeStrengthInput = it },
-                        enabled = dehazeEnabled,
-                        singleLine = true,
-                        placeholder = { Text(text = stringResource(id = R.string.studio_dehaze_strength_hint)) },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    TextField(
-                        value = dehazePercentileInput,
-                        onValueChange = { dehazePercentileInput = it },
-                        enabled = dehazeEnabled,
-                        singleLine = true,
-                        placeholder = { Text(text = stringResource(id = R.string.studio_dehaze_percentile_hint)) },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    TextField(
-                        value = dehazeRadiusDarkInput,
-                        onValueChange = { dehazeRadiusDarkInput = it },
-                        enabled = dehazeEnabled,
-                        singleLine = true,
-                        placeholder = { Text(text = stringResource(id = R.string.studio_dehaze_radius_dark_hint)) },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    TextField(
-                        value = dehazeRadiusGuideInput,
-                        onValueChange = { dehazeRadiusGuideInput = it },
-                        enabled = dehazeEnabled,
-                        singleLine = true,
-                        placeholder = { Text(text = stringResource(id = R.string.studio_dehaze_radius_guide_hint)) },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    // Dehaze merge mode — a clickable read-only field that expands a DropdownMenu
-                    // of the four modes (Each / Blue / Min / Avg). The selection is held in
-                    // `dehazeMergeModeInput` and passed to the engine on OK; default is Min.
-                    Box {
-                        TextField(
-                            value = when (dehazeMergeModeInput) {
-                                DehazeMergeMode.EACH -> stringResource(id = R.string.studio_dehaze_merge_each)
-                                DehazeMergeMode.BLUE -> stringResource(id = R.string.studio_dehaze_merge_blue)
-                                DehazeMergeMode.MIN -> stringResource(id = R.string.studio_dehaze_merge_min)
-                                DehazeMergeMode.AVG -> stringResource(id = R.string.studio_dehaze_merge_avg)
-                            },
-                            onValueChange = { },
-                            readOnly = true,
-                            enabled = dehazeEnabled,
-                            singleLine = true,
-                            label = { Text(text = stringResource(id = R.string.studio_dehaze_merge_label)) },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable(enabled = dehazeEnabled) { dehazeMergeModeMenuOpen = true },
-                        )
-                        DropdownMenu(
-                            expanded = dehazeMergeModeMenuOpen,
-                            onDismissRequest = { dehazeMergeModeMenuOpen = false },
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text(text = stringResource(id = R.string.studio_dehaze_merge_each)) },
-                                onClick = {
-                                    dehazeMergeModeInput = DehazeMergeMode.EACH
-                                    dehazeMergeModeMenuOpen = false
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text(text = stringResource(id = R.string.studio_dehaze_merge_blue)) },
-                                onClick = {
-                                    dehazeMergeModeInput = DehazeMergeMode.BLUE
-                                    dehazeMergeModeMenuOpen = false
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text(text = stringResource(id = R.string.studio_dehaze_merge_min)) },
-                                onClick = {
-                                    dehazeMergeModeInput = DehazeMergeMode.MIN
-                                    dehazeMergeModeMenuOpen = false
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text(text = stringResource(id = R.string.studio_dehaze_merge_avg)) },
-                                onClick = {
-                                    dehazeMergeModeInput = DehazeMergeMode.AVG
-                                    dehazeMergeModeMenuOpen = false
-                                },
-                            )
-                        }
-                    }
-                }
-            },
+            onDismiss = { showDehazeDialog = false },
         )
     }
 
-    // Grade-fork error (a picked file that is not a readable .cube LUT, or a grader failure):
-    // StudioEngine already fell back to the sRGB develop presentation, so this only explains why.
     gradeError?.let { message ->
-        AlertDialog(
-            onDismissRequest = { StudioEngine.clearGradeError() },
-            confirmButton = {
-                TextButton(onClick = { StudioEngine.clearGradeError() }) {
-                    Text(text = stringResource(id = R.string.common_action_ok))
-                }
-            },
-            title = { Text(text = stringResource(id = R.string.studio_grade_error_title)) },
-            text = { Text(text = message) },
+        GradeErrorDialog(
+            message = message,
+            onDismiss = { StudioEngine.clearGradeError() },
         )
     }
 }
 
-/** Height of the Studio fun bar — the former M3 top app bar's 64.dp. */
-private val StudioScreenFunBarHeight = 64.dp
 
-/**
- * The Studio fun bar: the shared skeleton of `FOTLAB-UIXDES-000002`, pinned to the screen's
- * bottom edge. Left-to-right: drawer menu, then the three *category* icons that dock one of the
- * Studio operation bars in the slot above — Theaters (DevelopFilm: Exposure / Denoise / Dehaze / Demosaic / White Balance),
- * Tune (TuneImage: Contrast / Saturation) and PhotoFilter (StyleFilter: LOG / LUT); a flexible
- * gap; the
- * file-open action and the overflow (three-dot) at the far right. The develop/grade tools
- * themselves no longer live here — they are `OperationalButton`s inside the operation bars, so
- * reordering them only touches the bar's list. The bar renders no title text
- * (`FOTLAB-UIXDES-000004` R6). Anchored at the bottom edge, every dropdown opens upward — including
- * the share action's format menu, which lists the two [StudioExportFormat] branches.
- */
-@Composable
-private fun StudioScreenFunBar(
-    barIsOpen: Boolean,
-    onOpenDrawer: () -> Unit,
-    onExitBar: () -> Unit,
-    onOpenFile: () -> Unit,
-    onShareFile: (StudioExportFormat) -> Unit,
-    hasImage: Boolean,
-    isPipelineRunning: Boolean,
-    onStopPipeline: () -> Unit,
-    onResetView: () -> Unit,
-    onDevelopFilm: () -> Unit,
-    onTuneImage: () -> Unit,
-    onStyleFilter: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    var overflowOpen by remember { mutableStateOf(false) }
 
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        modifier = modifier.fillMaxWidth(),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .windowInsetsPadding(WindowInsets.navigationBars)
-                .height(StudioScreenFunBarHeight),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = if (barIsOpen) onExitBar else onOpenDrawer) {
-                    Icon(
-                        imageVector = if (barIsOpen) Icons.Filled.Close else Icons.Filled.Menu,
-                        contentDescription = stringResource(
-                            id = if (barIsOpen) R.string.studio_cd_close_bar else R.string.studio_cd_drawer_open,
-                        ),
-                    )
-                }
-                IconButton(onClick = onDevelopFilm) {
-                    Icon(
-                        imageVector = Icons.Filled.Theaters,
-                        contentDescription = stringResource(id = R.string.studio_cd_develop_film),
-                    )
-                }
-                IconButton(onClick = onTuneImage) {
-                    Icon(
-                        imageVector = Icons.Filled.Tune,
-                        contentDescription = stringResource(id = R.string.studio_cd_tune_image),
-                    )
-                }
-                IconButton(onClick = onStyleFilter) {
-                    Icon(
-                        imageVector = Icons.Filled.PhotoFilter,
-                        contentDescription = stringResource(id = R.string.studio_cd_style_filter),
-                    )
-                }
-            }
 
-            Spacer(modifier = Modifier.weight(1f))
 
-            if (isPipelineRunning) {
-                // A render is in flight: the slot becomes a square Stop button that cancels it.
-                IconButton(onClick = onStopPipeline) {
-                    Icon(
-                        imageVector = Icons.Filled.Stop,
-                        contentDescription = stringResource(id = R.string.studio_cd_stop_pipeline),
-                    )
-                }
-            } else if (hasImage) {
-                // An image is resident: the open-file slot becomes the share action. Its drop-up menu
-                // picks the format (PNG / JPG); the two branches are parallel — the bar hands the
-                // choice back and the launcher encodes exactly that one.
-                var shareMenuOpen by remember { mutableStateOf(false) }
-                Box {
-                    IconButton(onClick = { shareMenuOpen = true }) {
-                        Icon(
-                            imageVector = Icons.Filled.IosShare,
-                            contentDescription = stringResource(id = R.string.studio_cd_share),
-                        )
-                    }
-                    DropdownMenu(
-                        expanded = shareMenuOpen,
-                        onDismissRequest = { shareMenuOpen = false },
-                    ) {
-                        StudioExportFormat.entries.forEach { format ->
-                            DropdownMenuItem(
-                                text = { Text(text = stringResource(id = format.labelRes)) },
-                                onClick = {
-                                    shareMenuOpen = false
-                                    onShareFile(format)
-                                },
-                            )
-                        }
-                    }
-                }
-            } else {
-                IconButton(onClick = onOpenFile) {
-                    Icon(
-                        imageVector = Icons.Filled.AddPhotoAlternate,
-                        contentDescription = stringResource(id = R.string.studio_cd_open_file),
-                    )
-                }
-            }
-            Box {
-                IconButton(onClick = { overflowOpen = true }) {
-                    Icon(
-                        imageVector = Icons.Filled.MoreVert,
-                        contentDescription = stringResource(id = R.string.studio_cd_more_options),
-                    )
-                }
-                DropdownMenu(
-                    expanded = overflowOpen,
-                    onDismissRequest = { overflowOpen = false },
-                ) {
-                    DropdownMenuItem(
-                        text = { Text(text = stringResource(id = R.string.studio_reset_view)) },
-                        leadingIcon = { Icon(imageVector = Icons.Filled.Refresh, contentDescription = null) },
-                        onClick = {
-                            overflowOpen = false
-                            onResetView()
-                        },
-                    )
-                }
-            }
-        }
-    }
-}
 
-/**
- * The Studio drawer sheet: the Material3 [ModalDrawerSheet] at 80% of the module width
- * (`FOTLAB-UIXDES-000002` R3). The close button sits in the sheet's own bottom-left corner,
- * level with the fun bar's menu icon, so opening the drawer replaces that icon in place
- * (R6); the close row shares the fun bar's 64.dp height and the navigation-bar inset.
- *
- * It has no settings today. The quarter-resolution switch that used to live here is gone: rawler's
- * superpixel is a demosaic like any other, so it is an entry in the DevelopFilm bar's demosaic menu
- * next to `RAWTRP vng4` rather than a second, independent knob that could contradict the algorithm
- * choice (`rules/REVIEW/detail/OPTIMZ-PERFRM-000010.md`). The sheet stays because the fun bar's menu
- * icon opens it and R6 fixes the close affordance's position.
- *
- * TODO: drawer content — tool categories / recent edits. Module-private per `FOTLAB-UIXDES-000002` R5.
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun StudioDrawer(
-    onClose: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    ModalDrawerSheet(
-        modifier = modifier
-            .fillMaxHeight()
-            .fillMaxWidth(0.8f),
-    ) {
-        Text(
-            text = stringResource(id = R.string.app_nav_studio_label),
-            style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier.padding(16.dp),
-        )
 
-        // Push the close affordance to the bottom-left, level with the fun bar's menu icon.
-        Spacer(modifier = Modifier.weight(1f))
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .windowInsetsPadding(WindowInsets.navigationBars)
-                .height(StudioScreenFunBarHeight),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(
-                onClick = onClose,
-                modifier = Modifier.padding(start = 4.dp),
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Close,
-                    contentDescription = stringResource(id = R.string.common_drawer_close),
-                )
-            }
-        }
-    }
-}
 
-// ---------------------------------------------------------------------------
-// Operation-bar categories and the buttons that populate them
-// ---------------------------------------------------------------------------
 
-/** The three Studio operation bars docked in the former grade-bar slot. */
-private enum class StudioOpBar { DevelopFilm, TuneImage, StyleFilter, Basic }
 
-/**
- * Toggle helper: tapping the category icon for the already-active bar closes it (falls back to the
- * Basic bar); tapping a different bar switches to it; Basic is the floor and never toggles off.
- */
-private fun StudioOpBar.toggle(target: StudioOpBar): StudioOpBar =
-    if (this == target) StudioOpBar.Basic else target
-
-/**
- * Max height of the scrolling picker menus (Demosaic / LOG): five 48dp menu rows plus Material3's
- * 8dp top/bottom menu padding = 256dp.
- *
- * The cap MUST be applied through [DropdownMenu]'s own `modifier`, never by wrapping the items in
- * another scrolling `Column`: Material3 already hosts the menu content in a vertically scrolling
- * Column, and a scrollable child nested inside it is measured with unbounded height constraints,
- * crashing during layout ("Vertically scrollable component was measured with an infinity maximum
- * height constraints") before the popup is ever drawn.
- */
-private val PickerMenuMaxHeight = 256.dp
-
-/**
- * Demosaic algorithm picker (the gradient icon anchors an upward-opening dropdown).
- *
- * The entries come from the native catalogue ([StudioEngine.demosaicCandidates]), not from a list
- * written here: the menu and the pipeline read the same catalogue, so a kernel ported in
- * `rawtrp_demosaic` cannot show up in one without the other (`FOTLAB-NATIVE-000004` D5). See
- * [demosaicLabel] for how each entry's text is chosen.
- *
- * [superpixelSupported] `false` greys out the superpixel entry rather than letting the pick resolve
- * to something else: that entry is the quarter-resolution demosaic, and on a sensor that cannot run
- * it (X-Trans, Fuji-rotated) picking it would silently give the CFA default instead. `null` (no RAW
- * resident) leaves it selectable — the capability is about the image, and there is no image to
- * contradict yet.
- */
-@Composable
-private fun DemosaicButton(
-    candidates: List<DemosaicCandidate>,
-    superpixelSupported: Boolean?,
-    onAlgorithmPicked: (DemosaicCandidate) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    var open by remember { mutableStateOf(false) }
-    Box(modifier = modifier) {
-        IconButton(onClick = { open = true }) {
-            Icon(
-                imageVector = Icons.Filled.Gradient,
-                contentDescription = stringResource(id = R.string.studio_cd_demosaic),
-            )
-        }
-        DropdownMenu(
-            expanded = open,
-            onDismissRequest = { open = false },
-            modifier = Modifier.heightIn(max = PickerMenuMaxHeight),
-        ) {
-            for (candidate in candidates) {
-                DropdownMenuItem(
-                    text = { Text(text = demosaicLabel(candidate)) },
-                    onClick = { open = false; onAlgorithmPicked(candidate) },
-                    enabled = candidate.id != SUPERPIXEL_ID || superpixelSupported != false,
-                )
-            }
-        }
-    }
-}
-
-/** The superpixel entry's catalogue id — the one pick whose applicability is sensor-dependent. */
-private const val SUPERPIXEL_ID = "rawler:superpixel"
-
-/**
- * Display text for one demosaic candidate, **always naming the source library** except for the
- * default entry.
- *
- * The menu lists two independent implementations under similar names — `amaze` and `fast` exist on
- * both sides — so an entry that did not say where it came from would be ambiguous. The native
- * catalogue already prefixes every label with `RAWLER` / `RAWTRP` (`rawtrp_demosaic::algo`); this
- * keeps that prefix while still showing the *translated* algorithm name for the entries Studio has
- * localised. The default is the one exception: it is not an algorithm but "whatever the sensor's CFA
- * calls for", so it carries no source.
- *
- * The prefix is a parameter rather than part of each translated string so the source name stays a
- * single fact: translating "RAWLER" or "RAWTRP" is not a thing, and duplicating it across five
- * strings is how the two halves would drift apart.
- */
-@Composable
-private fun demosaicLabel(candidate: DemosaicCandidate): String {
-    val localized = when (candidate.id) {
-        "rawler:default" -> return stringResource(id = R.string.studio_demosaic_default)
-        "rawler:ppg" -> stringResource(id = R.string.studio_demosaic_ppg)
-        "rawler:bilinear4" -> stringResource(id = R.string.studio_demosaic_bilinear4)
-        "rawler:xtrans_bilinear" -> stringResource(id = R.string.studio_demosaic_xtrans)
-        SUPERPIXEL_ID -> stringResource(id = R.string.studio_demosaic_superpixel)
-        // A kernel ported later: no translated string exists yet, so it keeps the catalogue's own
-        // already-prefixed label rather than vanishing from the menu.
-        else -> return candidate.label
-    }
-    return stringResource(id = R.string.studio_demosaic_source_prefix, candidate.label.substringBefore(' ')) +
-        " " + localized
-}
-
-/**
- * Read-only RAW status indicator for the Basic bar's first slot.
- *
- * Shows the Material `RawOn` glyph only when an image is actually held AND the
- * format sniffer routed it to the rawler RAW path ([StudioEngine.isRawLoaded]);
- * every other case — no image, or a sniffed jpeg/png handled by Coil — shows
- * `RawOff`. It is a pure status readout, so it renders a bare [Icon] (no
- * IconButton / no click handling).
- */
-@Composable
-private fun RawStatusButton(
-    isOn: Boolean,
-    modifier: Modifier = Modifier,
-) {
-    Icon(
-        imageVector = if (isOn) Icons.Filled.RawOn else Icons.Filled.RawOff,
-        contentDescription = stringResource(
-            id = if (isOn) R.string.studio_cd_raw_on else R.string.studio_cd_raw_off,
-        ),
-        modifier = modifier,
-    )
-}
-
-/** Exposure stops input (opens the EV dialog owned by StudioScreen). */
-@Composable
-private fun ExposureButton(
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    IconButton(onClick = onClick, modifier = modifier) {
-        Icon(
-            imageVector = Icons.Filled.Exposure,
-            contentDescription = stringResource(id = R.string.studio_cd_exposure),
-        )
-    }
-}
-
-/** White-balance Kelvin input (opens the WB dialog owned by StudioScreen). */
-@Composable
-private fun WhiteBalanceButton(
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    IconButton(onClick = onClick, modifier = modifier) {
-        Icon(
-            imageVector = Icons.Filled.WbAuto,
-            contentDescription = stringResource(id = R.string.studio_cd_whitebalance),
-        )
-    }
-}
-
-/** Denoise strength input (opens the Denoise dialog owned by StudioScreen). */
-@Composable
-private fun DenoiseButton(
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    IconButton(onClick = onClick, modifier = modifier) {
-        Icon(
-            imageVector = Icons.Filled.Grain,
-            contentDescription = stringResource(id = R.string.studio_cd_denoise),
-        )
-    }
-}
-
-/** Dehaze input (opens the Dehaze dialog owned by StudioScreen). */
-@Composable
-private fun DehazeButton(
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    IconButton(onClick = onClick, modifier = modifier) {
-        Icon(
-            imageVector = Icons.Filled.Air,
-            contentDescription = stringResource(id = R.string.studio_cd_dehaze),
-        )
-    }
-}
-
-/**
- * LCA (chromatic-aberration correction) parameter entry of the develop bar.
- * The ClosedCaption glyph stands for Color Correction here; the caption reads
- * LCA in every locale.
- */
-@Composable
-private fun CaButton(
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    IconButton(onClick = onClick, modifier = modifier) {
-        Icon(
-            imageVector = Icons.Filled.ClosedCaption,
-            contentDescription = stringResource(id = R.string.studio_cd_lca),
-        )
-    }
-}
-
-/**
- * LoCA (longitudinal / axial chromatic-aberration correction) parameter entry of the develop bar.
- * The ClosedCaptionOff glyph is the "CC disabled" mark repurposed here as the axial-fringe tool; the
- * caption reads LoCA in every locale. It opens the LoCA dialog, which exposes only the two peer
- * switches (去紫边 / 去绿边) — the master switch is derived by Kotlin from them.
- */
-@Composable
-private fun LocaButton(
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    IconButton(onClick = onClick, modifier = modifier) {
-        Icon(
-            imageVector = Icons.Filled.ClosedCaptionOff,
-            contentDescription = stringResource(id = R.string.studio_cd_loca),
-        )
-    }
-}
-
-/**
- * Out-of-gamut clipping switch (opens the Clipping dialog owned by StudioScreen).
- *
- * Material's *all out* glyph is the deliberate choice here: it is the "pull everything inside
- * the boundary" mark, which is exactly what the tool does to a ProPhoto buffer whose channels
- * left the 0..1 cube. Like the other DevelopFilm-bar tools it carries no state of its own — the
- * dialog's switch is the only control (`FOTLAB-UIXDES-000002`: the screen owns the dialogs).
- */
-@Composable
-private fun ClippingButton(
-    onClick: () -> Unit,
-    enabled: Boolean = true,
-    modifier: Modifier = Modifier,
-) {
-    IconButton(onClick = onClick, enabled = enabled, modifier = modifier) {
-        Icon(
-            imageVector = Icons.Filled.AllOut,
-            contentDescription = stringResource(id = R.string.studio_cd_clipping),
-            tint = operationIconTint(enabled = enabled, active = false),
-        )
-    }
-}
-
-/**
- * OKLab highlight-compression switch (opens the OKLab dialog owned by StudioScreen).
- *
- * Material's *flare* glyph marks the perceptual highlight glow this tool tames: it inserts a
- * lightness-driven chroma roll-off in OKLab on the sRGB presentation fork's near-clipped
- * highlights, so the per-channel sRGB clamp no longer freezes a hue error. Like the other
- * tools it carries no state of its own — the dialog's switch is the only control
- * (`FOTLAB-UIXDES-000002`: the screen owns the dialogs).
- */
-
-/**
- * Shared icon tint for operation buttons. [active] (the tool is currently applied) tints primary,
- * otherwise the default onSurfaceVariant; [enabled = false] — the tool's precondition (e.g. a
- * prior RAW decode) is not met — forces the standard Material disabled alpha so the button reads
- * as unavailable rather than merely inactive, instead of the whole bar hiding it.
- */
-@Composable
-private fun operationIconTint(enabled: Boolean, active: Boolean) =
-    if (!enabled) {
-        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
-    } else if (active) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
-    }
-
-@Composable
-private fun OklabHighlightButton(
-    onClick: () -> Unit,
-    enabled: Boolean = true,
-    modifier: Modifier = Modifier,
-) {
-    IconButton(onClick = onClick, enabled = enabled, modifier = modifier) {
-        Icon(
-            imageVector = Icons.Filled.Flare,
-            contentDescription = stringResource(id = R.string.studio_cd_oklab),
-            tint = operationIconTint(enabled = enabled, active = false),
-        )
-    }
-}
-
-/**
- * Contrast parameter of the boost group. Primary tint while configured. Opens
- * [BoostParameterDialog]; the boost switch itself is derived (either parameter configured).
- */
-@Composable
-private fun ContrastButton(
-    contrast: Float?,
-    onContrast: (Float?) -> Unit,
-    enabled: Boolean = true,
-    modifier: Modifier = Modifier,
-) {
-    var open by remember { mutableStateOf(false) }
-    IconButton(onClick = { open = true }, enabled = enabled, modifier = modifier) {
-        Icon(
-            imageVector = Icons.Filled.Contrast,
-            contentDescription = stringResource(id = R.string.studio_cd_contrast),
-            tint = operationIconTint(enabled = enabled, active = contrast != null),
-        )
-    }
-    if (open) {
-        BoostParameterDialog(
-            titleRes = R.string.studio_contrast_title,
-            currentValue = contrast,
-            onApply = { onContrast(it); open = false },
-            onDismiss = { open = false },
-        )
-    }
-}
-
-/**
- * Saturation parameter of the boost group — same shape as [ContrastButton]'s, Tonality icon.
- */
-@Composable
-private fun SaturationButton(
-    saturation: Float?,
-    onSaturation: (Float?) -> Unit,
-    enabled: Boolean = true,
-    modifier: Modifier = Modifier,
-) {
-
-    var open by remember { mutableStateOf(false) }
-    IconButton(onClick = { open = true }, enabled = enabled, modifier = modifier) {
-        Icon(
-            imageVector = Icons.Filled.Tonality,
-            contentDescription = stringResource(id = R.string.studio_cd_saturation),
-            tint = operationIconTint(enabled = enabled, active = saturation != null),
-        )
-    }
-    if (open) {
-        BoostParameterDialog(
-            titleRes = R.string.studio_saturation_title,
-            currentValue = saturation,
-            onApply = { onSaturation(it); open = false },
-            onDismiss = { open = false },
-        )
-    }
-}
-
-/**
- * Boost-parameter input dialog shared by contrast and saturation: an enable switch plus one free-form
- * float field, no range limiting. The switch has priority over the value — when OFF the parameter is
- * cleared (unconfigured; when the sibling is unconfigured too the whole boost switch turns off) and
- * the field is ignored; when ON the parsed value is applied. OK is disabled while ON with a
- * non-parseable field. The two boost parameters are coupled by the engine (rawalchemy applies both
- * together, the unconfigured sibling falling back to 1.0), so each dialog only toggles its own.
- */
-@Composable
-private fun BoostParameterDialog(
-    titleRes: Int,
-    currentValue: Float?,
-    onApply: (Float?) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    var enabled by remember(currentValue) { mutableStateOf(currentValue != null) }
-    var input by remember(currentValue) { mutableStateOf(currentValue?.toString() ?: "") }
-    val parsed = input.toFloatOrNull()
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        confirmButton = {
-            TextButton(
-                enabled = !enabled || parsed != null,
-                onClick = { onApply(if (enabled) parsed else null) },
-            ) {
-                Text(text = stringResource(id = R.string.common_action_ok))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(text = stringResource(id = R.string.common_action_cancel))
-            }
-        },
-        title = { Text(text = stringResource(id = titleRes)) },
-        text = {
-            Column {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(text = stringResource(id = R.string.studio_enable_stage))
-                    Spacer(modifier = Modifier.weight(1f))
-                    Switch(checked = enabled, onCheckedChange = { enabled = it })
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-                TextField(
-                    value = input,
-                    onValueChange = { input = it },
-                    enabled = enabled,
-                    singleLine = true,
-                    placeholder = { Text(text = stringResource(id = R.string.studio_boost_param_hint)) },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                )
-            }
-        },
-    )
-}
-
-/**
- * LOG curve picker — none plus every curve rawalchemy enumerates. Primary tint while a curve is
- * selected. The icon is the official Material "movie_edit" glyph, reproduced first-party in
- * [CustomMaterialStyleIcons] (the frozen material-icons-extended artifact never generated it).
- */
-@Composable
-private fun LogButton(
-    logSpace: String?,
-    logSpaces: List<String>,
-    onLogSpace: (String?) -> Unit,
-    enabled: Boolean = true,
-    modifier: Modifier = Modifier,
-) {
-    var open by remember { mutableStateOf(false) }
-    val none = stringResource(id = R.string.studio_grade_none)
-    Box(modifier = modifier) {
-        IconButton(onClick = { open = true }, enabled = enabled) {
-            Icon(
-                imageVector = CustomMaterialStyleIcons.Filled.MovieEdit,
-                contentDescription = stringResource(id = R.string.studio_cd_log),
-                tint = operationIconTint(enabled = enabled, active = logSpace != null),
-            )
-        }
-        DropdownMenu(
-            expanded = open,
-            onDismissRequest = { open = false },
-            modifier = Modifier.heightIn(max = PickerMenuMaxHeight),
-        ) {
-            DropdownMenuItem(
-                text = { Text(text = none) },
-                onClick = { open = false; onLogSpace(null) },
-            )
-            for (name in logSpaces) {
-                DropdownMenuItem(
-                    text = { Text(text = name) },
-                    onClick = { open = false; onLogSpace(name) },
-                )
-            }
-        }
-    }
-}
-
-/**
- * LUT picker — "Choose file…" (SAF) / "None (remove LUT)". Primary tint while a LUT is loaded.
- */
-@Composable
-private fun LutButton(
-    lutName: String?,
-    onPick: () -> Unit,
-    onClear: () -> Unit,
-    enabled: Boolean = true,
-    modifier: Modifier = Modifier,
-) {
-    var open by remember { mutableStateOf(false) }
-    Box(modifier = modifier) {
-        IconButton(onClick = { open = true }, enabled = enabled) {
-            Icon(
-                imageVector = Icons.Filled.MovieFilter,
-                contentDescription = stringResource(id = R.string.studio_cd_lut),
-                tint = operationIconTint(enabled = enabled, active = lutName != null),
-            )
-        }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            DropdownMenuItem(
-                text = { Text(text = stringResource(id = R.string.studio_grade_lut_pick)) },
-                onClick = { open = false; onPick() },
-            )
-            DropdownMenuItem(
-                text = { Text(text = stringResource(id = R.string.studio_grade_lut_clear)) },
-                onClick = { open = false; onClear() },
-            )
-        }
-    }
-}
-
-/**
- * DCP camera-profile picker — "Choose profile…" (SAF) / "None (remove camera correction)". Primary
- * tint while a profile is loaded (the [active] flag).
- */
-@Composable
-private fun DcpButton(
-    active: Boolean,
-    onPick: () -> Unit,
-    onClear: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    var open by remember { mutableStateOf(false) }
-    Box(modifier = modifier) {
-        IconButton(onClick = { open = true }) {
-            Icon(
-                imageVector = Icons.Filled.PhotoCamera,
-                contentDescription = stringResource(id = R.string.studio_cd_dcp),
-                tint = if (active) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-            )
-        }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            DropdownMenuItem(
-                text = { Text(text = stringResource(id = R.string.studio_dcp_pick)) },
-                onClick = { open = false; onPick() },
-            )
-            DropdownMenuItem(
-                text = { Text(text = stringResource(id = R.string.studio_dcp_clear)) },
-                onClick = { open = false; onClear() },
-            )
-        }
-    }
-}
-
-/**
- * LCP lens-profile picker — "Choose profile…" (SAF) / "None (remove lens correction)". Primary tint
- * while a profile is loaded (the [active] flag). The bar sits just above the fun bar, so Material3
- * opens this dropdown upward automatically.
- */
-@Composable
-private fun LcpButton(
-    active: Boolean,
-    onPick: () -> Unit,
-    onClear: () -> Unit,
-    onFocal: () -> Unit,
-    currentUserFocal: Float? = null,
-    modifier: Modifier = Modifier,
-) {
-    var open by remember { mutableStateOf(false) }
-    Box(modifier = modifier) {
-        IconButton(onClick = { open = true }) {
-            Icon(
-                imageVector = Icons.Filled.Camera,
-                contentDescription = stringResource(id = R.string.studio_cd_lcp),
-                tint = if (active) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-            )
-        }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            DropdownMenuItem(
-                text = { Text(text = stringResource(id = R.string.studio_lcp_pick)) },
-                onClick = { open = false; onPick() },
-            )
-            DropdownMenuItem(
-                text = {
-                    Text(
-                        text = if (currentUserFocal != null) {
-                            stringResource(id = R.string.studio_lcp_focal_with_value, "%.0f".format(currentUserFocal))
-                        } else {
-                            stringResource(id = R.string.studio_lcp_focal)
-                        },
-                    )
-                },
-                onClick = { open = false; onFocal() },
-            )
-            DropdownMenuItem(
-                text = { Text(text = stringResource(id = R.string.studio_lcp_clear)) },
-                onClick = { open = false; onClear() },
-            )
-        }
-    }
-}
-
-/**
- * DevelopFilm bar — the develop tools that used to live directly on the fun bar, now ordered
- * Exposure → Denoise → Dehaze → Demosaic → White Balance: exposure is first, the mosaic-cleaning
- * stages run before demosaic, and white balance sits after demosaic. Reordering the list below
- * reorders the bar.
- *
- * [demosaicCandidates] is the native catalogue, passed in rather than read here so the bar stays a
- * pure renderer of state the engine owns. Each tool is an icon-only `OperationalButton`; the dialogs
- * they open are owned by `StudioScreen`, so the bar itself carries no parameter UI (the function /
- * layout decoupling the screen keeps — `FOTLAB-UIXDES-000002`).
- */
-@Composable
-private fun StudioOperationBarDevelopFilm(
-    demosaicCandidates: List<DemosaicCandidate>,
-    superpixelSupported: Boolean?,
-    onAlgorithmPicked: (DemosaicCandidate) -> Unit,
-    onDenoise: () -> Unit,
-    onDehaze: () -> Unit,
-    onCa: () -> Unit,
-    onLoca: () -> Unit,
-    onExposure: () -> Unit,
-    onWhiteBalance: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    HorizontalOperationBar(
-        modifier = modifier,
-        items = listOf(
-            OperationalButton(
-                id = "exposure",
-                label = stringResource(id = R.string.studio_label_exposure),
-            ) { ExposureButton(onExposure) },
-            OperationalButton(
-                id = "ca",
-                label = stringResource(id = R.string.studio_label_lca),
-            ) { CaButton(onCa) },
-            OperationalButton(
-                id = "loca",
-                label = stringResource(id = R.string.studio_label_loca),
-            ) { LocaButton(onLoca) },
-            OperationalButton(
-                id = "denoise",
-                label = stringResource(id = R.string.studio_label_denoise),
-            ) { DenoiseButton(onDenoise) },
-            OperationalButton(
-                id = "dehaze",
-                label = stringResource(id = R.string.studio_label_dehaze),
-            ) { DehazeButton(onDehaze) },
-            OperationalButton(
-                id = "demosaic",
-                label = stringResource(id = R.string.studio_label_demosaic),
-            ) { DemosaicButton(demosaicCandidates, superpixelSupported, onAlgorithmPicked) },
-            OperationalButton(
-                id = "wb",
-                label = stringResource(id = R.string.studio_label_whitebalance),
-            ) { WhiteBalanceButton(onWhiteBalance) },
-        ),
-    )
-}
-
-/** TuneImage bar — the boost group: Contrast and Saturation parameter inputs. */
-@Composable
-private fun StudioOperationBarTuneImage(
-    rawLoaded: Boolean,
-    onOklabHighlight: () -> Unit,
-    onClipping: () -> Unit,
-    contrast: Float?,
-    saturation: Float?,
-    onContrast: (Float?) -> Unit,
-    onSaturation: (Float?) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    HorizontalOperationBar(
-        modifier = modifier,
-        items = listOf(
-            OperationalButton(
-                id = "oklab",
-                label = stringResource(id = R.string.studio_label_oklab),
-            ) { OklabHighlightButton(onOklabHighlight, enabled = rawLoaded) },
-            OperationalButton(
-                id = "clipping",
-                label = stringResource(id = R.string.studio_label_clipping),
-            ) { ClippingButton(onClipping, enabled = rawLoaded) },
-            OperationalButton(
-                id = "contrast",
-                label = stringResource(id = R.string.studio_cd_contrast),
-            ) { ContrastButton(contrast = contrast, onContrast = onContrast, enabled = rawLoaded) },
-            OperationalButton(
-                id = "saturation",
-                label = stringResource(id = R.string.studio_cd_saturation),
-            ) { SaturationButton(saturation = saturation, onSaturation = onSaturation, enabled = rawLoaded) },
-        ),
-    )
-}
-
-/** StyleFilter bar — LOG and LUT. */
-@Composable
-private fun StudioOperationBarStyleFilter(
-    rawLoaded: Boolean,
-    logSpace: String?,
-    lutName: String?,
-    logSpaces: List<String>,
-    onLogSpace: (String?) -> Unit,
-    onPickLut: () -> Unit,
-    onClearLut: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    HorizontalOperationBar(
-        modifier = modifier,
-        items = listOf(
-            OperationalButton(
-                id = "log",
-                label = stringResource(id = R.string.studio_label_log),
-            ) {
-                LogButton(
-                    logSpace = logSpace,
-                    logSpaces = logSpaces,
-                    onLogSpace = onLogSpace,
-                    enabled = rawLoaded,
-                )
-            },
-            OperationalButton(
-                id = "lut",
-                label = stringResource(id = R.string.studio_label_lut),
-            ) {
-                LutButton(
-                    lutName = lutName,
-                    onPick = onPickLut,
-                    onClear = onClearLut,
-                    enabled = rawLoaded,
-                )
-            },
-        ),
-    )
-}
-
-// ---------------------------------------------------------------------------
-// Export — the share action's format choices
-// ---------------------------------------------------------------------------
-
-/**
- * The two formats the fun bar's share menu offers. They are parallel branches, not a
- * quality/format axis: the user picks one, and the export runs exactly that encoder.
- *
- * Both go through `Bitmap.compress`, the platform's own compression + container step, so the two
- * differ only in the [Bitmap.CompressFormat] handed to it and the file's extension / MIME type.
- * PNG is lossless (the platform ignores `quality` there — 100 is the strongest deflate the public
- * API offers, as there is no API to force a zlib level). JPG is lossy: [JPG_QUALITY] is the
- * quantization hint, and Android's JPEG encoder keeps its own chroma subsampling — `compress`
- * exposes no sampling-factor control, so 4:4:4 vs 4:2:0 is the platform's call, not ours.
- */
-/** `quality` for the JPEG branch (the platform ignores it for PNG). 95 is the conventional
- * "visually near-lossless" JPEG setting; the chroma subsampling is the encoder's own choice. */
-private const val JPG_QUALITY: Int = 95
-
-private enum class StudioExportFormat(
-    val labelRes: Int,
-    val mimeType: String,
-    val extension: String,
-    val compressFormat: Bitmap.CompressFormat,
-    val quality: Int,
-) {
-    Png(R.string.studio_export_png, "image/png", "png", Bitmap.CompressFormat.PNG, 100),
-    Jpg(R.string.studio_export_jpg, "image/jpeg", "jpg", Bitmap.CompressFormat.JPEG, JPG_QUALITY),
-    ;
-}
-
-/**
- * Decode whatever the canvas is currently showing and re-encode it as [format], returning the
- * file bytes, or null when nothing decodable is resident.
- *
- * The engine hands back either uncompressed PNG bytes (rawler path) or the source [Uri] (Coil
- * path); both are decoded to a [Bitmap] first, then handed to `Bitmap.compress` so the file the
- * user gets is a real compressed image rather than raw samples.
- */
-private fun encodeExport(
-    context: Context,
-    result: StudioRenderResult?,
-    format: StudioExportFormat,
-): ByteArray? {
-    result ?: return null
-    val bitmap = when (val r = result) {
-        is StudioRenderResult.Ready -> when (val model = r.model) {
-            is ByteBuffer -> BitmapFactory.decodeByteArray(model.array(), 0, model.array().size)
-            is Uri -> context.contentResolver.openInputStream(model)?.use { input ->
-                BitmapFactory.decodeStream(input)
-            }
-            else -> null
-        }
-        else -> null
-    } ?: return null
-    return ByteArrayOutputStream().use { out ->
-        bitmap.compress(format.compressFormat, format.quality, out)
-        out.toByteArray()
-    }
-}
-
-// ---------------------------------------------------------------------------
-// SAF helpers — per-call "remember my last folder"
-// ---------------------------------------------------------------------------
-
-/**
- * Build an `ACTION_OPEN_DOCUMENT` intent that, when [initialUri] is non-null, starts the system
- * picker in that document's parent folder via [DocumentsContract.EXTRA_INITIAL_URI]. Passing the
- * *document* URI (not a tree) is exactly what makes the picker open where the previous pick landed,
- * which is how LUT / import keep their own independent "recent directory" instead of sharing the
- * single global SAF one.
- */
-private fun openDocumentIntent(mimeTypes: Array<String>, initialUri: Uri?): Intent =
-    Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-        addCategory(Intent.CATEGORY_OPENABLE)
-        type = mimeTypes.firstOrNull() ?: "*/*"
-        putExtra(Intent.EXTRA_MIME_TYPES, mimeTypes)
-        if (initialUri != null) putExtra(DocumentsContract.EXTRA_INITIAL_URI, initialUri)
-    }
-
-/**
- * Build an `ACTION_CREATE_DOCUMENT` intent (the share export) that prefills the file name via
- * [Intent.EXTRA_TITLE] and, when [initialUri] is non-null, opens the picker in that export's parent
- * folder so repeated exports stay put. [mimeType] and the title's extension both come from the
- * chosen [StudioExportFormat].
- */
-private fun createDocumentIntent(mimeType: String, title: String, initialUri: Uri?): Intent =
-    Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
-        addCategory(Intent.CATEGORY_OPENABLE)
-        type = mimeType
-        putExtra(Intent.EXTRA_TITLE, title)
-        if (initialUri != null) putExtra(DocumentsContract.EXTRA_INITIAL_URI, initialUri)
-    }
-
-/**
- * Take a persistable URI permission on a document the system picker just granted us, so the
- * [DocumentsContract.EXTRA_INITIAL_URI] hint survives process death. Some providers grant only
- * transient permission and throw on the persistable call — that is non-fatal, so we swallow it.
- */
-private fun persistUriPermission(context: Context, uri: Uri, write: Boolean) {
-    runCatching {
-        val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or
-            if (write) Intent.FLAG_GRANT_WRITE_URI_PERMISSION else 0
-        context.contentResolver.takePersistableUriPermission(uri, flags)
-    }
-}
