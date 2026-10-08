@@ -1,0 +1,23 @@
+[package]
+name = "fotlab_rawpro"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "FotLab pure-Rust re-implementation of the ExifTool TIFF/DNG/DCP/LCP profile parsers (replaces external/exiftool Perl for these formats)."
+# Intended to be a pure-Rust library (rlib) consumed by other Rust crates in
+# app/src/binding/rust/. May later gain a cdylib + uniffi surface like
+# rawler_fotlab if it must be exposed to the JVM/Kotlin layer.
+
+[lib]
+path = "src/lib.rs"
+
+# Candidate dependencies (surveyed 2026-09-28, NOT yet pinned — see chat summary):
+#   TIFF / IFD container ...... image-tiff (image-rs) OR tiff_reader OR kamadak-exif
+#                               OR build on exif-oxide (photostructure, "ExifTool in Rust" codegen)
+#   DNG / DCP camera profile .. no off-the-shelf crate; build on a TIFF IFD reader
+#                               + DNG tag tables + XMP extraction
+#   XMP (embedded + LCP) ...... quick-xml (features = ["serialize"])
+#   ZIP (LCP container) ....... zip (zip-rs / zip2)
+#   errors ................... thiserror
+# [dependencies]
+# thiserror = "2.0"
