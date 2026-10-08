@@ -35,16 +35,16 @@ apply_scaling(507) → take_scaled_pixels(514)
   → calibrate(687)               // r*=wb[0]; g*=wb[1]; b*=wb[2] 才在此乘 WB
 ```
 
-`calibrate`（`calibrate.rs:193-195`）逐像素施加 `wb`：`r = px[0]*wb[0]; g = px[1]*wb[1]; b = px[2]*wb[2]`。而 `correct_loca` 在 `develop.rs:657` 调用，**早于** `calibrate` 的 WB 乘法，且 `correct_loca` 的签名（`loca.rs:83-89`）与 `rawtrp_correct::correct_loca_bayer` 的核（`ca_correction_loca.rs:42`）都明确标注运行于 **pre-WB raw-linear mosaic domain**。即 LoCA 看到的是白平衡尚未施加的相机空间 mosaic。
+`calibrate`（`calibrate.rs:193-195`）逐像素施加 `wb`：`r = px[0]*wb[0]; g = px[1]*wb[1]; b = px[2]*wb[2]`。而 `correct_loca` 在 `develop.rs:657` 调用，**早于** `calibrate` 的 WB 乘法，且 `correct_loca` 的签名（`loca.rs:83-89`）与 `rawtrp_correct::correct_loca_bayer` 的核（`ca_correction_aca.rs:42`）都明确标注运行于 **pre-WB raw-linear mosaic domain**。即 LoCA 看到的是白平衡尚未施加的相机空间 mosaic。
 
 ### F2. 判据依赖「白平衡后的通道可比性」，pre-WB 下关系被系统性倒置
 
-LoCA 两对 peer 分支的判据均为通道幅度比较（`ca_correction_loca.rs:149-205`）：
+LoCA 两对 peer 分支的判据均为通道幅度比较（`ca_correction_aca.rs:149-205`）：
 
 - **紫边（去紫边）**：`magenta = min(r,b) − g > 0` 且 `lum > purple_lum_min` 且 on-edge。
 - **绿边（去绿边）**：`excess = g − max(r,b) > 0` 且 `lum > green_lum_min` 且 on-edge。
 
-其中 `r`/`b` 由当前 G 位置的**4 个正交 CFA 邻居**估计（RGGB 瓦片中，G 的正交邻居必为 2 个 R + 2 个 B），`g` 取中心 G 本身（`ca_correction_loca.rs:276-301`）。
+其中 `r`/`b` 由当前 G 位置的**4 个正交 CFA 邻居**估计（RGGB 瓦片中，G 的正交邻居必为 2 个 R + 2 个 B），`g` 取中心 G 本身（`ca_correction_aca.rs:276-301`）。
 
 判据成立的前提是：在白平衡后的幅度空间里，紫边处 `min(r,b) > g`、绿边处 `g > max(r,b)`。但 pre-WB 的 as-shot 相机空间里，机内中性白平衡乘子把 R、B 通道**向上**归一、G 通道恒为 1（见 `FOTLAB-RAWLER-000019` F1：上游 `wb = 1 / (相机对场景白点响应)`，绿通道归一为 1）。因此**原始 R、B 数值系统性低于 G**：
 
@@ -55,7 +55,7 @@ LoCA 两对 peer 分支的判据均为通道幅度比较（`ca_correction_loca.r
 
 ### F3. 不应把 LoCA 移到 demosaic / WB 之后 —— G 中心邻域结构不在 RGB 域
 
-LoCA 是 G 中心算法：它在 mosaic 的每个 G 光位上、用其正交 R/B 邻居估计、就地改 G 平面（`ca_correction_loca.rs:264-358` 只在 `fc(row,col)==1`（G）处写入）。这套 CFA 邻域结构在 demosaic 之后不存在 —— 去马赛克后是每像素 R/G/B 三平面，正交「R/B 邻居」语义消失，边缘检测也依赖对角 G 邻居（`ca_correction_loca.rs:306-311`）。把 LoCA 后移等于重写整套 G 中心算法，违反「pre-demosaic 邻域质量阶段」的架构约定（`FOTLAB-RAWLER-000009`、设计文档 `FOTLAB-RENDER-000003`），属架构降级，须人工确认，本分析不取此路。
+LoCA 是 G 中心算法：它在 mosaic 的每个 G 光位上、用其正交 R/B 邻居估计、就地改 G 平面（`ca_correction_aca.rs:264-358` 只在 `fc(row,col)==1`（G）处写入）。这套 CFA 邻域结构在 demosaic 之后不存在 —— 去马赛克后是每像素 R/G/B 三平面，正交「R/B 邻居」语义消失，边缘检测也依赖对角 G 邻居（`ca_correction_aca.rs:306-311`）。把 LoCA 后移等于重写整套 G 中心算法，违反「pre-demosaic 邻域质量阶段」的架构约定（`FOTLAB-RAWLER-000009`、设计文档 `FOTLAB-RENDER-000003`），属架构降级，须人工确认，本分析不取此路。
 
 ### F4. 修复方向 —— 在 LoCA 之前把**中性（as-shot）WB** 折进 mosaic，仍位于 demosaic 之前
 
@@ -79,7 +79,7 @@ B ← B · wb_coeffs[2]
 
 ### F5. 已静态核验的边界事实（支撑上述结论）
 
-- mosaic 接受 exposure-EV 后 >1 的合法值（`ca_correction_loca.rs:44-47`）：所有除法（`magenta/lum`、`excess/lum`、`rsum/rc`、`bsum/bc`）均被判据门控保证分母 >0，`smoothstep`/`smootherstep` 分母为常量 ≠0；apply 阶段无 sqrt/log/pow，且已无 clamp（F1 第二点）→ >1 不会崩溃，仅可能过度触发（见 F2 绿边误触发，属算法调参而非崩溃）。
+- mosaic 接受 exposure-EV 后 >1 的合法值（`ca_correction_aca.rs:44-47`）：所有除法（`magenta/lum`、`excess/lum`、`rsum/rc`、`bsum/bc`）均被判据门控保证分母 >0，`smoothstep`/`smootherstep` 分母为常量 ≠0；apply 阶段无 sqrt/log/pow，且已无 clamp（F1 第二点）→ >1 不会崩溃，仅可能过度触发（见 F2 绿边误触发，属算法调参而非崩溃）。
 - `correct_loca` 在 `settings=None` 或 `!settings.enabled` 两处短路（`loca.rs:90-97`），与 `DevelopParams.loca=None`（Kotlin 关）共同保证默认即「关」。
 
 ## Impact / Conflict

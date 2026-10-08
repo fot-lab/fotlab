@@ -132,9 +132,9 @@ desaturate-R/B repair would.
 
 ## Impacted Modules
 
-- `app/src/binding/rust/rawtrp_correct/src/ca_correction_loca.rs` (new) — `correct_loca_bayer`,
+- `app/src/binding/rust/rawtrp_correct/src/ca_correction_aca.rs` (new) — `correct_loca_bayer`,
   `LocaParams`, `Error`.
-- `app/src/binding/rust/rawtrp_correct/src/lib.rs` — `pub mod ca_correction_loca;`.
+- `app/src/binding/rust/rawtrp_correct/src/lib.rs` — `pub mod ca_correction_aca;`.
 - `app/src/binding/rust/rawler_fotlab/src/loca.rs` (new) — FFI orchestration `correct_loca`,
   `LocaSettings` (uniffi Record).
 - `app/src/binding/rust/rawler_fotlab/src/lib.rs` — `mod loca;`.

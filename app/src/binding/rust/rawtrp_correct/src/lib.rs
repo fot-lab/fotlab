@@ -36,10 +36,10 @@
 //! round-trip is omitted and all thresholds are unchanged.
 
 pub mod ca_correction_lca;
-pub mod ca_correction_loca;
+pub mod ca_correction_aca;
 pub mod gauss;
 pub mod lin_eq;
 
 pub use ca_correction_lca::{correct_ca_bayer, fit_ca_bayer, CaParams, Error, FitParams};
-pub use ca_correction_loca::{correct_loca_bayer, LocaParams, Error as LocaError};
+pub use ca_correction_aca::{correct_loca_bayer, LocaParams, Error as LocaError};
 pub use lin_eq::lin_eq_solve;
