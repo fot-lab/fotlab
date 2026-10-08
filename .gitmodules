@@ -36,3 +36,7 @@
 	path = external/V-Log-Alchemy
 	url = ../v-log-alchemy.git
 	branch = main
+[submodule "external/bottosson"]
+	path = external/bottosson
+	url = ../bottosson.github.io.git
+	branch = master

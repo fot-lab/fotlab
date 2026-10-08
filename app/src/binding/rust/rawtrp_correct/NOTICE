@@ -28,4 +28,4 @@ Upstream origin (GPL-3.0):
 The auto-fit chromatic-aberration model implemented here was authored by
 Emil Martinec and refined by Ingo Weyrich; see the RT source headers for the
 full upstream attribution. The original code comment block ("Portions of this
-algorithm are based on a paper by...") is preserved in ca_correct.rs.
+algorithm are based on a paper by...") is preserved in ca_correction_lca.rs.
