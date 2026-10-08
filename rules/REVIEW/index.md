@@ -56,4 +56,5 @@ This file contains **only** the item table. No statistics, no changelog — git 
 | `ACTION-KOTLIN-000008` | Android Bitmap.compress exposes no JPEG chroma-subsampling control — 4:4:4 falls back to platform default | `KOTLIN` | Implemented | P2 | [detail](rules/REVIEW/detail/ACTION-KOTLIN-000008.md) |
 | `FOTLAB-RAWLER-000020` | LoCA 紫边/绿边矫正失效根因 —— 判据在 pre-WB 相机空间评估，须折中性（as-shot）WB 进 mosaic 才生效，且与创作 WB 解耦 | `RAWLER` | 等待用户决定 | P1 | [detail](rules/REVIEW/detail/FOTLAB-RAWLER-000020.md) |
 | `FOTLAB-RAWLER-000021` | ca_correction_lca 亮度边缘判定调研 — 无 YUV/LAB 转换；Bayer 绿通道即亮度代理（方向加权 G 插值 + G−R/B 高低通滤波加权 CA 色差拟合） | `RAWLER` | Observation | P3 | [detail](rules/REVIEW/detail/FOTLAB-RAWLER-000021.md) |
-<!-- Next sequence per category: PREPIN 000002, LIBRND 000002, RAWLER 000009, KOTLIN 000009, FOTLAB-RAWLER 000022, ROLLBK 000002, PERFRM 000011, VIEWER-KOTLIN 000002. Append one row per new item; never reuse or renumber IDs. -->
+| `FOTLAB-RAWLER-000022` | LCA vs. Kang 2010 PDE paper — patch method not adopted; global radial scaling LCA retained | `RAWLER` | Rejected | P3 | [detail](rules/REVIEW/detail/FOTLAB-RAWLER-000022.md) |
+<!-- Next sequence per category: PREPIN 000002, LIBRND 000002, RAWLER 000009, KOTLIN 000009, FOTLAB-RAWLER 000023, ROLLBK 000002, PERFRM 000011, VIEWER-KOTLIN 000002. Append one row per new item; never reuse or renumber IDs. -->
