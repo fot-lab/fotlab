@@ -25,8 +25,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
 import io.github.fotlab.fotlab.R
+import kotlin.math.roundToInt
 import io.github.fotlab.fotlab.feature.studio.StudioEngine
 import io.github.fotlab.fotlab_rawler.CaSettings
 import io.github.fotlab.fotlab_rawler.DehazeMergeMode
