@@ -20,6 +20,8 @@
 //! presentation branch and the `ProPhotoD50` editing branch with no D50↔D65 Bradford
 //! bridge (the step is invisible to the destination primaries).
 
+use rayon::prelude::*;
+
 use rawler::imgop::matrix::{multiply, normalize, pseudo_inverse};
 use rawler::imgop::xyz::SRGB_TO_XYZ_D65;
 
@@ -172,6 +174,16 @@ impl OklabBypassMaps {
   pub fn compress_pixel(&self, cam: [f32; 3]) -> [f32; 3] {
     oklab_highlight_compress_pixel(cam, &self.cam2xyz, &self.xyz2cam_eff)
   }
+
+  /// Parallel (rayon) whole-buffer variant of [`OklabBypassMaps::compress_pixel`]. Applies the
+  /// highlight-chroma compression to every pixel of `cam` in parallel. `cam` is a buffer of
+  /// post-white-balance camera triples (e.g. the `&mut [[f32;3]]` produced by `calibrate`'s WB
+  /// pass). The per-pixel kernel is shared with `compress_pixel`, so the two are behaviourally
+  /// identical — this method only adds the data-parallel scheduling, which lives here in the
+  /// oklab module rather than in the caller's per-pixel loop.
+  pub fn compress_buffer(&self, cam: &mut [[f32; 3]]) {
+    oklab_highlight_compress_buffer(cam, &self.cam2xyz, &self.xyz2cam_eff)
+  }
 }
 
 /// Camera-space-in / camera-space-out OKLab highlight-chroma compression for one pixel.
@@ -214,6 +226,24 @@ pub fn oklab_highlight_compress_pixel(
   let lab2 = [l, a * scale, b * scale];
   let xyz2 = OKLab2D65XYZ(lab2);
   D65XYZ2CameraSpaceRGB(xyz2, xyz2cam_eff)
+}
+
+/// Parallel (rayon) whole-buffer variant of [`oklab_highlight_compress_pixel`].
+///
+/// Applies the same camera-space-in / camera-space-out highlight-chroma compression to every
+/// pixel of `cam` in parallel. `cam` is a buffer of post-white-balance camera triples (e.g. the
+/// `&mut [[f32;3]]` produced by `calibrate`'s WB pass). The per-pixel kernel is
+/// [`oklab_highlight_compress_pixel`]; this function only adds the data-parallel scheduling, so
+/// the two are behaviourally identical. Useful for other Rust software that wants to compress a
+/// whole image buffer without inlining the parallel loop.
+pub fn oklab_highlight_compress_buffer(
+  cam: &mut [[f32; 3]],
+  cam2xyz: &[[f32; 3]; 3],
+  xyz2cam_eff: &[[f32; 3]; 3],
+) {
+  cam.par_iter_mut().for_each(|p| {
+    *p = oklab_highlight_compress_pixel(*p, cam2xyz, xyz2cam_eff);
+  });
 }
 
 #[cfg(test)]

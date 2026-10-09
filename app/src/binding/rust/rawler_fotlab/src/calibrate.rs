@@ -28,6 +28,7 @@ use rawler::imgop::chromatic_adaption::adapt_bradford;
 use rawler::imgop::xyz::{Illuminant, SRGB_TO_XYZ_D65, XYZ_TO_PROFOTORGB_D50};
 use rawler::RawImage;
 
+use crate::calibrate_oklab::OklabBypassMaps;
 use crate::develop::RawlerImageDeveloped;
 use crate::RawlerFotlabError;
 
@@ -81,12 +82,29 @@ impl WorkingSpace {
 /// 3-colour case is transformed IN PLACE and the buffer is zero-copy flattened
 /// into the [RawlerImageDeveloped]. Allocating a second ~630 MB f32 buffer on a 50 MP
 /// frame was the other half of the mid-develop OOM (low-memory-kill).
+/// OKLab branch switch set — the master gate plus one sub-switch per fork.
+///
+/// Decides whether `calibrate` runs any OKLab work at all. The master `enabled` gates the
+/// *entire* branch; each per-fork sub-switch gates the one feature currently behind OKLab
+/// (highlight-chroma compression). Both default to off on the Rust/FFI side, so an absent
+/// caller sees a pure camera→working-space identity and the OKLab round trip never runs.
+/// Kotlin assembles this set and turns the master on when it wants OKLab
+/// (`FOTLAB-RENDER-000001`).
+pub(crate) struct OklabSwitches {
+  /// Master gate for the whole OKLab branch.
+  pub enabled: bool,
+  /// Sub-switch: highlight-chroma compression for the `SrgbD65` presentation fork.
+  pub highlight_compress_srgb: bool,
+  /// Sub-switch: highlight-chroma compression for the `ProPhotoD50` editing fork.
+  pub highlight_compress_prophoto: bool,
+}
+
 pub(crate) fn calibrate(
     intermediate: Intermediate,
     image: &RawImage,
     wb: Option<[f32; 4]>,
     space: WorkingSpace,
-    oklab_compress: bool,
+    oklab: OklabSwitches,
 ) -> Result<RawlerImageDeveloped, RawlerFotlabError> {
   // Resolve the camera color matrix at the target white point (D65 presentation /
   // D50 editing), Bradford-adapted from another illuminant (rawler's logic).
@@ -118,15 +136,24 @@ pub(crate) fn calibrate(
   let cam2rgb = pseudo_inverse(rgb2cam);
 
   // --- OKLab highlight-compression bypass (`FOTLAB-RENDER-000001`) -----------------
-  // The whole bypass (round-trip maps + per-pixel chroma roll-off) lives in
-  // `calibrate_oklab`; the boundary is camera-space — `calibrate` hands the post-WB
-  // camera triple to `OklabBypassMaps::compress_pixel` and gets a camera triple back,
-  // before the working-space `cam2rgb` multiply. The maps are built once per image,
-  // only when the bypass is on.
-  let oklab = if oklab_compress {
-    Some(calibrate_oklab::OklabBypassMaps::new(&xyz2cam))
-  } else {
-    None
+  // Master + per-fork sub-switch gating, decided here at the branch site. The whole OKLab
+  // round trip is skipped (None) unless the master `enabled` is on AND this fork's sub-switch
+  // is on. Both default to off on the Rust/FFI side, so an absent caller gets a pure
+  // camera→working-space identity and the OKLab pass never runs. The maps + per-pixel chroma
+  // roll-off live in `calibrate_oklab`; the boundary is camera-space — `calibrate` hands the
+  // post-WB camera triple to `OklabBypassMaps::compress_pixel` and gets a camera triple back,
+  // before the working-space `cam2rgb` multiply. The maps are built once per image, only when
+  // the branch is actually on.
+  let oklab_branch = {
+    let sub = match space {
+      WorkingSpace::SrgbD65 => oklab.highlight_compress_srgb,
+      WorkingSpace::ProPhotoD50 => oklab.highlight_compress_prophoto,
+    };
+    if oklab.enabled && sub {
+      Some(OklabBypassMaps::new(&xyz2cam))
+    } else {
+      None
+    }
   };
 
   // Every arm below is a per-pixel mapping with no cross-pixel dependency, so each one is
@@ -150,24 +177,35 @@ pub(crate) fn calibrate(
       })
     }
     Intermediate::ThreeColor(mut pixels) => {
-      // In-place: the 3x3 matrix maps each pixel from its own three channels,
-      // so compute the result into a local before overwriting the source pixel.
+      // In-place, parallel over the buffer. The mapping is three sequential per-pixel stages,
+      // each its own rayon pass (the buffer is `&mut [[f32;3]]`, so each pass is a simple
+      // `par_iter_mut`):
+      //   1. white balance (channel gains),
+      //   2. OKLab highlight-chroma compression (camera-space, owned by `calibrate_oklab`),
+      //   3. camera → working-space `cam2rgb`.
+      // Keeping them as separate passes lets the OKLab round trip — and its rayon scheduling —
+      // live entirely in the oklab module (via `compress_buffer`) instead of being inlined here.
       let (w, h) = (pixels.width, pixels.height);
+      // 1. White balance.
       pixels.pixels_mut().par_iter_mut().for_each(|px| {
-        let r = px[0] * wb[0];
-        let g = px[1] * wb[1];
-        let b = px[2] * wb[2];
-        let [r, g, b] = match &oklab {
-          Some(maps) => maps.compress_pixel([r, g, b]),
-          None => [r, g, b],
-        };
-        let mapped = [
+        px[0] *= wb[0];
+        px[1] *= wb[1];
+        px[2] *= wb[2];
+      });
+      // 2. OKLab highlight-chroma compression (camera-space in/out), whole buffer in parallel.
+      if let Some(maps) = &oklab_branch {
+        maps.compress_buffer(pixels.pixels_mut());
+      }
+      // 3. Camera → working space.
+      pixels.pixels_mut().par_iter_mut().for_each(|px| {
+        let r = px[0];
+        let g = px[1];
+        let b = px[2];
+        *px = [
           cam2rgb[0][0] * r + cam2rgb[0][1] * g + cam2rgb[0][2] * b,
           cam2rgb[1][0] * r + cam2rgb[1][1] * g + cam2rgb[1][2] * b,
           cam2rgb[2][0] * r + cam2rgb[2][1] * g + cam2rgb[2][2] * b,
         ];
-        // No clamp: the result stays in the working space, out-of-[0,1] included.
-        *px = mapped;
       });
       // Reinterpret the same allocation as flat RGB — no ~630 MB copy.
       Ok(RawlerImageDeveloped {
