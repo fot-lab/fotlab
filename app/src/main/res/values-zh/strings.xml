@@ -117,6 +117,12 @@
     <string name="studio_label_dcp">相机</string>
     <string name="studio_label_lcp">镜头</string>
     <string name="studio_label_format">格式</string>
+    <!-- 传递函数名不翻译：Gamma / Linear 是曲线名而非文案，译名只会让人对不上原生参数
+         （与 demosaic 的 "RAWLER "/"RAWTRP " 前缀同理），故与默认 strings.xml 保持一致。 -->
+    <string name="studio_transfer_gamma">Gamma</string>
+    <string name="studio_transfer_linear">Linear</string>
+    <string name="studio_cd_transfer_gamma">输出传递函数：gamma</string>
+    <string name="studio_cd_transfer_linear">输出传递函数：linear</string>
     <string name="studio_ca_title">LCA（径向色差校正）</string>
     <string name="studio_cd_loca">ACA（轴向色差校正）</string>
     <string name="studio_label_loca">ACA</string>
@@ -133,7 +139,7 @@
     <string name="studio_cd_oklab">OKLab 高光压缩</string>
     <string name="studio_label_oklab">高光</string>
     <string name="studio_oklab_title">高光压缩</string>
-    <string name="studio_oklab_body">在 OKLab 空间对接近溢出的高光做色度压缩（sRGB 呈现 / ProPhoto 编辑），使逐通道截断不再冻结色相误差。两个分支分别开关。</string>
+    <string name="studio_oklab_body">在 OKLab 空间对接近溢出的高光做色度压缩，使逐通道截断不再冻结色相误差。滚降运行在相机空间、位于 develop 缓存之上，两个输出目标各自有一个开关。</string>
     <string name="studio_oklab_srgb">sRGB 高光滚降</string>
     <string name="studio_oklab_prophoto">ProPhoto 高光滚降</string>
     <string name="studio_ca_auto_label">自动拟合</string>

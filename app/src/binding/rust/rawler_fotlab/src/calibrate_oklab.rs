@@ -184,6 +184,20 @@ impl OklabBypassMaps {
   pub fn compress_buffer(&self, cam: &mut [[f32; 3]]) {
     oklab_highlight_compress_buffer(cam, &self.cam2xyz, &self.xyz2cam_eff)
   }
+
+  /// Same pass over a **flat** `Vec<f32>` of packed camera triples - the shape the develop stage
+  /// caches, which keeps its pixels row-major without a per-pixel array type.
+  ///
+  /// Chunks by three in place rather than reshaping into `Vec<[f32; 3]>` and back: on a 50 MP frame
+  /// that round trip would copy ~600 MB twice, for a stage whose whole point is that it is cheap.
+  /// A trailing partial chunk is left untouched, which cannot arise for a buffer the demosaic
+  /// produced (its length is always a multiple of three) but is stated rather than assumed.
+  pub fn compress_buffer_flat(&self, cam: &mut [f32]) {
+    cam.par_chunks_exact_mut(3).for_each(|px| {
+      let out = oklab_highlight_compress_pixel([px[0], px[1], px[2]], &self.cam2xyz, &self.xyz2cam_eff);
+      px.copy_from_slice(&out);
+    });
+  }
 }
 
 /// Camera-space-in / camera-space-out OKLab highlight-chroma compression for one pixel.

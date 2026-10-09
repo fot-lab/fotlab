@@ -72,38 +72,39 @@ object RawlerFotlabBridge {
     fun supportsDownsample(loaded: RawlerImageLoaded): Boolean =
         runCatching { loaded.supportsDownsample() }.getOrDefault(false)
 
-    /** Develop an already-loaded image into a linear PNG — no re-decode; null on failure. */
-    fun developRawlerImage(loaded: RawlerImageLoaded, params: DevelopParams): ByteArray? =
-        runCatching { loaded.developToPng(params) }.getOrNull()
-
     /**
-     * Develop an already-loaded image into a finished sRGB PNG, overriding the white balance with the
-     * multipliers for a target color temperature ([kelvin] Kelvin) — no re-decode; null on failure.
-     * The Kelvin→multiplier projection happens natively; only the `f32` crosses the FFI.
+     * Render an already-loaded image and return the finished PNG — the single develop/grade entry.
+     *
+     * Replaces the old `developRawlerImage` / `gradeRawlerImageToPng` pair: there is one trunk
+     * natively now, and [stages] says where the output lands. Passing `develop = false` with the
+     * [cache] handle from [takeDemosaicedCameraImage] skips decode→demosaic entirely, which is
+     * what makes a grade-only edit cheap.
+     *
+     * [kelvin] > 0 overrides the white balance for that colour temperature; ≤ 0 keeps as-shot.
+     * Null on failure (a bad LUT path makes the native grader error) or when the library is absent.
      */
-    fun developRawlerImageAtKelvin(loaded: RawlerImageLoaded, params: DevelopParams, kelvin: Float): ByteArray? =
-        runCatching { loaded.developToPngAtKelvin(params, kelvin) }.getOrNull()
-
-    /**
-     * Develop an already-loaded image into linear ProPhoto-D50, hand it to the rawalchemy grading
-     * engine (Boost / LOG / LUT per [gradeParams]) and return the graded result encoded straight to
-     * PNG — direct 0..1→0..255 quantization, **no** transfer function, since the grade already
-     * encoded the image (`FOTLAB-RAWLER-000006` decision 4). The Studio grade bar calls this; null
-     * on failure (a bad LUT path makes the native grader error) or when the library is absent.
-     */
-    fun gradeRawlerImageToPng(
+    fun renderRawlerImage(
         loaded: RawlerImageLoaded,
         params: DevelopParams,
+        stages: PipelineStages,
         gradeParams: GradeParams,
-    ): ByteArray? = runCatching { loaded.developAndGradeToPng(params, gradeParams) }.getOrNull()
-
-    /** Kelvin variant of [gradeRawlerImageToPng] — the WB override carries into a grade re-render. */
-    fun gradeRawlerImageToPngAtKelvin(
-        loaded: RawlerImageLoaded,
-        params: DevelopParams,
+        cache: DemosaicedCameraImage?,
         kelvin: Float,
-        gradeParams: GradeParams,
-    ): ByteArray? = runCatching { loaded.developAndGradeToPngAtKelvin(params, kelvin, gradeParams) }.getOrNull()
+    ): ByteArray? = runCatching {
+        loaded.renderPng(params, stages, gradeParams, cache, kelvin)
+    }.getOrNull()
+
+    /**
+     * Hand over the demosaiced camera-space buffer the last render produced, leaving nothing
+     * behind — so at most one is ever alive. Null when the last render did not build one (it was
+     * itself a cached render, or nothing has been rendered yet).
+     *
+     * Kotlin owns the handle from here: keep it, pass it back to [renderRawlerImage] as `cache`,
+     * and drop the previous one before taking a new one. Dropping it on a file switch is all the
+     * cleanup that needs.
+     */
+    fun takeDemosaicedCameraImage(loaded: RawlerImageLoaded): DemosaicedCameraImage? =
+        runCatching { loaded.takeDemosaicedCameraImage() }.getOrNull()
 
     /**
      * Auto-exposure metering of a resident [loaded] image with rawalchemy's 5-strategy meter.

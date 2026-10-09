@@ -297,6 +297,15 @@ internal fun ClippingDialog(
 /**
  * OKLab highlight-compression dialog — the switch IS the parameter; there is no numeric field, and OK
  * is always enabled.
+ *
+ * Two switches, one per output. The roll-off itself is a single stage running in **camera space**
+ * (after white balance, before the camera
+→
+working matrix), but whether it is *worth* running
+ * depends on where the render is going: rolling off the sRGB presentation is what stops the
+ * encoder's per-channel clamp from freezing a hue error, while the ProPhoto grade wants its own
+ * desaturated (not clamped) highlights. The native side picks the sub-switch that matches the
+ * output space the stage dictionary already selects, so the two knobs cannot contradict the render.
  */
 @Composable
 internal fun OklabDialog(

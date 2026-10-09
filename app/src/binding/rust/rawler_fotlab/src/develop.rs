@@ -40,26 +40,38 @@
 //!    slot: `DemosaicAlgorithm::Superpixel` is rawler's quarter-resolution debayer, so choosing it
 //!    makes this stage return an intermediate at half the linear dimensions and every later stage
 //!    simply processes fewer pixels (`rules/REVIEW/detail/OPTIMZ-PERFRM-000010.md`).
-//! 5. `calibrate`   — white balance + cam→working-space matrix (exposure already
-//!    applied); `WorkingSpace` selects sRGB D65 (presentation) or ProPhoto D50
-//!    (editing). **No clipping** — out-of-[0,1] is kept for the editing branch.
-//! 6. crop-default  — crop to the recommended area (rawler `CropDefault`); the crop
-//!    rectangle is halved when the demosaic stage produced a quarter-resolution image,
-//!    derived from the dimensions rather than from the switch.
-//! 7. `clip_to_gamut` — optional per-channel clamp of the finished image into `[0,1]`.
-//!    **ProPhoto (editing) branch only**, and always the last step, so the buffer
-//!    rawalchemy grades and the handle `develop` hands back to Kotlin are already
-//!    in gamut. Off by default, i.e. the editing branch stays unclamped.
+//! 5. white balance — channel gains on the demosaiced buffer; this is the **last** develop
+//!    stage, and the buffer it produces is still camera-space (no colour matrix applied yet).
 //!
-//! Dual fork (`rules/REVIEW/detail/FOTLAB-RAWLER-000005.md`): the linear result
-//! is finished into a display-ready sRGB PNG (gamma + clip) for the UI by
-//! `bound::rawlerimagedeveloped_to_png`, or returned unclamped as ProPhoto D50 for the
-//! rawalchemy pipeline by `develop`. Kotlin owns only the UI PNG.
+//! # Three stages, one entry (`FOTLAB-RAWLER-000005`, unified)
 //!
-//! Every parameter change from Kotlin re-runs the whole pipeline (decoding
-//! included) — acceptable for now; re-decoding is optimized later
-//! (`FOTLAB-RAWLER-000003`). Identification/sniff/route are not repeated because
-//! Kotlin only calls `develop` once the raw path is already chosen.
+//! There used to be a dual fork here — an `sRGB` presentation branch that stopped after
+//! calibrate and a `ProPhoto` editing branch that fed rawalchemy — with each branch running
+//! its own complete pass over the whole pipeline, and the OKLab roll-off buried inside the
+//! colour mapping where it was inseparable from it. Both are gone. There is now a single
+//! `RawlerImageLoaded::render_png` entry running one trunk of three stages, and the caller's
+//! [`PipelineStages`] says which of them run:
+//!
+//! | stage | what it does | gate | cached? |
+//! |---|---|---|---|
+//! | **develop** | steps 1-5 above, ending in [`DemosaicedCameraImage`] | `stages.develop` | yes — the cache |
+//! | **oklab** | the camera-space highlight roll-off (`calibrate_oklab.rs`) | `stages.oklab` | no, it is cheap |
+//! | **grade** | crop → camera→working matrix → gamut clip → rawalchemy → PNG | `stages.grade` | no |
+//!
+//! `grade = false` stops after the projection, in **sRGB D65**, and encodes with
+//! `bound::rawlerimagedeveloped_to_png`; `grade = true` projects into **ProPhoto D50** and
+//! encodes the graded result with `bound::graded_to_png`. The working space is chosen by
+//! [`PipelineStages::working_space`] and nowhere else.
+//!
+//! The develop/oklab split is what the cache is built on: the roll-off is per-pixel and
+//! returns most pixels untouched, so it is far cheaper to re-apply than to have baked in. That
+//! puts it **above** the cache, which means one cached buffer serves either roll-off setting —
+//! flipping an OKLab switch re-renders without re-running decode→demosaic, exactly as changing
+//! a grade parameter does not.
+//!
+//! Every develop-stage parameter change from Kotlin re-runs the trunk (decoding included);
+//! changes confined to the two later stages reuse the cache. Identification/sniff/route are
+//! not repeated because Kotlin only calls render once the raw path is already chosen.
 
 use std::panic::{self, AssertUnwindSafe};
 
@@ -69,8 +81,9 @@ use rawler::rawimage::{RawImageData, RawPhotometricInterpretation};
 use rawler::RawImage;
 
 use crate::ca::{correct_ca, CaSettings};
+use crate::camera_space::{to_camera_space, DemosaicedCameraImage, OklabSwitches};
 use crate::loca::{correct_loca, LocaSettings};
-use crate::calibrate::{calibrate, OklabSwitches, WorkingSpace};
+use crate::calibrate::WorkingSpace;
 use crate::decode::decode_to_rawimage;
 use crate::dehaze::dehaze;
 use crate::dehaze_guided_filter::DehazeMergeMode;
@@ -332,43 +345,139 @@ pub struct DevelopParams {
   /// → `DEFAULT_LCP_FOCAL_MM`.
   #[uniffi(default = None)]
   pub raw_focal_length_mm: Option<f32>,
-  /// Master on/off for the **entire** OKLab branch (`FOTLAB-RENDER-000001`). When `false`, the
-  /// whole OKLab round trip — every per-feature sub-switch below — is skipped and `calibrate`
-  /// returns the camera triple untouched. The sub-switches are each gated behind this, so a
-  /// caller that forgets (or omits) the OKLab flags gets a pure identity and never an OKLab pass.
-  /// **Default `false`** (skip) — the Rust/FFI side defaults everything off; Kotlin assembles the
-  /// master + sub-switches and turns this on when it actually wants OKLab.
-  #[uniffi(default = false)]
-  pub oklab_enabled: bool,
-  /// OKLab highlight-chroma compression — `SrgbD65` presentation branch
-  /// (`rules/DESIGN/detail/FOTLAB-RENDER-000001`). When `true`, a camera-space-in / camera-space-
-  /// out OKLab block runs right after white balance and *before* the camera→working `cam2rgb`
+  /// OKLab highlight-chroma compression for the **sRGB D65 presentation** output
+  /// (`rules/DESIGN/detail/FOTLAB-RENDER-000001`). When on *and* the render's output is the sRGB
+  /// presentation, a camera-space-in / camera-space-out OKLab block runs before the camera→working
   /// multiply: camera → XYZ(D65) → OKLab → lightness-driven chroma roll-off → XYZ(D65) → camera.
   /// Because the round trip is camera-space in/out and anchored on XYZ(D65), it desaturates
-  /// near-clipped highlights *before* they reach `bound::encode_srgb`'s per-channel clamp,
-  /// trending a highlight whose channels clip unevenly toward neutral instead of freezing into
-  /// magenta/cyan. It is transparent to the destination primaries (no D50↔D65 Bradford bridge),
-  /// so the math is identical to the `ProPhotoD50` twin below. It is a pure identity
-  /// pass-through when `false` (bit-for-bit identical to today's output). This is a **sub-switch**:
-  /// the branch only runs when the master `oklab_enabled` is also on, and this per-branch flag is
-  /// on for the `SrgbD65` presentation path; the `ProPhotoD50` editing path is gated by
-  /// `oklab_highlight_compress_prophoto`. **Default `false`** (off) — every sub-switch defaults
-  /// off on the Rust/FFI side; Kotlin controls assembly (`FOTLAB-RENDER-000001` R3/C6).
+  /// near-clipped highlights *before* they reach the encoder's per-channel clamp, trending a
+  /// highlight whose channels clip unevenly toward neutral instead of freezing into magenta/cyan.
+  ///
+  /// **Sub-switch**: it only takes effect when the render's OKLab stage runs at all
+  /// ([`PipelineStages::oklab`]) and when the sub-switch for the *actual* output space is on —
+  /// this one for a presentation render, [`Self::oklab_highlight_compress_prophoto`] for a graded
+  /// one. Identity pass-through otherwise (bit-for-bit identical to the bypass-off output).
+  /// **Default `false`** (off) — every switch defaults off on the Rust/FFI side; Kotlin controls
+  /// assembly (`FOTLAB-RENDER-000001` R3/C6).
   #[uniffi(default = false)]
   pub oklab_highlight_compress_srgb: bool,
-  /// OKLab highlight-chroma compression — `ProPhotoD50` editing branch (twin of
-  /// `oklab_highlight_compress_srgb`). Same camera-space D65-anchored round trip, applied to the
-  /// editing branch so rawalchemy receives a desaturated (not clamped) near-clipped-highlight
-  /// buffer. **Sub-switch**: only runs when the master `oklab_enabled` is on and this flag is on
-  /// for the `ProPhotoD50` fork. **Default `false`** (off) — the editing branch leaves the
-  /// ProPhoto buffer untouched by default; the Studio OKLab dialog's second switch controls it
-  /// (Kotlin assembly). Identity pass-through when `false`. The gate is decided in `develop_image`
-  /// from `space` (`FOTLAB-RENDER-000001` R3/C6).
+  #[uniffi(default = false)]
+  pub oklab_highlight_compress_srgb: bool,
+  /// OKLab highlight-chroma compression for the **ProPhoto D50 graded** output - twin of
+  /// [`Self::oklab_highlight_compress_srgb`], applied when the render is a graded one so rawalchemy
+  /// receives a desaturated (not clamped) near-clipped-highlight buffer. The math is identical; only
+  /// the switch differs, which is how one dialog can address both outputs.
+  ///
+  /// **Sub-switch**, gated by [`PipelineStages::oklab`] like its sRGB twin. **Default `false`**.
   #[uniffi(default = false)]
   pub oklab_highlight_compress_prophoto: bool,
+  /// Output transfer applied when the finished linear buffer is encoded to PNG
+  /// (`OutputTransfer`), read by `bound::rawlerimagedeveloped_to_png` — and only there.
+  ///
+  /// This is deliberately **not** a develop stage: nothing upstream of `bound` may look at it,
+  /// so switching it can never change the pixels the grade sees. It only decides whether the
+  /// final 8-bit PNG passes through the sRGB OETF or is written straight from the linear
+  /// values (clamped to 0..1 either way).
+  ///
+  /// Kotlin assembles it from app state rather than exposing it as a user choice: a graded
+  /// render is already log-encoded by rawalchemy and must not be gamma-encoded again, while
+  /// the develop-presentation render is the one that wants the transfer function. It is
+  /// carried here (rather than as a separate entry-point argument) so one record fully
+  /// describes a render.
+  #[uniffi(default = OutputTransfer::Gamma)]
+  pub output_transfer: OutputTransfer,
 }
 
-/// Grading parameters supplied by Kotlin for [`develop_and_grade`].
+/// Whether the PNG written at the end of the trunk carries the sRGB transfer function.
+///
+/// Read at exactly one place — `bound::rawlerimagedeveloped_to_png` — so the choice cannot
+/// leak into the develop stages and change the pixels the grade receives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum OutputTransfer {
+  /// Apply the sRGB OETF (gamma) before quantizing to 8 bits. Default, and what the
+  /// develop-presentation PNG has always used.
+  Gamma,
+  /// Write the linear values as-is (clamped to `[0,1]`, no OETF).
+  Linear,
+}
+
+impl OutputTransfer {
+  /// Whether `bound` should apply the transfer function. Named so the call site reads as the
+  /// decision it is rather than as a string comparison against an enum.
+  pub(crate) fn applies_gamma(self) -> bool {
+    matches!(self, OutputTransfer::Gamma)
+  }
+}
+
+/// Which stages this render runs — the two-key dictionary that replaced the old
+/// `srgb` / `prophoto` entry fork.
+///
+/// It is assembled by Kotlin, which is the only layer that knows *why* a re-render was
+/// requested, and it does double duty: it decides the output (and with it the working space,
+/// see [`PipelineStages::working_space`]) and it decides whether the expensive develop half
+/// may be skipped in favour of the cached [`DemosaicedCameraImage`]. The simple rule Kotlin
+/// applies is that **`develop` must be `true` whenever no cache is held**; with a cache held
+/// it may be `false` whenever the develop-stage parameters are unchanged.
+///
+/// * `{ develop: true, oklab: <on>, grade: false }` — the common case: re-run develop, apply the
+///   roll-off, stop at the sRGB D65 presentation PNG. Also the state of a freshly opened file,
+///   where nothing is configured yet.
+/// * `{ develop: true, oklab: <on>, grade: true }` — the develop parameters changed *and* grading
+///   is enabled: run the whole trunk in one pass instead of stopping at develop and waiting for a
+///   second call for the grade.
+/// * `{ develop: false, oklab: <on>, grade: true }` — only the grade changed: reuse the cached
+///   demosaiced camera buffer and start from it.
+/// * `{ develop: false, oklab: <on>, grade: false }` — grading was switched off entirely and
+///   develop did not change: reuse the cache and render the presentation PNG from it.
+///
+/// The OKLab stage sits **above** the cache on purpose: it is cheap, and being above it means one
+/// cached buffer serves either roll-off setting — so flipping an OKLab switch does not invalidate
+/// the cache, exactly like changing a grade parameter does not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
+pub struct PipelineStages {
+  /// Run decode → … → demosaic → white balance, producing a fresh
+  /// [`DemosaicedCameraImage`]. `false` means "reuse the cached one" — only legal when Kotlin
+  /// holds a cache built from the same develop-stage parameters.
+  pub develop: bool,
+  /// Run the OKLab highlight roll-off stage — a master gate for the whole stage, exactly as `grade`
+  /// gates the grading stage, so `false` skips it outright. Which roll-off actually applies is then
+  /// decided by the per-output sub-switches on [`DevelopParams`], picked from the output space this
+  /// same dictionary selects — so Kotlin derives this as "at least one sub-switch is on", which makes
+  /// the stage a guaranteed no-op exactly when it is switched off.
+  pub oklab: bool,
+  /// Hand the linear working-space buffer to rawalchemy and emit the graded PNG. Also selects
+  /// the working space: ProPhoto D50 when on, sRGB D65 when off.
+  pub grade: bool,
+}
+
+impl Default for PipelineStages {
+  /// `develop = true, oklab = false, grade = false` — the safe default: develop everything, touch
+  /// nothing optional. A caller that has not yet assembled the dictionary gets a complete
+  /// presentation render and never silently skips a stage it did not ask for.
+  fn default() -> Self {
+    PipelineStages { develop: true, oklab: false, grade: false }
+  }
+}
+
+impl PipelineStages {
+  /// The working space this render's output lives in.
+  ///
+  /// Grade on → ProPhoto D50 (the editing space rawalchemy expects); grade off → sRGB D65 (the
+  /// presentation space the PNG is viewed in). This is the *only* place the two are chosen —
+  /// there is no longer an entry point per space.
+  ///
+  /// `pub(crate)` on purpose: this is a Rust-side derivation, not something Kotlin sends or reads,
+  /// and a `pub` method on a Record would be lifted into a second exported function for no gain.
+  pub(crate) fn working_space(self) -> WorkingSpace {
+    if self.grade {
+      WorkingSpace::ProPhotoD50
+    } else {
+      WorkingSpace::SrgbD65
+    }
+  }
+}
+
+/// Grading parameters supplied by Kotlin for the graded render.
 ///
 /// **Every field is optional, and `None` means "the engine decides"** — either
 /// "use upstream's own `rawalchemy::GradingParams` default" or "skip this stage".
@@ -376,7 +485,11 @@ pub struct DevelopParams {
 /// the glue as "unset" sentinels precisely so that upstream stays the single
 /// owner of every default it declares. If upstream changes one, we follow it
 /// without touching this crate (`rules/REVIEW/detail/FOTLAB-RAWLER-000006.md`).
-#[derive(Debug, Clone, uniffi::Record)]
+///
+/// `Default` (every field `None`) is what the unified entry passes when the caller does not
+/// want a grade — it is never consulted for that, because `PipelineStages::grade == false`
+/// skips the engine entirely; it exists so the stateless helpers can build an inert record.
+#[derive(Debug, Clone, Default, uniffi::Record)]
 pub struct GradeParams {
   /// Log space selecting the camera log curve and the ProPhoto→target gamut
   /// matrix (e.g. `"FUJIFILM F-Log2 C"`, `"Sony S-Log3"`, `"ARRI LogC4"`), i.e.
@@ -494,27 +607,66 @@ pub fn develop_and_grade(
     .map_err(|e| RawlerFotlabError::Decode(format!("rawalchemy grade failed: {e}")))
 }
 
-/// Develop an already-decoded [`RawImage`] into a linear RGB image in the
-/// requested [`WorkingSpace`] (no gamma).
+/// Develop an already-decoded [`RawImage`] into a linear RGB image in the requested
+/// [`WorkingSpace`] (no transfer function).
 ///
-/// This is the shared core of the dual-fork (`rules/REVIEW/detail/FOTLAB-RAWLER-000005.md`):
+/// The two trunk halves back to back: [`develop_to_camera_image`], then the OKLab stage and the
+/// working-space projection in [`DemosaicedCameraImage::to_working_space`]. It is what the
+/// stateless helpers use; the resident path ([`crate::loaded::RawlerImageLoaded`]) calls the
+/// halves separately so it can keep the camera-space half between renders — and so it can read
+/// the OKLab gate straight off the render's [`PipelineStages`] instead of re-deriving it here.
 ///
-/// * `WorkingSpace::SrgbD65` — the *presentation* branch. The result is later
-///   finished into a display-ready sRGB PNG (gamma + clip) by
-///   `bound::rawlerimagedeveloped_to_png`; the rawalgebra object is never touched.
-/// * `WorkingSpace::ProPhotoD50` — the *editing* branch for the rawalchemy
-///   pipeline. Wide gamut and **unclamped**: the returned [`RawlerImageDeveloped`] keeps
-///   its negative and >1 components.
-///
-/// Shared by the stateless `develop` FFI entry point (ProPhoto) and
-/// `crate::loaded::RawlerImageLoaded::develop_to_png` (sRGB, which then encodes
-/// with gamma). The pipeline mutates `image` in place — callers that must keep
-/// their `RawImage` must clone it first (`FOTLAB-RAWLER-000004` §clone).
+/// The pipeline mutates `image` in place — callers that must keep their `RawImage` must clone
+/// it first (`FOTLAB-RAWLER-000004` §clone).
 pub(crate) fn develop_image(
-  mut image: RawImage,
+  image: RawImage,
   params: DevelopParams,
   space: WorkingSpace,
 ) -> Result<RawlerImageDeveloped, RawlerFotlabError> {
+  let clip = params.clip_to_gamut && space == WorkingSpace::ProPhotoD50;
+  let camera_image = develop_to_camera_image(image, &params)?;
+  camera_image.to_working_space(space, oklab_enabled(&params), oklab_switches(&params), clip)
+}
+
+/// The OKLab stage's master gate, for callers that have no render dictionary to read it from -
+/// the stateless entry points (`develop`, `develop_and_grade`, the metering path).
+///
+/// Derived exactly as Kotlin derives it for a real render: with both per-output sub-switches off
+/// the stage is a guaranteed identity whichever space the output lands in, so there is nothing
+/// to run. A resident render does not use this - it passes `PipelineStages::oklab` straight
+/// through, so the dictionary stays the single source of truth wherever one exists.
+pub(crate) fn oklab_enabled(params: &DevelopParams) -> bool {
+  params.oklab_highlight_compress_srgb || params.oklab_highlight_compress_prophoto
+}
+
+/// The OKLab stage's per-output sub-switches, read off [`DevelopParams`].
+///
+/// The master gate is *not* here: it belongs to the render dictionary ([`PipelineStages::oklab`]),
+/// because "is this stage part of this render" is a property of the render, not of the develop
+/// parameters. The sub-switches are per-output parameters, so they travel with everything else the
+/// caller assembled.
+pub(crate) fn oklab_switches(params: &DevelopParams) -> OklabSwitches {
+  OklabSwitches {
+    highlight_compress_srgb: params.oklab_highlight_compress_srgb,
+    highlight_compress_prophoto: params.oklab_highlight_compress_prophoto,
+  }
+}
+
+/// The **develop stage** of the trunk: decode-side mosaic work through demosaic and white
+/// balance, stopping at the cacheable camera-space boundary.
+///
+/// Everything the later stages need that is not per-pixel is resolved here and carried inside
+/// the returned [`DemosaicedCameraImage`]: the D65 camera matrix the OKLab stage round-trips
+/// through, the two camera-to-working matrices, and the crop rectangle. Nothing downstream
+/// needs the `RawImage`, which is what lets the resident object drop its decoded pixels sooner
+/// and lets a render whose later stages changed skip this half entirely.
+///
+/// The OKLab roll-off is deliberately NOT applied here - it is a stage of its own and runs
+/// above this boundary (`crate::camera_space`).
+pub(crate) fn develop_to_camera_image(
+    mut image: RawImage,
+    params: &DevelopParams,
+) -> Result<DemosaicedCameraImage, RawlerFotlabError> {
   image
     .apply_scaling()
     .map_err(|e| RawlerFotlabError::Decode(e.to_string()))?;
@@ -684,53 +836,12 @@ pub(crate) fn develop_image(
     a
   });
 
-  // Calibrate first, then CropDefault — the same order as rawler's
-  // `RawDevelop::develop_intermediate` (Calibrate → CropDefault). Both are
-  // per-pixel/rect-selection operations, so order is numerically equivalent,
-  // but keeping the identical order means the crop coordinates resolve
-  // exactly the way upstream resolves them.
-  // Assemble the OKLab switch set (master + per-fork sub-switches) and hand it to `calibrate`,
-  // which gates the whole branch on the master and the per-fork sub-switch (`FOTLAB-RENDER-000001`).
-  // Every switch defaults to off on the Rust/FFI side, so a caller that omits them gets a pure
-  // identity — the OKLab round trip never runs.
-  let oklab_switches = OklabSwitches {
-    enabled: params.oklab_enabled,
-    highlight_compress_srgb: params.oklab_highlight_compress_srgb,
-    highlight_compress_prophoto: params.oklab_highlight_compress_prophoto,
-  };
-  let linear = calibrate(intermediate, &image, wb, space, oklab_switches)?;
-  let mut linear = crop_default(&image, linear)?;
-
-  // Out-of-gamut clipping (the Studio "Clipping" switch) — the LAST step of the
-  // pipeline, so the buffer every consumer of the editing branch sees is already
-  // in gamut: rawalchemy's grade, the auto-exposure meter, and the handle
-  // `develop` hands back to Kotlin. Runs after the crop so it touches only the
-  // pixels that survive, and is gated on the editing branch because the sRGB
-  // presentation branch is finished by `bound::rawlerimagedeveloped_to_png`,
-  // which clips (after gamma) on its own.
-  if params.clip_to_gamut && space == WorkingSpace::ProPhotoD50 {
-    clamp_to_gamut(&mut linear);
-  }
-  Ok(linear)
-}
-
-/// Clamp every component of `image` into `[0,1]` — the D50 ProPhoto RGB
-/// boundary — in place.
-///
-/// This is the Studio "Clipping" switch. It is deliberately the *same*
-/// per-channel operation `bound::shrink_f32` performs on the presentation branch
-/// one stage later (`bound.rs`), so the two forks can disagree about an
-/// out-of-gamut pixel only by *when* it is clipped, never by what clipping
-/// means. It is **not** gamut mapping: hue and luminance are not preserved, and
-/// a highlight whose channels clip unequally still shifts hue — the point is
-/// that the excursion is resolved here instead of travelling downstream intact
-/// (`rules/REVIEW/detail/FOTLAB-RAWLER-000013.md` §F7/F8).
-///
-/// NaN passes through unchanged (`f32::clamp` returns a NaN input); a
-/// well-formed develop contains none, and substituting a value here would only
-/// hide the loader failure that produced it.
-fn clamp_to_gamut(image: &mut RawlerImageDeveloped) {
-  image.rgb.par_iter_mut().for_each(|v| *v = v.clamp(0.0, 1.0));
+  // Hand the debayered buffer across the cacheable boundary. `to_camera_space` applies white
+  // balance — the last develop-stage step — and folds in the D65 camera matrix, the two
+  // working-space matrices and the crop rectangle, so this function can return without knowing
+  // which working space the caller wants. The OKLab roll-off is deliberately NOT applied here: it
+  // is its own stage and runs above the cache (`crate::camera_space`).
+  to_camera_space(intermediate, &image, wb)
 }
 
 /// Take ownership of the scaled f32 pixel buffer from [RawImage] without a
@@ -743,124 +854,5 @@ fn take_scaled_pixels(image: &mut RawImage) -> Result<Vec<f32>, RawlerFotlabErro
     RawImageData::Integer(_) => Err(RawlerFotlabError::Decode(
       "scaled RawImage pixels are not f32 — apply_scaling contract changed".to_string(),
     )),
-  }
-}
-
-
-/// Crop the developed image to the recommended area — rawler's `CropDefault`
-/// step, applied after calibrate.
-///
-/// CRITICAL coordinate fix (the "every format develops to Unsupported" bug):
-/// `RawImage.crop_area` is in **full-sensor** coordinates, but the demosaic
-/// stage already cropped its ROI to `RawImage.active_area` — so the
-/// intermediate (and the flattened [`RawlerImageDeveloped`] calibrated from it) is in
-/// **active-area** coordinates. rawler re-bases the crop with
-/// `crop.adapt(active_area)` (`imgop/develop.rs`, CropDefault block) before
-/// applying it. The previous code skipped that re-basing and sliced the
-/// smaller buffer at full-sensor offsets, which panicked out of bounds on
-/// essentially every real camera file (CR2 carries an embedded sensor-area
-/// crop; DNG's DefaultCropOrigin is offset by ActiveArea in the decoder); the
-/// `catch_unwind` boundary turned the panic into a Decode error and the UI
-/// showed "Unsupported Format". When `active_area` is `None` the demosaic ROI
-/// was the full frame, so no re-basing happens — matching upstream.
-///
-/// SCALE fix (superpixel's own trap): the intermediate can be a
-/// **decimated** view of that ROI — rawler's superpixel debayer emits one
-/// output pixel per 2×2 CFA block, so a half-size buffer carries the ROI's
-/// coordinates at half scale. The crop rectangle has to be brought into the
-/// buffer's coordinate space before it is sliced.
-///
-/// The factor is **derived from the dimensions that actually came back** — never
-/// from a "was superpixel used" flag threaded down from the caller, and never
-/// from a hardcoded `0.5` — so the rectangle and the buffer it slices cannot
-/// disagree, and a future decimation ratio needs no change here. The mapping is
-/// `out = in / factor` in **integer** arithmetic, which is exactly how the
-/// decimator itself truncates (`roi.d.w >> 1` discards the odd last column);
-/// multiplying by the real ratio `buf/roi` would instead drift by a pixel
-/// whenever the ROI is odd (`3664 * (1833/3667) = 1831`, but the true answer is
-/// `1832`). When the dimensions do not describe a clean integer decimation the
-/// factor stays `1` and the bounds check below reports the mismatch with its
-/// numbers, rather than letting the slice panic and resurface as the same bogus
-/// "Unsupported Format".
-fn crop_default(
-  image: &RawImage,
-  mut linear: RawlerImageDeveloped,
-) -> Result<RawlerImageDeveloped, RawlerFotlabError> {
-  let Some(mut crop) = image.crop_area.or(image.active_area) else {
-    return Ok(linear);
-  };
-  // The demosaic ROI is `active_area` (the whole frame when there is none), so that — not
-  // `RawImage.width` — is the full-scale space both the crop rectangle and the intermediate are
-  // measured in once the rectangle has been re-based.
-  let (roi_w, roi_h) = match image.active_area {
-    Some(active_area) => {
-      crop = crop.adapt(&active_area);
-      (active_area.d.w, active_area.d.h)
-    }
-    None => (image.width, image.height),
-  };
-
-  let factor = decimation_factor(roi_w, roi_h, linear.width as usize, linear.height as usize);
-  if factor > 1 {
-    crop.p.x /= factor;
-    crop.p.y /= factor;
-    crop.d.w /= factor;
-    crop.d.h /= factor;
-  }
-
-  let (buf_w, buf_h) = (linear.width as usize, linear.height as usize);
-  let (cw, ch) = (crop.width(), crop.height());
-  let (x, y) = (crop.x(), crop.y());
-  if cw == buf_w && ch == buf_h {
-    return Ok(linear);
-  }
-  if cw == 0 || ch == 0 {
-    return Ok(RawlerImageDeveloped { width: cw as u32, height: ch as u32, rgb: Vec::new() });
-  }
-  // The rectangle has to sit inside the buffer it is about to slice. Falling outside means the
-  // intermediate's dimensions did not describe a decimation this stage recognises — report the
-  // numbers that disagree instead of letting the slice panic.
-  if x + cw > buf_w || y + ch > buf_h {
-    return Err(RawlerFotlabError::Decode(format!(
-      "crop rect {cw}x{ch}+{x}+{y} does not fit the {buf_w}x{buf_h} developed buffer \
-       (roi {roi_w}x{roi_h}, decimation factor {factor})"
-    )));
-  }
-
-  let row_len = cw * 3;
-  // Row-wise copy, so each row is an independent contiguous memcpy — parallelised
-  // with rayon instead of being walked sequentially (`OPTIMZ-PERFRM-000007`).
-  let mut rgb = vec![0f32; cw * ch * 3];
-  rgb.par_chunks_mut(row_len).enumerate().for_each(|(row, dst)| {
-    let start = ((y + row) * buf_w + x) * 3;
-    dst.copy_from_slice(&linear.rgb[start..start + row_len]);
-  });
-  linear.width = cw as u32;
-  linear.height = ch as u32;
-  linear.rgb = rgb;
-  Ok(linear)
-}
-
-/// Integer decimation factor between the demosaic ROI and the intermediate that came back: `1`
-/// when they are the same size, `n` when the buffer is that ROI reduced by `n` on both axes.
-///
-/// Only clean integer decimation is recognised. The quotient is checked by *truncating back*
-/// (`roi / n == buf`) rather than by exact divisibility, because that is how the decimator itself
-/// works — superpixel emits `roi.d.w >> 1`, so a 3667-wide ROI yields a 1833-wide buffer and
-/// `1833 * 2 != 3667` even though the factor is unambiguously 2. Both axes must agree. Anything
-/// unrecognised returns `1`, leaving the caller's bounds check to report the mismatch instead of
-/// guessing a rectangle.
-fn decimation_factor(roi_w: usize, roi_h: usize, buf_w: usize, buf_h: usize) -> usize {
-  if buf_w == 0 || buf_h == 0 || buf_w > roi_w || buf_h > roi_h {
-    return 1;
-  }
-  if buf_w == roi_w && buf_h == roi_h {
-    return 1;
-  }
-  let (fw, fh) = (roi_w / buf_w, roi_h / buf_h);
-  if fw == fh && fw > 1 && roi_w / fw == buf_w && roi_h / fh == buf_h {
-    fw
-  } else {
-    1
   }
 }

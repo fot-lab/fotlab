@@ -107,6 +107,13 @@
     <string name="studio_label_dcp">Camera</string>
     <string name="studio_label_lcp">Lens</string>
     <string name="studio_label_format">Format</string>
+    <!-- Output-transfer readout. Deliberately identical in every locale: "Gamma"/"Linear" name
+         transfer functions, and translating a curve name is not a thing (same reasoning as the
+         "RAWLER "/"RAWTRP " demosaic source prefix). -->
+    <string name="studio_transfer_gamma">Gamma</string>
+    <string name="studio_transfer_linear">Linear</string>
+    <string name="studio_cd_transfer_gamma">Output transfer: gamma</string>
+    <string name="studio_cd_transfer_linear">Output transfer: linear</string>
     <string name="studio_ca_title">LCA (chromatic aberration)</string>
     <string name="studio_ca_auto_label">Auto-fit</string>
     <string name="studio_ca_red_hint">Red radial strength (0 = off)</string>
@@ -126,7 +133,7 @@
     <string name="studio_cd_oklab">OKLab highlight compression</string>
     <string name="studio_label_oklab">Highlight</string>
     <string name="studio_oklab_title">Highlight compression</string>
-    <string name="studio_oklab_body">Compress chroma in OKLab on near-clipped highlights (sRGB presentation / ProPhoto editing) so the per-channel clamp no longer freezes a hue error. Toggle each branch separately.</string>
+    <string name="studio_oklab_body">Compress chroma in OKLab on near-clipped highlights so the per-channel clamp no longer freezes a hue error. The roll-off runs in camera space, above the develop cache, and each output target has its own switch.</string>
     <string name="studio_oklab_srgb">sRGB highlight roll-off</string>
     <string name="studio_oklab_prophoto">ProPhoto highlight roll-off</string>
     <string name="studio_label_log">LOG</string>

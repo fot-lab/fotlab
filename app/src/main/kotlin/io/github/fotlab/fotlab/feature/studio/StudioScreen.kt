@@ -53,6 +53,7 @@ import io.github.fotlab.fotlab.ui.rememberZoomState
 import io.github.fotlab.fotlab_rawler.CaSettings
 import io.github.fotlab.fotlab_rawler.DehazeMergeMode
 import io.github.fotlab.fotlab_rawler.LocaSettings
+import io.github.fotlab.fotlab_rawler.OutputTransfer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -111,9 +112,13 @@ fun StudioScreen() {
     // Boost/LOG/LUT grade-fork state.
     val gradeSelection by StudioEngine.gradeSelection.collectAsState()
     val gradeError by StudioEngine.gradeError.collectAsState()
-    // Grade (Boost/LOG/LUT) is a RAW-only fork: reGrade() is a safe no-op for non-RAW images, but
+    // Grade (Boost/LOG/LUT) is a RAW-only fork: requestRender() is a safe no-op for non-RAW images, but
     // the former grade bar was gated on a resident RAW and we keep that contract for Tune/Style.
     val rawLoaded by StudioEngine.isRawLoaded.collectAsState()
+    // Whether the PNG on the canvas went through the sRGB transfer function. Derived by the engine
+    // from what the render actually is (a graded render is already log-encoded, so no gamma) and
+    // shown in the Basic bar as a readout - there is nothing here for the user to choose.
+    val outputTransfer by StudioEngine.outputTransfer.collectAsState()
     // Whether the resident RAW can be developed at quarter resolution, i.e. whether the
     // superpixel entry in the demosaic menu applies to it (`null` = nothing resident yet).
     val superpixelSupported by StudioEngine.superpixelSupported.collectAsState()
@@ -572,6 +577,21 @@ fun StudioScreen() {
                                         showLcpFocalDialog = true
                                     },
                                     currentUserFocal = userLcpFocalLengthMm,
+                                )
+                            },
+                            OperationalButton(
+                                id = "transfer",
+                                label = stringResource(
+                                    id = if (outputTransfer == OutputTransfer.GAMMA) {
+                                        R.string.studio_transfer_gamma
+                                    } else {
+                                        R.string.studio_transfer_linear
+                                    },
+                                ),
+                            ) { slotModifier ->
+                                OutputTransferStatusButton(
+                                    isGamma = outputTransfer == OutputTransfer.GAMMA,
+                                    modifier = slotModifier,
                                 )
                             },
                             OperationalButton(

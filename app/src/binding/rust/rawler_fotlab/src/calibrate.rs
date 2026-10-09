@@ -1,35 +1,36 @@
-//! Calibrate glue — white balance + colour-matrix mapping that turns a debayered
-//! intermediate into a **linear** image in the requested [`WorkingSpace`].
+//! Calibrate glue — the **working-space** half of the develop trunk: which RGB primaries
+//! (and white point) a developed result lives in, and how the camera colour matrix is
+//! resolved for it.
 //!
 //! Two spaces are supported (`rules/REVIEW/detail/FOTLAB-RAWLER-000005.md`):
 //!
-//! * [`WorkingSpace::SrgbD65`] — presentation. Finished to sRGB (gamma + gamut mapping)
+//! * [`WorkingSpace::SrgbD65`] — presentation. Finished to sRGB (transfer function + clip)
 //!   at PNG encode time in `bound`, never here.
 //! * [`WorkingSpace::ProPhotoD50`] — editing, for the rawalchemy pipeline. Wide gamut and
 //!   **unclamped**: negatives and >1 survive into the returned buffer on purpose.
 //!
-//! This is the "calibrate" half of our hand-built develop pipeline
-//! (`FOTLAB-RAWLER-000003`). rawler's own `map_3ch_to_rgb` / `map_4ch_to_rgb`
-//! are `pub(crate)`, so we replicate their math here using rawler's *public*
-//! matrix primitives (`multiply`, `normalize`, `pseudo_inverse`,
-//! `SRGB_TO_XYZ_D65`) and `clip_euclidean_norm_avg`. The colour matrix is always
-//! taken from rawler's resolved `RawImage.color_matrix` (D65-normalized via
-//! Bradford adaptation when only another illuminant is available), exactly as
-//! rawler does. Exposure compensation is **not** applied here — it is applied as
-//! the linear gain `2^exposure_ev` to the single-channel mosaic *before*
-//! demosaic in `develop`, since demosaic is linear and the gain is
-//! channel-uniform, so shifting it earlier is numerically identical.
+//! The trunk no longer forks at the entry: `space` is *derived* from the caller's
+//! `PipelineStages` (grade on → ProPhoto D50, grade off → sRGB D65) and the pixel work itself
+//! lives in [`crate::camera_space`] — the camera-space half that is cacheable and the
+//! working-space projection that is not. What stays here is the shared, stage-independent
+//! part: the space enum, its illuminant / forward matrix, and [`resolve_xyz_to_cam`], which
+//! the white-balance Kelvin helpers (`wb::as_shot_color_temp_kelvin`) also read so a custom
+//! multiplier is always computed against the exact matrix it renders through.
+//!
+//! rawler's own `map_3ch_to_rgb` / `map_4ch_to_rgb` are `pub(crate)`, so the projection is
+//! replicated in `camera_space` using rawler's *public* matrix primitives (`multiply`,
+//! `normalize`, `pseudo_inverse`). The colour matrix is always taken from rawler's resolved
+//! `RawImage.color_matrix` (Bradford-adapted when only another illuminant is available),
+//! exactly as rawler does. Exposure compensation is **not** applied here — it is applied as
+//! the linear gain `2^exposure_ev` to the single-channel mosaic *before* demosaic in
+//! `develop`, since demosaic is linear and the gain is channel-uniform, so shifting it earlier
+//! is numerically identical.
 
-use rayon::prelude::*;
-
-use rawler::imgop::develop::Intermediate;
-use rawler::imgop::matrix::{multiply, normalize, pseudo_inverse};
 use rawler::imgop::chromatic_adaption::adapt_bradford;
+use rawler::imgop::matrix::{multiply, normalize, pseudo_inverse};
 use rawler::imgop::xyz::{Illuminant, SRGB_TO_XYZ_D65, XYZ_TO_PROFOTORGB_D50};
 use rawler::RawImage;
 
-use crate::calibrate_oklab::OklabBypassMaps;
-use crate::develop::RawlerImageDeveloped;
 use crate::RawlerFotlabError;
 
 /// Which RGB primaries (and white point) the developed result lives in.
@@ -38,12 +39,17 @@ use crate::RawlerFotlabError;
 /// (`rules/REVIEW/detail/FOTLAB-RAWLER-000005.md`):
 ///
 /// * [`WorkingSpace::SrgbD65`] — the *presentation* path. Small gamut, but it is what a
-///   display can actually show, so this is the space the UI PNG is finished in (gamma and
-///   gamut mapping included, applied at PNG encode time — see `bound::rawlerimagedeveloped_to_png`).
+///   display can actually show, so this is the space the UI PNG is finished in (transfer
+///   function and gamut mapping included, applied at PNG encode time — see
+///   `bound::rawlerimagedeveloped_to_png`).
 /// * [`WorkingSpace::ProPhotoD50`] — the *editing* path handed to the rawalchemy pipeline.
 ///   Wide gamut: colours outside sRGB survive here. It is deliberately **not** clipped —
 ///   negative and >1 components are legitimate and only get resolved at final export.
 ///   D50 matches rawalchemy and RawTherapee, so no chromatic-adaptation bridge is needed.
+///
+/// There is exactly one trunk now: which space a render lands in is read off the caller's
+/// `PipelineStages` (see `PipelineStages::working_space`), never off which entry point was
+/// called.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkingSpace {
     /// Linear sRGB, white point D65.
@@ -54,7 +60,7 @@ pub enum WorkingSpace {
 
 impl WorkingSpace {
     /// The illuminant the camera colour matrix must be adapted to for this space.
-    fn illuminant(self) -> Illuminant {
+    pub(crate) fn illuminant(self) -> Illuminant {
         match self {
             WorkingSpace::SrgbD65 => Illuminant::D65,
             WorkingSpace::ProPhotoD50 => Illuminant::D50,
@@ -63,198 +69,30 @@ impl WorkingSpace {
 
     /// Forward matrix from this working space to XYZ, at this space's own white point.
     ///
-    /// `sRGB → XYZ` is a published constant; rawler only ships `XYZ → ProPhoto`, so that
-    /// one is inverted here (`pseudo_inverse` on a 3×3 is negligible next to the per-pixel
-    /// loop).
+    /// `sRGB → XYZ` is a published constant; rawler only ships `XYZ → ProPhoto`, so that one
+    /// is inverted here (`pseudo_inverse` on a 3×3 is negligible next to the per-pixel loop).
     fn to_xyz_matrix(self) -> [[f32; 3]; 3] {
         match self {
             WorkingSpace::SrgbD65 => SRGB_TO_XYZ_D65,
             WorkingSpace::ProPhotoD50 => pseudo_inverse(XYZ_TO_PROFOTORGB_D50),
         }
     }
-}
 
-/// White balance multipliers (RGBE order); `None` means "use rawler's default
-/// from the file".
-///
-/// Takes OWNERSHIP of the intermediate: the colour mapping is per-pixel (each
-/// output channel only depends on the same pixel's input channels), so the
-/// 3-colour case is transformed IN PLACE and the buffer is zero-copy flattened
-/// into the [RawlerImageDeveloped]. Allocating a second ~630 MB f32 buffer on a 50 MP
-/// frame was the other half of the mid-develop OOM (low-memory-kill).
-/// OKLab branch switch set — the master gate plus one sub-switch per fork.
-///
-/// Decides whether `calibrate` runs any OKLab work at all. The master `enabled` gates the
-/// *entire* branch; each per-fork sub-switch gates the one feature currently behind OKLab
-/// (highlight-chroma compression). Both default to off on the Rust/FFI side, so an absent
-/// caller sees a pure camera→working-space identity and the OKLab round trip never runs.
-/// Kotlin assembles this set and turns the master on when it wants OKLab
-/// (`FOTLAB-RENDER-000001`).
-pub(crate) struct OklabSwitches {
-  /// Master gate for the whole OKLab branch.
-  pub enabled: bool,
-  /// Sub-switch: highlight-chroma compression for the `SrgbD65` presentation fork.
-  pub highlight_compress_srgb: bool,
-  /// Sub-switch: highlight-chroma compression for the `ProPhotoD50` editing fork.
-  pub highlight_compress_prophoto: bool,
-}
-
-pub(crate) fn calibrate(
-    intermediate: Intermediate,
-    image: &RawImage,
-    wb: Option<[f32; 4]>,
-    space: WorkingSpace,
-    oklab: OklabSwitches,
-) -> Result<RawlerImageDeveloped, RawlerFotlabError> {
-  // Resolve the camera color matrix at the target white point (D65 presentation /
-  // D50 editing), Bradford-adapted from another illuminant (rawler's logic).
-  let target_illu = space.illuminant();
-  let xyz2cam = resolve_xyz_to_cam(image, target_illu)?;
-
-  // White balance: explicit override, else rawler default (1.0 if NaN).
-  let wb = match wb {
-    Some(wb) => wb,
-    None => {
-      if image.wb_coeffs[0].is_nan() {
-        [1.0, 1.0, 1.0, 1.0]
-      } else {
-        image.wb_coeffs
-      }
+    /// The camera → working-space matrix, anchored on this space's illuminant.
+    ///
+    /// Four coefficients per output row, not three: rawler's `pseudo_inverse` runs on the
+    /// 4-row XYZ→camera matrix and returns `[[f32; 4]; 3]`, so a four-colour CFA genuinely has
+    /// a fourth camera channel feeding each output row. A 3-channel buffer simply uses the
+    /// first three.
+    ///
+    /// Resolved once per image and then carried **inside** the `DemosaicedCameraImage`, so the
+    /// projection afterwards is a pure per-pixel multiply that needs no `RawImage` beside it
+    /// (`crate::camera_space`).
+    pub(crate) fn cam2rgb_for(self, image: &RawImage) -> Result<[[f32; 4]; 3], RawlerFotlabError> {
+        let xyz2cam = resolve_xyz_to_cam(image, self.illuminant())?;
+        let rgb2cam = normalize(multiply(&xyz2cam, &self.to_xyz_matrix()));
+        Ok(pseudo_inverse(rgb2cam))
     }
-  };
-
-  // Anchor the camera matrix on the requested working space: sRGB→XYZ (D65) for the
-  // presentation path, ProPhoto→XYZ (D50) for the wide-gamut editing path.
-  //
-  // NOTE: no gamut clamping happens here any more. `clip_euclidean_norm_avg` used to run
-  // per-pixel right after this matrix, which forced every colour inside the sRGB cube and
-  // irreversibly destroyed anything outside it *before* the FFI. Clamping now happens only
-  // where a finished image is actually produced (`bound::rawlerimagedeveloped_to_png`), so the
-  // wide-gamut result handed to rawalchemy keeps its negative and >1 components
-  // (`rules/REVIEW/detail/FOTLAB-RAWLER-000005.md`).
-  let rgb2cam = normalize(multiply(&xyz2cam, &space.to_xyz_matrix()));
-  let cam2rgb = pseudo_inverse(rgb2cam);
-
-  // --- OKLab highlight-compression bypass (`FOTLAB-RENDER-000001`) -----------------
-  // Master + per-fork sub-switch gating, decided here at the branch site. The whole OKLab
-  // round trip is skipped (None) unless the master `enabled` is on AND this fork's sub-switch
-  // is on. Both default to off on the Rust/FFI side, so an absent caller gets a pure
-  // camera→working-space identity and the OKLab pass never runs. The maps + per-pixel chroma
-  // roll-off live in `calibrate_oklab`; the boundary is camera-space — `calibrate` hands the
-  // post-WB camera triple to `OklabBypassMaps::compress_pixel` and gets a camera triple back,
-  // before the working-space `cam2rgb` multiply. The maps are built once per image, only when
-  // the branch is actually on.
-  let oklab_branch = {
-    let sub = match space {
-      WorkingSpace::SrgbD65 => oklab.highlight_compress_srgb,
-      WorkingSpace::ProPhotoD50 => oklab.highlight_compress_prophoto,
-    };
-    if oklab.enabled && sub {
-      Some(OklabBypassMaps::new(&xyz2cam))
-    } else {
-      None
-    }
-  };
-
-  // Every arm below is a per-pixel mapping with no cross-pixel dependency, so each one is
-  // parallelised with rayon — this is the cost centre the upstream `map_*_to_rgb` helpers
-  // cannot cover for us, because they are `pub(crate)` in rawler
-  // (`rules/REVIEW/detail/OPTIMZ-PERFRM-000007.md`, `FOTLAB-RAWLER-000003`).
-  match intermediate {
-    Intermediate::Monochrome(pix) => {
-      // No per-channel colour mapping for monochrome; replicate the single
-      // channel across RGB. (3x size expansion is unavoidable.) Exposure EV is
-      // already baked into the source mosaic by `develop` before demosaic.
-      let mut rgb: Vec<f32> = vec![0f32; pix.data.len() * 3];
-      pix.data
-          .par_iter()
-          .zip(rgb.par_chunks_exact_mut(3))
-          .for_each(|(&v, out)| out.copy_from_slice(&[v, v, v]));
-      Ok(RawlerImageDeveloped {
-        width: pix.width as u32,
-        height: pix.height as u32,
-        rgb,
-      })
-    }
-    Intermediate::ThreeColor(mut pixels) => {
-      // In-place, parallel over the buffer. The mapping is three sequential per-pixel stages,
-      // each its own rayon pass (the buffer is `&mut [[f32;3]]`, so each pass is a simple
-      // `par_iter_mut`):
-      //   1. white balance (channel gains),
-      //   2. OKLab highlight-chroma compression (camera-space, owned by `calibrate_oklab`),
-      //   3. camera → working-space `cam2rgb`.
-      // Keeping them as separate passes lets the OKLab round trip — and its rayon scheduling —
-      // live entirely in the oklab module (via `compress_buffer`) instead of being inlined here.
-      let (w, h) = (pixels.width, pixels.height);
-      // 1. White balance.
-      pixels.pixels_mut().par_iter_mut().for_each(|px| {
-        px[0] *= wb[0];
-        px[1] *= wb[1];
-        px[2] *= wb[2];
-      });
-      // 2. OKLab highlight-chroma compression (camera-space in/out), whole buffer in parallel.
-      if let Some(maps) = &oklab_branch {
-        maps.compress_buffer(pixels.pixels_mut());
-      }
-      // 3. Camera → working space.
-      pixels.pixels_mut().par_iter_mut().for_each(|px| {
-        let r = px[0];
-        let g = px[1];
-        let b = px[2];
-        *px = [
-          cam2rgb[0][0] * r + cam2rgb[0][1] * g + cam2rgb[0][2] * b,
-          cam2rgb[1][0] * r + cam2rgb[1][1] * g + cam2rgb[1][2] * b,
-          cam2rgb[2][0] * r + cam2rgb[2][1] * g + cam2rgb[2][2] * b,
-        ];
-      });
-      // Reinterpret the same allocation as flat RGB — no ~630 MB copy.
-      Ok(RawlerImageDeveloped {
-        width: w as u32,
-        height: h as u32,
-        rgb: flatten_rgb3(pixels.into_inner()),
-      })
-    }
-    Intermediate::FourColor(pixels) => {
-      // 4-channel -> 3-channel shrinks the data; the new vec is 3/4 the size
-      // of the source and the source is dropped right after.
-      let mut out: Vec<f32> = vec![0f32; pixels.data.len() * 3];
-      pixels
-          .pixels()
-          .par_iter()
-          .zip(out.par_chunks_exact_mut(3))
-          .for_each(|(px, dst)| {
-            let ch0 = px[0] * wb[0];
-            let ch1 = px[1] * wb[1];
-            let ch2 = px[2] * wb[2];
-            let ch3 = px[3] * wb[3];
-            let mapped = [
-              cam2rgb[0][0] * ch0 + cam2rgb[0][1] * ch1 + cam2rgb[0][2] * ch2 + cam2rgb[0][3] * ch3,
-              cam2rgb[1][0] * ch0 + cam2rgb[1][1] * ch1 + cam2rgb[1][2] * ch2 + cam2rgb[1][3] * ch3,
-              cam2rgb[2][0] * ch0 + cam2rgb[2][1] * ch1 + cam2rgb[2][2] * ch2 + cam2rgb[2][3] * ch3,
-            ];
-            // No clamp — see the ThreeColor arm.
-            dst.copy_from_slice(&mapped);
-          });
-      Ok(RawlerImageDeveloped {
-        width: pixels.width as u32,
-        height: pixels.height as u32,
-        rgb: out,
-      })
-    }
-  }
-}
-
-/// Zero-copy reinterpretation of `Vec<[f32; 3]>` as `Vec<f32>`.
-///
-/// Sound: `[f32; 3]` has `align_of::<f32>()` and size exactly
-/// `3 * size_of::<f32>()` with no padding, so the backing allocation of an
-/// array vector is a contiguous run of `len * 3` f32s — same invariants
-/// `Vec::from_raw_parts` needs after repointing length/capacity in elements.
-fn flatten_rgb3(v: Vec<[f32; 3]>) -> Vec<f32> {
-  let mut v = std::mem::ManuallyDrop::new(v);
-  // SAFETY: ptr/len/cap stay within the original allocation; the element type
-  // change [f32;3] -> f32 preserves layout contiguity and alignment.
-  unsafe { Vec::from_raw_parts(v.as_mut_ptr() as *mut f32, v.len() * 3, v.capacity() * 3) }
 }
 
 /// Resolve the camera color matrix (XYZ→camera, `[[f32;3];4]`, RGBE rows) at the
@@ -306,11 +144,9 @@ pub(crate) fn resolve_xyz_to_cam(
 /// Tiny helper replicating `rawler::imgop::matrix::transform_1d::<3,3>` — reshapes
 /// a 9-element flat colour matrix into `[[f32;3];3]` for `adapt_bradford`.
 fn transform_1d_3x3(matrix: &[f32]) -> [[f32; 3]; 3] {
-  let mut out = [[0.0f32; 3]; 3];
-  for (i, v) in matrix.iter().copied().enumerate() {
-    out[i / 3][i % 3] = v;
-  }
-  out
+    let mut out = [[0.0f32; 3]; 3];
+    for (i, v) in matrix.iter().copied().enumerate() {
+        out[i / 3][i % 3] = v;
+    }
+    out
 }
-
-

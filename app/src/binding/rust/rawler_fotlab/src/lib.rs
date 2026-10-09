@@ -11,27 +11,23 @@
 //!   * `decode_to_png`  — call #2: decode the already-identified RAW and encode a
 //!     **grayscale raw preview** PNG (no demosaic / calibrate) via `bound::fotraw_to_png`.
 //!     This is what Studio shows on first open, before any demosaic choice.
-//!   * `develop`        — *editing* branch: decode + demosaic + calibrate into a
-//!     **linear ProPhoto D50** RGB image (`RawlerImageDeveloped`), unclipped, for the
-//!     rawalchemy pipeline. Wide gamut; negatives and >1 survive
-//!     (`FOTLAB-RAWLER-000005`). No gamma — ProPhoto is a linear editing space.
-//!   * `develop_to_png` — *presentation* branch: same develop pipeline, but built in
-//!     sRGB D65 and then finished into a display-ready PNG by
-//!     `bound::rawlerimagedeveloped_to_png`, which applies the sRGB transfer function (gamma)
-//!     and clips to [0,1]. This is what Studio renders after the user picks a
-//!     demosaic algorithm from the bottom-bar menu.
-//!   * `develop_and_grade` — *grading* branch (behind the `rawalchemy` feature, on by
-//!     default): same develop as above, but the linear ProPhoto-D50 buffer is handed
-//!     to the rawalchemy grading engine in the same call and the **graded** float
-//!     buffer comes back. Which stages run is chosen entirely by `GradeParams`, whose
-//!     optional fields deliberately expose upstream's full parameter surface
-//!     (`FOTLAB-RAWLER-000006`). The resident object additionally exposes
-//!     `develop_and_grade_to_png` / `..._at_kelvin`, which quantize the graded
-//!     buffer straight to a display PNG (no transfer function), and
-//!     `supported_log_spaces` lists the log curves the Studio LOG chooser offers.
-//!     Studio's grade bar drives the PNG variants; changing a develop parameter
-//!     (demosaic / exposure / WB) re-renders the sRGB fork above, changing a grade
-//!     parameter (Boost / LOG / LUT) re-renders the graded PNG fork.
+//!   * `develop`        — decode + develop into a **linear ProPhoto D50** RGB image
+//!     (`RawlerImageDeveloped`), unclipped, for the rawalchemy pipeline. Wide gamut;
+//!     negatives and >1 survive (`FOTLAB-RAWLER-000005`).
+//!   * `develop_to_png` — the stateless convenience render: develop, then encode a PNG.
+//!     Studio does not use it (it drives the resident object instead, so the decode is
+//!     cached); it is here for callers that hold only the bytes.
+//!   * `loaded::RawlerImageLoaded::render_png` — **the** render entry Studio uses, and the
+//!     only one there is. It replaced the old `develop_to_png` /
+//!     `develop_and_grade_to_png` pair on the resident object: there is now one trunk, and
+//!     the caller's `PipelineStages` (`develop` / `grade`) says where the output lands —
+//!     stop after develop in sRGB D65, or run on into ProPhoto D50 and the grading engine.
+//!     `develop = false` reuses the `DemosaicedCameraImage` cache Kotlin holds, so a
+//!     grade-only edit no longer re-runs decode→demosaic.
+//!     `develop_and_grade` (behind the `rawalchemy` feature, on by default) still returns
+//!     the graded **float** buffer, and `supported_log_spaces` lists the log curves the
+//!     Studio LOG chooser offers. `GradeParams`' optional fields deliberately expose
+//!     upstream's full parameter surface (`FOTLAB-RAWLER-000006`).
 //!   * `demosaic_candidates` — the algorithm menu: the concatenation of rawler's
 //!     own demosaics (`RAWLER …`) and the RawTherapee kernels ported in
 //!     `rawtrp_demosaic` (`RAWTRP …`), filtered to the ones that are actually wired.
@@ -77,6 +73,7 @@ mod bound;
 mod ca;
 mod calibrate;
 pub mod calibrate_oklab;
+mod camera_space;
 mod loca;
 mod cfa;
 mod decode;
@@ -155,13 +152,22 @@ pub fn decode_to_png(raw: &[u8]) -> Result<Vec<u8>, RawlerFotlabError> {
 
 /// Render call — develop the already-identified RAW and encode it straight to PNG.
 ///
-/// Now delegates to [`loaded::RawlerImageLoaded`]: decodes once and develops from
-/// the cached decode (`FOTLAB-RAWLER-000004`). The stateless free function keeps
-/// its signature for existing callers; `StudioEngine` drives the cached path.
+/// Now delegates to [`loaded::RawlerImageLoaded`]: decodes once and renders from the cached
+/// decode (`FOTLAB-RAWLER-000004`). It passes the neutral [`PipelineStages::default`] — develop
+/// everything, grade nothing — so this stateless form is always the presentation render and
+/// never reuses a cache (there is nothing to reuse across a single call). The Kotlin Studio
+/// drives [`loaded::RawlerImageLoaded::render_png`] directly and assembles the stage
+/// dictionary itself.
 #[uniffi::export]
 pub fn develop_to_png(raw: &[u8], params: DevelopParams) -> Result<Vec<u8>, RawlerFotlabError> {
     let loaded = loaded::decode_rawler_image(raw)?;
-    loaded.develop_to_png(params)
+    loaded.render_png(
+        params,
+        develop::PipelineStages::default(),
+        develop::GradeParams::default(),
+        None,
+        0.0,
+    )
 }
 
 /// Log spaces the rawalchemy grading engine accepts, as UI display names

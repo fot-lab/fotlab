@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.Exposure
 import androidx.compose.material.icons.filled.Gradient
 import androidx.compose.material.icons.filled.RawOff
 import androidx.compose.material.icons.filled.RawOn
+import androidx.compose.material.icons.filled.SdCard
 import androidx.compose.material.icons.filled.Contrast
 import androidx.compose.material.icons.filled.MovieFilter
 import androidx.compose.material.icons.filled.Tonality
@@ -199,6 +200,36 @@ internal fun RawStatusButton(
         contentDescription = stringResource(
             id = if (isOn) R.string.studio_cd_raw_on else R.string.studio_cd_raw_off,
         ),
+        modifier = modifier,
+    )
+}
+
+/**
+ * Read-only output-transfer indicator for the Basic bar, in the same spirit as the raw-status
+ * readout: it *reports* whether the PNG the canvas is showing was written through the sRGB transfer
+ * function or straight from linear, and offers nothing to change.
+ *
+ * The value is derived by `StudioEngine` from what the render actually is — a graded render is
+ * already log-encoded by rawalchemy and must not be gamma-encoded again, while the develop
+ * presentation is the one that wants the curve — so surfacing it as a switch would only let the
+ * user ask for a combination that cannot happen. It is an indicator, not a control: a bare icon
+ * with no click handling, whose primary tint means "gamma is being applied".
+ */
+@Composable
+internal fun OutputTransferStatusButton(
+    isGamma: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Icon(
+        imageVector = Icons.Filled.SdCard,
+        contentDescription = stringResource(
+            id = if (isGamma) R.string.studio_cd_transfer_gamma else R.string.studio_cd_transfer_linear,
+        ),
+        tint = if (isGamma) {
+            MaterialTheme.colorScheme.primary
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        },
         modifier = modifier,
     )
 }

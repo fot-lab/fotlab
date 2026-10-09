@@ -21,8 +21,11 @@ import io.github.fotlab.fotlab_rawler.CaSettings
 import io.github.fotlab.fotlab_rawler.LocaSettings
 import io.github.fotlab.fotlab_rawler.CameraProfileParams
 import io.github.fotlab.fotlab_rawler.DevelopParams
+import io.github.fotlab.fotlab_rawler.DemosaicedCameraImage
 import io.github.fotlab.fotlab_rawler.GradeParams
 import io.github.fotlab.fotlab_rawler.LensProfileParams
+import io.github.fotlab.fotlab_rawler.OutputTransfer
+import io.github.fotlab.fotlab_rawler.PipelineStages
 import io.github.fotlab.fotlab_rawler.RawlerImageLoaded
 import io.github.fotlab.fotlab_rawler.RawlerFotlabBridge
 import kotlinx.coroutines.CoroutineScope
@@ -159,12 +162,17 @@ object StudioEngine {
         // Release any previously-held decoded RAW and invalidate in-flight work before switching
         // (FOTLAB-RAWLER-000004 §lifecycle: exactly one handle per loaded file, at most).
         loadedImage = null
+        // …and with it the demosaiced camera buffer, which is the other half of the same memory
+        // budget and belongs to the file that was open before. Dropping both together is what
+        // keeps "at most one" true across a file switch.
+        clearRenderCache()
         // The held frame belongs to the previous node: drop it so we never show a different
         // file's image while the new one decodes; the new Ready replaces it on arrival.
         displayedResultState.value = null
         // The Boost/LOG/LUT selection belongs to the previous file's grade fork — every new node
         // starts at all-"none" (the regular sRGB develop presentation).
         gradeSelectionState.value = GradeSelection()
+        outputTransferState.value = OutputTransfer.GAMMA
         gradeErrorState.value = null
         rawLoadedState.value = false
         // The LCP focal sources belong to the previous file: the decoded-RAW focal is re-read for the
@@ -242,37 +250,38 @@ object StudioEngine {
                 // Capture focal length (mm) decoded from the RAW EXIF — 2nd LCP priority (tier-2). UniFFI
                 // maps Option<f64> to a nullable Double?, so null means the file carried no focal.
                 rawFocalLengthMmState.value = loaded.focalLengthMm()?.toFloat()
+                // A new file invalidates every render cache: the resident handle and the demosaiced
+                // camera buffer both belong to the file that was open before, and the buffer carries
+                // no notion of which image produced it.
+                clearRenderCache()
                 // Develop once with as-shot params: pass `null` for both `exposureEv` and `wb` so the
                 // pipeline adopts the decoded as-shot values (rawler's `RawDevelop::default()`, which
                 // dnglab uses for its DNG thumbnail and applies no exposure step — FOTLAB-RAWLER-000004
-                // §as-shot). Later develops reuse this same object. The demosaic choice does apply
-                // here: opening the file is a develop, so the frame it lands on already honours the
-                // user's pick (or the default when they have never picked one).
-                val png = RawlerFotlabBridge.developRawlerImage(
+                // §as-shot). Nothing is configured yet, so the stage dictionary is the neutral one:
+                // develop everything, grade nothing — which is also what the gamma/linear readout
+                // starts out reporting. `develop = true` is not merely the default here, it is
+                // required: there is no cache to reuse on a freshly opened file.
+                // The demosaic choice does apply here: opening the file is a develop, so the frame it
+                // lands on already honours the user's pick (or the default when they never picked one).
+                val transfer = OutputTransfer.GAMMA
+                outputTransferState.value = transfer
+                val params = assembleDevelopParams(exposureEv = null, outputTransfer = transfer)
+                val png = RawlerFotlabBridge.renderRawlerImage(
                     loaded,
-                    DevelopParams(
-                        demosaicAlgorithm = currentAlgorithm,
-                        exposureEv = null,
-                        wb = null,
-                        denoiseStrength = currentDenoiseStrength,
-                        denoiseBm3dStrength = currentDenoiseBm3dStrength,
-                        dehazeStrength = currentDehazeStrength,
-                        dehazePercentile = currentDehazePercentile,
-            dehazeCeiling = currentDehazePercentile,
-            dehazeRadiusDark = currentDehazeRadiusDark,
-            dehazeRadiusGuide = currentDehazeRadiusGuide,
-            dehazeMergeMode = currentDehazeMergeMode,
-            ca = currentCa,
-            loca = currentLoca,
-            clipToGamut = currentClipToGamut,
-            cameraProfile = cameraProfileState.value,
-            lensProfile = lensProfileState.value,
-            rawFocalLengthMm = rawFocalLengthMmState.value,
-            oklabEnabled = currentOklabHighlightCompressSrgb || currentOklabHighlightCompressProphoto,
-            oklabHighlightCompressSrgb = currentOklabHighlightCompressSrgb,
-            oklabHighlightCompressProphoto = currentOklabHighlightCompressProphoto,
-                    ),
+                    params,
+                    PipelineStages(develop = true, oklab = oklabForFreshOpen(), grade = false),
+                    GradeParams(),
+                    null,
+                    0f,
                 ) ?: return StudioRenderResult.Unsupported
+                // Take the demosaiced buffer this render just built, so the first grade-only edit can
+                // start from it instead of re-running decode and demosaic.
+                demosaicedCache = RawlerFotlabBridge.takeDemosaicedCameraImage(loaded)
+                demosaicedKey = params.copy(
+                    outputTransfer = OutputTransfer.GAMMA,
+                    oklabHighlightCompressSrgb = false,
+                    oklabHighlightCompressProphoto = false,
+                )
                 currentFormat = r.format
                 rawLoadedState.value = true
                 StudioRenderResult.Ready(ByteBuffer.wrap(png))
@@ -372,7 +381,7 @@ object StudioEngine {
         demosaicTouched = true
         currentAlgorithm = candidate.algorithm
         scope.launch { runCatching { developPreference.setDemosaicId(candidate.id) } }
-        reDevelop()
+        requestRender()
     }
 
     /**
@@ -535,25 +544,25 @@ object StudioEngine {
     /** Configure the boost-group contrast parameter; null = unconfigured (clears the value). */
     fun setGradeContrast(value: Float?) {
         gradeSelectionState.update { it.copy(contrast = value) }
-        reGrade()
+        requestRender()
     }
 
     /** Configure the boost-group saturation parameter; null = unconfigured (clears the value). */
     fun setGradeSaturation(value: Float?) {
         gradeSelectionState.update { it.copy(saturation = value) }
-        reGrade()
+        requestRender()
     }
 
     /** Pick a log curve by name (one of [supportedLogSpaces]); null = the "none" chip. */
     fun setGradeLogSpace(name: String?) {
         gradeSelectionState.update { it.copy(logSpace = name) }
-        reGrade()
+        requestRender()
     }
 
     /** Remove the picked LUT (the "none" item in the LUT menu). */
     fun clearGradeLut() {
         gradeSelectionState.update { it.copy(lutName = null, lutPath = null) }
-        reGrade()
+        requestRender()
     }
 
     /**
@@ -575,53 +584,61 @@ object StudioEngine {
             }
             if (loadNonce.get() != token) return@launch
             gradeSelectionState.update { it.copy(lutName = copied.first, lutPath = copied.second) }
-            reGrade()
+            requestRender()
         }
     }
 
-    /** Shared grade-fork render: re-develop (resident decode, retained algo/EV/WB) → grade → PNG. */
-    private fun reGrade() {
-        val selection = gradeSelectionState.value
-        if (!selection.isActive) {
-            // All three back to "none": nothing to grade — return the canvas to the sRGB develop
-            // presentation rather than showing a dark, linear, unencoded ProPhoto buffer.
-            reDevelop()
-            return
-        }
-        if (loadedImage == null) return
-        val token = loadNonce.get()
-        renderResultState.value = StudioRenderResult.Loading
-        inFlight.incrementAndGet()
-        pipelineRunningState.value = true
-        val job = scope.launch {
-            val png = runGrade(token, selection)
-            if (loadNonce.get() != token) return@launch
-            if (png != null) {
-                val ready = StudioRenderResult.Ready(ByteBuffer.wrap(png))
-                renderResultState.value = ready
-                displayedResultState.value = ready
-            } else {
-                // The grader rejected the inputs (almost always a bad LUT): surface the reason once
-                // and keep the canvas usable by falling back to the sRGB develop presentation.
-                gradeErrorState.value = appContext.getString(R.string.studio_grade_error_message)
-                reDevelop()
-            }
-        }
-        runningJob = job
-        job.invokeOnCompletion { if (inFlight.decrementAndGet() == 0) pipelineRunningState.value = false }
-    }
+    // ---- the unified render -----------------------------------------------------------------
+    //
+    // There is one native trunk and one call any more. `reDevelop` and `reGrade` used to be two
+    // entry points that each ran a whole pipeline of their own — a develop-parameter change
+    // stopped at the sRGB presentation PNG and a grade-parameter change re-ran everything up to
+    // rawalchemy. Both now funnel into [requestRender], which assembles the `develop`/`grade`
+    // dictionary and calls `renderRawlerImage` once. Consequences worth knowing:
+    //
+    //  * a develop change while grading is enabled finishes the grade in the *same* pass;
+    //  * a grade-only change does not re-run decode→demosaic, because the demosaiced
+    //    camera-space buffer is cached (see [demosaicedCache]);
+    //  * turning every grade stage off returns the canvas to the sRGB+gamma presentation render,
+    //    which is now just another dictionary value rather than a separate code path.
 
-    private fun runGrade(token: Long, selection: GradeSelection): ByteArray? {
-        if (loadNonce.get() != token) return null
-        val loaded = loadedImage ?: return null
-        val params = DevelopParams(
+    /**
+     * The demosaiced camera-space buffer, held here on purpose.
+     *
+     * Native publishes the most recent one after every render that re-developed and hands it over
+     * exactly once (see [RawlerFotlabBridge.takeDemosaicedCameraImage]); from then on Kotlin owns
+     * it and passes it back as the render's `cache`. At most one is alive: the previous handle is
+     * dropped *before* a new one is taken, and both are dropped on a file switch.
+     */
+    @Volatile private var demosaicedCache: DemosaicedCameraImage? = null
+
+    /**
+     * The [DevelopParams] the cached [demosaicedCache] was built from, with the output-transfer
+     * field normalised away — that field is applied by the encoder, downstream of the cache
+     * boundary, so flipping it must not invalidate anything. Any other difference means the cache
+     * describes different pixels and the next render has to re-develop.
+     */
+    @Volatile private var demosaicedKey: DevelopParams? = null
+
+    /**
+     * Assemble the full develop parameter set for the next render.
+     *
+     * One function, so the cache-validity comparison in [requestRender] can never drift from
+     * what is actually sent: both read the same record.
+     *
+     * [outputTransfer] is the only field the develop half does not act on — it is read by the PNG
+     * encoder — and [requestRender] derives it from the grade state rather than from a user
+     * choice (see [outputTransfer]).
+     */
+    private fun assembleDevelopParams(exposureEv: Float?, outputTransfer: OutputTransfer): DevelopParams =
+        DevelopParams(
             demosaicAlgorithm = currentAlgorithm,
-            exposureEv = currentExposureEv,
+            exposureEv = exposureEv,
             exposureClipLower = currentExposureClipLower,
             exposureClipUpper = currentExposureClipUpper,
             wb = null,
             denoiseStrength = currentDenoiseStrength,
-                        denoiseBm3dStrength = currentDenoiseBm3dStrength,
+            denoiseBm3dStrength = currentDenoiseBm3dStrength,
             dehazeStrength = currentDehazeStrength,
             dehazePercentile = currentDehazePercentile,
             dehazeCeiling = currentDehazePercentile,
@@ -634,14 +651,110 @@ object StudioEngine {
             cameraProfile = cameraProfileState.value,
             lensProfile = lensProfileState.value,
             rawFocalLengthMm = rawFocalLengthMmState.value,
-            oklabEnabled = currentOklabHighlightCompressSrgb || currentOklabHighlightCompressProphoto,
             oklabHighlightCompressSrgb = currentOklabHighlightCompressSrgb,
             oklabHighlightCompressProphoto = currentOklabHighlightCompressProphoto,
+            outputTransfer = outputTransfer,
         )
+
+    /**
+     * Re-render after any parameter change, on whichever output the current state calls for.
+     *
+     * Every develop control *and* every grade control lands here — they no longer differ in kind,
+     * only in which dictionary value they imply. The decision rule is short and entirely
+     * Kotlin-side, because Kotlin is the layer that knows what changed:
+     *
+     *  * no cache held → `develop = true` (there is nothing to reuse);
+     *  * cache held and the develop-stage parameters are unchanged → `develop = false`, reuse it;
+     *  * otherwise → `develop = true`, replacing the cache.
+     *
+     * `grade` is simply "is any grade stage active", and it is what selects the output: graded →
+     * ProPhoto D50 + the graded PNG + `OutputTransfer.LINEAR`; not graded → sRGB D65 + the
+     * presentation PNG + `OutputTransfer.GAMMA`.
+     *
+     * Falls back to the stateless decoder when no resident image is held (a non-RAW source), which
+     * is the one case with no cache to speak of.
+     *
+     * [gradeOverride] exists for exactly one caller: the recovery path after a grading failure. It
+     * forces the presentation output for that one render instead of re-reading the selection,
+     * which is still active and would otherwise send the render straight back into the grader that
+     * just rejected it - an endless retry loop with no way out.
+     */
+    private fun requestRender(gradeOverride: Boolean? = null) {
+        val loaded = loadedImage
+        if (loaded == null) {
+            reDevelopStateless()
+            return
+        }
+        val selection = gradeSelectionState.value
+        val gradeActive = gradeOverride ?: selection.isActive
+        val transfer = if (gradeActive) OutputTransfer.LINEAR else OutputTransfer.GAMMA
+        outputTransferState.value = transfer
+
+        val params = assembleDevelopParams(currentExposureEv, transfer)
+        // Normalise out everything the develop half does not act on. The transfer function is an
+        // encoder concern, and the OKLab sub-switches belong to the stage ABOVE the cache, so
+        // neither changes the cached pixels; letting either into the key would re-run a whole
+        // decode for a render that costs one matrix multiply.
+        val key = params.copy(
+            outputTransfer = OutputTransfer.GAMMA,
+            oklabHighlightCompressSrgb = false,
+            oklabHighlightCompressProphoto = false,
+        )
+        val cache = demosaicedCache
+        val develop = cache == null || demosaicedKey != key
+        // The OKLab stage master gate, derived the same way `grade` is: with both sub-switches off
+        // the stage is a guaranteed identity for every output, so there is nothing to run.
+        val oklab = currentOklabHighlightCompressSrgb || currentOklabHighlightCompressProphoto
+        val stages = PipelineStages(develop = develop, oklab = oklab, grade = gradeActive)
+
+        val token = loadNonce.get()
+        renderResultState.value = StudioRenderResult.Loading
+        inFlight.incrementAndGet()
+        pipelineRunningState.value = true
+        val job = scope.launch {
+            val png = runRender(token, loaded, params, stages, selection, if (develop) null else cache)
+            if (loadNonce.get() != token) return@launch
+            if (png != null) {
+                if (stages.develop) {
+                    // Replace, never accumulate: dropping first is what keeps exactly one buffer
+                    // alive across an arbitrarily long editing session.
+                    demosaicedCache = null
+                    demosaicedCache = RawlerFotlabBridge.takeDemosaicedCameraImage(loaded)
+                    demosaicedKey = key
+                }
+                val ready = StudioRenderResult.Ready(ByteBuffer.wrap(png))
+                renderResultState.value = ready
+                displayedResultState.value = ready
+            } else if (stages.grade) {
+                // The grader rejected the inputs (almost always a bad LUT): surface the reason once
+                // and keep the canvas usable by falling back to the develop presentation.
+                gradeErrorState.value = appContext.getString(R.string.studio_grade_error_message)
+                requestRender(gradeOverride = false)
+            } else {
+                // Not a grading problem - the develop render itself failed. Retrying would only
+                // fail the same way, so say so instead of spinning.
+                renderResultState.value = StudioRenderResult.Unsupported
+            }
+        }
+        runningJob = job
+        job.invokeOnCompletion { if (inFlight.decrementAndGet() == 0) pipelineRunningState.value = false }
+    }
+
+    /** One native call: run the trunk (develop half cached or not) and encode the PNG. */
+    private fun runRender(
+        token: Long,
+        loaded: RawlerImageLoaded,
+        params: DevelopParams,
+        stages: PipelineStages,
+        selection: GradeSelection,
+        cache: DemosaicedCameraImage?,
+    ): ByteArray? {
+        if (loadNonce.get() != token) return null
         // Only the three grade-bar controls are wired. The boost group assembles here: the switch
         // is derived (either parameter configured), and an unconfigured sibling falls back to 1.0
         // so upstream always receives both parameters explicitly. Every other rawalchemy parameter
-        // stays null ("the engine decides") — this crate pins no upstream default of its own.
+        // stays null ("the engine decides") — this layer pins no upstream default of its own.
+        // Ignored entirely when `stages.grade` is false, which is the "all stages off" case.
         val boostOn = selection.boostEnabled
         val grade = GradeParams(
             logSpace = selection.logSpace,
@@ -654,12 +767,34 @@ object StudioEngine {
             contrast = if (boostOn) (selection.contrast ?: 1.0f) else null,
             pivot = null,
         )
-        val kelvin = currentWhiteBalanceKelvin
-        return if (kelvin != null) {
-            RawlerFotlabBridge.gradeRawlerImageToPngAtKelvin(loaded, params, kelvin, grade)
-        } else {
-            RawlerFotlabBridge.gradeRawlerImageToPng(loaded, params, grade)
-        }
+        return RawlerFotlabBridge.renderRawlerImage(
+            loaded,
+            params,
+            stages,
+            grade,
+            cache,
+            currentWhiteBalanceKelvin ?: 0f,
+        )
+    }
+
+    /**
+     * The OKLab stage master gate for the very first render of a freshly opened file.
+     *
+     * Split out only so [runPipeline] and [requestRender] cannot drift: a fresh file develops with
+     * nothing configured except whatever the OKLab dialog already holds, and that is exactly the
+     * same derivation.
+     */
+    private fun oklabForFreshOpen(): Boolean =
+        currentOklabHighlightCompressSrgb || currentOklabHighlightCompressProphoto
+
+    /**
+     * Drop both halves of the render cache. Called on a file switch so the next file cannot be
+     * handed the previous file's demosaiced buffer — the single most important invariant here,
+     * since the handle alone carries no notion of which image it belongs to.
+     */
+    private fun clearRenderCache() {
+        demosaicedCache = null
+        demosaicedKey = null
     }
 
     /**
@@ -847,7 +982,7 @@ object StudioEngine {
      */
     fun setWhiteBalanceKelvin(kelvin: Float) {
         currentWhiteBalanceKelvin = kelvin
-        reDevelop()
+        requestRender()
     }
 
     /**
@@ -869,7 +1004,7 @@ object StudioEngine {
             currentExposureClipLower = hi
             currentExposureClipUpper = lo
         }
-        reDevelop()
+        requestRender()
     }
 
     /**
@@ -889,30 +1024,11 @@ object StudioEngine {
      */
     fun meterAutoExposure(mode: String): Float? {
         val loaded = loadedImage ?: return null
-        val params = DevelopParams(
-            demosaicAlgorithm = currentAlgorithm,
-            exposureEv = currentExposureEv,
-            exposureClipLower = currentExposureClipLower,
-            exposureClipUpper = currentExposureClipUpper,
-            wb = null,
-            denoiseStrength = currentDenoiseStrength,
-                        denoiseBm3dStrength = currentDenoiseBm3dStrength,
-            dehazeStrength = currentDehazeStrength,
-            dehazePercentile = currentDehazePercentile,
-            dehazeCeiling = currentDehazePercentile,
-            dehazeRadiusDark = currentDehazeRadiusDark,
-            dehazeRadiusGuide = currentDehazeRadiusGuide,
-            dehazeMergeMode = currentDehazeMergeMode,
-            ca = currentCa,
-            loca = currentLoca,
-            clipToGamut = currentClipToGamut,
-            cameraProfile = cameraProfileState.value,
-            lensProfile = lensProfileState.value,
-            rawFocalLengthMm = rawFocalLengthMmState.value,
-            oklabEnabled = currentOklabHighlightCompressSrgb || currentOklabHighlightCompressProphoto,
-            oklabHighlightCompressSrgb = currentOklabHighlightCompressSrgb,
-            oklabHighlightCompressProphoto = currentOklabHighlightCompressProphoto,
-        )
+        // Metering runs the same trunk into the ProPhoto editing space, so it assembles from the
+        // one shared parameter set. The transfer field is irrelevant to it (it never encodes a
+        // PNG), but passing the current value keeps the record identical to what a render would
+        // send — and it is excluded from the cache key anyway.
+        val params = assembleDevelopParams(currentExposureEv, outputTransferState.value)
         // `metered` is the offset relative to the current image; add the recorded applied exposure
         // so the dialog's field receives an absolute value on the same scale.
         val metered = RawlerFotlabBridge.meterAutoExposure(loaded, params, mode, null) ?: return null
@@ -964,47 +1080,63 @@ object StudioEngine {
     fun currentClipToGamut(): Boolean = currentClipToGamut
 
     /**
-     * Whether the OKLab highlight-compression bypass is active for the **sRGB presentation** fork
-     * on the next render (the Studio OKLab dialog's first switch). A lightness-driven chroma
-     * roll-off in OKLab desaturates near-clipped highlights so the per-channel sRGB clamp no longer
-     * freezes a hue error. Default **on**. OFF is a bit-for-bit identity for the rest of the image.
+     * Whether the OKLab highlight roll-off runs for the **sRGB presentation** output (the Studio
+     * OKLab dialog's first switch). A lightness-driven chroma roll-off in OKLab desaturates
+     * near-clipped highlights so the encoder's per-channel clamp no longer freezes a hue error.
+     * Default **on**. OFF is a bit-for-bit identity for the rest of the image.
      */
     private var currentOklabHighlightCompressSrgb: Boolean = true
 
     /**
-     * Whether the OKLab highlight-compression bypass is active for the **ProPhoto-D50 editing** fork
-     * on the next render (the Studio OKLab dialog's second switch). Same D65-anchored camera-space
-     * round trip as the sRGB twin, so rawalchemy receives a desaturated (not clamped) near-clipped
-     * highlight buffer. Default **off** — the editing branch leaves the ProPhoto buffer untouched
-     * unless the UI enables it. OFF is a bit-for-bit identity.
+     * Whether the OKLab highlight roll-off runs for the **ProPhoto grade** output (the dialog's
+     * second switch). Same D65-anchored camera-space round trip as the sRGB twin, so rawalchemy
+     * receives a desaturated (not clamped) near-clipped-highlight buffer. Default **off** — the
+     * graded output leaves its highlights untouched unless the UI enables it.
+     *
+     * Both switches sit **above** the demosaic cache, so flipping either re-renders without
+     * re-developing: the stage is cheap and the cached buffer is pre-roll-off by design.
      */
     private var currentOklabHighlightCompressProphoto: Boolean = false
 
-    /** Current sRGB OKLab highlight-compression switch; the UI prefills the OKLab dialog from this. */
+    /** Current sRGB OKLab highlight-roll-off switch; the UI prefills the OKLab dialog from this. */
     fun currentOklabHighlightCompressSrgb(): Boolean = currentOklabHighlightCompressSrgb
 
-    /** Current ProPhoto OKLab highlight-compression switch; the UI prefills the OKLab dialog from this. */
+    /** Current ProPhoto OKLab highlight-roll-off switch; the UI prefills the OKLab dialog from this. */
     fun currentOklabHighlightCompressProphoto(): Boolean = currentOklabHighlightCompressProphoto
 
     /**
-     * Re-develop the current RAW with OKLab highlight compression [enabled] for the sRGB
-     * presentation fork (Studio OKLab dialog). The switch changes the sRGB presentation PNG (the
-     * fork this gate touches), so this goes through [reDevelop] rather than [reGrade].
+     * Re-render with the OKLab highlight roll-off [enabled] for the sRGB presentation output
+     * (Studio OKLab dialog).
      */
     fun setOklabHighlightCompressSrgb(enabled: Boolean) {
         currentOklabHighlightCompressSrgb = enabled
-        reDevelop()
+        requestRender()
     }
 
     /**
-     * Re-develop the current RAW with OKLab highlight compression [enabled] for the ProPhoto-D50
-     * editing fork (Studio OKLab dialog). The switch changes the ProPhoto buffer rawalchemy
-     * receives, so this goes through [reDevelop] (which re-renders the editing fork too).
+     * Re-render with the OKLab highlight roll-off [enabled] for the ProPhoto grade output
+     * (Studio OKLab dialog).
      */
     fun setOklabHighlightCompressProphoto(enabled: Boolean) {
         currentOklabHighlightCompressProphoto = enabled
-        reDevelop()
+        requestRender()
     }
+
+    /**
+     * The output transfer the next render asks the encoder for — `Gamma` for the develop
+     * presentation PNG, `Linear` for a graded one.
+     *
+     * This is an **indicator, not a user choice**: there is no switch to flip it, because the
+     * right answer is decided by what the render is. A graded buffer has already been
+     * log-encoded by rawalchemy, so running the sRGB OETF over it would double-encode it;
+     * the presentation render is the one that wants the transfer function. So the value is
+     * derived from [currentGradeSelection] and merely *reported* — to the native encoder
+     * through `DevelopParams.outputTransfer`, and to the user through the Basic bar's readout.
+     *
+     * Exposed as a `StateFlow` because the bar's label follows it.
+     */
+    private val outputTransferState = MutableStateFlow(OutputTransfer.GAMMA)
+    val outputTransfer: StateFlow<OutputTransfer> = outputTransferState.asStateFlow()
 
     /**
      * The DCP camera profile retained for the next develop re-render; null = off (no camera
@@ -1042,13 +1174,14 @@ object StudioEngine {
      * reaches rawalchemy, so the graded output can no longer show the >1 excursions that the
      * unclipped editing branch carried.
      *
-     * The render goes through [reGrade] rather than [reDevelop] because the sRGB presentation fork
-     * is unaffected: when no grade stage is active [reGrade] falls back to the same develop, so
-     * toggling the switch with grading off is a visually identical re-render.
+     * The render goes through the resident trunk because clipping is a property of the *working-space*
+     * projection, which sits below the cache boundary: with grading off it is simply not applied, so
+     * toggling the switch is a visually identical re-render 鈥?and with grading on it changes the
+     * buffer rawalchemy receives, which is exactly the intent.
      */
     fun setClipToGamut(enabled: Boolean) {
         currentClipToGamut = enabled
-        reGrade()
+        requestRender()
     }
 
     /**
@@ -1060,7 +1193,7 @@ object StudioEngine {
     fun setDenoise(impulse: Float?, bm3d: Float?) {
         currentDenoiseStrength = impulse
         currentDenoiseBm3dStrength = bm3d
-        reDevelop()
+        requestRender()
     }
 
     /**
@@ -1076,7 +1209,7 @@ object StudioEngine {
         currentDehazeRadiusDark = radiusDark
         currentDehazeRadiusGuide = radiusGuide
         currentDehazeMergeMode = mergeMode
-        reDevelop()
+        requestRender()
     }
 
     /**
@@ -1087,7 +1220,7 @@ object StudioEngine {
      */
     fun setCa(ca: CaSettings?) {
         currentCa = ca
-        reDevelop()
+        requestRender()
     }
 
     /**
@@ -1099,7 +1232,7 @@ object StudioEngine {
      */
     fun setLoca(loca: LocaSettings?) {
         currentLoca = loca
-        reDevelop()
+        requestRender()
     }
 
     /**
@@ -1110,7 +1243,7 @@ object StudioEngine {
      */
     fun setCameraProfile(profile: CameraProfileParams?) {
         cameraProfileState.value = profile
-        reGrade()
+        requestRender()
     }
 
     /** Remove the DCP camera profile (the "none" item in the DCP dropdown). */
@@ -1135,7 +1268,7 @@ object StudioEngine {
             }
             if (loadNonce.get() != token) return@launch
             cameraProfileState.value = CameraProfileParams(copied.second, true)
-            reGrade()
+            requestRender()
         }
     }
 
@@ -1147,7 +1280,7 @@ object StudioEngine {
      */
     fun setLensProfile(profile: LensProfileParams?) {
         lensProfileState.value = profile
-        reGrade()
+        requestRender()
     }
 
     /** Remove the LCP lens profile (the "none" item in the LCP dropdown). Also drops any user-specified focal override. */
@@ -1165,7 +1298,7 @@ object StudioEngine {
      */
     fun setLensProfileUserFocal(mm: Float?) {
         userLcpFocalLengthMmState.value = mm
-        if (lensProfileState.value != null) reGrade()
+        if (lensProfileState.value != null) requestRender()
     }
 
     /**
@@ -1191,19 +1324,19 @@ object StudioEngine {
                 applyDistortion = true,
                 focalLength = userLcpFocalLengthMmState.value,
             )
-            reGrade()
+            requestRender()
         }
     }
 
-    /** Shared re-develop path: re-runs the develop pipeline with the retained algorithm + exposure. */
-    private fun reDevelop(wbKelvin: Float? = currentWhiteBalanceKelvin) {
+    /** The no-resident-image fallback for [requestRender]: re-decodes from scratch. */
+    private fun reDevelopStateless() {
         val uri = currentUri ?: return
         val token = loadNonce.get()
         renderResultState.value = StudioRenderResult.Loading
         inFlight.incrementAndGet()
         pipelineRunningState.value = true
         val job = scope.launch {
-            val result = runDevelop(appContext.contentResolver, uri, token, currentAlgorithm, currentExposureEv, wbKelvin)
+            val result = runDevelop(appContext.contentResolver, uri, token, currentAlgorithm, currentExposureEv)
             if (loadNonce.get() == token) {
                 renderResultState.value = result
                 if (result is StudioRenderResult.Ready) displayedResultState.value = result
@@ -1231,82 +1364,27 @@ object StudioEngine {
         if (displayedResultState.value == null) renderResultState.value = StudioRenderResult.Idle
     }
 
+    /**
+     * The stateless develop fallback, used only when no resident image is held.
+     *
+     * A routed RAW always goes through [requestRender] and its resident handle, so reaching here
+     * means the source is not a resident RAW (a build without the `.so`, or a route that never
+     * produced one) and the only thing available is [RawDecoder.developToPng], which re-reads and
+     * re-decodes the bytes. There is no cache to consult on this path — and no develop-stage state
+     * beyond the algorithm and exposure, which is exactly what that older interface carries.
+     */
     private suspend fun runDevelop(
         resolver: ContentResolver,
         uri: Uri,
         token: Long,
         algorithm: DemosaicAlgorithm,
         exposureEv: Float?,
-        wbKelvin: Float? = null,
     ): StudioRenderResult {
         // If the file was switched while we were about to develop, bail — never develop a different
-        // file's pixels (FOTLAB-RAWLER-000004 §lifecycle: exactly one handle per current file).
+        // file's pixels (FOTLAB-RAWLER-000004 搂lifecycle: exactly one handle per current file).
         if (loadNonce.get() != token) return StudioRenderResult.Unsupported
-        // Reuse the resident decoded image; fall back to a stateless re-decode only if it is absent.
-        val loaded = loadedImage
-        val png = if (loaded != null) {
-            if (wbKelvin != null) {
-                RawlerFotlabBridge.developRawlerImageAtKelvin(
-                    loaded,
-                    DevelopParams(
-                        demosaicAlgorithm = algorithm,
-                        exposureEv = exposureEv,
-                        exposureClipLower = currentExposureClipLower,
-                        exposureClipUpper = currentExposureClipUpper,
-                        wb = null,
-                        denoiseStrength = currentDenoiseStrength,
-                        denoiseBm3dStrength = currentDenoiseBm3dStrength,
-                        dehazeStrength = currentDehazeStrength,
-                        dehazePercentile = currentDehazePercentile,
-            dehazeCeiling = currentDehazePercentile,
-            dehazeRadiusDark = currentDehazeRadiusDark,
-            dehazeRadiusGuide = currentDehazeRadiusGuide,
-            dehazeMergeMode = currentDehazeMergeMode,
-            ca = currentCa,
-            loca = currentLoca,
-            clipToGamut = currentClipToGamut,
-            cameraProfile = cameraProfileState.value,
-            lensProfile = lensProfileState.value,
-            rawFocalLengthMm = rawFocalLengthMmState.value,
-            oklabEnabled = currentOklabHighlightCompressSrgb || currentOklabHighlightCompressProphoto,
-            oklabHighlightCompressSrgb = currentOklabHighlightCompressSrgb,
-            oklabHighlightCompressProphoto = currentOklabHighlightCompressProphoto,
-                    ),
-                    wbKelvin,
-                )
-            } else {
-                RawlerFotlabBridge.developRawlerImage(
-                    loaded,
-                    DevelopParams(
-                        demosaicAlgorithm = algorithm,
-                        exposureEv = exposureEv,
-                        exposureClipLower = currentExposureClipLower,
-                        exposureClipUpper = currentExposureClipUpper,
-                        wb = null,
-                        denoiseStrength = currentDenoiseStrength,
-                        denoiseBm3dStrength = currentDenoiseBm3dStrength,
-                        dehazeStrength = currentDehazeStrength,
-                        dehazePercentile = currentDehazePercentile,
-            dehazeCeiling = currentDehazePercentile,
-            dehazeRadiusDark = currentDehazeRadiusDark,
-            dehazeRadiusGuide = currentDehazeRadiusGuide,
-            dehazeMergeMode = currentDehazeMergeMode,
-            ca = currentCa,
-            loca = currentLoca,
-            clipToGamut = currentClipToGamut,
-            cameraProfile = cameraProfileState.value,
-            lensProfile = lensProfileState.value,
-            rawFocalLengthMm = rawFocalLengthMmState.value,
-            oklabEnabled = currentOklabHighlightCompressSrgb || currentOklabHighlightCompressProphoto,
-            oklabHighlightCompressSrgb = currentOklabHighlightCompressSrgb,
-            oklabHighlightCompressProphoto = currentOklabHighlightCompressProphoto,
-                    ),
-                )
-            }
-        } else {
-            rawDecoder.developToPng(currentFormat ?: "", algorithm, exposureEv) {
-                resolver.openInputStream(uri) ?: error("cannot open source")
-            }
+        val png = rawDecoder.developToPng(currentFormat ?: "", algorithm, exposureEv) {
+            resolver.openInputStream(uri) ?: error("cannot open source")
         }
         return if (png != null) StudioRenderResult.Ready(ByteBuffer.wrap(png)) else StudioRenderResult.Unsupported
     }

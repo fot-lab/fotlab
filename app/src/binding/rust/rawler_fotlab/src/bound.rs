@@ -9,9 +9,10 @@
 //!   before any demosaic choice (`FOTLAB-STUDIO-000001` R4, `FOTLAB-NATIVE-000001`). No display
 //!   transform is applied — it is a raw dump.
 //! * [`rawlerimagedeveloped_to_png`] — the **developed, display-ready** image. Takes the [`RawlerImageDeveloped`]
-//!   produced by the develop pipeline (demosaic + calibrate) and applies the sRGB transfer function
-//!   (gamma) + clip to [0,1] before writing PNG — a finished sRGB image for the UI
-//!   (`FOTLAB-RAWLER-000005`). This is what Studio renders after the user picks a demosaic algorithm.
+//!   produced by the develop trunk and clips to [0,1], applying the sRGB transfer function only
+//!   when the caller asked for it (`OutputTransfer::Gamma`) — a finished image for the UI
+//!   (`FOTLAB-RAWLER-000005`). This is what Studio renders after the user picks a demosaic
+//!   algorithm, and also what it falls back to when grading is switched off.
 //! * [`graded_to_png`] — the **rawalchemy result**. Takes the graded float buffer (log-encoded when a
 //!   log space was selected) and quantizes it directly (clamp + ×255), applying **no** transfer
 //!   function — the grade already encoded the image, and Kotlin consumes it as-is
@@ -114,33 +115,47 @@ fn shrink_f32(v: f32) -> u8 {
     (v.clamp(0.0, 1.0) * 255.0) as u8
 }
 
-/// Encode one linear sRGB channel to an 8-bit sRGB byte.
+/// Encode one linear channel to an 8-bit byte, optionally through the sRGB transfer function.
 ///
-/// The sRGB transfer function (OETF) is only defined for the `[0,1]` linear
-/// domain, so the (possibly out-of-range — e.g. highlight-overflow) linear input
-/// is clamped to `[0,1]` **before** gamma is applied. This keeps the operator in
-/// its defined domain rather than relying on the downstream byte-clamp to catch
-/// out-of-range inputs. Because the OETF is strictly monotonic, clamping before
-/// vs. after the curve yields identical 8-bit bytes (`clamp(gamma(v)) ==
-/// gamma(clamp(v))`), so this is a defensive/correctness change, not a visual
-/// one — the only clip in the UI path is still here, just moved to the input
-/// side of the curve. `encode_srgb` is already invoked per-channel inside the
-/// rayon parallel loop of [`rawlerimagedeveloped_to_png`], so the clamp is
-/// automatically parallelised.
-fn encode_srgb(v: f32) -> u8 {
-    shrink_f32(srgb_apply_gamma(v.clamp(0.0, 1.0)))
+/// The sRGB transfer function (OETF) is only defined for the `[0,1]` linear domain, so the
+/// (possibly out-of-range — e.g. highlight-overflow) linear input is clamped to `[0,1]`
+/// **before** gamma is applied. This keeps the operator in its defined domain rather than
+/// relying on the downstream byte-clamp to catch out-of-range inputs. Because the OETF is
+/// strictly monotonic, clamping before vs. after the curve yields identical 8-bit bytes
+/// (`clamp(gamma(v)) == gamma(clamp(v))`), so this is a defensive/correctness change, not a
+/// visual one — the only clip in this encoder is still here, just moved to the input side of
+/// the curve.
+///
+/// `apply_gamma` is [`OutputTransfer`](crate::develop::OutputTransfer) resolved to a yes/no at
+/// the call site — the one place the parameter is read. `false` writes the linear value
+/// directly, which is what a graded render needs: rawalchemy's log OETF has already encoded
+/// those pixels and running the sRGB curve again would double-encode them.
+/// `encode` is invoked per-channel inside the rayon parallel loop of
+/// [`rawlerimagedeveloped_to_png`], so both arms are automatically parallelised.
+#[inline(always)]
+fn encode(v: f32, apply_gamma: bool) -> u8 {
+    let v = v.clamp(0.0, 1.0);
+    if apply_gamma {
+        shrink_f32(srgb_apply_gamma(v))
+    } else {
+        shrink_f32(v)
+    }
 }
 
-/// Encode a developed [`RawlerImageDeveloped`] (expected in **linear sRGB D65**) to a
-/// finished, display-ready RGBA8 sRGB PNG.
+/// Encode a developed [`RawlerImageDeveloped`] (linear, in the working space the caller chose)
+/// to a finished RGBA8 PNG, applying the sRGB transfer function only when `apply_gamma`.
 ///
-/// This is the *presentation* half of the dual-fork
-/// (`rules/REVIEW/detail/FOTLAB-RAWLER-000005.md`): each linear value is clamped
-/// to `[0,1]` and then run through the sRGB transfer function (`srgb_apply_gamma`)
-/// — the only place clipping happens. The in-memory editing object
-/// (ProPhoto D50, unclamped) is never touched. This is the output side of
-/// `rawler_fotlab::develop_to_png`.
-pub(crate) fn rawlerimagedeveloped_to_png(image: &RawlerImageDeveloped) -> Result<Vec<u8>, String> {
+/// This is the develop-presentation output — the PNG the UI paints — reached whenever the
+/// render's `PipelineStages.grade` is off. The graded render does not come here: it goes
+/// through [`graded_to_png`], which never applies a transfer function.
+///
+/// Every linear value is clamped to `[0,1]` and then, when `apply_gamma`, run through
+/// `srgb_apply_gamma` — the only place clipping happens on this path. The wide-gamut editing
+/// buffer is never touched.
+pub(crate) fn rawlerimagedeveloped_to_png(
+    image: &RawlerImageDeveloped,
+    apply_gamma: bool,
+) -> Result<Vec<u8>, String> {
     let (w, h) = (image.width, image.height);
     if w == 0 || h == 0 {
         return Err("developed image has no pixels".to_string());
@@ -157,14 +172,19 @@ pub(crate) fn rawlerimagedeveloped_to_png(image: &RawlerImageDeveloped) -> Resul
     }
 
     // Per-pixel, order-independent: parallelised with rayon (this is the ~50 MP
-    // gamma + RGBA expansion, see `OPTIMZ-PERFRM-000007`).
+    // transfer-function + RGBA expansion, see `OPTIMZ-PERFRM-000007`).
     let mut rgba: Vec<u8> = vec![0u8; (w as usize) * (h as usize) * 4];
     image
         .rgb
         .par_chunks_exact(3)
         .zip(rgba.par_chunks_exact_mut(4))
         .for_each(|(px, out)| {
-            out.copy_from_slice(&[encode_srgb(px[0]), encode_srgb(px[1]), encode_srgb(px[2]), 255]);
+            out.copy_from_slice(&[
+                encode(px[0], apply_gamma),
+                encode(px[1], apply_gamma),
+                encode(px[2], apply_gamma),
+                255,
+            ]);
         });
 
     let mut out: Vec<u8> = Vec::new();
