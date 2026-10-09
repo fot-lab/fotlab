@@ -52,6 +52,12 @@ app/schemas/
 *.dylib
 target/
 
+# Generated Cargo.lock for the hand-written native crates — never committed
+# (local-rust-test convention: delete lockfiles; they are produced by the local
+# GNU toolchain / CI and are not part of the source). `**` covers any nesting
+# depth under app/src so all such crates are excluded regardless of layout.
+app/src/**/Cargo.lock
+
 # OS
 .DS_Store
 Thumbs.db
