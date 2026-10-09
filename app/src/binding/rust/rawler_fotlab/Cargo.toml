@@ -16,7 +16,10 @@ description = "FotLab native binding over the upstream rawler crate (external/dn
 
 [lib]
 name = "rawler_fotlab"
-crate-type = ["cdylib"]
+# `cdylib` exposes the C/FFI ABI for the shipped library; `rlib` additionally exposes the
+# Rust API so other Rust software can `use rawler_fotlab::calibrate_oklab::*` (e.g. the
+# reusable OKLab transforms). Both artifacts are produced from the same source.
+crate-type = ["cdylib", "rlib"]
 path = "src/lib.rs"
 
 [features]

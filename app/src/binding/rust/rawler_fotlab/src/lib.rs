@@ -76,6 +76,7 @@ use rawler::rawsource::RawSource;
 mod bound;
 mod ca;
 mod calibrate;
+pub mod calibrate_oklab;
 mod loca;
 mod cfa;
 mod decode;
