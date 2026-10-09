@@ -60,12 +60,12 @@ struct Pass1Shared {
 
 const TS: usize = 128; // tile size
 const TSH: usize = 64; // half tile (R/B planes are half-res)
-// Max CA shift (px) the auto path is designed to apply before the user should disable LCA.
+// Max CA shift (px) the auto path is designed to apply before the user should disable TCA.
 // Drives the tile border margin so the resample loops stay inside the TS*TS green buffer.
 // Chosen to cover strong wide-angle lenses at high pixel densities (delta_px grows with
 // sqrt(MP); ~12px at 45MP frame corners, ~17px at 100MP). Beyond this, the shifted source
 // index is *saturated* to the buffer edge (see the first apply loop) so the render never
-// panics — but the result there is approximate and the user may disable LCA.
+// panics — but the result there is approximate and the user may disable TCA.
 const CA_SHIFT_MAX: i32 = 16;
 const BORDER: i32 = 2 * CA_SHIFT_MAX; // tile mirror border (px) on each side
 const BORDER2: i32 = 2 * BORDER; // 2*border (block-grid step; must stay < TS)
@@ -532,7 +532,7 @@ pub fn correct_ca_bayer(
                     // +/-BS_LIM. A clamped shift leaves *residual* CA on strong lenses at high
                     // pixel densities / frame corners (delta_px grows with sqrt(MP) and easily
                     // exceeds 4px there), i.e. a half-fixed image. We would rather let the
-                    // correction run to its measured value and let the user disable LCA entirely
+                    // correction run to its measured value and let the user disable TCA entirely
                     // if the result looks bad, than ship a clamped partial fix.
                     // SAFETY: BORDER is now 2*CA_SHIFT_MAX and the first apply loop runs
                     // `rr in CA_SHIFT_MAX..(rr1-CA_SHIFT_MAX)` (margin = CA_SHIFT_MAX), so the

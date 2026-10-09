@@ -243,7 +243,7 @@ pub fn correct_loca_bayer(
     let purple_lum_min = params.purple_lum_min.clamp(0.0, 1.0);
     let green_lum_min = params.green_lum_min.clamp(0.0, 1.0);
 
-    // Folded 2x2 CFA (values 0/1/2), matching `ca_correction_lca::correct_ca_bayer`.
+    // Folded 2x2 CFA (values 0/1/2), matching `ca_correction_tca::correct_ca_bayer`.
     let cfa2 = [
         [cfa.fc(0, 0) as i32, cfa.fc(0, 1) as i32],
         [cfa.fc(1, 0) as i32, cfa.fc(1, 1) as i32],

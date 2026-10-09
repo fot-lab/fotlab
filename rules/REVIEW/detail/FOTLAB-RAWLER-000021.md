@@ -1,4 +1,4 @@
-# ca_correction_lca luminance-edge judgement — no YUV/LAB conversion; Bayer green channel is the luminance proxy
+# ca_correction_tca luminance-edge judgement — no YUV/LAB conversion; Bayer green channel is the luminance proxy
 
 - ID: FOTLAB-RAWLER-000021
 - Status: Observation
@@ -9,7 +9,7 @@
 
 ## Background & Goal
 
-User question, raised during a code audit: *how does `ca_correction_lca` judge luminance edges, and does it convert the image into a YUV or LAB colour space?* This is a research note recording the actual implementation in `app/src/binding/rust/rawtrp_correct/src/ca_correction_lca.rs`, specifically the pass-1 auto-fit measurement `detect_ca` (the only place a "luminance edge" is reasoned about; pass-2 `correct_ca_bayer` merely applies the measured shifts). The crate is a faithful Rust port of RawTherapee's `CA_correct_RT.cc` (Martinec / Weyrich radial CA model), see `FOTLAB-RAWLER-000011`.
+User question, raised during a code audit: *how does `ca_correction_tca` judge luminance edges, and does it convert the image into a YUV or LAB colour space?* This is a research note recording the actual implementation in `app/src/binding/rust/rawtrp_correct/src/ca_correction_tca.rs`, specifically the pass-1 auto-fit measurement `detect_ca` (the only place a "luminance edge" is reasoned about; pass-2 `correct_ca_bayer` merely applies the measured shifts). The crate is a faithful Rust port of RawTherapee's `CA_correct_RT.cc` (Martinec / Weyrich radial CA model), see `FOTLAB-RAWLER-000011`.
 
 ## Finding
 
@@ -17,13 +17,13 @@ User question, raised during a code audit: *how does `ca_correction_lca` judge l
 
 **2. "Luminance" is the Bayer green channel, and edges are judged from it.** In a Bayer grid the G plane is the densest and is used as the luminance proxy. Three mechanisms, all in `detect_ca`:
 
-- **Directional weighted G interpolation (an edge-aware luminance estimate), `ca_correction_lca.rs:1070`–`1116`.** At each R/B grid point the four directional G neighbours are averaged with weights `wtu/wtd/wtl/wtr = 1 / (EPS + |ΔG| + |ΔRB|)²`. The weight is the *inverse square of the local G gradient magnitude*: a strong gradient (a luminance edge) drives the weight toward zero, so the estimator suppresses the edge direction. This is the "luminance" the stage reasons about.
-- **G−(R/B) colour-difference high/low-pass filters, `ca_correction_lca.rs:1118`–`1183`.** `rbhpfv/rbhpfh` = high-pass of the R/B colour difference (the high-frequency content at luminance/colour edges); `rblpfv/rblpfh` = its low-pass; `grblpfv/grblpfh` = low-pass of the G-plus-R/B sum ≈ the low-frequency **luminance** estimate.
-- **Edge-weighted CA fit, `ca_correction_lca.rs:1208`–`1230`.** Each sample's contribution to the quadratic colour-difference fit is weighted by
+- **Directional weighted G interpolation (an edge-aware luminance estimate), `ca_correction_tca.rs:1070`–`1116`.** At each R/B grid point the four directional G neighbours are averaged with weights `wtu/wtd/wtl/wtr = 1 / (EPS + |ΔG| + |ΔRB|)²`. The weight is the *inverse square of the local G gradient magnitude*: a strong gradient (a luminance edge) drives the weight toward zero, so the estimator suppresses the edge direction. This is the "luminance" the stage reasons about.
+- **G−(R/B) colour-difference high/low-pass filters, `ca_correction_tca.rs:1118`–`1183`.** `rbhpfv/rbhpfh` = high-pass of the R/B colour difference (the high-frequency content at luminance/colour edges); `rblpfv/rblpfh` = its low-pass; `grblpfv/grblpfh` = low-pass of the G-plus-R/B sum ≈ the low-frequency **luminance** estimate.
+- **Edge-weighted CA fit, `ca_correction_tca.rs:1208`–`1230`.** Each sample's contribution to the quadratic colour-difference fit is weighted by
   `gradwt = rbhpf·(grblpf neighbours) / (EPS + 0.1·grblpf + rblpf)`.
   Bright, high-contrast (luminance-edge) regions get large weight and the CA measurement is trusted; flat / low-contrast regions are suppressed.
 
-A separate, block-level consistency check (`ca_correction_lca.rs:1364`–`1368`) rejects tiles whose measured shift² exceeds `CA_AUTOSTRENGTH · blockvar` — a fit-consistency gate, not a per-pixel luminance-edge test.
+A separate, block-level consistency check (`ca_correction_tca.rs:1364`–`1368`) rejects tiles whose measured shift² exceeds `CA_AUTOSTRENGTH · blockvar` — a fit-consistency gate, not a per-pixel luminance-edge test.
 
 ## Impact / Conflict
 
@@ -35,4 +35,4 @@ No code change. Keep as a reference finding. If future work proposes a different
 
 ## Change History
 
-- 2026-10-08 — Created as `Observation` (P3). Research note answering how `ca_correction_lca::detect_ca` judges luminance edges: no YUV/LAB conversion (pre-demosaic single-channel mosaic, `lib.rs:35`); the Bayer **green channel is the luminance proxy**, and luminance edges are reasoned about via (a) directionally-weighted G interpolation whose weights are the inverse-square of the local G gradient (`ca_correction_lca.rs:1070`–`1116`), (b) G−R/B colour-difference high/low-pass filters (`1118`–`1183`), and (c) a `gradwt` term that weights the CA colour-difference fit by local luminance-edge strength (`1208`–`1230`), plus a block-level `CA_AUTOSTRENGTH` variance gate (`1364`–`1368`). No action required.
+- 2026-10-08 — Created as `Observation` (P3). Research note answering how `ca_correction_tca::detect_ca` judges luminance edges: no YUV/LAB conversion (pre-demosaic single-channel mosaic, `lib.rs:35`); the Bayer **green channel is the luminance proxy**, and luminance edges are reasoned about via (a) directionally-weighted G interpolation whose weights are the inverse-square of the local G gradient (`ca_correction_tca.rs:1070`–`1116`), (b) G−R/B colour-difference high/low-pass filters (`1118`–`1183`), and (c) a `gradwt` term that weights the CA colour-difference fit by local luminance-edge strength (`1208`–`1230`), plus a block-level `CA_AUTOSTRENGTH` variance gate (`1364`–`1368`). No action required.

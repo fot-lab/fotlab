@@ -68,7 +68,7 @@ internal fun StudioOperationBarDevelopFilm(
             ) { ExposureButton(onExposure) },
             OperationalButton(
                 id = "ca",
-                label = stringResource(id = R.string.studio_label_lca),
+                label = stringResource(id = R.string.studio_label_tca),
             ) { CaButton(onCa) },
             OperationalButton(
                 id = "loca",

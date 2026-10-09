@@ -112,7 +112,7 @@
     <string name="studio_dehaze_title">去雾</string>
     <string name="studio_cd_lca">LCA（色差校正）</string>
     <string name="studio_cd_clipping">截断（超出色域的颜色）</string>
-    <string name="studio_label_lca">LCA</string>
+    <string name="studio_label_tca">TCA</string>
     <string name="studio_label_clipping">截断</string>
     <string name="studio_label_dcp">相机</string>
     <string name="studio_label_lcp">镜头</string>

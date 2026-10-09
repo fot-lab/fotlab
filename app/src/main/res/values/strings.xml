@@ -102,7 +102,7 @@
     <string name="studio_label_whitebalance">WB</string>
     <string name="studio_label_denoise">Denoise</string>
     <string name="studio_label_dehaze">Dehaze</string>
-    <string name="studio_label_lca">LCA</string>
+    <string name="studio_label_tca">TCA</string>
     <string name="studio_label_clipping">Clipping</string>
     <string name="studio_label_dcp">Camera</string>
     <string name="studio_label_lcp">Lens</string>
