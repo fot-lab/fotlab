@@ -40,3 +40,7 @@
 	path = external/bottosson
 	url = ../bottosson.github.io.git
 	branch = master
+[submodule "external/purple-fringe"]
+	path = external/purple-fringe
+	url = ../purple-fringe.git
+	branch = master
