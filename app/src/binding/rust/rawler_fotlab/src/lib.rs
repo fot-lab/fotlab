@@ -74,6 +74,7 @@ mod ca;
 mod calibrate;
 pub mod calibrate_oklab;
 pub mod defringe_prophoto_unpurple;
+pub mod defringe_prophoto_ungreen;
 mod camera_space;
 mod loca;
 mod cfa;

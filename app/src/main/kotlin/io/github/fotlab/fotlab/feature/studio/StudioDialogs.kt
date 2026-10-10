@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -166,27 +167,43 @@ internal fun CaDialog(
 }
 
 /**
- * ACA (purple-fringe correction) dialog — parameter entry for the Unpurple core.
+ * ACA (fringe correction) dialog — parameter entry for the two ProPhoto cores, **purple first**.
  *
- * The master switch is the tool: OFF hands the engine `null` (the stage is skipped entirely). The
- * five numeric fields mirror `UnpurpleSettings` one-for-one and are editable only while the switch
- * is on; an empty or unparseable field falls back to that field's upstream default rather than
- * being rejected, so OK is always enabled. Defaults shown are `unpurple.ml`'s own.
+ * The dialog hosts **two independent switches**, each with its own parameter group:
+ *  1. **Purple** — the Unpurple core (`UnpurpleSettings`: red:blue ratio bounds).
+ *  2. **Green** — the Ungreen core (`UngreenSettings`: hedge + strength).
+ *
+ * They are independent on the Rust side too — two separate `Option` fields — so either switch may be
+ * on while the other is off, and each group's fields are editable only while its own switch is on.
+ * An empty or unparseable field falls back to that field's default rather than being rejected, so
+ * OK is always enabled.
  */
 @Composable
 internal fun AcaDialog(
-    enabled: Boolean,
-    onEnabledChange: (Boolean) -> Unit,
-    radius: String,
-    onRadiusChange: (String) -> Unit,
-    intensity: String,
-    onIntensityChange: (String) -> Unit,
-    minBrightness: String,
-    onMinBrightnessChange: (String) -> Unit,
-    minRedToBlueRatio: String,
-    onMinRedToBlueRatioChange: (String) -> Unit,
-    maxRedToBlueRatio: String,
-    onMaxRedToBlueRatioChange: (String) -> Unit,
+    purpleEnabled: Boolean,
+    onPurpleEnabledChange: (Boolean) -> Unit,
+    purpleRadius: String,
+    onPurpleRadiusChange: (String) -> Unit,
+    purpleIntensity: String,
+    onPurpleIntensityChange: (String) -> Unit,
+    purpleMinBrightness: String,
+    onPurpleMinBrightnessChange: (String) -> Unit,
+    purpleMinRatio: String,
+    onPurpleMinRatioChange: (String) -> Unit,
+    purpleMaxRatio: String,
+    onPurpleMaxRatioChange: (String) -> Unit,
+    greenEnabled: Boolean,
+    onGreenEnabledChange: (Boolean) -> Unit,
+    greenRadius: String,
+    onGreenRadiusChange: (String) -> Unit,
+    greenIntensity: String,
+    onGreenIntensityChange: (String) -> Unit,
+    greenMinBrightness: String,
+    onGreenMinBrightnessChange: (String) -> Unit,
+    greenHedge: String,
+    onGreenHedgeChange: (String) -> Unit,
+    greenStrength: String,
+    onGreenStrengthChange: (String) -> Unit,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -204,48 +221,91 @@ internal fun AcaDialog(
         },
         title = { Text(text = stringResource(id = R.string.studio_aca_title)) },
         text = {
-            Column {
+            // Ten fields plus two switch rows, so the body must scroll or the green group is
+            // unreachable on a short dialog.
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                 Text(text = stringResource(id = R.string.studio_aca_body))
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(text = stringResource(id = R.string.studio_aca_enable_label))
+                    Text(text = stringResource(id = R.string.studio_aca_purple_label))
                     Spacer(modifier = Modifier.weight(1f))
-                    Switch(checked = enabled, onCheckedChange = onEnabledChange)
+                    Switch(checked = purpleEnabled, onCheckedChange = onPurpleEnabledChange)
                 }
                 Spacer(modifier = Modifier.height(8.dp))
                 AcaField(
-                    value = radius,
-                    onValueChange = onRadiusChange,
-                    enabled = enabled,
+                    value = purpleRadius,
+                    onValueChange = onPurpleRadiusChange,
+                    enabled = purpleEnabled,
                     hint = stringResource(id = R.string.studio_aca_radius_hint),
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 AcaField(
-                    value = intensity,
-                    onValueChange = onIntensityChange,
-                    enabled = enabled,
+                    value = purpleIntensity,
+                    onValueChange = onPurpleIntensityChange,
+                    enabled = purpleEnabled,
                     hint = stringResource(id = R.string.studio_aca_intensity_hint),
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 AcaField(
-                    value = minBrightness,
-                    onValueChange = onMinBrightnessChange,
-                    enabled = enabled,
+                    value = purpleMinBrightness,
+                    onValueChange = onPurpleMinBrightnessChange,
+                    enabled = purpleEnabled,
                     hint = stringResource(id = R.string.studio_aca_min_brightness_hint),
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 AcaField(
-                    value = minRedToBlueRatio,
-                    onValueChange = onMinRedToBlueRatioChange,
-                    enabled = enabled,
+                    value = purpleMinRatio,
+                    onValueChange = onPurpleMinRatioChange,
+                    enabled = purpleEnabled,
                     hint = stringResource(id = R.string.studio_aca_min_ratio_hint),
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 AcaField(
-                    value = maxRedToBlueRatio,
-                    onValueChange = onMaxRedToBlueRatioChange,
-                    enabled = enabled,
+                    value = purpleMaxRatio,
+                    onValueChange = onPurpleMaxRatioChange,
+                    enabled = purpleEnabled,
                     hint = stringResource(id = R.string.studio_aca_max_ratio_hint),
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(text = stringResource(id = R.string.studio_aca_green_label))
+                    Spacer(modifier = Modifier.weight(1f))
+                    Switch(checked = greenEnabled, onCheckedChange = onGreenEnabledChange)
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                AcaField(
+                    value = greenRadius,
+                    onValueChange = onGreenRadiusChange,
+                    enabled = greenEnabled,
+                    hint = stringResource(id = R.string.studio_aca_radius_hint),
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                AcaField(
+                    value = greenIntensity,
+                    onValueChange = onGreenIntensityChange,
+                    enabled = greenEnabled,
+                    hint = stringResource(id = R.string.studio_aca_intensity_hint),
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                AcaField(
+                    value = greenMinBrightness,
+                    onValueChange = onGreenMinBrightnessChange,
+                    enabled = greenEnabled,
+                    hint = stringResource(id = R.string.studio_aca_min_brightness_hint),
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                AcaField(
+                    value = greenHedge,
+                    onValueChange = onGreenHedgeChange,
+                    enabled = greenEnabled,
+                    hint = stringResource(id = R.string.studio_aca_hedge_hint),
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                AcaField(
+                    value = greenStrength,
+                    onValueChange = onGreenStrengthChange,
+                    enabled = greenEnabled,
+                    hint = stringResource(id = R.string.studio_aca_strength_hint),
                 )
             }
         },

@@ -120,14 +120,17 @@
     <string name="studio_ca_blue_hint">Blue radial strength (0 = off)</string>
     <string name="studio_cd_loca">ACA (purple fringe correction)</string>
     <string name="studio_label_loca">ACA</string>
-    <string name="studio_aca_title">ACA (purple fringe correction)</string>
-    <string name="studio_aca_body">Removes purple fringing on the ProPhoto working buffer</string>
-    <string name="studio_aca_enable_label">Enable ACA</string>
+    <string name="studio_aca_title">ACA (fringe correction)</string>
+    <string name="studio_aca_body">Removes fringing on the ProPhoto working buffer</string>
+    <string name="studio_aca_purple_label">Purple fringe</string>
+    <string name="studio_aca_green_label">Green fringe</string>
     <string name="studio_aca_radius_hint">Radius (px), default 5.0</string>
     <string name="studio_aca_intensity_hint">Intensity, default 1.0</string>
     <string name="studio_aca_min_brightness_hint">Min brightness, default 0.0</string>
     <string name="studio_aca_min_ratio_hint">Min red:blue ratio, default 0.0</string>
     <string name="studio_aca_max_ratio_hint">Max red:blue ratio, default 0.33</string>
+    <string name="studio_aca_hedge_hint">Hedge — pull G toward the r/b midpoint, default 0.2</string>
+    <string name="studio_aca_strength_hint">Strength — fraction of the excess removed, default 1.0</string>
     <string name="studio_clipping_title">Clipping</string>
     <string name="studio_clipping_body">Clipping out-of-gamut colors to the D50 ProPhoto RGB boundary</string>
     <string name="studio_cd_oklab">OKLab highlight compression</string>

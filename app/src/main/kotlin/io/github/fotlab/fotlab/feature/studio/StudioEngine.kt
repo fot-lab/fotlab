@@ -18,6 +18,7 @@ import io.github.fotlab.fotlab_rawler.DemosaicAlgorithm
 import io.github.fotlab.fotlab_rawler.DemosaicCandidate
 import io.github.fotlab.fotlab_rawler.DehazeMergeMode
 import io.github.fotlab.fotlab_rawler.CaSettings
+import io.github.fotlab.fotlab_rawler.UngreenSettings
 import io.github.fotlab.fotlab_rawler.UnpurpleSettings
 import io.github.fotlab.fotlab_rawler.CameraProfileParams
 import io.github.fotlab.fotlab_rawler.DevelopParams
@@ -647,6 +648,7 @@ object StudioEngine {
             dehazeMergeMode = currentDehazeMergeMode,
             ca = currentCa,
             defringeProphoto = currentUnpurple,
+            defringeUngreen = currentUngreen,
             clipToGamut = currentClipToGamut,
             cameraProfile = cameraProfileState.value,
             lensProfile = lensProfileState.value,
@@ -690,7 +692,9 @@ object StudioEngine {
         // editing buffer, which only the graded fork builds (`working_space()` picks ProPhotoD50
         // exactly when `grade` is true). Without this, enabling ACA on the sRGB presentation path
         // would silently do nothing.
-        val gradeActive = gradeOverride ?: (selection.isActive || currentUnpurple != null)
+        // Either ACA switch engaging counts as grade-active: both cores run on the ProPhoto-D50
+        // editing buffer, which only the graded fork produces.
+        val gradeActive = gradeOverride ?: (selection.isActive || currentUnpurple != null || currentUngreen != null)
         val transfer = if (gradeActive) OutputTransfer.LINEAR else OutputTransfer.GAMMA
         outputTransferState.value = transfer
 
@@ -1067,15 +1071,27 @@ object StudioEngine {
     fun currentCa(): CaSettings? = currentCa
 
     /**
-     * The ACA (purple-fringe) settings retained for the next render; `null` = off.
+     * The ACA **unpurple** (purple-fringe) settings retained for the next render; `null` = off.
      *
-     * A non-null value also **engages the grade** (see [requestRender]): the unpurple core runs on
-     * the linear ProPhoto-D50 editing buffer, which only exists on the graded fork.
+     * Independent of [currentUngreen] — the two ACA stages have their own switch each. A non-null
+     * value on **either** also **engages the grade** (see [requestRender]): both cores run on the
+     * linear ProPhoto-D50 editing buffer, which only exists on the graded fork.
      */
     private var currentUnpurple: UnpurpleSettings? = null
 
-    /** The current ACA settings; the UI prefills the ACA dialog from this. */
+    /** The current ACA unpurple settings; the UI prefills the ACA dialog's purple section from this. */
     fun currentUnpurple(): UnpurpleSettings? = currentUnpurple
+
+    /**
+     * The ACA **ungreen** (green-fringe) settings retained for the next render; `null` = off.
+     *
+     * Independent of [currentUnpurple] in exactly the same way: turning green off leaves purple
+     * untouched, and a non-null value here engages the grade for the same ProPhoto-D50 reason.
+     */
+    private var currentUngreen: UngreenSettings? = null
+
+    /** The current ACA ungreeen settings; the UI prefills the ACA dialog's green section from this. */
+    fun currentUngreen(): UngreenSettings? = currentUngreen
 
     /**
      * Whether out-of-gamut clipping is retained for the next render (the Studio Clipping dialog's
@@ -1233,14 +1249,20 @@ object StudioEngine {
     }
 
     /**
-     * Re-render with [unpurple] purple-fringe (ACA) settings entered from the Studio ACA dialog.
-     * `null` (the dialog switch OFF) is the identity — [DevelopParams.defringeProphoto] is `None`,
-     * so the stage is skipped. A non-null value **engages the grade**, because the core runs on the
-     * ProPhoto-D50 editing buffer that only the graded fork produces; the canvas is re-rendered from
-     * the re-developed PNG.
+     * Re-render with the ACA fringe settings entered from the Studio ACA dialog.
+     *
+     * The two arguments are the dialog's two **independent** switches: either may be `null` (that
+     * section off → [DevelopParams.defringeProphoto] / [DevelopParams.defringeUngreen] is `None`
+     * → the stage is skipped) regardless of the other, so all four combinations are reachable.
+     *
+     * Both are applied in one call rather than two setters so that a dialog OK triggers exactly
+     * one render even when both switches are on. Any non-null value **engages the grade**, because
+     * both cores run on the ProPhoto-D50 editing buffer that only the graded fork produces; the
+     * canvas is re-rendered from the re-developed PNG.
      */
-    fun setUnpurple(unpurple: UnpurpleSettings?) {
+    fun setAca(unpurple: UnpurpleSettings?, ungreen: UngreenSettings?) {
         currentUnpurple = unpurple
+        currentUngreen = ungreen
         requestRender()
     }
 

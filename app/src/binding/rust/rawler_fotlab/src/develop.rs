@@ -383,6 +383,23 @@ pub struct DevelopParams {
   /// space before calibration and was removed as superseded.
   #[uniffi(default = None)]
   pub defringe_prophoto: Option<crate::defringe_prophoto_unpurple::UnpurpleSettings>,
+  /// **ProPhoto-space green-fringe (ungreen) correction** for the *editing* branch
+  /// (`defringe_prophoto_ungreen.rs`) — the **independent** twin of
+  /// [`Self::defringe_prophoto`]. Same slot in the pipeline (after prophoto clipping, before the
+  /// rawalchemy hand-off) and same linear ProPhoto-D50 `0..1 f32` buffer, but a separate field so
+  /// the two stages can be switched on and off **independently**: purple on / green off,
+  /// green on / purple off, both on, or both off are all distinct, directly expressible states.
+  ///
+  /// Independence is real all the way down, not just in the dialog: the two cores touch
+  /// **disjoint** channels — unpurple only ever lowers R and B, ungreeen only ever lowers G — so
+  /// neither can observe or undo the other's edit, and running both is well defined.
+  ///
+  /// `None` (this field's default) = the stage is skipped (identity), matching the project's
+  /// "every switch defaults off on the Rust/FFI side, Kotlin controls assembly" rule. Note this
+  /// module is **not** an upstream port — `unpurple.ml` has no green mode; see its module docs
+  /// for what the green implementation is actually based on.
+  #[uniffi(default = None)]
+  pub defringe_ungreen: Option<crate::defringe_prophoto_ungreen::UngreenSettings>,
   /// Output transfer applied when the finished linear buffer is encoded to PNG
   /// (`OutputTransfer`), read by `bound::rawlerimagedeveloped_to_png` — and only there.
   ///

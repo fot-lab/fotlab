@@ -40,6 +40,7 @@ use crate::bound;
 use crate::calibrate::WorkingSpace;
 use crate::camera_space::DemosaicedCameraImage;
 use crate::defringe_prophoto_unpurple::defringe_prophoto;
+use crate::defringe_prophoto_ungreen::defringe_ungreen;
 use crate::develop::{
   develop_image, develop_to_camera_image, oklab_switches, DevelopParams, GradeParams, OutputTransfer,
   PipelineStages,
@@ -281,17 +282,22 @@ impl RawlerImageLoaded {
                 params.clip_to_gamut && space == WorkingSpace::ProPhotoD50,
             )?;
 
-            // --- ProPhoto-space defringe (unpurple) ------------------------------------
+            // --- ProPhoto-space defringe: unpurple, then ungreeen ------------------------
             // Runs **after** prophoto clipping and **before** the rawalchemy hand-off, on the
-            // linear ProPhoto-D50 buffer. `defringe_prophoto` is in place and only touches the
-            // R/B channels; `None` (the default, see `DevelopParams::defringe_prophoto`) is an
-            // identity no-op, so a graded render with the stage off is bit-for-bit unchanged.
-            // Restricted to the graded (ProPhoto) path: the colour space the Unpurple core
-            // expects is exactly the ProPhoto-D50 buffer, so the sRGB presentation path is
-            // deliberately left untouched (its former OKLab defringe stage has been removed).
+            // linear ProPhoto-D50 buffer. Each stage has its own `Option` in `DevelopParams` and
+            // each `None` (both defaults) is an identity no-op, so the two switches are fully
+            // independent in every combination — purple on/green off, green on/purple off, both,
+            // or neither. Order is purple first, green second (matching the dialog's order); the
+            // sequence is harmless either way because the cores write disjoint channels.
+            // Restricted to the graded (ProPhoto) path: the colour space both cores expect is
+            // exactly the ProPhoto-D50 buffer, so the sRGB presentation path is deliberately left
+            // untouched (its former OKLab defringe stage has been removed).
             if space == WorkingSpace::ProPhotoD50 {
                 if let Some(dp_settings) = &params.defringe_prophoto {
                     defringe_prophoto(&mut linear.rgb, linear.width as usize, linear.height as usize, dp_settings);
+                }
+                if let Some(dp_settings) = &params.defringe_ungreen {
+                    defringe_ungreen(&mut linear.rgb, linear.width as usize, linear.height as usize, dp_settings);
                 }
             }
 

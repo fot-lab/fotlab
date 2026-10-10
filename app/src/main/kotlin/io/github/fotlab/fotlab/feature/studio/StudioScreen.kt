@@ -52,6 +52,7 @@ import io.github.fotlab.fotlab.ui.operation.OperationalButton
 import io.github.fotlab.fotlab.ui.rememberZoomState
 import io.github.fotlab.fotlab_rawler.CaSettings
 import io.github.fotlab.fotlab_rawler.DehazeMergeMode
+import io.github.fotlab.fotlab_rawler.UngreenSettings
 import io.github.fotlab.fotlab_rawler.UnpurpleSettings
 import io.github.fotlab.fotlab_rawler.OutputTransfer
 import kotlinx.coroutines.Dispatchers
@@ -200,18 +201,25 @@ fun StudioScreen() {
     var caRedInput by remember { mutableStateOf("") }
     var caBlueInput by remember { mutableStateOf("") }
 
-    // ACA (purple-fringe / unpurple) dialog state (opened by the adjustment bar's ACA icon, the
-    // ClosedCaptionOff glyph, between Clipping and Contrast). The switch IS the tool: OFF hands the
-    // engine null (the stage is skipped); ON builds an UnpurpleSettings from the five fields, each
-    // falling back to its unpurple.ml default when blank or unparseable. Enabling it engages the
-    // grade, because the core runs on the ProPhoto-D50 editing buffer.
+    // ACA dialog state (opened by the adjustment bar's ACA icon, the ClosedCaptionOff glyph, between
+    // Clipping and Contrast). TWO INDEPENDENT switches, purple first then green: each OFF hands the
+    // engine null for its own core (that stage is skipped) regardless of the other, each ON builds
+    // its settings record from its own five fields, each falling back to its default when blank or
+    // unparseable. Enabling either engages the grade, because both cores run on the ProPhoto-D50
+    // editing buffer.
     var showAcaDialog by remember { mutableStateOf(false) }
-    var acaEnabled by remember { mutableStateOf(false) }
-    var acaRadiusInput by remember { mutableStateOf("") }
-    var acaIntensityInput by remember { mutableStateOf("") }
-    var acaMinBrightnessInput by remember { mutableStateOf("") }
-    var acaMinRatioInput by remember { mutableStateOf("") }
-    var acaMaxRatioInput by remember { mutableStateOf("") }
+    var acaPurpleEnabled by remember { mutableStateOf(false) }
+    var acaPurpleRadiusInput by remember { mutableStateOf("") }
+    var acaPurpleIntensityInput by remember { mutableStateOf("") }
+    var acaPurpleMinBrightnessInput by remember { mutableStateOf("") }
+    var acaPurpleMinRatioInput by remember { mutableStateOf("") }
+    var acaPurpleMaxRatioInput by remember { mutableStateOf("") }
+    var acaGreenEnabled by remember { mutableStateOf(false) }
+    var acaGreenRadiusInput by remember { mutableStateOf("") }
+    var acaGreenIntensityInput by remember { mutableStateOf("") }
+    var acaGreenMinBrightnessInput by remember { mutableStateOf("") }
+    var acaGreenHedgeInput by remember { mutableStateOf("") }
+    var acaGreenStrengthInput by remember { mutableStateOf("") }
 
     // Clipping dialog state (opened by the Clipping icon, the AllOut glyph).
     // The switch IS the tool — there is no numeric parameter: ON clamps every component of the
@@ -513,20 +521,38 @@ fun StudioScreen() {
                             showClippingDialog = true
                         },
                         onLoca = {
+                            // Prefill each section from its own engine value; a null there means that
+                            // switch was off, so it shows off with blank fields (the OK handler then
+                            // falls back to defaults should the user turn it on without typing).
                             StudioEngine.currentUnpurple()?.let { unpurple ->
-                                acaEnabled = true
-                                acaRadiusInput = unpurple.radius.toString()
-                                acaIntensityInput = unpurple.intensity.toString()
-                                acaMinBrightnessInput = unpurple.minBrightness.toString()
-                                acaMinRatioInput = unpurple.minRedToBlueRatio.toString()
-                                acaMaxRatioInput = unpurple.maxRedToBlueRatio.toString()
+                                acaPurpleEnabled = true
+                                acaPurpleRadiusInput = unpurple.radius.toString()
+                                acaPurpleIntensityInput = unpurple.intensity.toString()
+                                acaPurpleMinBrightnessInput = unpurple.minBrightness.toString()
+                                acaPurpleMinRatioInput = unpurple.minRedToBlueRatio.toString()
+                                acaPurpleMaxRatioInput = unpurple.maxRedToBlueRatio.toString()
                             } ?: run {
-                                acaEnabled = false
-                                acaRadiusInput = ""
-                                acaIntensityInput = ""
-                                acaMinBrightnessInput = ""
-                                acaMinRatioInput = ""
-                                acaMaxRatioInput = ""
+                                acaPurpleEnabled = false
+                                acaPurpleRadiusInput = ""
+                                acaPurpleIntensityInput = ""
+                                acaPurpleMinBrightnessInput = ""
+                                acaPurpleMinRatioInput = ""
+                                acaPurpleMaxRatioInput = ""
+                            }
+                            StudioEngine.currentUngreen()?.let { ungreen ->
+                                acaGreenEnabled = true
+                                acaGreenRadiusInput = ungreen.radius.toString()
+                                acaGreenIntensityInput = ungreen.intensity.toString()
+                                acaGreenMinBrightnessInput = ungreen.minBrightness.toString()
+                                acaGreenHedgeInput = ungreen.hedge.toString()
+                                acaGreenStrengthInput = ungreen.strength.toString()
+                            } ?: run {
+                                acaGreenEnabled = false
+                                acaGreenRadiusInput = ""
+                                acaGreenIntensityInput = ""
+                                acaGreenMinBrightnessInput = ""
+                                acaGreenHedgeInput = ""
+                                acaGreenStrengthInput = ""
                             }
                             showAcaDialog = true
                         },
@@ -665,29 +691,53 @@ fun StudioScreen() {
 
     if (showAcaDialog) {
         AcaDialog(
-            enabled = acaEnabled,
-            onEnabledChange = { acaEnabled = it },
-            radius = acaRadiusInput,
-            onRadiusChange = { acaRadiusInput = it },
-            intensity = acaIntensityInput,
-            onIntensityChange = { acaIntensityInput = it },
-            minBrightness = acaMinBrightnessInput,
-            onMinBrightnessChange = { acaMinBrightnessInput = it },
-            minRedToBlueRatio = acaMinRatioInput,
-            onMinRedToBlueRatioChange = { acaMinRatioInput = it },
-            maxRedToBlueRatio = acaMaxRatioInput,
-            onMaxRedToBlueRatioChange = { acaMaxRatioInput = it },
+            purpleEnabled = acaPurpleEnabled,
+            onPurpleEnabledChange = { acaPurpleEnabled = it },
+            purpleRadius = acaPurpleRadiusInput,
+            onPurpleRadiusChange = { acaPurpleRadiusInput = it },
+            purpleIntensity = acaPurpleIntensityInput,
+            onPurpleIntensityChange = { acaPurpleIntensityInput = it },
+            purpleMinBrightness = acaPurpleMinBrightnessInput,
+            onPurpleMinBrightnessChange = { acaPurpleMinBrightnessInput = it },
+            purpleMinRatio = acaPurpleMinRatioInput,
+            onPurpleMinRatioChange = { acaPurpleMinRatioInput = it },
+            purpleMaxRatio = acaPurpleMaxRatioInput,
+            onPurpleMaxRatioChange = { acaPurpleMaxRatioInput = it },
+            greenEnabled = acaGreenEnabled,
+            onGreenEnabledChange = { acaGreenEnabled = it },
+            greenRadius = acaGreenRadiusInput,
+            onGreenRadiusChange = { acaGreenRadiusInput = it },
+            greenIntensity = acaGreenIntensityInput,
+            onGreenIntensityChange = { acaGreenIntensityInput = it },
+            greenMinBrightness = acaGreenMinBrightnessInput,
+            onGreenMinBrightnessChange = { acaGreenMinBrightnessInput = it },
+            greenHedge = acaGreenHedgeInput,
+            onGreenHedgeChange = { acaGreenHedgeInput = it },
+            greenStrength = acaGreenStrengthInput,
+            onGreenStrengthChange = { acaGreenStrengthInput = it },
             onConfirm = {
-                // The switch is the tool: OFF is the identity (null = stage skipped). Each blank or
-                // unparseable field falls back to unpurple.ml's own default rather than blocking OK.
-                StudioEngine.setUnpurple(
-                    if (acaEnabled) {
+                // Each switch is its own tool: OFF is null (that core's stage is skipped),
+                // independently of the other. Each blank or unparseable field falls back to that
+                // core's default rather than blocking OK. One call => one render.
+                StudioEngine.setAca(
+                    if (acaPurpleEnabled) {
                         UnpurpleSettings(
-                            radius = acaRadiusInput.toDoubleOrNull() ?: 5.0,
-                            intensity = acaIntensityInput.toDoubleOrNull() ?: 1.0,
-                            minBrightness = acaMinBrightnessInput.toDoubleOrNull() ?: 0.0,
-                            minRedToBlueRatio = acaMinRatioInput.toDoubleOrNull() ?: 0.0,
-                            maxRedToBlueRatio = acaMaxRatioInput.toDoubleOrNull() ?: 0.33,
+                            radius = acaPurpleRadiusInput.toDoubleOrNull() ?: 5.0,
+                            intensity = acaPurpleIntensityInput.toDoubleOrNull() ?: 1.0,
+                            minBrightness = acaPurpleMinBrightnessInput.toDoubleOrNull() ?: 0.0,
+                            minRedToBlueRatio = acaPurpleMinRatioInput.toDoubleOrNull() ?: 0.0,
+                            maxRedToBlueRatio = acaPurpleMaxRatioInput.toDoubleOrNull() ?: 0.33,
+                        )
+                    } else {
+                        null
+                    },
+                    if (acaGreenEnabled) {
+                        UngreenSettings(
+                            radius = acaGreenRadiusInput.toDoubleOrNull() ?: 5.0,
+                            intensity = acaGreenIntensityInput.toDoubleOrNull() ?: 1.0,
+                            minBrightness = acaGreenMinBrightnessInput.toDoubleOrNull() ?: 0.0,
+                            hedge = acaGreenHedgeInput.toDoubleOrNull() ?: 0.2,
+                            strength = acaGreenStrengthInput.toDoubleOrNull() ?: 1.0,
                         )
                     } else {
                         null
