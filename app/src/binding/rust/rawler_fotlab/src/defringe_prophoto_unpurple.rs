@@ -2,8 +2,9 @@
 //! on **ProPhoto-RGB (linear, 0..1 f32) planes** instead of sRGB 8-bit — the **v4**
 //! algorithm core, wired into the `rawler_fotlab` develop pipeline.
 //!
-//! This module is the ProPhoto-space counterpart of `defringe_oklab_aca.rs` (which runs
-//! in OKLab before calibration). It lives **after** prophoto clipping and **before** the
+//! This is the pipeline's only purple-fringe correction: it supersedes the former OKLab
+//! defringe stage (`defringe_oklab_aca.rs`, now removed — measured worse and replaced by
+//! this faithful port). It lives **after** prophoto clipping and **before** the
 //! rawalchemy hand-off, operating in place on the linear ProPhoto-D50 buffer the pipeline
 //! already holds — so it needs only the core algorithm, no JPG decode (that half of the v4
 //! prototype, `prophoto_jpg_io.rs`, is intentionally *not* ported here).

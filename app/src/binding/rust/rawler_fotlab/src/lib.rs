@@ -73,7 +73,6 @@ mod bound;
 mod ca;
 mod calibrate;
 pub mod calibrate_oklab;
-pub mod defringe_oklab_aca;
 pub mod defringe_prophoto_unpurple;
 mod camera_space;
 mod loca;

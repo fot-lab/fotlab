@@ -378,9 +378,9 @@ pub struct DevelopParams {
   /// the v4 prototype is intentionally *not* wired here — the pipeline already owns the ProPhoto
   /// buffer, so only the core algorithm is needed.
   ///
-  /// This is the ProPhoto twin of the OKLab defringe (`defringe_oklab_aca.rs`): that one runs in
-  /// camera space before calibration (presentation path), this one runs in the graded working
-  /// space. They are independent stages and either may be on or off.
+  /// This is the pipeline's only purple-fringe correction, running in the graded working space.
+  /// It supersedes the former OKLab defringe stage (`defringe_oklab_aca.rs`), which ran in camera
+  /// space before calibration and was removed as superseded.
   #[uniffi(default = None)]
   pub defringe_prophoto: Option<crate::defringe_prophoto_unpurple::UnpurpleSettings>,
   /// Output transfer applied when the finished linear buffer is encoded to PNG

@@ -287,8 +287,8 @@ impl RawlerImageLoaded {
             // R/B channels; `None` (the default, see `DevelopParams::defringe_prophoto`) is an
             // identity no-op, so a graded render with the stage off is bit-for-bit unchanged.
             // Restricted to the graded (ProPhoto) path: the colour space the Unpurple core
-            // expects is exactly the ProPhoto-D50 buffer, so the sRGB presentation path — which
-            // has its own OKLab defringe (`defringe_oklab_aca.rs`) — is deliberately left to that.
+            // expects is exactly the ProPhoto-D50 buffer, so the sRGB presentation path is
+            // deliberately left untouched (its former OKLab defringe stage has been removed).
             if space == WorkingSpace::ProPhotoD50 {
                 if let Some(dp_settings) = &params.defringe_prophoto {
                     defringe_prophoto(&mut linear.rgb, linear.width as usize, linear.height as usize, dp_settings);
