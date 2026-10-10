@@ -67,18 +67,21 @@ android {
 
     buildTypes {
         release {
-            // R8 minification + resource shrinking are ON (rules/ACTION.md Q2). This reverses the
-            // 2026-09-15 disabling, which itself reversed an earlier enabling — see ACTION.md Q2
-            // and its Change History for that two-step history. The deciding factor then was
-            // "the user never asked for it"; the user has now asked, so that reason no longer
-            // holds and the keep rules written for the first enabling are reused as-is.
-            //
-            // The JNA/UniFFI keep rules are load-bearing, not precautionary: JNA resolves native
+            // R8 minification + resource shrinking stay OFF (rules/ACTION.md Q2), deliberately and
+            // with the reason recorded rather than left to the AGP default. The deciding reason is
+            // to **protect the native bridge conservatively**: the JNA/UniFFI bridge resolves native
             // symbols by reflecting over Java declarations and maps each Java method NAME to a
-            // native symbol, so obfuscating `io.github.fotlab.fotlab_rawler.**` would break the
-            // bridge at runtime — with no compile error, only a runtime failure on device.
-            isMinifyEnabled = true
-            isShrinkResources = true
+            // native symbol, so an obfuscation mistake breaks it at runtime only — no compile
+            // error, and no CI signal either, because R8 applies to release alone while the
+            // emulator smoke job builds the debug variant. The first shipping release would be the
+            // first build to actually execute these rules, and it would do so on a user's device.
+            // R8 is a size/performance optimisation, not a correctness feature, so the trade is
+            // not worth taking blind. Enable it deliberately, once a release build runs in CI.
+            //
+            // `proguard-rules.pro` stays wired via `proguardFiles`, so it is inert now and applies
+            // automatically the day minification is switched on.
+            isMinifyEnabled = false
+            isShrinkResources = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",

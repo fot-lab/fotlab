@@ -338,23 +338,34 @@ Split across the two rule files, on purpose:
 - Q1 — CI must confirm that AGP `8.7.3` accepts `compileSdk = 36`. If AGP rejects
   it, AGP and Gradle are upgraded **together** (their versions are
   coupled); neither is bumped alone. **TBD.**
-- Q2 — **RESOLVED (reversed 2026-10-11).** Release builds **do** run R8 minification
-  and resource shrinking (`isMinifyEnabled = true`, `isShrinkResources = true`).
-  This question has now reversed twice, and both prior resolutions were agent
-  inventions rather than user instructions: an enabling on 2026-09-14 recorded as
-  "user-specified R8" (a hallucination — the user had not asked), then a disabling on
-  2026-09-15 whose stated reason was that the request was hallucinated and that, for
-  an open-source project, obfuscation has no anti-reverse-engineering value. That
-  second reason no longer holds as a **decision**: the user has now explicitly asked
-  for R8 to be re-enabled, and per the precedence rule (`rules/**` is not higher than a
-  human instruction) this resolution stands. `minSdk = 26`, so multidex is not a
-  concern and R8 needs no additional configuration.
-  `app/proguard-rules.pro` is **live** again and its rules are load-bearing rather
-  than precautionary: JNA maps each Java method NAME to a native symbol by reflecting
-  over Java declarations, so obfuscating `io.github.fotlab.fotlab_rawler.**` would
-  break the native bridge **at runtime only** — no compile error, no CI signal.
-  Note the coverage gap: R8 applies to release only, while the emulator smoke job
-  builds the **debug** variant, so a keep-rule gap would surface only at release time.
+- Q2 — **RESOLVED (reversed 2026-10-11, restored).** Release builds do **not** run R8
+  minification or resource shrinking. `isMinifyEnabled` and `isShrinkResources` are
+  set to an explicit `false` rather than left at the AGP default, so that a reader
+  can tell a deliberate decision from a forgotten setting — that distinction is the
+  lesson of the two earlier reversals below.
+  **Deciding reason: protect the native bridge conservatively.** JNA maps each Java
+  method NAME to a native symbol by reflecting over Java declarations, so an
+  obfuscation mistake breaks the bridge at runtime only — no compile error, and no CI
+  signal either, since R8 applies to release alone while the emulator smoke job builds
+  the debug variant. The first shipping release would therefore be the first build to
+  execute these rules, and it would execute them on a user's device. R8 is a
+  size/performance optimisation, not a correctness feature, so the trade is not worth
+  taking blind. Re-enable it deliberately once a release build runs in CI.
+  `app/proguard-rules.pro` stays wired via `proguardFiles` — inert today, applied
+  automatically when minification is switched on.
+  **Boundary audit (2026-10-11).** R8 rewrites Java/Kotlin bytecode only and never sees
+  machine code, so keep rules matter only where a symbol crosses the language boundary.
+  This project has exactly **one** such boundary, and the keep file covers it: JNA/UniFFI.
+  Verified as *not* needing rules, with reasons recorded in the keep file itself:
+  the C++ engines (rawalchemy grading, rawtherapee/RawTherapee) are reached from Rust
+  through the `cxx` crate's `#[cxx::bridge]` — compile-time glue statically linked
+  inside `librawler_fotlab.so`, whose symbols have no Java-side names, and whose real
+  hazards are link-time (`libc++_shared.so` / `libomp.so` packaging, handled by
+  `build.rs` + CI); Room is KSP + room-compiler with no reflection; DataStore uses the
+  Preferences API, not Proto; Compose / Coil / ExifInterface ship AAR consumer rules
+  that AGP merges. This project also uses **no JNI** at all (no `jni::`, no
+  Kotlin `external fun`), so the default `native <methods>` rule matches nothing today
+  and is kept only as a cheap safety net for a future JNI entry point.
 - Q3 — Signing: which keystore, injected through which secret, and is release
   signing part of the first release? **TBD.**
 - Q4 — **RESOLVED (reversed 2026-10-03).** Release now ships **per-ABI APKs**
@@ -415,3 +426,5 @@ Split across the two rule files, on purpose:
 | 2026-09-17 | Verification Loop step 3 now documents the `e: ` prefix convention for Kotlin compiler errors in the build-gradle log (grep `^e: ` to extract compile errors quickly). |
 | 2026-10-03 | Reversed Q4: release now ships **per-ABI APKs** instead of one universal. `app/build.gradle.kts` gains `splits { abi { ... isUniversalApk = true } }` (Google "Build per-ABI APKs" best practice); the four ABIs mirror `build_rust.yaml`. `release_github.yaml`'s "Name release asset" step now loops over `apk/*.apk` and renames each to `FotLab-{VERSION_NAME}-<abi>-release.apk` (+ `-universal-` fallback), publishing all. `rules/VERSION.md` asset-name convention updated. No `ndk.abiFilters` needed — AGP filters the placed native libs per output APK. |
 | 2026-10-11 | **Q2 reversed again — R8 re-enabled at the user's explicit request.** `app/build.gradle.kts` sets `isMinifyEnabled = true` and `isShrinkResources = true` on the release build type; `app/proguard-rules.pro` becomes live again rather than inert, so its JNA and `io.github.fotlab.fotlab_rawler.**` keep rules are now load-bearing. Recorded plainly because this question has reversed twice and **both** earlier resolutions were agent inventions: an enabling on 2026-09-14 logged as "user-specified" when the user had not asked, then the 2026-09-15 disabling whose reasoning ("hallucinated, and obfuscation buys nothing for an open-source project") is a statement about a request that was never actually made. The user has now asked, so that reasoning does not carry over. No workflow change was involved — the switch lives only in `build.gradle.kts` and the workflows never referenced R8. `minSdk = 26` means multidex is irrelevant. **Known coverage gap:** R8 applies to release only while the emulator smoke job builds the debug variant, so a missing keep rule would fail only on a release build, at runtime, with no compile-time or CI signal. |
+
+| 2026-10-11 | **Q2 reversed a third time — R8 disabled again, to protect the native bridge conservatively.** Same day as the enabling above, and deliberately undoing it: `isMinifyEnabled` / `isShrinkResources` set to an **explicit `false`** instead of being deleted, so a reader can distinguish a deliberate decision from an omitted setting (that is precisely what the 2026-09-15 reversal got wrong, and what made this cycle possible at all). Reason: the JNA/UniFFI bridge fails on an obfuscation mistake **at runtime only** — no compile error, and no CI signal either, because R8 applies to release while the emulator smoke job builds debug. The first shipping release would be the first build to execute these rules, on a user's device; R8 is an optimisation, not a correctness feature, so it is not worth taking blind. Re-enable once a release build runs in CI. Accompanied by a **boundary audit of the keep rules**, now recorded in `app/proguard-rules.pro`: R8 touches Java/Kotlin bytecode only, so keep rules matter only where a symbol crosses the language boundary — and this project has exactly one, JNA/UniFFI. Explicitly verified as needing nothing: the C++ engines (rawalchemy grading, rawtherapee/RawTherapee), which reach Rust through the `cxx` crate's `#[cxx::bridge]` as compile-time glue statically linked inside `librawler_fotlab.so` with no Java-side names (their real hazards are link-time `libc++_shared.so` / `libomp.so` packaging, owned by `build.rs` + CI); Room (KSP + room-compiler, no reflection); DataStore (Preferences API, not Proto); Compose / Coil / ExifInterface (AAR consumer rules merged by AGP). Also confirmed the project uses **no JNI** at all, so the default `native <methods>` rule matches nothing and is retained purely as a safety net for a future JNI entry point. The two `-dontwarn java.awt.**` / `javax.swing.**` lines are kept: they are inert while R8 is off, and on an Android app those packages are never on the classpath anyway. |
