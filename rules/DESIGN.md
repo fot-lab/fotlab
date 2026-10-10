@@ -94,6 +94,7 @@ The detail file name **must** equal its ID plus `.md`.
 | --- | --- | --- |
 | `FEATUR` | Feature | User-visible capabilities and end-to-end flows |
 | `RENDER` | Rendering & Style | Colour pipeline, style/LUT application, preview and export |
+| `DEFRNG` | Defringe & Chromatic Fringe | Post-demosaic fringe / defringing in perceptual (Oklch) space; extends `calibrate_oklab` |
 | `IMGMGR` | Image & File | Import, browse, storage, album, file lifecycle |
 | `DATABS` | Data & Persistence | Structured local storage: Room entities, DAOs, migrations, repositories |
 | `METADA` | Metadata | EXIF/XMP read & write, exiftool-backed behaviour |

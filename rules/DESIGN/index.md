@@ -28,4 +28,6 @@ This file contains **only** the item table. No statistics, no changelog — git 
 | `FOTLAB-RENDER-000002` | Highlight recovery (HLRecovery) port feasibility — RT five variants in two tiers; per-pixel tier fits the OKLab camera-space fold | `RENDER` | Draft | P2 | [detail](rules/DESIGN/detail/FOTLAB-RENDER-000002.md) |
 | `FOTLAB-RENDER-000003` | Axial CA (ACA) / purple-fringe — pre-demosaic, independent edge detection, RapidRAW raise-G repair | `RENDER` | Draft | P2 | [detail](rules/DESIGN/detail/FOTLAB-RENDER-000003.md) |
 | `FOTLAB-RENDER-000004` | Shearlet-domain CA correction — unified LCA + ACA, post-demosaic RGB, Li & Jin (ACCV 2020) | `RENDER` | Draft | P2 | [detail](rules/DESIGN/detail/FOTLAB-RENDER-000004.md) |
-<!-- Next sequence per category: UIXDES 000007, DATABS 000003, NATIVE 000006, IMGMGR 000002, PIPELN 000002, RENDER 000005. Append one row per new item; never reuse or renumber IDs. -->
+| `FOTLAB-DEFRNG-000001` | Oklch post-demosaic defringe — bright-edge chroma (C) + luminance (L) reduction (extends `calibrate_oklab`) | `DEFRNG` | Draft | P2 | [detail](rules/DESIGN/detail/FOTLAB-DEFRNG-000001.md) |
+| `FOTLAB-DEHAZE-000002` | OKLab/OKLCH post-demosaic dehaze — guided-filter haze field inside the OKLab highlight block | `DEHAZE` | Draft | P2 | [detail](rules/DESIGN/detail/FOTLAB-DEHAZE-000002.md) |
+<!-- Next sequence per category: UIXDES 000007, DATABS 000003, NATIVE 000006, IMGMGR 000002, PIPELN 000002, RENDER 000005, DEHAZE 000003, DEFRNG 000002. Append one row per new item; never reuse or renumber IDs. -->
