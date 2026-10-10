@@ -1,6 +1,7 @@
 package io.github.fotlab.fotlab.media
 
 import io.github.fotlab.fotlab_rawler.DehazeMergeMode
+import io.github.fotlab.fotlab_rawler.OutputTransfer
 import io.github.fotlab.fotlab_rawler.DemosaicAlgorithm
 import io.github.fotlab.fotlab_rawler.DevelopParams
 import io.github.fotlab.fotlab_rawler.RawlerFotlabBridge
@@ -42,6 +43,9 @@ class RawlerFotlabDecoder : RawDecoder {
             exposureEv = exposureEv,
             wb = null,
             dehazeMergeMode = DehazeMergeMode.MIN,
+            // This is the presentation PNG path, so it must carry the sRGB transfer explicitly;
+            // the Rust-side default for an omitted field is `Linear`, which would skip gamma here.
+            outputTransfer = OutputTransfer.GAMMA,
         )
         return RawlerFotlabBridge.developRawToPng(bytes, params)
     }

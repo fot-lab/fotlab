@@ -40,7 +40,8 @@ use crate::bound;
 use crate::calibrate::WorkingSpace;
 use crate::camera_space::DemosaicedCameraImage;
 use crate::develop::{
-  develop_image, develop_to_camera_image, oklab_switches, DevelopParams, GradeParams, PipelineStages,
+  develop_image, develop_to_camera_image, oklab_switches, DevelopParams, GradeParams, OutputTransfer,
+  PipelineStages,
 };
 use crate::intermediate;
 use crate::RawlerFotlabError;
@@ -297,8 +298,15 @@ impl RawlerImageLoaded {
                     ))
                 }
             } else {
-                bound::rawlerimagedeveloped_to_png(&linear, params.output_transfer.applies_gamma())
-                    .map_err(RawlerFotlabError::Decode)
+                // The transfer fallback for an omitted `output_transfer` lives here — the single
+                // branch point that reads the value. The default is `Linear` (no sRGB OETF): a
+                // graded/editing render must not be gamma-encoded, and an explicit `Gamma` from
+                // Kotlin overrides this for the presentation PNG.
+                bound::rawlerimagedeveloped_to_png(
+                    &linear,
+                    params.output_transfer.unwrap_or(OutputTransfer::Linear).applies_gamma(),
+                )
+                .map_err(RawlerFotlabError::Decode)
             }
         }))
         .unwrap_or_else(|_| Err(RawlerFotlabError::Decode("rawler panicked during render".to_string())))

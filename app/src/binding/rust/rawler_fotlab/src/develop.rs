@@ -383,10 +383,14 @@ pub struct DevelopParams {
   /// carried here (rather than as a separate entry-point argument) so one record fully
   /// describes a render.
   ///
-  /// Required (no UniFFI default): every call site — Rust and the Kotlin assembler in
-  /// `StudioEngine.assembleDevelopParams` — supplies it explicitly, and UniFFI 0.28's field
-  /// default only accepts literals, not enum variants.
-  pub output_transfer: OutputTransfer,
+  /// `Option` + `None` default (not an enum-variant default, which UniFFI 0.28 rejects — its
+  /// field default only accepts literals): the real fallback lives at the one place the value is
+  /// read, `loaded.rs` (the `unwrap_or(OutputTransfer::Linear)` before `applies_gamma`). The
+  /// default is `Linear` (no sRGB OETF) — a graded/editing render must not be gamma-encoded — and
+  /// any render that wants the transfer function supplies `Gamma` explicitly (Kotlin does, via
+  /// `StudioEngine.assembleDevelopParams`).
+  #[uniffi(default = None)]
+  pub output_transfer: Option<OutputTransfer>,
 }
 
 /// Whether the PNG written at the end of the trunk carries the sRGB transfer function.
