@@ -369,6 +369,20 @@ pub struct DevelopParams {
   /// **Sub-switch**, gated by [`PipelineStages::oklab`] like its sRGB twin. **Default `false`**.
   #[uniffi(default = false)]
   pub oklab_highlight_compress_prophoto: bool,
+  /// **ProPhoto-space purple-fringe (unpurple) correction** for the *editing* branch
+  /// (`defringe_prophoto_unpurple.rs`), applied **after** prophoto clipping and **before** the
+  /// rawalchemy hand-off — i.e. on the linear ProPhoto-D50 buffer the grade consumes. `None` =
+  /// the stage is off (identity; this is the default, matching the project's "every switch
+  /// defaults off on the Rust/FFI side, Kotlin controls assembly" rule). `Some(settings)` runs
+  /// the v4 faithful Unpurple core in place on `RawlerImageDeveloped.rgb`. The JPG-decode half of
+  /// the v4 prototype is intentionally *not* wired here — the pipeline already owns the ProPhoto
+  /// buffer, so only the core algorithm is needed.
+  ///
+  /// This is the ProPhoto twin of the OKLab defringe (`defringe_oklab_aca.rs`): that one runs in
+  /// camera space before calibration (presentation path), this one runs in the graded working
+  /// space. They are independent stages and either may be on or off.
+  #[uniffi(default = None)]
+  pub defringe_prophoto: Option<crate::defringe_prophoto_unpurple::UnpurpleSettings>,
   /// Output transfer applied when the finished linear buffer is encoded to PNG
   /// (`OutputTransfer`), read by `bound::rawlerimagedeveloped_to_png` — and only there.
   ///

@@ -39,6 +39,7 @@ use rawler::RawImage;
 use crate::bound;
 use crate::calibrate::WorkingSpace;
 use crate::camera_space::DemosaicedCameraImage;
+use crate::defringe_prophoto_unpurple::defringe_prophoto;
 use crate::develop::{
   develop_image, develop_to_camera_image, oklab_switches, DevelopParams, GradeParams, OutputTransfer,
   PipelineStages,
@@ -273,12 +274,26 @@ impl RawlerImageLoaded {
             // --- oklab + output --------------------------------------------------------
             // Clipping is the editing path's own business: the presentation PNG is finished by
             // `bound`, which clips after the transfer function on its own.
-            let linear = camera_image.to_working_space(
+            let mut linear = camera_image.to_working_space(
                 space,
                 stages.oklab,
                 oklab_switches(&params),
                 params.clip_to_gamut && space == WorkingSpace::ProPhotoD50,
             )?;
+
+            // --- ProPhoto-space defringe (unpurple) ------------------------------------
+            // Runs **after** prophoto clipping and **before** the rawalchemy hand-off, on the
+            // linear ProPhoto-D50 buffer. `defringe_prophoto` is in place and only touches the
+            // R/B channels; `None` (the default, see `DevelopParams::defringe_prophoto`) is an
+            // identity no-op, so a graded render with the stage off is bit-for-bit unchanged.
+            // Restricted to the graded (ProPhoto) path: the colour space the Unpurple core
+            // expects is exactly the ProPhoto-D50 buffer, so the sRGB presentation path — which
+            // has its own OKLab defringe (`defringe_oklab_aca.rs`) — is deliberately left to that.
+            if space == WorkingSpace::ProPhotoD50 {
+                if let Some(dp_settings) = &params.defringe_prophoto {
+                    defringe_prophoto(&mut linear.rgb, linear.width as usize, linear.height as usize, dp_settings);
+                }
+            }
 
             // --- output -------------------------------------------------------------------
             if stages.grade {
