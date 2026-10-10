@@ -54,7 +54,6 @@ internal fun StudioOperationBarDevelopFilm(
     onDenoise: () -> Unit,
     onDehaze: () -> Unit,
     onCa: () -> Unit,
-    onLoca: () -> Unit,
     onExposure: () -> Unit,
     onWhiteBalance: () -> Unit,
     modifier: Modifier = Modifier,
@@ -70,10 +69,6 @@ internal fun StudioOperationBarDevelopFilm(
                 id = "ca",
                 label = stringResource(id = R.string.studio_label_tca),
             ) { CaButton(onCa) },
-            OperationalButton(
-                id = "loca",
-                label = stringResource(id = R.string.studio_label_loca),
-            ) { LocaButton(onLoca) },
             OperationalButton(
                 id = "denoise",
                 label = stringResource(id = R.string.studio_label_denoise),
@@ -94,12 +89,22 @@ internal fun StudioOperationBarDevelopFilm(
     )
 }
 
-/** TuneImage bar — the boost group: Contrast and Saturation parameter inputs. */
+/**
+ * TuneImage bar — the boost group: ACA and Clipping switches plus the Contrast and Saturation
+ * parameter inputs.
+ *
+ * **ACA** (the purple-fringe corrector, `defringe_prophoto_unpurple.rs`) sits between Clipping and
+ * Contrast on purpose: all three act on the same **linear ProPhoto-D50 editing buffer** — Clipping
+ * clamps it, ACA removes the fringe in it, Contrast grades what comes after — so they belong to the
+ * editing fork, not to the develop bar's pre-demosaic tools. Turning ACA on therefore counts as
+ * engaging the grade (see `StudioEngine.requestRender`).
+ */
 @Composable
 internal fun StudioOperationBarTuneImage(
     rawLoaded: Boolean,
     onOklabHighlight: () -> Unit,
     onClipping: () -> Unit,
+    onLoca: () -> Unit,
     contrast: Float?,
     saturation: Float?,
     onContrast: (Float?) -> Unit,
@@ -117,6 +122,10 @@ internal fun StudioOperationBarTuneImage(
                 id = "clipping",
                 label = stringResource(id = R.string.studio_label_clipping),
             ) { ClippingButton(onClipping, enabled = rawLoaded) },
+            OperationalButton(
+                id = "loca",
+                label = stringResource(id = R.string.studio_label_loca),
+            ) { LocaButton(onLoca, enabled = rawLoaded) },
             OperationalButton(
                 id = "contrast",
                 label = stringResource(id = R.string.studio_cd_contrast),

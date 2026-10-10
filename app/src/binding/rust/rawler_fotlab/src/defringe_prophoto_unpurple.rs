@@ -45,18 +45,27 @@
 use rayon::prelude::*;
 
 /// Unpurple parameters (mirrors `unpurple.ml`'s `param` record).
-#[derive(Debug, Clone, Copy, PartialEq)]
+///
+/// Exposed to Kotlin as the Studio **ACA** control (`DevelopParams::defringe_prophoto`). Every
+/// field defaults to the upstream `unpurple.ml` value, so an all-defaults record reproduces the
+/// reference tool; `None` (no record at all) means the stage is skipped entirely.
+#[derive(Debug, Clone, Copy, PartialEq, uniffi::Record)]
 pub struct UnpurpleSettings {
     /// Blur radius (pixels). Upstream default 5.
+    #[uniffi(default = 5.0)]
     pub radius: f64,
     /// Intensity multiplier on the mask source (≈1.0). Upstream default 1.
+    #[uniffi(default = 1.0)]
     pub intensity: f64,
     /// Minimum brightness gate on the blue plane (0..1). Upstream default 0,
     /// `-gentle` sets 0.8.
+    #[uniffi(default = 0.0)]
     pub min_brightness: f64,
     /// Minimum red:blue ratio in the fringe (0 = no floor). `-gentle`/butterfly = 0.15.
+    #[uniffi(default = 0.0)]
     pub min_red_to_blue_ratio: f64,
     /// Maximum red:blue ratio in the fringe. Upstream default 0.33.
+    #[uniffi(default = 0.33)]
     pub max_red_to_blue_ratio: f64,
 }
 

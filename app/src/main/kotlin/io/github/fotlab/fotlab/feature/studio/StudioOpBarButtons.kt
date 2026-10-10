@@ -92,7 +92,6 @@ import io.github.fotlab.fotlab.ui.operation.HorizontalOperationBar
 import io.github.fotlab.fotlab.ui.operation.OperationalButton
 import io.github.fotlab.fotlab.ui.rememberZoomState
 import io.github.fotlab.fotlab_rawler.CaSettings
-import io.github.fotlab.fotlab_rawler.LocaSettings
 import io.github.fotlab.fotlab_rawler.DehazeMergeMode
 import io.github.fotlab.fotlab_rawler.DemosaicCandidate
 import kotlinx.coroutines.Dispatchers
@@ -309,17 +308,20 @@ internal fun CaButton(
 }
 
 /**
- * LoCA (longitudinal / axial chromatic-aberration correction) parameter entry of the develop bar.
- * The ClosedCaptionOff glyph is the "CC disabled" mark repurposed here as the axial-fringe tool; the
- * caption reads LoCA in every locale. It opens the LoCA dialog, which exposes only the two peer
- * switches (去紫边 / 去绿边) — the master switch is derived by Kotlin from them.
+ * ACA (purple-fringe correction) parameter entry of the **adjustment** bar.
+ *
+ * The ClosedCaptionOff glyph is kept from the tool this button replaced — the label reads ACA in
+ * every locale. It opens the ACA dialog, which drives `UnpurpleSettings` (radius / intensity /
+ * brightness gate / red:blue ratio bounds) on the ProPhoto-D50 editing buffer. The stage lives here
+ * because it needs the graded working space; enabling it engages the grade.
  */
 @Composable
 internal fun LocaButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
 ) {
-    IconButton(onClick = onClick, modifier = modifier) {
+    IconButton(onClick = onClick, modifier = modifier, enabled = enabled) {
         Icon(
             imageVector = Icons.Filled.ClosedCaptionOff,
             contentDescription = stringResource(id = R.string.studio_cd_loca),

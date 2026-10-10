@@ -52,7 +52,7 @@ import io.github.fotlab.fotlab.ui.operation.OperationalButton
 import io.github.fotlab.fotlab.ui.rememberZoomState
 import io.github.fotlab.fotlab_rawler.CaSettings
 import io.github.fotlab.fotlab_rawler.DehazeMergeMode
-import io.github.fotlab.fotlab_rawler.LocaSettings
+import io.github.fotlab.fotlab_rawler.UnpurpleSettings
 import io.github.fotlab.fotlab_rawler.OutputTransfer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -200,17 +200,18 @@ fun StudioScreen() {
     var caRedInput by remember { mutableStateOf("") }
     var caBlueInput by remember { mutableStateOf("") }
 
-    // LoCA (longitudinal-CA / axial fringe) dialog state (opened by the DevelopFilm bar LoCA icon,
-    // the ClosedCaptionOff glyph). Only the two PEER switches are exposed to the user; the master
-    // switch is derived by Kotlin: both off → loca = null (the stage is skipped), either/both on
-    // → loca = Some(...). Strength / threshold fields keep the platform defaults as placeholders.
-    var showLocaDialog by remember { mutableStateOf(false) }
-    var locaPurpleEnabled by remember { mutableStateOf(false) }
-    var locaGreenEnabled by remember { mutableStateOf(false) }
-    var locaPurpleStrengthInput by remember { mutableStateOf("") }
-    var locaGreenStrengthInput by remember { mutableStateOf("") }
-    var locaPurpleLumInput by remember { mutableStateOf("") }
-    var locaGreenLumInput by remember { mutableStateOf("") }
+    // ACA (purple-fringe / unpurple) dialog state (opened by the adjustment bar's ACA icon, the
+    // ClosedCaptionOff glyph, between Clipping and Contrast). The switch IS the tool: OFF hands the
+    // engine null (the stage is skipped); ON builds an UnpurpleSettings from the five fields, each
+    // falling back to its unpurple.ml default when blank or unparseable. Enabling it engages the
+    // grade, because the core runs on the ProPhoto-D50 editing buffer.
+    var showAcaDialog by remember { mutableStateOf(false) }
+    var acaEnabled by remember { mutableStateOf(false) }
+    var acaRadiusInput by remember { mutableStateOf("") }
+    var acaIntensityInput by remember { mutableStateOf("") }
+    var acaMinBrightnessInput by remember { mutableStateOf("") }
+    var acaMinRatioInput by remember { mutableStateOf("") }
+    var acaMaxRatioInput by remember { mutableStateOf("") }
 
     // Clipping dialog state (opened by the Clipping icon, the AllOut glyph).
     // The switch IS the tool — there is no numeric parameter: ON clamps every component of the
@@ -482,24 +483,6 @@ fun StudioScreen() {
                             }
                             showCaDialog = true
                         },
-                        onLoca = {
-                            StudioEngine.currentLoca()?.let { loca ->
-                                locaPurpleEnabled = loca.purpleEnabled
-                                locaGreenEnabled = loca.greenEnabled
-                                locaPurpleStrengthInput = loca.purpleStrength.toString()
-                                locaGreenStrengthInput = loca.greenStrength.toString()
-                                locaPurpleLumInput = loca.purpleLumMin.toString()
-                                locaGreenLumInput = loca.greenLumMin.toString()
-                            } ?: run {
-                                locaPurpleEnabled = false
-                                locaGreenEnabled = false
-                                locaPurpleStrengthInput = ""
-                                locaGreenStrengthInput = ""
-                                locaPurpleLumInput = ""
-                                locaGreenLumInput = ""
-                            }
-                            showLocaDialog = true
-                        },
                         onExposure = {
                             exposureEnabled = StudioEngine.currentExposureEv() != null
                             exposureInput = StudioEngine.currentExposureEv()?.toString() ?: ""
@@ -528,6 +511,24 @@ fun StudioScreen() {
                         onClipping = {
                             clipToGamutEnabled = StudioEngine.currentClipToGamut()
                             showClippingDialog = true
+                        },
+                        onLoca = {
+                            StudioEngine.currentUnpurple()?.let { unpurple ->
+                                acaEnabled = true
+                                acaRadiusInput = unpurple.radius.toString()
+                                acaIntensityInput = unpurple.intensity.toString()
+                                acaMinBrightnessInput = unpurple.minBrightness.toString()
+                                acaMinRatioInput = unpurple.minRedToBlueRatio.toString()
+                                acaMaxRatioInput = unpurple.maxRedToBlueRatio.toString()
+                            } ?: run {
+                                acaEnabled = false
+                                acaRadiusInput = ""
+                                acaIntensityInput = ""
+                                acaMinBrightnessInput = ""
+                                acaMinRatioInput = ""
+                                acaMaxRatioInput = ""
+                            }
+                            showAcaDialog = true
                         },
                         contrast = gradeSelection.contrast,
                         saturation = gradeSelection.saturation,
@@ -662,41 +663,39 @@ fun StudioScreen() {
         )
     }
 
-    if (showLocaDialog) {
-        LocaDialog(
-            purpleEnabled = locaPurpleEnabled,
-            onPurpleEnabledChange = { locaPurpleEnabled = it },
-            greenEnabled = locaGreenEnabled,
-            onGreenEnabledChange = { locaGreenEnabled = it },
-            purpleStrength = locaPurpleStrengthInput,
-            onPurpleStrengthChange = { locaPurpleStrengthInput = it },
-            greenStrength = locaGreenStrengthInput,
-            onGreenStrengthChange = { locaGreenStrengthInput = it },
-            purpleLum = locaPurpleLumInput,
-            onPurpleLumChange = { locaPurpleLumInput = it },
-            greenLum = locaGreenLumInput,
-            onGreenLumChange = { locaGreenLumInput = it },
+    if (showAcaDialog) {
+        AcaDialog(
+            enabled = acaEnabled,
+            onEnabledChange = { acaEnabled = it },
+            radius = acaRadiusInput,
+            onRadiusChange = { acaRadiusInput = it },
+            intensity = acaIntensityInput,
+            onIntensityChange = { acaIntensityInput = it },
+            minBrightness = acaMinBrightnessInput,
+            onMinBrightnessChange = { acaMinBrightnessInput = it },
+            minRedToBlueRatio = acaMinRatioInput,
+            onMinRedToBlueRatioChange = { acaMinRatioInput = it },
+            maxRedToBlueRatio = acaMaxRatioInput,
+            onMaxRedToBlueRatioChange = { acaMaxRatioInput = it },
             onConfirm = {
-                val purpleOn = locaPurpleEnabled
-                val greenOn = locaGreenEnabled
-                StudioEngine.setLoca(
-                    if (purpleOn || greenOn) {
-                        LocaSettings(
-                            enabled = purpleOn || greenOn,
-                            purpleEnabled = purpleOn,
-                            greenEnabled = greenOn,
-                            purpleStrength = locaPurpleStrengthInput.toFloatOrNull() ?: 1.0f,
-                            greenStrength = locaGreenStrengthInput.toFloatOrNull() ?: 1.0f,
-                            purpleLumMin = locaPurpleLumInput.toFloatOrNull() ?: 0.5f,
-                            greenLumMin = locaGreenLumInput.toFloatOrNull() ?: 0.5f,
+                // The switch is the tool: OFF is the identity (null = stage skipped). Each blank or
+                // unparseable field falls back to unpurple.ml's own default rather than blocking OK.
+                StudioEngine.setUnpurple(
+                    if (acaEnabled) {
+                        UnpurpleSettings(
+                            radius = acaRadiusInput.toDoubleOrNull() ?: 5.0,
+                            intensity = acaIntensityInput.toDoubleOrNull() ?: 1.0,
+                            minBrightness = acaMinBrightnessInput.toDoubleOrNull() ?: 0.0,
+                            minRedToBlueRatio = acaMinRatioInput.toDoubleOrNull() ?: 0.0,
+                            maxRedToBlueRatio = acaMaxRatioInput.toDoubleOrNull() ?: 0.33,
                         )
                     } else {
                         null
                     },
                 )
-                showLocaDialog = false
+                showAcaDialog = false
             },
-            onDismiss = { showLocaDialog = false },
+            onDismiss = { showAcaDialog = false },
         )
     }
 

@@ -18,7 +18,7 @@ import io.github.fotlab.fotlab_rawler.DemosaicAlgorithm
 import io.github.fotlab.fotlab_rawler.DemosaicCandidate
 import io.github.fotlab.fotlab_rawler.DehazeMergeMode
 import io.github.fotlab.fotlab_rawler.CaSettings
-import io.github.fotlab.fotlab_rawler.LocaSettings
+import io.github.fotlab.fotlab_rawler.UnpurpleSettings
 import io.github.fotlab.fotlab_rawler.CameraProfileParams
 import io.github.fotlab.fotlab_rawler.DevelopParams
 import io.github.fotlab.fotlab_rawler.DemosaicedCameraImage
@@ -646,7 +646,7 @@ object StudioEngine {
             dehazeRadiusGuide = currentDehazeRadiusGuide,
             dehazeMergeMode = currentDehazeMergeMode,
             ca = currentCa,
-            loca = currentLoca,
+            defringeProphoto = currentUnpurple,
             clipToGamut = currentClipToGamut,
             cameraProfile = cameraProfileState.value,
             lensProfile = lensProfileState.value,
@@ -686,7 +686,11 @@ object StudioEngine {
             return
         }
         val selection = gradeSelectionState.value
-        val gradeActive = gradeOverride ?: selection.isActive
+        // ACA counts as engaging the grade: the unpurple core runs on the linear ProPhoto-D50
+        // editing buffer, which only the graded fork builds (`working_space()` picks ProPhotoD50
+        // exactly when `grade` is true). Without this, enabling ACA on the sRGB presentation path
+        // would silently do nothing.
+        val gradeActive = gradeOverride ?: (selection.isActive || currentUnpurple != null)
         val transfer = if (gradeActive) OutputTransfer.LINEAR else OutputTransfer.GAMMA
         outputTransferState.value = transfer
 
@@ -1062,11 +1066,16 @@ object StudioEngine {
     /** The current CA settings; the UI prefills the LCA dialog from this. */
     fun currentCa(): CaSettings? = currentCa
 
-    /** The LoCA (longitudinal-CA) fringe settings retained for the next develop re-render; null = off. */
-    private var currentLoca: LocaSettings? = null
+    /**
+     * The ACA (purple-fringe) settings retained for the next render; `null` = off.
+     *
+     * A non-null value also **engages the grade** (see [requestRender]): the unpurple core runs on
+     * the linear ProPhoto-D50 editing buffer, which only exists on the graded fork.
+     */
+    private var currentUnpurple: UnpurpleSettings? = null
 
-    /** The current LoCA settings; the UI prefills the LoCA dialog from this. */
-    fun currentLoca(): LocaSettings? = currentLoca
+    /** The current ACA settings; the UI prefills the ACA dialog from this. */
+    fun currentUnpurple(): UnpurpleSettings? = currentUnpurple
 
     /**
      * Whether out-of-gamut clipping is retained for the next render (the Studio Clipping dialog's
@@ -1224,14 +1233,14 @@ object StudioEngine {
     }
 
     /**
-     * Re-develop the current RAW with [loca] longitudinal-CA fringe settings entered from the
-     * Studio LoCA dialog. The Kotlin dialog exposes only the two peer switches (去紫边 / 去绿边);
-     * the master switch is derived by the caller: both off → `null` (the stage is skipped,
-     * [DevelopParams.loca] is `None`), either/both on → `Some(...)`. `null` is the identity — the
-     * canvas is re-rendered from the re-developed PNG.
+     * Re-render with [unpurple] purple-fringe (ACA) settings entered from the Studio ACA dialog.
+     * `null` (the dialog switch OFF) is the identity — [DevelopParams.defringeProphoto] is `None`,
+     * so the stage is skipped. A non-null value **engages the grade**, because the core runs on the
+     * ProPhoto-D50 editing buffer that only the graded fork produces; the canvas is re-rendered from
+     * the re-developed PNG.
      */
-    fun setLoca(loca: LocaSettings?) {
-        currentLoca = loca
+    fun setUnpurple(unpurple: UnpurpleSettings?) {
+        currentUnpurple = unpurple
         requestRender()
     }
 

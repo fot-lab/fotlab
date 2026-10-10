@@ -32,7 +32,6 @@ import kotlin.math.roundToInt
 import io.github.fotlab.fotlab.feature.studio.StudioEngine
 import io.github.fotlab.fotlab_rawler.CaSettings
 import io.github.fotlab.fotlab_rawler.DehazeMergeMode
-import io.github.fotlab.fotlab_rawler.LocaSettings
 
 /**
  * LCP lens-profile user focal-length override dialog. The OK action is owned by the caller (it writes
@@ -167,24 +166,27 @@ internal fun CaDialog(
 }
 
 /**
- * LoCA (longitudinal / axial CA) dialog. Only the two PEER switches (purple / green) are exposed; the
- * master switch is derived by the caller. Strength / luminance fields default to platform values as
- * placeholders and are editable only while their pair switch is on. OK is always enabled.
+ * ACA (purple-fringe correction) dialog — parameter entry for the Unpurple core.
+ *
+ * The master switch is the tool: OFF hands the engine `null` (the stage is skipped entirely). The
+ * five numeric fields mirror `UnpurpleSettings` one-for-one and are editable only while the switch
+ * is on; an empty or unparseable field falls back to that field's upstream default rather than
+ * being rejected, so OK is always enabled. Defaults shown are `unpurple.ml`'s own.
  */
 @Composable
-internal fun LocaDialog(
-    purpleEnabled: Boolean,
-    onPurpleEnabledChange: (Boolean) -> Unit,
-    greenEnabled: Boolean,
-    onGreenEnabledChange: (Boolean) -> Unit,
-    purpleStrength: String,
-    onPurpleStrengthChange: (String) -> Unit,
-    greenStrength: String,
-    onGreenStrengthChange: (String) -> Unit,
-    purpleLum: String,
-    onPurpleLumChange: (String) -> Unit,
-    greenLum: String,
-    onGreenLumChange: (String) -> Unit,
+internal fun AcaDialog(
+    enabled: Boolean,
+    onEnabledChange: (Boolean) -> Unit,
+    radius: String,
+    onRadiusChange: (String) -> Unit,
+    intensity: String,
+    onIntensityChange: (String) -> Unit,
+    minBrightness: String,
+    onMinBrightnessChange: (String) -> Unit,
+    minRedToBlueRatio: String,
+    onMinRedToBlueRatioChange: (String) -> Unit,
+    maxRedToBlueRatio: String,
+    onMaxRedToBlueRatioChange: (String) -> Unit,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -200,60 +202,71 @@ internal fun LocaDialog(
                 Text(text = stringResource(id = R.string.common_action_cancel))
             }
         },
-        title = { Text(text = stringResource(id = R.string.studio_loca_title)) },
+        title = { Text(text = stringResource(id = R.string.studio_aca_title)) },
         text = {
             Column {
-                Text(text = stringResource(id = R.string.studio_loca_body))
+                Text(text = stringResource(id = R.string.studio_aca_body))
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(text = stringResource(id = R.string.studio_loca_purple_label))
+                    Text(text = stringResource(id = R.string.studio_aca_enable_label))
                     Spacer(modifier = Modifier.weight(1f))
-                    Switch(checked = purpleEnabled, onCheckedChange = onPurpleEnabledChange)
+                    Switch(checked = enabled, onCheckedChange = onEnabledChange)
                 }
                 Spacer(modifier = Modifier.height(8.dp))
-                TextField(
-                    value = purpleStrength,
-                    onValueChange = onPurpleStrengthChange,
-                    enabled = purpleEnabled,
-                    singleLine = true,
-                    placeholder = { Text(text = stringResource(id = R.string.studio_loca_purple_strength_hint)) },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                AcaField(
+                    value = radius,
+                    onValueChange = onRadiusChange,
+                    enabled = enabled,
+                    hint = stringResource(id = R.string.studio_aca_radius_hint),
                 )
                 Spacer(modifier = Modifier.height(8.dp))
-                TextField(
-                    value = purpleLum,
-                    onValueChange = onPurpleLumChange,
-                    enabled = purpleEnabled,
-                    singleLine = true,
-                    placeholder = { Text(text = stringResource(id = R.string.studio_loca_purple_lum_hint)) },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                AcaField(
+                    value = intensity,
+                    onValueChange = onIntensityChange,
+                    enabled = enabled,
+                    hint = stringResource(id = R.string.studio_aca_intensity_hint),
                 )
                 Spacer(modifier = Modifier.height(8.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(text = stringResource(id = R.string.studio_loca_green_label))
-                    Spacer(modifier = Modifier.weight(1f))
-                    Switch(checked = greenEnabled, onCheckedChange = onGreenEnabledChange)
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-                TextField(
-                    value = greenStrength,
-                    onValueChange = onGreenStrengthChange,
-                    enabled = greenEnabled,
-                    singleLine = true,
-                    placeholder = { Text(text = stringResource(id = R.string.studio_loca_green_strength_hint)) },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                AcaField(
+                    value = minBrightness,
+                    onValueChange = onMinBrightnessChange,
+                    enabled = enabled,
+                    hint = stringResource(id = R.string.studio_aca_min_brightness_hint),
                 )
                 Spacer(modifier = Modifier.height(8.dp))
-                TextField(
-                    value = greenLum,
-                    onValueChange = onGreenLumChange,
-                    enabled = greenEnabled,
-                    singleLine = true,
-                    placeholder = { Text(text = stringResource(id = R.string.studio_loca_green_lum_hint)) },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                AcaField(
+                    value = minRedToBlueRatio,
+                    onValueChange = onMinRedToBlueRatioChange,
+                    enabled = enabled,
+                    hint = stringResource(id = R.string.studio_aca_min_ratio_hint),
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                AcaField(
+                    value = maxRedToBlueRatio,
+                    onValueChange = onMaxRedToBlueRatioChange,
+                    enabled = enabled,
+                    hint = stringResource(id = R.string.studio_aca_max_ratio_hint),
                 )
             }
         },
+    )
+}
+
+/** One decimal [TextField] row of the ACA dialog, shared by all five parameters. */
+@Composable
+private fun AcaField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    enabled: Boolean,
+    hint: String,
+) {
+    TextField(
+        value = value,
+        onValueChange = onValueChange,
+        enabled = enabled,
+        singleLine = true,
+        placeholder = { Text(text = hint) },
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
     )
 }
 
