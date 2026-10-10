@@ -594,14 +594,21 @@ mod tests {
   #[test]
   fn the_cache_survives_a_render_and_can_be_projected_twice() {
     // Kotlin holds one buffer and hands it back for every later render, so a stage above the
-    // cache must not consume or mutate it.
+    // cache must not consume or mutate it. A different (non-mutating) projection run in between
+    // must not change a later projection of the same kind, and projecting the same way twice must
+    // agree — both are checks that the cache buffer is read, never overwritten.
     let held = cache(CameraChannels::Three, 2, 1, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
     let srgb = OklabSwitches { highlight_compress_srgb: true, highlight_compress_prophoto: false };
+
+    // A projection that does NOT touch the cache's pixels runs first.
+    let _prophoto = held
+      .to_working_space(WorkingSpace::ProPhotoD50, true, srgb, false)
+      .unwrap();
     let first = held
       .to_working_space(WorkingSpace::SrgbD65, true, srgb, false)
       .unwrap();
     let second = held
-      .to_working_space(WorkingSpace::ProPhotoD50, true, srgb, false)
+      .to_working_space(WorkingSpace::SrgbD65, true, srgb, false)
       .unwrap();
     assert_eq!(first.rgb, second.rgb, "the projection must not depend on render history");
   }

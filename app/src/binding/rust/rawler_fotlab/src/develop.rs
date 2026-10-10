@@ -361,8 +361,6 @@ pub struct DevelopParams {
   /// assembly (`FOTLAB-RENDER-000001` R3/C6).
   #[uniffi(default = false)]
   pub oklab_highlight_compress_srgb: bool,
-  #[uniffi(default = false)]
-  pub oklab_highlight_compress_srgb: bool,
   /// OKLab highlight-chroma compression for the **ProPhoto D50 graded** output - twin of
   /// [`Self::oklab_highlight_compress_srgb`], applied when the render is a graded one so rawalchemy
   /// receives a desaturated (not clamped) near-clipped-highlight buffer. The math is identical; only
@@ -384,7 +382,10 @@ pub struct DevelopParams {
   /// the develop-presentation render is the one that wants the transfer function. It is
   /// carried here (rather than as a separate entry-point argument) so one record fully
   /// describes a render.
-  #[uniffi(default = OutputTransfer::Gamma)]
+  ///
+  /// Required (no UniFFI default): every call site — Rust and the Kotlin assembler in
+  /// `StudioEngine.assembleDevelopParams` — supplies it explicitly, and UniFFI 0.28's field
+  /// default only accepts literals, not enum variants.
   pub output_transfer: OutputTransfer,
 }
 
