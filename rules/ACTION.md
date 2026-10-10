@@ -338,13 +338,23 @@ Split across the two rule files, on purpose:
 - Q1 — CI must confirm that AGP `8.7.3` accepts `compileSdk = 36`. If AGP rejects
   it, AGP and Gradle are upgraded **together** (their versions are
   coupled); neither is bumped alone. **TBD.**
-- Q2 — **RESOLVED (reversed 2026-09-15).** Release builds do **not** run R8
-  minification or resource shrinking. The project is open source, so obfuscation
-  has no anti-reverse-engineering value, and the user never requested it — the
-  earlier "user-specified R8" resolution was an agent hallucination and has been
-  reverted (`isMinifyEnabled` stays at its `false` default). `app/proguard-rules.pro`
-  with its JNA/UniFFI keep rules is **kept** and stays wired via `proguardFiles`,
-  inert while minification is off and effective again if it is ever re-enabled.
+- Q2 — **RESOLVED (reversed 2026-10-11).** Release builds **do** run R8 minification
+  and resource shrinking (`isMinifyEnabled = true`, `isShrinkResources = true`).
+  This question has now reversed twice, and both prior resolutions were agent
+  inventions rather than user instructions: an enabling on 2026-09-14 recorded as
+  "user-specified R8" (a hallucination — the user had not asked), then a disabling on
+  2026-09-15 whose stated reason was that the request was hallucinated and that, for
+  an open-source project, obfuscation has no anti-reverse-engineering value. That
+  second reason no longer holds as a **decision**: the user has now explicitly asked
+  for R8 to be re-enabled, and per the precedence rule (`rules/**` is not higher than a
+  human instruction) this resolution stands. `minSdk = 26`, so multidex is not a
+  concern and R8 needs no additional configuration.
+  `app/proguard-rules.pro` is **live** again and its rules are load-bearing rather
+  than precautionary: JNA maps each Java method NAME to a native symbol by reflecting
+  over Java declarations, so obfuscating `io.github.fotlab.fotlab_rawler.**` would
+  break the native bridge **at runtime only** — no compile error, no CI signal.
+  Note the coverage gap: R8 applies to release only, while the emulator smoke job
+  builds the **debug** variant, so a keep-rule gap would surface only at release time.
 - Q3 — Signing: which keystore, injected through which secret, and is release
   signing part of the first release? **TBD.**
 - Q4 — **RESOLVED (reversed 2026-10-03).** Release now ships **per-ABI APKs**
@@ -404,3 +414,4 @@ Split across the two rule files, on purpose:
 | 2026-09-16 | `RawRoutingTest` proves the RAW path per camera format (Canon CR2, Sony ARW x2, Nikon NEF, Panasonic RW2) on the emulator: sniff dictionary -> `route` -> `StudioEngine` -> decoded frame, with the decoded PNG's SIZE as the decisive assertion - an embedded preview is at most ~2k px wide, so anything below 3000 px means the pixels did not come from rawler. The corpus comes from the public `fot-lab/rawdb` `samples` branch, cached as `rawdb-samples-v1`; a PNG control case asserts the opposite branch (Coil). The smoke job's budget grew with it: test step 20 -> 60 min, job 45 -> 75 min, and the cache-layer numbering below shifted by one. |
 | 2026-09-17 | Verification Loop step 3 now documents the `e: ` prefix convention for Kotlin compiler errors in the build-gradle log (grep `^e: ` to extract compile errors quickly). |
 | 2026-10-03 | Reversed Q4: release now ships **per-ABI APKs** instead of one universal. `app/build.gradle.kts` gains `splits { abi { ... isUniversalApk = true } }` (Google "Build per-ABI APKs" best practice); the four ABIs mirror `build_rust.yaml`. `release_github.yaml`'s "Name release asset" step now loops over `apk/*.apk` and renames each to `FotLab-{VERSION_NAME}-<abi>-release.apk` (+ `-universal-` fallback), publishing all. `rules/VERSION.md` asset-name convention updated. No `ndk.abiFilters` needed — AGP filters the placed native libs per output APK. |
+| 2026-10-11 | **Q2 reversed again — R8 re-enabled at the user's explicit request.** `app/build.gradle.kts` sets `isMinifyEnabled = true` and `isShrinkResources = true` on the release build type; `app/proguard-rules.pro` becomes live again rather than inert, so its JNA and `io.github.fotlab.fotlab_rawler.**` keep rules are now load-bearing. Recorded plainly because this question has reversed twice and **both** earlier resolutions were agent inventions: an enabling on 2026-09-14 logged as "user-specified" when the user had not asked, then the 2026-09-15 disabling whose reasoning ("hallucinated, and obfuscation buys nothing for an open-source project") is a statement about a request that was never actually made. The user has now asked, so that reasoning does not carry over. No workflow change was involved — the switch lives only in `build.gradle.kts` and the workflows never referenced R8. `minSdk = 26` means multidex is irrelevant. **Known coverage gap:** R8 applies to release only while the emulator smoke job builds the debug variant, so a missing keep rule would fail only on a release build, at runtime, with no compile-time or CI signal. |

@@ -1,4 +1,6 @@
-# Project-specific R8 rules. Applied to release builds only (rules/ACTION.md Q2).
+# Project-specific R8 rules. Applied to release builds only (rules/ACTION.md Q2). These were
+# written when R8 was first enabled (2026-09-14), left inert while it was disabled, and are live
+# again now that minification is re-enabled — see the JNA note below for why they are mandatory.
 
 # JNI entry points reachable from native code.
 -keepclasseswithmembernames,includedescriptorclasses class * {

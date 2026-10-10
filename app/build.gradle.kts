@@ -67,12 +67,18 @@ android {
 
     buildTypes {
         release {
-            // R8 minification / resource shrinking stay OFF (rules/ACTION.md Q2): the project is
-            // open source, obfuscation has no anti-reverse-engineering value, and the user never
-            // requested it — an earlier agent resolution enabling them was reverted. The keep
-            // rules for JNA and the UniFFI bindings are kept in proguard-rules.pro and stay
-            // wired via proguardFiles, so they apply automatically if minification is ever
-            // re-enabled; while R8 is off this declaration is inert.
+            // R8 minification + resource shrinking are ON (rules/ACTION.md Q2). This reverses the
+            // 2026-09-15 disabling, which itself reversed an earlier enabling — see ACTION.md Q2
+            // and its Change History for that two-step history. The deciding factor then was
+            // "the user never asked for it"; the user has now asked, so that reason no longer
+            // holds and the keep rules written for the first enabling are reused as-is.
+            //
+            // The JNA/UniFFI keep rules are load-bearing, not precautionary: JNA resolves native
+            // symbols by reflecting over Java declarations and maps each Java method NAME to a
+            // native symbol, so obfuscating `io.github.fotlab.fotlab_rawler.**` would break the
+            // bridge at runtime — with no compile error, only a runtime failure on device.
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
