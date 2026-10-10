@@ -176,6 +176,18 @@ pub struct UngreenSettings {
   pub strength: f64,
 }
 
+impl Default for UngreenSettings {
+  fn default() -> Self {
+    UngreenSettings {
+      radius: 5.0,
+      intensity: 1.0,
+      min_brightness: 0.0,
+      hedge: 0.2,
+      strength: 1.0,
+    }
+  }
+}
+
 /// Diagnostics for the harness `diagnose:` line.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct UngreenDiagnostics {
