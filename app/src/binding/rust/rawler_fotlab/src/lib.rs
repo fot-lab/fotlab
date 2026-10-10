@@ -73,6 +73,7 @@ mod bound;
 mod ca;
 mod calibrate;
 pub mod calibrate_oklab;
+pub mod defringe_oklab_aca;
 mod camera_space;
 mod loca;
 mod cfa;
