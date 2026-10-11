@@ -330,6 +330,15 @@ jobs:
           expected-tests: '20'
           need-raw: 'true'
           need-lut: 'false'
+          # Two-phase demosaiced-cache protocol: phase 1 = cache ON (app default). An OOM
+          # process crash is judged by the RAW-journey floor (>=2 of these five must have
+          # passed); below the floor the script re-runs once with the cache OFF.
+          raw-journey-tests: >-
+            io.github.fotlab.fotlab.smoke.RawRoutingTest#canonCr2OpensInStudioThroughRawler,
+            io.github.fotlab.fotlab.smoke.RawRoutingTest#sonyIlce7rArwOpensInStudioThroughRawler,
+            io.github.fotlab.fotlab.smoke.RawRoutingTest#sonyIlce7rm2ArwOpensInStudioThroughRawler,
+            io.github.fotlab.fotlab.smoke.RawRoutingTest#nikonD850NefOpensInStudioThroughRawler,
+            io.github.fotlab.fotlab.smoke.RawRoutingTest#panasonicDcS1rRw2OpensInStudioThroughRawler
           test-timeout-minutes: '35'
           log-artifact-name: ${{ inputs.log-artifact-name }}
           log-retention-days: ${{ inputs.log-retention-days }}

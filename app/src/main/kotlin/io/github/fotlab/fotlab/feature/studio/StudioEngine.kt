@@ -103,6 +103,15 @@ object StudioEngine {
             // action and must never be silently reverted by a slower disk read.
             if (!demosaicTouched) applyPersistedDemosaic(persisted)
         }
+        scope.launch {
+            val persisted = runCatching { developPreference.demosaicedCacheEnabled.first() }.getOrNull()
+            // Absent = the user never toggled the switch → the ON default stands. A toggle that
+            // landed while the read was in flight wins, as above.
+            if (!demosaicedCacheTouched && persisted != null) {
+                currentDemosaicedCacheEnabled = persisted
+                demosaicedCacheEnabledState.value = persisted
+            }
+        }
     }
 
     /**
@@ -297,15 +306,24 @@ object StudioEngine {
                     // take can only see this render's own publish, and the token guard keeps a node
                     // switch during the render from leaving this file's buffer behind for the next one.
                     if (loadNonce.get() != token) return StudioRenderResult.Unsupported
+                    // Cache OFF: the buffer is still TAKEN — the native slot must never hold a
+                    // frame this layer will not read — but immediately dropped instead of kept,
+                    // which is what keeps the resident ceiling at the single-layer level and the
+                    // bookkeeping (cleared below) honest about holding nothing.
                     demosaicedCache = null
-                    demosaicedCache = RawlerFotlabBridge.takeDemosaicedCameraImage(loaded)
-                    demosaicedOwner = loaded
-                    demosaicedKey = params.copy(
-                        outputTransfer = OutputTransfer.GAMMA,
-                        oklabHighlightCompressSrgb = false,
-                        oklabHighlightCompressProphoto = false,
-                    )
-                    demosaicedKeyKelvin = 0f
+                    val freshBuffer = RawlerFotlabBridge.takeDemosaicedCameraImage(loaded)
+                    if (currentDemosaicedCacheEnabled) {
+                        demosaicedCache = freshBuffer
+                        demosaicedOwner = loaded
+                        demosaicedKey = params.copy(
+                            outputTransfer = OutputTransfer.GAMMA,
+                            oklabHighlightCompressSrgb = false,
+                            oklabHighlightCompressProphoto = false,
+                        )
+                        demosaicedKeyKelvin = 0f
+                    } else {
+                        clearRenderCache()
+                    }
                     rendered
                 }
                 currentFormat = r.format
@@ -370,6 +388,27 @@ object StudioEngine {
     @Volatile private var demosaicTouched = false
 
     /**
+     * Set once the user has toggled the demosaiced-cache switch, so the one-shot store read in
+     * [prepare] can never revert a toggle made while it was still reading (same rule as
+     * [demosaicTouched]).
+     */
+    @Volatile private var demosaicedCacheTouched = false
+
+    /**
+     * The second-layer (demosaiced camera-space) cache switch. ON (the product default) keeps one
+     * demosaiced buffer resident between grade-only edits — fast re-renders at ~0.5 GB resident
+     * for a 50 MP RAW. OFF makes every render re-develop from the decode and drains the native
+     * slot after each develop ("take-and-drop"), so the resident ceiling drops back to the
+     * single-layer level. This is the memory-pressure escape hatch for low-RAM devices.
+     */
+    @Volatile private var currentDemosaicedCacheEnabled = true
+
+    private val demosaicedCacheEnabledState = MutableStateFlow(true)
+
+    /** The demosaiced-cache switch as the drawer's [androidx.compose.material3.Switch] shows it. */
+    val demosaicedCacheEnabled: StateFlow<Boolean> = demosaicedCacheEnabledState.asStateFlow()
+
+    /**
      * Whether the resident RAW can be developed at quarter resolution, decided by the native
      * sensor/CFA guard; `null` while no routed RAW is resident. The menu disables the superpixel
      * entry on `false`, so a sensor that cannot run it (X-Trans, Fuji-rotated) is *stated* instead
@@ -408,6 +447,25 @@ object StudioEngine {
         currentAlgorithm = candidate.algorithm
         scope.launch { runCatching { developPreference.setDemosaicId(candidate.id) } }
         requestRender()
+    }
+
+    /**
+     * The drawer entry for the demosaiced-cache switch: persist the choice and re-render.
+     *
+     * Toggling is a render-behaviour change in both directions: OFF must invalidate the buffer
+     * already held (the next render re-develops and then drains the slot), and ON must invalidate
+     * it too (the next render re-develops and *rebuilds* the cache under the current keys). The
+     * clear + [requestRender] pair expresses both; only a resident RAW can re-render.
+     */
+    fun setDemosaicedCacheEnabled(enabled: Boolean) {
+        demosaicedCacheTouched = true
+        currentDemosaicedCacheEnabled = enabled
+        demosaicedCacheEnabledState.value = enabled
+        scope.launch { runCatching { developPreference.setDemosaicedCacheEnabled(enabled) } }
+        if (loadedImage != null) {
+            clearRenderCache()
+            requestRender()
+        }
     }
 
     /**
@@ -758,12 +816,17 @@ object StudioEngine {
             oklabHighlightCompressProphoto = false,
         )
         val cache = demosaicedCache
-        // A cache hit requires all four to line up: a buffer exists, it belongs to THIS resident
-        // decode (the owner binding — a stale buffer from another file is unusable even when its
-        // parameters happen to match), it was built from the same develop-stage parameters, and it
-        // was built under the same white-balance override. Any miss re-develops.
+        // A cache hit requires all five to line up: the switch is ON, a buffer exists, it belongs
+        // to THIS resident decode (the owner binding — a stale buffer from another file is
+        // unusable even when its parameters happen to match), it was built from the same
+        // develop-stage parameters, and it was built under the same white-balance override. Any
+        // miss — including the switch being OFF, which makes every render re-develop — re-develops.
         val develop =
-            cache == null || demosaicedOwner !== loaded || demosaicedKey != key || demosaicedKeyKelvin != kelvin
+            !currentDemosaicedCacheEnabled ||
+                cache == null ||
+                demosaicedOwner !== loaded ||
+                demosaicedKey != key ||
+                demosaicedKeyKelvin != kelvin
         // The OKLab stage master gate, derived the same way `grade` is: with both sub-switches off
         // the stage is a guaranteed identity for every output, so there is nothing to run.
         val oklab = currentOklabHighlightCompressSrgb || currentOklabHighlightCompressProphoto
@@ -783,12 +846,20 @@ object StudioEngine {
                         // Replace, never accumulate: dropping first is what keeps exactly one buffer
                         // alive across an arbitrarily long editing session. Under the render gate the
                         // take is unambiguous — the only publisher between this render's develop and
-                        // this take is the render itself.
+                        // this take is the render itself. With the switch OFF the buffer is still
+                        // taken (the native slot must stay empty) but dropped: resident memory stays
+                        // at the single-layer level and the bookkeeping is cleared so no later
+                        // render can mistake it for a cache hit.
                         demosaicedCache = null
-                        demosaicedCache = RawlerFotlabBridge.takeDemosaicedCameraImage(loaded)
-                        demosaicedOwner = loaded
-                        demosaicedKey = key
-                        demosaicedKeyKelvin = kelvin
+                        val freshBuffer = RawlerFotlabBridge.takeDemosaicedCameraImage(loaded)
+                        if (currentDemosaicedCacheEnabled) {
+                            demosaicedCache = freshBuffer
+                            demosaicedOwner = loaded
+                            demosaicedKey = key
+                            demosaicedKeyKelvin = kelvin
+                        } else {
+                            clearRenderCache()
+                        }
                     }
                     val ready = StudioRenderResult.Ready(ByteBuffer.wrap(png))
                     renderResultState.value = ready

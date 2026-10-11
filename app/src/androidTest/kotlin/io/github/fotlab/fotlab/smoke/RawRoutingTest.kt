@@ -37,6 +37,7 @@ import io.github.fotlab.fotlab.feature.library.LibraryCore
 import io.github.fotlab.fotlab.feature.library.LibraryRoot
 import io.github.fotlab.fotlab.feature.library.LibraryScreen
 import io.github.fotlab.fotlab.feature.library.LibraryViewerScreen
+import io.github.fotlab.fotlab.feature.studio.StudioDevelopPreference
 import io.github.fotlab.fotlab.feature.studio.StudioEngine
 import io.github.fotlab.fotlab.feature.studio.StudioRenderResult
 import io.github.fotlab.fotlab.feature.studio.StudioScreen
@@ -122,10 +123,32 @@ class RawRoutingTest {
         Log.i(tag, "[T+${ms}ms][$phase] $detail")
     }
 
+    /**
+     * Two-phase CI protocol for the second-layer demosaiced cache (`run_smoke_shard.sh`): phase 1
+     * runs with the cache ON (the app default — no argument arrives and this is a no-op), and the
+     * OOM-crash fallback re-runs the same filter with `-PsmokeDemosaicedCache=off`, which forwards
+     * here as runner argument `demosaicedCache=off`. Applied before any journey launches so the
+     * very first open already renders with the requested mode. The persisted write covers an
+     * engine that has not been prepared yet ([StudioEngine.prepare] reads the store once); the
+     * engine call covers a process where an earlier test already prepared it.
+     */
+    private fun applyDemosaicedCacheMode() {
+        val mode = InstrumentationRegistry.getArguments().getString("demosaicedCache") ?: return
+        if (!mode.equals("off", ignoreCase = true)) return
+        Log.i(tag, "demosaicedCache=off (CI phase 2): forcing the demosaiced-cache switch off")
+        runBlocking {
+            StudioDevelopPreference(InstrumentationRegistry.getInstrumentation().targetContext)
+                .setDemosaicedCacheEnabled(false)
+        }
+        runCatching { StudioEngine.setDemosaicedCacheEnabled(false) }
+            .onFailure { Log.i(tag, "engine not prepared yet; the persisted preference will apply", it) }
+    }
+
     /** Reading the corpus back out of MediaStore needs the media-read permission. */
     @Before
     fun setUp() {
         t0 = System.nanoTime()
+        applyDemosaicedCacheMode()
         val permission = if (Build.VERSION.SDK_INT >= 33) {
             Manifest.permission.READ_MEDIA_IMAGES
         } else {

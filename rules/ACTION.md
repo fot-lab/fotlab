@@ -98,6 +98,19 @@ path, where no release is produced to verify.
 | `test_image_develop` | `RawlerNativeSmokeTest` develop-entry boundary (3); five RAW brands through the demosaic menu + the every-algorithm/exposure redevelop proof + the manual-Kelvin white-balance no-black regression (7) — 10 total, the heavy software-demosaic shard | RAW corpus |
 | `test_image_alchemy` | native log-space enumeration (1); engine boost/log redevelop, grade-bar UI journey, Panasonic V-Log + downloaded `.cube` LUT, SAF LUT-picker contract (4) — 5 total | RAW corpus + LUT cube |
 
+**Two-phase demosaiced-cache protocol (loader shard).** The second-layer (demosaiced
+camera-space) cache holds ~0.5 GB resident for a 50 MP RAW and is the app default
+(toggle in the Studio drawer, persisted in `StudioDevelopPreference`). Phase 1 runs the
+shard with the cache ON. If it fails with an OOM process crash (`Instrumentation run
+failed due to Process crashed` — lmkd kills the app under emulator memory pressure),
+`run_smoke_shard.sh` judges the crash by a **RAW-journey floor of 2**: at least 2 of the
+shard's five RAW journeys (the `raw-journey-tests` list) must have passed in the XML
+results for the cache-ON path to count as validated (shard passes; the rest died with the
+process, not on assertions). Below the floor the same filter is re-run **once** with
+`-PsmokeDemosaicedCache=off` (forwarded to the tests as runner arg `demosaicedCache`,
+applied by `RawRoutingTest.setUp` before any journey launches), and that run decides.
+Shards without RAW journeys disable the protocol (`raw-journey-tests` empty).
+
 Both caches are written solely by `prep-emulator`, **after** the AVD has been
 created and **before** any APK install, so the cached snapshot is a clean warm
 emulator every shard restores. That ordering is why prep uses the split

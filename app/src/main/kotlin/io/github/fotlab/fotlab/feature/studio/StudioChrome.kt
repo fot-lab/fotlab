@@ -1,6 +1,7 @@
 package io.github.fotlab.fotlab.feature.studio
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -29,8 +30,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -190,11 +193,12 @@ internal fun StudioScreenFunBar(
  * level with the fun bar's menu icon, so opening the drawer replaces that icon in place
  * (R6); the close row shares the fun bar's 64.dp height and the navigation-bar inset.
  *
- * It has no settings today. The quarter-resolution switch that used to live here is gone: rawler's
- * superpixel is a demosaic like any other, so it is an entry in the DevelopFilm bar's demosaic menu
- * next to `RAWTRP vng4` rather than a second, independent knob that could contradict the algorithm
- * choice (`rules/REVIEW/detail/OPTIMZ-PERFRM-000010.md`). The sheet stays because the fun bar's menu
- * icon opens it and R6 fixes the close affordance's position.
+ * The sheet hosts the module's settings section. The quarter-resolution switch that used to live
+ * here is gone: rawler's superpixel is a demosaic like any other, so it is an entry in the
+ * DevelopFilm bar's demosaic menu next to `RAWTRP vng4` rather than a second, independent knob
+ * that could contradict the algorithm choice
+ * (`rules/REVIEW/detail/OPTIMZ-PERFRM-000010.md`). The settings it carries now are pipeline
+ * switches — first the second-layer demosaiced cache, the low-memory escape hatch.
  *
  * TODO: drawer content — tool categories / recent edits. Module-private per `FOTLAB-UIXDES-000002` R5.
  */
@@ -214,6 +218,34 @@ internal fun StudioDrawer(
             style = MaterialTheme.typography.titleMedium,
             modifier = Modifier.padding(16.dp),
         )
+
+        // Settings section. First entry: the second-layer demosaiced cache. ON is the product
+        // default (grade-only edits reuse the demosaiced camera-space buffer — fast, at ~0.5 GB
+        // resident for a 50 MP RAW); OFF re-develops every render and drains the native slot, the
+        // escape hatch for memory-pressured devices. Persisted via StudioDevelopPreference.
+        val demosaicedCacheEnabled by StudioEngine.demosaicedCacheEnabled.collectAsState()
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(id = R.string.studio_drawer_cache_title),
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                Text(
+                    text = stringResource(id = R.string.studio_drawer_cache_supporting),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked = demosaicedCacheEnabled,
+                onCheckedChange = { StudioEngine.setDemosaicedCacheEnabled(it) },
+            )
+        }
 
         // Push the close affordance to the bottom-left, level with the fun bar's menu icon.
         Spacer(modifier = Modifier.weight(1f))

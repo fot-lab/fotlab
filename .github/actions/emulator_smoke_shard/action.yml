@@ -53,6 +53,21 @@ inputs:
     description: Whether to download and stage the grade LUT cube ('true'/'false').
     required: false
     default: 'false'
+  demosaiced-cache:
+    description: >-
+      Phase-1 mode of the two-phase demosaiced-cache protocol: 'on' (default) runs the shard with
+      the second-layer cache enabled (the app default) and lets run_smoke_shard.sh judge an OOM
+      process crash by the RAW-journey floor, re-running with the cache OFF when below it. 'off'
+      runs cache-off directly (no protocol).
+    required: false
+    default: 'on'
+  raw-journey-tests:
+    description: >-
+      Comma-separated Class#method list of the shard's RAW-format journey tests, used to count
+      successes for the cache-ON floor (2 = an OOM-crashed cache-ON run still validates the cache
+      path and passes). Empty disables the protocol (shards without RAW journeys).
+    required: false
+    default: ''
   test-timeout-minutes:
     description: Timeout for the instrumented-test step.
     required: false
@@ -184,6 +199,8 @@ runs:
         EXPECTED_TESTS: ${{ inputs.expected-tests }}
         NEED_RAW: ${{ inputs.need-raw }}
         NEED_LUT: ${{ inputs.need-lut }}
+        DEMOSAICED_CACHE: ${{ inputs.demosaiced-cache }}
+        RAW_JOURNEY_TESTS: ${{ inputs.raw-journey-tests }}
         # Identical to smoke_emulator.yaml: the snapshot is always generated with
         # -memory 4096, so every boot that loads it must request the same memory.
         # The shard adds -no-snapshot-save (it must never overwrite the clean cached
@@ -214,6 +231,7 @@ runs:
         name: ${{ format('{0}-{1}', inputs.log-artifact-name, inputs.shard) }}
         path: |
           smoke-log.txt
+          smoke-log-cacheon.txt
           logcat.txt
           tombstones.txt
           app/build/reports/androidTests/connected

@@ -1,6 +1,7 @@
 package io.github.fotlab.fotlab.feature.studio
 
 import android.content.Context
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -34,6 +35,12 @@ private val Context.studioDevelopDataStore by preferencesDataStore(name = "studi
  */
 private val KEY_DEMOSAIC_ID = stringPreferencesKey("studio_develop_demosaic_id")
 
+/**
+ * The second-layer (demosaiced camera-space) cache switch. Absent (not defaulted) when the user
+ * has never touched it — [StudioEngine] owns the ON default, so it lives in one place.
+ */
+private val KEY_DEMOSAICED_CACHE = booleanPreferencesKey("studio_demosaiced_cache_enabled")
+
 class StudioDevelopPreference(context: Context) {
 
     private val store = context.applicationContext.studioDevelopDataStore
@@ -44,5 +51,17 @@ class StudioDevelopPreference(context: Context) {
     /** Persist [id] so the next launch starts from the same choice. */
     suspend fun setDemosaicId(id: String) {
         store.edit { prefs -> prefs[KEY_DEMOSAIC_ID] = id }
+    }
+
+    /**
+     * The persisted demosaiced-cache switch, or `null` when the user has never toggled it. ON is
+     * the product default; OFF trades grade-only edit speed for a substantially lower resident
+     * memory ceiling (the camera-space buffer of a 50 MP RAW is ~0.5 GB).
+     */
+    val demosaicedCacheEnabled: Flow<Boolean?> = store.data.map { prefs -> prefs[KEY_DEMOSAICED_CACHE] }
+
+    /** Persist the demosaiced-cache switch so the next launch starts from the same choice. */
+    suspend fun setDemosaicedCacheEnabled(enabled: Boolean) {
+        store.edit { prefs -> prefs[KEY_DEMOSAICED_CACHE] = enabled }
     }
 }

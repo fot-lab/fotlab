@@ -52,6 +52,14 @@ android {
             testInstrumentationRunnerArguments["class"] =
                 project.property("smokeTestFilter").toString()
         }
+        // CI-only override for the demosaiced-cache switch (StudioEngine / RawRoutingTest):
+        // "off" forces the second-layer cache off for this instrumentation run — the phase-2
+        // fallback of run_smoke_shard.sh after an OOM process crash. Absent locally / in phase 1,
+        // so the app default (on) applies.
+        if (project.hasProperty("smokeDemosaicedCache")) {
+            testInstrumentationRunnerArguments["demosaicedCache"] =
+                project.property("smokeDemosaicedCache").toString()
+        }
     }
 
     signingConfigs {
