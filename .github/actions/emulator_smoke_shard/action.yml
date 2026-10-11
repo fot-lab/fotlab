@@ -177,7 +177,12 @@ runs:
         echo "ANDROID_SERIAL=127.0.0.1:5555" >> "$GITHUB_ENV"
 
         echo "Booting Android emulator from $EMULATOR_IMAGE ..."
-        docker run -d --name fotlab-emu --device /dev/kvm \
+        # --privileged matches the image's own docker-compose: the bundled qemu
+        # needs more than the KVM node to initialize (kernel capabilities / /dev
+        # access). With only --device /dev/kvm the emulator process died at once,
+        # `docker logs` stayed empty and adbd never came up.
+        docker run -d --name fotlab-emu --privileged --device /dev/kvm \
+          -p 127.0.0.1:5554:5554 \
           -p 127.0.0.1:5555:5555 \
           -e MEMORY=4096 -e CORES=4 -e SKIP_AUTH=true \
           -e EXTRA_FLAGS="-no-metrics -no-audio -partition-size=8192" \
@@ -209,6 +214,10 @@ runs:
         final="$( { adb -s 127.0.0.1:5555 shell getprop sys.boot_completed 2>/dev/null || true; } | tr -d '\r' )"
         if [ "$final" != "1" ]; then
           echo "::error::Emulator did not finish booting within the 450s window."
+          echo "--- container state ---"
+          docker ps -a --filter name=fotlab-emu || true
+          docker inspect -f 'status={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} err={{.State.Error}}' fotlab-emu || true
+          echo "--- container logs ---"
           docker logs fotlab-emu || true
           exit 1
         fi
