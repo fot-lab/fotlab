@@ -202,7 +202,7 @@ fun StudioScreen() {
     var caBlueInput by remember { mutableStateOf("") }
 
     // ACA dialog state (opened by the adjustment bar's ACA icon, the ClosedCaptionOff glyph, between
-    // Clipping and Contrast). TWO INDEPENDENT switches, purple first then green: each OFF hands the
+    // Clipping and Contrast). TWO INDEPENDENT switches, purple first then cyan: each OFF hands the
     // engine null for its own core (that stage is skipped) regardless of the other, each ON builds
     // its settings record from its own five fields, each falling back to its default when blank or
     // unparseable. Enabling either engages the grade, because both cores run on the ProPhoto-D50
