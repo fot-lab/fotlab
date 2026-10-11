@@ -45,6 +45,8 @@ import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlin.jvm.Volatile
 
 /**
@@ -158,6 +160,19 @@ object StudioEngine {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    /**
+     * Serializes every native render (the fresh-open develop and every [requestRender] alike).
+     *
+     * The demosaiced cache is a single slot on the native side fed by "the most recent publish
+     * wins", so two overlapping develop renders could interleave publish/take and pair one
+     * render's buffer with the other render's key. Rendering one at a time keeps that order total
+     * (a render's `take` can only ever see its own publish), which is the strong cache order the
+     * two-layer cache relies on. It also bounds peak native memory: two concurrent full develops
+     * of a large RAW each hold multi-hundred-MB intermediates, which on a memory-pressured device
+     * is how the low-memory killer gets involved.
+     */
+    private val renderGate = Mutex()
+
     /** Point the canvas at [uri] (the virtual node's `uri_storage`) and run the render pipeline. */
     fun setCurrentNode(uri: String?) {
         // Release any previously-held decoded RAW and invalidate in-flight work before switching
@@ -243,6 +258,11 @@ object StudioEngine {
                     ?: return StudioRenderResult.Unsupported
                 // A newer node was opened while we decoded: discard so we never clobber the new file's state.
                 if (loadNonce.get() != token) return StudioRenderResult.Unsupported
+                // Invalidate the demosaiced cache BEFORE the resident decode swaps in. The cache is
+                // strictly downstream of the decode (strong cache order): a new raw-image cache must
+                // never become visible while the previous file's demosaiced buffer still is, or a
+                // render slipping into that window would pair the new decode with the old pixels.
+                clearRenderCache()
                 loadedImage = loaded
                 // Ask the decode itself whether quarter resolution is available for it, so the menu
                 // can disable the superpixel entry instead of leaving it inert on a sensor that
@@ -251,10 +271,6 @@ object StudioEngine {
                 // Capture focal length (mm) decoded from the RAW EXIF — 2nd LCP priority (tier-2). UniFFI
                 // maps Option<f64> to a nullable Double?, so null means the file carried no focal.
                 rawFocalLengthMmState.value = loaded.focalLengthMm()?.toFloat()
-                // A new file invalidates every render cache: the resident handle and the demosaiced
-                // camera buffer both belong to the file that was open before, and the buffer carries
-                // no notion of which image produced it.
-                clearRenderCache()
                 // Develop once with as-shot params: pass `null` for both `exposureEv` and `wb` so the
                 // pipeline adopts the decoded as-shot values (rawler's `RawDevelop::default()`, which
                 // dnglab uses for its DNG thumbnail and applies no exposure step — FOTLAB-RAWLER-000004
@@ -267,22 +283,31 @@ object StudioEngine {
                 val transfer = OutputTransfer.GAMMA
                 outputTransferState.value = transfer
                 val params = assembleDevelopParams(exposureEv = null, outputTransfer = transfer)
-                val png = RawlerFotlabBridge.renderRawlerImage(
-                    loaded,
-                    params,
-                    PipelineStages(develop = true, oklab = oklabForFreshOpen(), grade = false),
-                    GradeParams(),
-                    null,
-                    0f,
-                ) ?: return StudioRenderResult.Unsupported
-                // Take the demosaiced buffer this render just built, so the first grade-only edit can
-                // start from it instead of re-running decode and demosaic.
-                demosaicedCache = RawlerFotlabBridge.takeDemosaicedCameraImage(loaded)
-                demosaicedKey = params.copy(
-                    outputTransfer = OutputTransfer.GAMMA,
-                    oklabHighlightCompressSrgb = false,
-                    oklabHighlightCompressProphoto = false,
-                )
+                val png = renderGate.withLock {
+                    val rendered = RawlerFotlabBridge.renderRawlerImage(
+                        loaded,
+                        params,
+                        PipelineStages(develop = true, oklab = oklabForFreshOpen(), grade = false),
+                        GradeParams(),
+                        null,
+                        0f,
+                    ) ?: return StudioRenderResult.Unsupported
+                    // Take the demosaiced buffer this render just built, so the first grade-only edit can
+                    // start from it instead of re-running decode and demosaic. Under the render gate the
+                    // take can only see this render's own publish, and the token guard keeps a node
+                    // switch during the render from leaving this file's buffer behind for the next one.
+                    if (loadNonce.get() != token) return StudioRenderResult.Unsupported
+                    demosaicedCache = null
+                    demosaicedCache = RawlerFotlabBridge.takeDemosaicedCameraImage(loaded)
+                    demosaicedOwner = loaded
+                    demosaicedKey = params.copy(
+                        outputTransfer = OutputTransfer.GAMMA,
+                        oklabHighlightCompressSrgb = false,
+                        oklabHighlightCompressProphoto = false,
+                    )
+                    demosaicedKeyKelvin = 0f
+                    rendered
+                }
                 currentFormat = r.format
                 rawLoadedState.value = true
                 StudioRenderResult.Ready(ByteBuffer.wrap(png))
@@ -432,7 +457,7 @@ object StudioEngine {
     val demosaicCandidates: List<DemosaicCandidate> get() = demosaicCandidatesCache
 
     /** The white-balance color temperature (Kelvin) retained for the next develop re-render; null = as-shot. */
-    private var currentWhiteBalanceKelvin: Float? = null
+    @Volatile private var currentWhiteBalanceKelvin: Float? = null
 
     /**
      * The exposure compensation (in stops) retained for the next develop re-render. `null` means the
@@ -622,6 +647,26 @@ object StudioEngine {
     @Volatile private var demosaicedKey: DevelopParams? = null
 
     /**
+     * The resident decode the cached [demosaicedCache] was built from. The buffer itself carries
+     * no notion of which image produced it, so the owner is recorded alongside: a cache hit
+     * requires identity with the current [loadedImage]. This is what makes "a new decode
+     * invalidates the demosaiced cache" hold by construction rather than by call-site ordering —
+     * a stale write from a previous file can never be handed to the new file's render, because
+     * the owner comparison fails and forces a re-develop.
+     */
+    @Volatile private var demosaicedOwner: RawlerImageLoaded? = null
+
+    /**
+     * The white-balance Kelvin override the cached [demosaicedCache] was built under (0 =
+     * as-shot). The override is a develop-stage input — its multipliers are baked into the cached
+     * camera-space pixels — but it crosses the FFI separately from [DevelopParams], so it is part
+     * of the cache key explicitly. Without it a Kelvin change compares equal on every other
+     * field, the next render takes the `develop = false` path, and the native side skips the
+     * develop half entirely — silently rendering the old white balance.
+     */
+    @Volatile private var demosaicedKeyKelvin: Float = 0f
+
+    /**
      * Assemble the full develop parameter set for the next render.
      *
      * One function, so the cache-validity comparison in [requestRender] can never drift from
@@ -699,6 +744,10 @@ object StudioEngine {
         outputTransferState.value = transfer
 
         val params = assembleDevelopParams(currentExposureEv, transfer)
+        // The white-balance override is captured once and flows to both the render and the cache
+        // bookkeeping below — reading the shared var at write time would let a change made mid-
+        // render pair one Kelvin's pixels with another Kelvin's key.
+        val kelvin = currentWhiteBalanceKelvin ?: 0f
         // Normalise out everything the develop half does not act on. The transfer function is an
         // encoder concern, and the OKLab sub-switches belong to the stage ABOVE the cache, so
         // neither changes the cached pixels; letting either into the key would re-run a whole
@@ -709,7 +758,12 @@ object StudioEngine {
             oklabHighlightCompressProphoto = false,
         )
         val cache = demosaicedCache
-        val develop = cache == null || demosaicedKey != key
+        // A cache hit requires all four to line up: a buffer exists, it belongs to THIS resident
+        // decode (the owner binding — a stale buffer from another file is unusable even when its
+        // parameters happen to match), it was built from the same develop-stage parameters, and it
+        // was built under the same white-balance override. Any miss re-develops.
+        val develop =
+            cache == null || demosaicedOwner !== loaded || demosaicedKey != key || demosaicedKeyKelvin != kelvin
         // The OKLab stage master gate, derived the same way `grade` is: with both sub-switches off
         // the stage is a guaranteed identity for every output, so there is nothing to run.
         val oklab = currentOklabHighlightCompressSrgb || currentOklabHighlightCompressProphoto
@@ -720,28 +774,35 @@ object StudioEngine {
         inFlight.incrementAndGet()
         pipelineRunningState.value = true
         val job = scope.launch {
-            val png = runRender(token, loaded, params, stages, selection, if (develop) null else cache)
-            if (loadNonce.get() != token) return@launch
-            if (png != null) {
-                if (stages.develop) {
-                    // Replace, never accumulate: dropping first is what keeps exactly one buffer
-                    // alive across an arbitrarily long editing session.
-                    demosaicedCache = null
-                    demosaicedCache = RawlerFotlabBridge.takeDemosaicedCameraImage(loaded)
-                    demosaicedKey = key
+            renderGate.withLock {
+                if (loadNonce.get() != token) return@withLock
+                val png = runRender(token, loaded, params, stages, selection, if (develop) null else cache, kelvin)
+                if (loadNonce.get() != token) return@withLock
+                if (png != null) {
+                    if (stages.develop) {
+                        // Replace, never accumulate: dropping first is what keeps exactly one buffer
+                        // alive across an arbitrarily long editing session. Under the render gate the
+                        // take is unambiguous — the only publisher between this render's develop and
+                        // this take is the render itself.
+                        demosaicedCache = null
+                        demosaicedCache = RawlerFotlabBridge.takeDemosaicedCameraImage(loaded)
+                        demosaicedOwner = loaded
+                        demosaicedKey = key
+                        demosaicedKeyKelvin = kelvin
+                    }
+                    val ready = StudioRenderResult.Ready(ByteBuffer.wrap(png))
+                    renderResultState.value = ready
+                    displayedResultState.value = ready
+                } else if (stages.grade) {
+                    // The grader rejected the inputs (almost always a bad LUT): surface the reason once
+                    // and keep the canvas usable by falling back to the develop presentation.
+                    gradeErrorState.value = appContext.getString(R.string.studio_grade_error_message)
+                    requestRender(gradeOverride = false)
+                } else {
+                    // Not a grading problem - the develop render itself failed. Retrying would only
+                    // fail the same way, so say so instead of spinning.
+                    renderResultState.value = StudioRenderResult.Unsupported
                 }
-                val ready = StudioRenderResult.Ready(ByteBuffer.wrap(png))
-                renderResultState.value = ready
-                displayedResultState.value = ready
-            } else if (stages.grade) {
-                // The grader rejected the inputs (almost always a bad LUT): surface the reason once
-                // and keep the canvas usable by falling back to the develop presentation.
-                gradeErrorState.value = appContext.getString(R.string.studio_grade_error_message)
-                requestRender(gradeOverride = false)
-            } else {
-                // Not a grading problem - the develop render itself failed. Retrying would only
-                // fail the same way, so say so instead of spinning.
-                renderResultState.value = StudioRenderResult.Unsupported
             }
         }
         runningJob = job
@@ -756,6 +817,7 @@ object StudioEngine {
         stages: PipelineStages,
         selection: GradeSelection,
         cache: DemosaicedCameraImage?,
+        kelvin: Float,
     ): ByteArray? {
         if (loadNonce.get() != token) return null
         // Only the three grade-bar controls are wired. The boost group assembles here: the switch
@@ -781,7 +843,7 @@ object StudioEngine {
             stages,
             grade,
             cache,
-            currentWhiteBalanceKelvin ?: 0f,
+            kelvin,
         )
     }
 
@@ -798,11 +860,15 @@ object StudioEngine {
     /**
      * Drop both halves of the render cache. Called on a file switch so the next file cannot be
      * handed the previous file's demosaiced buffer — the single most important invariant here,
-     * since the handle alone carries no notion of which image it belongs to.
+     * since the handle alone carries no notion of which image it belongs to. The owner and the
+     * Kelvin key go with it: every cache bookkeeping field describes the same buffer, so all of
+     * them are invalidated together, before the new decode becomes visible.
      */
     private fun clearRenderCache() {
         demosaicedCache = null
+        demosaicedOwner = null
         demosaicedKey = null
+        demosaicedKeyKelvin = 0f
     }
 
     /**
