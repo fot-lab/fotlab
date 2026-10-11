@@ -737,7 +737,7 @@ fun StudioScreen() {
                             intensity = acaCyanIntensityInput.toDoubleOrNull() ?: 1.0,
                             minBrightness = acaCyanMinBrightnessInput.toDoubleOrNull() ?: 0.0,
                             minGreenToBlueRatio = acaCyanMinRatioInput.toDoubleOrNull() ?: 0.0,
-                            maxGreenToBlueRatio = acaCyanMaxRatioInput.toDoubleOrNull() ?: 0.33,
+                            maxGreenToBlueRatio = acaCyanMaxRatioInput.toDoubleOrNull() ?: 3.0,
                         )
                     } else {
                         null

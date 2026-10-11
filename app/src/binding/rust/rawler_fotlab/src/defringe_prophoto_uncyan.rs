@@ -166,8 +166,10 @@ pub struct UncyanSettings {
   #[uniffi(default = 0.0)]
   pub min_green_to_blue_ratio: f64,
   /// Maximum green:blue ratio in the fringe. Mirrors unpurple's
-  /// `max_red_to_blue_ratio` (default 0.33) with red→green swapped.
-  #[uniffi(default = 0.33)]
+  /// `max_red_to_blue_ratio` with red→green swapped; the uncyan default is 3.0
+  /// (green may be lowered up to 3× the blue primary), vs unpurple's 0.33, because a
+  /// cyan fringe carries far more excess green than a purple fringe carries excess red.
+  #[uniffi(default = 3.0)]
   pub max_green_to_blue_ratio: f64,
 }
 
@@ -178,7 +180,7 @@ impl Default for UncyanSettings {
       intensity: 1.0,
       min_brightness: 0.0,
       min_green_to_blue_ratio: 0.0,
-      max_green_to_blue_ratio: 0.33,
+      max_green_to_blue_ratio: 3.0,
     }
   }
 }
