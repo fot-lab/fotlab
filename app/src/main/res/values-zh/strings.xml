@@ -124,7 +124,7 @@
     <string name="studio_cd_transfer_gamma">输出传递函数：gamma</string>
     <string name="studio_cd_transfer_linear">输出传递函数：linear</string>
     <string name="studio_ca_title">LCA（径向色差校正）</string>
-    <string name="studio_cd_loca">ACA（边纹校正）</string>
+    <string name="studio_cd_loca">ACA（径向色差修正）</string>
     <string name="studio_label_loca">ACA</string>
     <string name="studio_aca_title">ACA（边纹校正）</string>
     <string name="studio_aca_body">在 ProPhoto 工作缓冲上去除边纹</string>
