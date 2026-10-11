@@ -26,8 +26,11 @@ Third-party modules under `external/` (git submodules) are independent external 
 - [x] Working space D50 ProPhoto (dnglab/rawler/RawAlchemyCpp)
 - [ ] Camera profile decoding + correction
 - [ ] Lens profile decoding + correction
-- [ ] Exposure adjustment
-- [ ] Highlight compression
+- [x] Exposure adjustment
+- [x] Highlight compression
+- [x] Defringe-correction for transitional chromatic aberration
+- [x] Defringe-correction for axial chromatic aberration purple/magenta
+- [x] Defringe-correction for axial chromatic aberration green/cyan
 - [ ] Crop and rotate
 - [x] White balance adjustment
 - [x] Demosaic alogrithm (from RawTherapee)
