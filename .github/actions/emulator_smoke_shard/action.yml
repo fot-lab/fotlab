@@ -170,6 +170,10 @@ runs:
       run: |
         set -euo pipefail
         export PATH="$ANDROID_HOME/platform-tools:$PATH"
+        command -v adb >/dev/null 2>&1 || {
+          echo "::error::adb not found on PATH after prepending $ANDROID_HOME/platform-tools"
+          exit 1
+        }
         echo "ANDROID_SERIAL=127.0.0.1:5555" >> "$GITHUB_ENV"
 
         echo "Booting Android emulator from $EMULATOR_IMAGE ..."
@@ -188,18 +192,23 @@ runs:
         fi
 
         # Wait for the container's adbd to accept connections, then for boot.
+        # NOTE: the adb getprop calls are EXPECTED to fail while the emulator is
+        # still booting (device not yet connectable). Under `set -euo pipefail`
+        # an unguarded `adb … | tr` would make the pipeline non-zero and abort
+        # the whole step on the first poll — so each is wrapped in `{ … || true; }`
+        # to keep the failure non-fatal while `tr` still strips the CR.
         adb connect 127.0.0.1:5555 || true
         boot_polls=0
-        while [ "$boot_polls" -lt 60 ]; do
-          st="$(adb -s 127.0.0.1:5555 shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')"
+        while [ "$boot_polls" -lt 90 ]; do
+          st="$( { adb -s 127.0.0.1:5555 shell getprop sys.boot_completed 2>/dev/null || true; } | tr -d '\r' )"
           [ "$st" = "1" ] && break
           adb connect 127.0.0.1:5555 >/dev/null 2>&1 || true
           sleep 5
           boot_polls=$((boot_polls + 1))
         done
-        final="$(adb -s 127.0.0.1:5555 shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')"
+        final="$( { adb -s 127.0.0.1:5555 shell getprop sys.boot_completed 2>/dev/null || true; } | tr -d '\r' )"
         if [ "$final" != "1" ]; then
-          echo "::error::Emulator did not finish booting within the 300s window."
+          echo "::error::Emulator did not finish booting within the 450s window."
           docker logs fotlab-emu || true
           exit 1
         fi
