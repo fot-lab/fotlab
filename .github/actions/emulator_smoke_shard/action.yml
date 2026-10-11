@@ -1,33 +1,29 @@
-# Composite action: run ONE parallel smoke shard on a booted emulator.
+# Composite action: run ONE parallel smoke shard against a prebuilt docker-android
+# emulator.
 #
 # smoke_emulator.yaml splits the instrumented suite into four independent shards
 # (test_app_smoke / test_image_loader / test_image_develop / test_image_alchemy),
 # each a separate job that invokes this action with its own AndroidJUnitRunner
-# `-e class` filter. The shared AVD + RAW corpus caches are warmed ONCE by the
-# workflow's prep job, so every shard restores them warm and only pays for its
-# own emulator boot and test slice.
+# `-e class` filter. The emulator is NO LONGER self-built or cached: this action
+# starts the prebuilt `halimqarroum/docker-android` image as a Docker container,
+# exposes its adbd on 127.0.0.1:5555, waits for boot, and runs the slice against
+# it. The RAW corpus is warmed ONCE by the workflow's prep job; every shard
+# restores it and only pays for its own emulator boot and test slice.
 #
 # The action deliberately contains NO cache-save step: only the prep job writes
-# caches, so N parallel shards can never race to save the same key. On an
-# unexpected restore miss a shard still creates the AVD locally (cold fallback),
-# it simply does not persist it.
+# caches, so N parallel shards can never race to save the same key. The emulator
+# is a pulled image, not a cache entry — it never needs saving.
 
 name: Emulator smoke shard
-description: Boot the cached AVD and run one filtered slice of the instrumented smoke tests.
+description: Start a docker-android emulator and run one filtered slice of the instrumented smoke tests.
 
 inputs:
-  api-level:
-    description: API level of the AVD's system image.
+  emulator-image:
+    description: >-
+      Prebuilt Android-emulator Docker image to boot (e.g. halimqarroum/docker-android:api-33).
+      The image fixes the API level / ABI, so there is no separate api-level input.
     required: false
-    default: '36'
-  target:
-    description: System-image flavour (google_apis, default, aosp_atd, ...).
-    required: false
-    default: google_apis
-  arch:
-    description: AVD architecture (must be an ABI present in librawler_fotlab.so).
-    required: false
-    default: x86_64
+    default: halimqarroum/docker-android:api-33
   native-artifact-name:
     description: Native artifact (librawler_fotlab.so + Kotlin bindings) to place; empty skips it.
     required: false
@@ -69,7 +65,7 @@ inputs:
     required: false
     default: ''
   test-timeout-minutes:
-    description: Timeout for the instrumented-test step.
+    description: Timeout for the instrumented-test step (governed also by the job's timeout-minutes).
     required: false
     default: '45'
   log-artifact-name:
@@ -106,18 +102,11 @@ runs:
         api-level: ${{ env.ANDROID_API }}
         build-tools: ${{ env.ANDROID_BUILD_TOOLS }}
       env:
+        # Needed to compile the debug APK (compileSdk/targetSdk 36). The emulator
+        # itself lives in the docker-android container, so no system-images /
+        # emulator packages are installed here.
         ANDROID_API: '36'
         ANDROID_BUILD_TOOLS: '36.0.0'
-
-    # Mandatory on Linux runners — see the long KVM note in smoke_emulator.yaml.
-    - name: Enable KVM
-      shell: bash
-      run: |
-        set -euo pipefail
-        echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-        sudo udevadm control --reload-rules
-        sudo udevadm trigger --name-match=kvm
-        ls -l /dev/kvm
 
     - name: Set up Gradle
       uses: gradle/actions/setup-gradle@v5
@@ -165,34 +154,60 @@ runs:
         echo "3e2da957fc86cbe06d382ec68ae653df7a70d2de577d521c829b48d7c5a37d02  lut-samples/FLog2C_to_CLASSIC-Neg_VLog.cube" | sha256sum -c -
         ls -l lut-samples
 
-    # -------- emulator (warm restore; cold fallback creates but does NOT save) --------
-    - name: Restore emulator cache
-      id: emulator-cache
-      uses: actions/cache/restore@v6
-      with:
-        path: |
-          ~/.android/avd/*
-          ~/.android/adb*
-          ${{ env.ANDROID_HOME }}/system-images
-          ${{ env.ANDROID_HOME }}/emulator
-          ${{ env.ANDROID_HOME }}/build-tools
-        key: ${{ runner.os }}-emulator-${{ inputs.api-level }}-${{ inputs.target }}-${{ inputs.arch }}
+    # -------- emulator: boot the prebuilt docker-android image --------
+    # Replaces the old self-built AVD + emulator cache. The image auto-boots the
+    # emulator on container start (google_apis / x86_64 / headless, -gpu
+    # swiftshader_indirect). KVM acceleration is passed through with --device
+    # /dev/kvm; the emulator runs as root inside the container, so the host-side
+    # udev rule we used for a runner-local emulator is no longer needed. adbd is
+    # exposed on 5555 (SKIP_AUTH=true removes the adb-key handshake), and we
+    # publish ANDROID_SERIAL so the later `adb` calls in run_smoke_shard.sh target
+    # exactly this device.
+    - name: Start docker-android emulator
+      shell: bash
+      env:
+        EMULATOR_IMAGE: ${{ inputs.emulator-image }}
+      run: |
+        set -euo pipefail
+        export PATH="$ANDROID_HOME/platform-tools:$PATH"
+        echo "ANDROID_SERIAL=127.0.0.1:5555" >> "$GITHUB_ENV"
 
-    - name: Create AVD locally (cold fallback; not cached)
-      if: steps.emulator-cache.outputs.cache-hit != 'true'
-      uses: reactivecircus/android-emulator-runner@v2
-      with:
-        api-level: ${{ inputs.api-level }}
-        target: ${{ inputs.target }}
-        arch: ${{ inputs.arch }}
-        force-avd-creation: false
-        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -memory 4096
-        disable-animations: false
-        script: echo "Generated a local AVD snapshot (cache miss fallback)."
+        echo "Booting Android emulator from $EMULATOR_IMAGE ..."
+        docker run -d --name fotlab-emu --device /dev/kvm \
+          -p 127.0.0.1:5555:5555 \
+          -e MEMORY=4096 -e CORES=4 -e SKIP_AUTH=true \
+          -e EXTRA_FLAGS="-no-metrics -no-audio -partition-size=8192" \
+          "$EMULATOR_IMAGE"
+
+        # Sanity: KVM must be present for hardware-accelerated boot. Without it
+        # the image falls back to TCG and the boot will not finish in time.
+        if [ ! -e /dev/kvm ]; then
+          echo "::warning::/dev/kvm missing on this runner — the emulator will fall back to TCG and likely time out."
+        else
+          ls -l /dev/kvm
+        fi
+
+        # Wait for the container's adbd to accept connections, then for boot.
+        adb connect 127.0.0.1:5555 || true
+        boot_polls=0
+        while [ "$boot_polls" -lt 60 ]; do
+          st="$(adb -s 127.0.0.1:5555 shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')"
+          [ "$st" = "1" ] && break
+          adb connect 127.0.0.1:5555 >/dev/null 2>&1 || true
+          sleep 5
+          boot_polls=$((boot_polls + 1))
+        done
+        final="$(adb -s 127.0.0.1:5555 shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')"
+        if [ "$final" != "1" ]; then
+          echo "::error::Emulator did not finish booting within the 300s window."
+          docker logs fotlab-emu || true
+          exit 1
+        fi
+        echo "Emulator booted and reachable at 127.0.0.1:5555."
 
     # -------- the filtered instrumented shard --------
     - name: Run ${{ inputs.shard }} smoke shard
-      uses: reactivecircus/android-emulator-runner@v2
+      shell: bash
       env:
         SMOKE_TEST_FILTER: ${{ inputs.test-filter }}
         SHARD_ID: ${{ inputs.shard }}
@@ -201,27 +216,28 @@ runs:
         NEED_LUT: ${{ inputs.need-lut }}
         DEMOSAICED_CACHE: ${{ inputs.demosaiced-cache }}
         RAW_JOURNEY_TESTS: ${{ inputs.raw-journey-tests }}
-        # Identical to smoke_emulator.yaml: the snapshot is always generated with
-        # -memory 4096, so every boot that loads it must request the same memory.
-        # The shard adds -no-snapshot-save (it must never overwrite the clean cached
-        # snapshot with app state).
-        EMULATOR_OPTIONS_TEST: '-no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot-save -memory 4096'
-      with:
-        api-level: ${{ inputs.api-level }}
-        target: ${{ inputs.target }}
-        arch: ${{ inputs.arch }}
-        force-avd-creation: false
-        emulator-options: ${{ env.EMULATOR_OPTIONS_TEST }}
-        disable-animations: true
+        TEST_TIMEOUT_MIN: ${{ inputs.test-timeout-minutes }}
+      run: |
+        set -euo pipefail
+        export PATH="$ANDROID_HOME/platform-tools:$PATH"
         # Single-line script on purpose. The composite-action layer collapses a
-        # multiline `script:` input into one line before handing it to the nested
-        # android-emulator-runner action; with inline `#` comments that turns the
-        # rest of the code (incl. the `fi` closing the guards) into an end-of-line
-        # comment and dash reports "expecting fi". Calling a real file keeps the
-        # newlines and comments intact. POSIX sh only (dash on ubuntu): no
-        # PIPESTATUS / pipefail. See smoke_emulator.yaml for the logcat/tombstone
-        # rationale (rawler FFI SIGSEGV/SIGABRT backtraces).
-        script: bash .github/scripts/run_smoke_shard.sh
+        # multiline `script:` input into one line before handing it to a nested
+        # action; with inline `#` comments that turns the rest of the code (incl.
+        # the `fi` closing the guards) into an end-of-line comment. Calling a real
+        # file keeps the newlines and comments intact. POSIX sh only (dash on
+        # ubuntu): no PIPESTATUS / pipefail. See smoke_emulator.yaml for the
+        # logcat/tombstone rationale (rawler FFI SIGSEGV/SIGABRT backtraces).
+        # `timeout` mirrors the job-level budget for this step; the script exits
+        # with the Gradle status (or a non-zero selector-check status).
+        timeout "${TEST_TIMEOUT_MIN}m" bash .github/scripts/run_smoke_shard.sh
+
+    # -------- emulator teardown (always, even on failure) --------
+    - name: Stop docker-android emulator
+      if: always()
+      shell: bash
+      run: |
+        docker stop fotlab-emu >/dev/null 2>&1 || true
+        docker rm -f fotlab-emu >/dev/null 2>&1 || true
 
     # Per-shard diagnostics: build-smoke-<shard>.log on the calling workflow.
     - name: Upload ${{ inputs.shard }} smoke logs

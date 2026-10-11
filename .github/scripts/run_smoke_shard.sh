@@ -109,7 +109,9 @@ fi
 if [ "$NEED_LUT" = "true" ]; then
   # Install first so the package data dir exists, then stream the cube through
   # run-as stdin (the file gets the APP uid; shell-created dirs under /sdcard
-  # are not app-traversable and /data/local/tmp is SELinux-blocked on API 36).
+  # are not app-traversable, and on the old API-36 hosted emulator /data/local/tmp
+  # was SELinux-blocked — run-as works on every API level we run, including the
+  # docker-android api-33 image, so it is the portable choice).
   # connectedDebugAndroidTest later reinstalls with -r, preserving app data.
   gradle --no-daemon :app:installDebug
   adb shell "run-as io.github.fotlab.fotlab sh -c 'mkdir -p files/lut-fixture && cat > files/lut-fixture/FLog2C_to_CLASSIC-Neg_VLog.cube'" \

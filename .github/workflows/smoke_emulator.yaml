@@ -1,4 +1,4 @@
-# Reusable workflow: smoke-tests the debug build on Android emulators.
+# Reusable workflow: smoke-tests the debug build on a prebuilt Android emulator.
 #
 # Called by build.yaml as the sibling of release_github.yaml, and only for a
 # NON-release run: a release is verified by publishing the APK, not by booting an
@@ -38,16 +38,17 @@
 #     compares it against the count AGP reports and fails the job on a mismatch,
 #     so a filter that selects the wrong number can no longer pass quietly.
 #
-# A fifth job, prep-emulator, warms the two big caches (the AVD+snapshot and the
-# ~250 MB RAW corpus) exactly once; all four shards `needs: prep-emulator` and
-# only ever RESTORE them. This keeps cache writes off the parallel jobs, so N
-# shards can never race saving the same cache key.
+# A fifth job, prep-emulator, warms the RAW corpus cache exactly once; all four
+# shards `needs: prep-emulator` and only ever RESTORE it. This keeps cache writes
+# off the parallel jobs, so N shards can never race saving the same cache key.
+# The emulator is NOT cached: each shard boots the prebuilt docker-android image
+# (~2.5 GB pull, on runner disk, NOT in the 10 GiB Actions-cache budget).
 #
 # -------- shard switchboard --------
 #
 # `enabled-shards` below is the list of shard ids that are actually orchestrated;
-# an id that is not in it is skipped before the AVD ever boots, so a switched-off
-# shard costs neither runner minutes nor a red job. It exists because two of the
+# an id that is not in it is skipped before the emulator container starts, so a
+# switched-off shard costs neither runner minutes nor a red job. It exists because two of the
 # four shards cannot pass on a hosted runner, for reasons that are the runner's
 # and not the product's:
 #
@@ -64,13 +65,15 @@
 # coverage we currently cannot buy on GitHub's emulator, and the honest fix is a
 # faster/roomier runner or a-reduced-size fixture, not the switch.
 #
-# Two prerequisites the jobs cannot skip, both learned the hard way:
-#   * KVM must be made accessible BEFORE the emulator starts. /dev/kvm exists on the
-#     image but belongs to group `kvm`, which the runner user is not in; without the
-#     udev rule below the emulator silently falls back to -accel off and its adb
-#     daemon never comes up.
-#   * the AVD and the emulator's SDK packages (system image, emulator, build-tools)
-#     must be cached TOGETHER — an AVD with no system image cannot boot.
+# The emulator API level is fixed by the docker-android image (api-33). We
+# accepted the 36 -> 33 test-coverage downgrade when adopting this image
+# (see rules/REVIEW/detail/ACTION-PREPIN-000002.md); the APK is still compiled
+# against compileSdk 36 and only RUN on api-33. One prerequisite the jobs cannot
+# skip, learned the hard way with the old self-built AVD and still true here:
+#   * KVM must be available to the container (docker run --device /dev/kvm) or the
+#     emulator falls back to TCG and will not boot in time. The emulator runs as
+#     root inside the container, so the host-side udev rule the runner-local AVD
+#     needed is gone.
 #
 # See rules/ACTION.md (Test Strategy, CI cache layers) and FOTLAB-CRASH-000001.
 
@@ -86,23 +89,15 @@ on:
         required: false
         type: string
         default: ''
-      api-level:
-        description: API level of the AVD's system image.
-        required: false
-        type: string
-        default: '36'
-      target:
-        description: System-image flavour (google_apis, default, aosp_atd, ...).
-        required: false
-        type: string
-        default: google_apis
-      arch:
+      emulator-image:
         description: >
-          AVD architecture. Must be an ABI present in librawler_fotlab.so — x86_64 for the
-          hosted ubuntu runners.
+          Prebuilt Android-emulator Docker image to boot (e.g. halimqarroum/docker-android:api-33).
+          The image fixes the API level / ABI, so there is no separate api-level input. Default is
+          the public image; mirror to ghcr.io/fot-lab/docker-android:api-33 to avoid Docker Hub
+          anonymous rate limits.
         required: false
         type: string
-        default: x86_64
+        default: halimqarroum/docker-android:api-33
       log-artifact-name:
         description: Base name of the uploaded per-shard failure log artifacts (a -<shard> suffix is appended). Empty means no log artifact.
         required: false
@@ -116,7 +111,7 @@ on:
       enabled-shards:
         description: >
           JSON array of shard ids to orchestrate: "app", "loader", "develop",
-          "alchemy". An id left out is skipped before its AVD boots. "develop" and
+          "alchemy". An id left out is skipped before the emulator container starts. "develop" and
           "alchemy" are out of the default list because the hosted emulator cannot
           finish them (OutOfMemoryError and 480 s wait timeouts on 36..50 MP
           software demosaics) — see the shard switchboard note at the top of this
@@ -129,86 +124,18 @@ permissions:
   contents: read
 
 jobs:
-  # Warms the emulator cache (AVD + quick-boot snapshot + the SDK packages it
-  # boots) and the RAW corpus cache exactly once. The snapshot is generated and
-  # SAVED before any APK is ever installed, so the cached emulator is pristine and
-  # stays valid for every shard and every later build. All four shards start only
-  # after this finishes, so their cache restores are warm and their saves are
-  # unnecessary (a shard that hits an evicted cache creates the AVD locally but
-  # never persists it — see the shard action's cold fallback).
+  # Warms the RAW corpus cache exactly once. The emulator is no longer cached:
+  # each shard boots the prebuilt docker-android image and runs its slice against
+  # it, so there is nothing to warm for the emulator here. All four shards start
+  # only after this finishes, so their RAW-corpus restores are warm and their
+  # saves are unnecessary (a shard that hits an evicted cache simply re-downloads).
   prep-emulator:
-    name: Smoke prep (AVD + RAW corpus)
+    name: Smoke prep (RAW corpus)
     runs-on: ubuntu-26.04
     timeout-minutes: 30
-    env:
-      ANDROID_API: '36'
-      ANDROID_BUILD_TOOLS: '36.0.0'
-      EMULATOR_OPTIONS: '-no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -memory 4096'
     steps:
       - name: Check out
         uses: actions/checkout@v7
-
-      - name: Install JDK
-        uses: ./.github/actions/install_jdk
-        with:
-          java-version: '17'
-          distribution: temurin
-
-      - name: Locate Android SDK
-        uses: ./.github/actions/locate_sdk
-
-      - name: Install Android SDK
-        uses: ./.github/actions/install_sdk
-        with:
-          android-home: ${{ env.ANDROID_HOME }}
-          api-level: ${{ env.ANDROID_API }}
-          build-tools: ${{ env.ANDROID_BUILD_TOOLS }}
-
-      - name: Enable KVM
-        run: |
-          set -euo pipefail
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-          ls -l /dev/kvm
-        shell: bash
-
-      # -------- emulator cache (AVD + snapshot + its SDK packages, one key) --------
-      - name: Restore emulator cache
-        id: emulator-cache
-        uses: actions/cache/restore@v6
-        with:
-          path: |
-            ~/.android/avd/*
-            ~/.android/adb*
-            ${{ env.ANDROID_HOME }}/system-images
-            ${{ env.ANDROID_HOME }}/emulator
-            ${{ env.ANDROID_HOME }}/build-tools
-          key: ${{ runner.os }}-emulator-${{ inputs.api-level }}-${{ inputs.target }}-${{ inputs.arch }}
-
-      - name: Create AVD and generate a snapshot for caching
-        if: steps.emulator-cache.outputs.cache-hit != 'true'
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: ${{ inputs.api-level }}
-          target: ${{ inputs.target }}
-          arch: ${{ inputs.arch }}
-          force-avd-creation: false
-          emulator-options: ${{ env.EMULATOR_OPTIONS }}
-          disable-animations: false
-          script: echo "Generated AVD snapshot for caching."
-
-      - name: Save emulator cache
-        if: steps.emulator-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
-        with:
-          path: |
-            ~/.android/avd/*
-            ~/.android/adb*
-            ${{ env.ANDROID_HOME }}/system-images
-            ${{ env.ANDROID_HOME }}/emulator
-            ${{ env.ANDROID_HOME }}/build-tools
-          key: ${{ runner.os }}-emulator-${{ inputs.api-level }}-${{ inputs.target }}-${{ inputs.arch }}
 
       # -------- RAW corpus (fot-lab/rawdb) — immutable, cached once --------
       - name: Restore RAW sample cache
@@ -252,7 +179,7 @@ jobs:
   # -------- shard 1: app shell + gestures (7 tests, no corpus) --------
   test-app-smoke:
     name: Smoke / test_app_smoke
-    # Switchboard: skipped entirely (no AVD boot, no runner minutes) unless this
+    # Switchboard: skipped entirely (no emulator container start, no runner minutes) unless this
     # shard's id is in `enabled-shards`.
     if: ${{ contains(fromJSON(inputs.enabled-shards), 'app') }}
     needs: [prep-emulator]
@@ -273,9 +200,7 @@ jobs:
       - name: Run app smoke shard
         uses: ./.github/actions/emulator_smoke_shard
         with:
-          api-level: ${{ inputs.api-level }}
-          target: ${{ inputs.target }}
-          arch: ${{ inputs.arch }}
+          emulator-image: ${{ inputs.emulator-image }}
           native-artifact-name: ${{ inputs.native-artifact-name }}
           shard: app
           test-filter: ${{ env.TEST_FILTER }}
@@ -321,9 +246,7 @@ jobs:
       - name: Run image loader shard
         uses: ./.github/actions/emulator_smoke_shard
         with:
-          api-level: ${{ inputs.api-level }}
-          target: ${{ inputs.target }}
-          arch: ${{ inputs.arch }}
+          emulator-image: ${{ inputs.emulator-image }}
           native-artifact-name: ${{ inputs.native-artifact-name }}
           shard: loader
           test-filter: ${{ env.TEST_FILTER }}
@@ -380,9 +303,7 @@ jobs:
       - name: Run image develop shard
         uses: ./.github/actions/emulator_smoke_shard
         with:
-          api-level: ${{ inputs.api-level }}
-          target: ${{ inputs.target }}
-          arch: ${{ inputs.arch }}
+          emulator-image: ${{ inputs.emulator-image }}
           native-artifact-name: ${{ inputs.native-artifact-name }}
           shard: develop
           test-filter: ${{ env.TEST_FILTER }}
@@ -420,9 +341,7 @@ jobs:
       - name: Run image alchemy shard
         uses: ./.github/actions/emulator_smoke_shard
         with:
-          api-level: ${{ inputs.api-level }}
-          target: ${{ inputs.target }}
-          arch: ${{ inputs.arch }}
+          emulator-image: ${{ inputs.emulator-image }}
           native-artifact-name: ${{ inputs.native-artifact-name }}
           shard: alchemy
           test-filter: ${{ env.TEST_FILTER }}
