@@ -181,11 +181,17 @@ runs:
         # needs more than the KVM node to initialize (kernel capabilities / /dev
         # access). With only --device /dev/kvm the emulator process died at once,
         # `docker logs` stayed empty and adbd never came up.
+        # EXTRA_FLAGS deliberately omits -partition-size: the image README still
+        # advertises "-partition-size=8192" in its default EXTRA_FLAGS, but the
+        # emulator bundled in the current :api-33 image (36.5.11.0) rejects it
+        # ("unknown option: -partition-size=8192"), which makes the emulator exit
+        # immediately and leaves adbd unreachable. Keep only flags every version
+        # accepts.
         docker run -d --name fotlab-emu --privileged --device /dev/kvm \
           -p 127.0.0.1:5554:5554 \
           -p 127.0.0.1:5555:5555 \
           -e MEMORY=4096 -e CORES=4 -e SKIP_AUTH=true \
-          -e EXTRA_FLAGS="-no-metrics -no-audio -partition-size=8192" \
+          -e EXTRA_FLAGS="-no-metrics -no-audio" \
           "$EMULATOR_IMAGE"
 
         # Sanity: KVM must be present for hardware-accelerated boot. Without it
