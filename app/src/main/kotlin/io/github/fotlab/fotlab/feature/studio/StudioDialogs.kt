@@ -257,14 +257,14 @@ internal fun AcaDialog(
                     value = purpleMinRatio,
                     onValueChange = onPurpleMinRatioChange,
                     enabled = purpleEnabled,
-                    hint = stringResource(id = R.string.studio_aca_min_ratio_hint),
+                    hint = stringResource(id = R.string.studio_aca_purple_min_ratio_hint),
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 AcaField(
                     value = purpleMaxRatio,
                     onValueChange = onPurpleMaxRatioChange,
                     enabled = purpleEnabled,
-                    hint = stringResource(id = R.string.studio_aca_max_ratio_hint),
+                    hint = stringResource(id = R.string.studio_aca_purple_max_ratio_hint),
                 )
                 Spacer(modifier = Modifier.height(16.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -298,14 +298,14 @@ internal fun AcaDialog(
                     value = cyanMinRatio,
                     onValueChange = onCyanMinRatioChange,
                     enabled = cyanEnabled,
-                    hint = stringResource(id = R.string.studio_aca_min_ratio_hint),
+                    hint = stringResource(id = R.string.studio_aca_cyan_min_ratio_hint),
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 AcaField(
                     value = cyanMaxRatio,
                     onValueChange = onCyanMaxRatioChange,
                     enabled = cyanEnabled,
-                    hint = stringResource(id = R.string.studio_aca_max_ratio_hint),
+                    hint = stringResource(id = R.string.studio_aca_cyan_max_ratio_hint),
                 )
             }
         },

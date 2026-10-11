@@ -127,8 +127,10 @@
     <string name="studio_aca_radius_hint">Radius (px), default 5.0</string>
     <string name="studio_aca_intensity_hint">Intensity, default 1.0</string>
     <string name="studio_aca_min_brightness_hint">Min brightness, default 0.0</string>
-    <string name="studio_aca_min_ratio_hint">Min ratio, default 0.0</string>
-    <string name="studio_aca_max_ratio_hint">Max ratio, default 3.0</string>
+    <string name="studio_aca_purple_min_ratio_hint">Purple: min ratio of (red removed) : (blue removed), default 0.0</string>
+    <string name="studio_aca_purple_max_ratio_hint">Purple: max ratio of (red removed) : (blue removed), default 0.33</string>
+    <string name="studio_aca_cyan_min_ratio_hint">Cyan: min ratio of (green removed) : (blue removed), default 0.0</string>
+    <string name="studio_aca_cyan_max_ratio_hint">Cyan: max ratio of (green removed) : (blue removed), default 3.0</string>
     <string name="studio_aca_hedge_hint">Hedge — pull G toward the r/b midpoint, default 0.2</string>
     <string name="studio_aca_strength_hint">Strength — fraction of the excess removed, default 1.0</string>
     <string name="studio_clipping_title">Clipping</string>

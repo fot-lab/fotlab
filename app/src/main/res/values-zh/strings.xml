@@ -133,8 +133,10 @@
     <string name="studio_aca_radius_hint">半径（像素），默认 5.0</string>
     <string name="studio_aca_intensity_hint">强度，默认 1.0</string>
     <string name="studio_aca_min_brightness_hint">最低亮度，默认 0.0</string>
-    <string name="studio_aca_min_ratio_hint">比值下限，默认 0.0</string>
-    <string name="studio_aca_max_ratio_hint">比值上限，默认 3.0</string>
+    <string name="studio_aca_purple_min_ratio_hint">紫边：去除量（红）:（蓝）比值下限，默认 0.0</string>
+    <string name="studio_aca_purple_max_ratio_hint">紫边：去除量（红）:（蓝）比值上限，默认 0.33</string>
+    <string name="studio_aca_cyan_min_ratio_hint">青边：去除量（绿）:（蓝）比值下限，默认 0.0</string>
+    <string name="studio_aca_cyan_max_ratio_hint">青边：去除量（绿）:（蓝）比值上限，默认 3.0</string>
     <string name="studio_aca_hedge_hint">缓和 — 将 G 拉向红蓝中点，默认 0.2</string>
     <string name="studio_aca_strength_hint">去除强度 — 去除超出量的比例，默认 1.0</string>
     <string name="studio_clipping_title">截断</string>
