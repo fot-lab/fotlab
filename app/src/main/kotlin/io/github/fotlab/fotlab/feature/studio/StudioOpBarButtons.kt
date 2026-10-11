@@ -31,7 +31,7 @@ import androidx.compose.material.icons.filled.Exposure
 import androidx.compose.material.icons.filled.Gradient
 import androidx.compose.material.icons.filled.RawOff
 import androidx.compose.material.icons.filled.RawOn
-import androidx.compose.material.icons.filled.SdCard
+import androidx.compose.material.icons.filled.Sd
 import androidx.compose.material.icons.filled.Contrast
 import androidx.compose.material.icons.filled.MovieFilter
 import androidx.compose.material.icons.filled.Tonality
@@ -220,7 +220,7 @@ internal fun OutputTransferStatusButton(
     modifier: Modifier = Modifier,
 ) {
     Icon(
-        imageVector = Icons.Filled.SdCard,
+        imageVector = Icons.Filled.Sd,
         contentDescription = stringResource(
             id = if (isGamma) R.string.studio_cd_transfer_gamma else R.string.studio_cd_transfer_linear,
         ),

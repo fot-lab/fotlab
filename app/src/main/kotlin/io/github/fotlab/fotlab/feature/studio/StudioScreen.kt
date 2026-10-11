@@ -607,6 +607,20 @@ fun StudioScreen() {
                                 )
                             },
                             OperationalButton(
+                                id = "dcp",
+                                label = stringResource(id = R.string.studio_label_dcp),
+                            ) {
+                                DcpButton(
+                                    active = cameraProfile != null,
+                                    onPick = {
+                                        dcpPickerLauncher.launch(
+                                            openDocumentIntent(arrayOf("*/*"), lastDcpUri?.let { Uri.parse(it) }),
+                                        )
+                                    },
+                                    onClear = StudioEngine::clearCameraProfile,
+                                )
+                            },
+                            OperationalButton(
                                 id = "transfer",
                                 label = stringResource(
                                     id = if (outputTransfer == OutputTransfer.GAMMA) {
@@ -621,20 +635,7 @@ fun StudioScreen() {
                                     modifier = slotModifier,
                                 )
                             },
-                            OperationalButton(
-                                id = "dcp",
-                                label = stringResource(id = R.string.studio_label_dcp),
-                            ) {
-                                DcpButton(
-                                    active = cameraProfile != null,
-                                    onPick = {
-                                        dcpPickerLauncher.launch(
-                                            openDocumentIntent(arrayOf("*/*"), lastDcpUri?.let { Uri.parse(it) }),
-                                        )
-                                    },
-                                    onClear = StudioEngine::clearCameraProfile,
-                                )
-                            },
+
                         ),
                     )
                 }
