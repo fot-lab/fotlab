@@ -52,7 +52,7 @@ import io.github.fotlab.fotlab.ui.operation.OperationalButton
 import io.github.fotlab.fotlab.ui.rememberZoomState
 import io.github.fotlab.fotlab_rawler.CaSettings
 import io.github.fotlab.fotlab_rawler.DehazeMergeMode
-import io.github.fotlab.fotlab_rawler.UngreenSettings
+import io.github.fotlab.fotlab_rawler.UncyanSettings
 import io.github.fotlab.fotlab_rawler.UnpurpleSettings
 import io.github.fotlab.fotlab_rawler.OutputTransfer
 import kotlinx.coroutines.Dispatchers
@@ -214,12 +214,12 @@ fun StudioScreen() {
     var acaPurpleMinBrightnessInput by remember { mutableStateOf("") }
     var acaPurpleMinRatioInput by remember { mutableStateOf("") }
     var acaPurpleMaxRatioInput by remember { mutableStateOf("") }
-    var acaGreenEnabled by remember { mutableStateOf(false) }
-    var acaGreenRadiusInput by remember { mutableStateOf("") }
-    var acaGreenIntensityInput by remember { mutableStateOf("") }
-    var acaGreenMinBrightnessInput by remember { mutableStateOf("") }
-    var acaGreenHedgeInput by remember { mutableStateOf("") }
-    var acaGreenStrengthInput by remember { mutableStateOf("") }
+    var acaCyanEnabled by remember { mutableStateOf(false) }
+    var acaCyanRadiusInput by remember { mutableStateOf("") }
+    var acaCyanIntensityInput by remember { mutableStateOf("") }
+    var acaCyanMinBrightnessInput by remember { mutableStateOf("") }
+    var acaCyanMinRatioInput by remember { mutableStateOf("") }
+    var acaCyanMaxRatioInput by remember { mutableStateOf("") }
 
     // Clipping dialog state (opened by the Clipping icon, the AllOut glyph).
     // The switch IS the tool — there is no numeric parameter: ON clamps every component of the
@@ -539,20 +539,20 @@ fun StudioScreen() {
                                 acaPurpleMinRatioInput = ""
                                 acaPurpleMaxRatioInput = ""
                             }
-                            StudioEngine.currentUngreen()?.let { ungreen ->
-                                acaGreenEnabled = true
-                                acaGreenRadiusInput = ungreen.radius.toString()
-                                acaGreenIntensityInput = ungreen.intensity.toString()
-                                acaGreenMinBrightnessInput = ungreen.minBrightness.toString()
-                                acaGreenHedgeInput = ungreen.hedge.toString()
-                                acaGreenStrengthInput = ungreen.strength.toString()
+                            StudioEngine.currentUncyan()?.let { uncyan ->
+                                acaCyanEnabled = true
+                                acaCyanRadiusInput = uncyan.radius.toString()
+                                acaCyanIntensityInput = uncyan.intensity.toString()
+                                acaCyanMinBrightnessInput = uncyan.minBrightness.toString()
+                                acaCyanMinRatioInput = uncyan.minGreenToBlueRatio.toString()
+                                acaCyanMaxRatioInput = uncyan.maxGreenToBlueRatio.toString()
                             } ?: run {
-                                acaGreenEnabled = false
-                                acaGreenRadiusInput = ""
-                                acaGreenIntensityInput = ""
-                                acaGreenMinBrightnessInput = ""
-                                acaGreenHedgeInput = ""
-                                acaGreenStrengthInput = ""
+                                acaCyanEnabled = false
+                                acaCyanRadiusInput = ""
+                                acaCyanIntensityInput = ""
+                                acaCyanMinBrightnessInput = ""
+                                acaCyanMinRatioInput = ""
+                                acaCyanMaxRatioInput = ""
                             }
                             showAcaDialog = true
                         },
@@ -587,6 +587,14 @@ fun StudioScreen() {
                                     modifier = slotModifier,
                                 )
                             },
+OperationalButton(
+                                id = "transfer",
+                                label = stringResource(
+                                    id = if (outputTransfer == OutputTransfer.GAMMA) {
+                                        R.string.studio_transfer_gamma
+                                    } else {
+                                        R.string.studio_transfer_linear
+                                    },
                             OperationalButton(
                                 id = "lcp",
                                 label = stringResource(id = R.string.studio_label_lcp),
@@ -620,14 +628,7 @@ fun StudioScreen() {
                                     onClear = StudioEngine::clearCameraProfile,
                                 )
                             },
-                            OperationalButton(
-                                id = "transfer",
-                                label = stringResource(
-                                    id = if (outputTransfer == OutputTransfer.GAMMA) {
-                                        R.string.studio_transfer_gamma
-                                    } else {
-                                        R.string.studio_transfer_linear
-                                    },
+                            
                                 ),
                             ) { slotModifier ->
                                 OutputTransferStatusButton(
@@ -704,18 +705,18 @@ fun StudioScreen() {
             onPurpleMinRatioChange = { acaPurpleMinRatioInput = it },
             purpleMaxRatio = acaPurpleMaxRatioInput,
             onPurpleMaxRatioChange = { acaPurpleMaxRatioInput = it },
-            greenEnabled = acaGreenEnabled,
-            onGreenEnabledChange = { acaGreenEnabled = it },
-            greenRadius = acaGreenRadiusInput,
-            onGreenRadiusChange = { acaGreenRadiusInput = it },
-            greenIntensity = acaGreenIntensityInput,
-            onGreenIntensityChange = { acaGreenIntensityInput = it },
-            greenMinBrightness = acaGreenMinBrightnessInput,
-            onGreenMinBrightnessChange = { acaGreenMinBrightnessInput = it },
-            greenHedge = acaGreenHedgeInput,
-            onGreenHedgeChange = { acaGreenHedgeInput = it },
-            greenStrength = acaGreenStrengthInput,
-            onGreenStrengthChange = { acaGreenStrengthInput = it },
+            cyanEnabled = acaCyanEnabled,
+            onCyanEnabledChange = { acaCyanEnabled = it },
+            cyanRadius = acaCyanRadiusInput,
+            onCyanRadiusChange = { acaCyanRadiusInput = it },
+            cyanIntensity = acaCyanIntensityInput,
+            onCyanIntensityChange = { acaCyanIntensityInput = it },
+            cyanMinBrightness = acaCyanMinBrightnessInput,
+            onCyanMinBrightnessChange = { acaCyanMinBrightnessInput = it },
+            cyanMinRatio = acaCyanMinRatioInput,
+            onCyanMinRatioChange = { acaCyanMinRatioInput = it },
+            cyanMaxRatio = acaCyanMaxRatioInput,
+            onCyanMaxRatioChange = { acaCyanMaxRatioInput = it },
             onConfirm = {
                 // Each switch is its own tool: OFF is null (that core's stage is skipped),
                 // independently of the other. Each blank or unparseable field falls back to that
@@ -732,13 +733,13 @@ fun StudioScreen() {
                     } else {
                         null
                     },
-                    if (acaGreenEnabled) {
-                        UngreenSettings(
-                            radius = acaGreenRadiusInput.toDoubleOrNull() ?: 5.0,
-                            intensity = acaGreenIntensityInput.toDoubleOrNull() ?: 1.0,
-                            minBrightness = acaGreenMinBrightnessInput.toDoubleOrNull() ?: 0.0,
-                            hedge = acaGreenHedgeInput.toDoubleOrNull() ?: 0.2,
-                            strength = acaGreenStrengthInput.toDoubleOrNull() ?: 1.0,
+                    if (acaCyanEnabled) {
+                        UncyanSettings(
+                            radius = acaCyanRadiusInput.toDoubleOrNull() ?: 5.0,
+                            intensity = acaCyanIntensityInput.toDoubleOrNull() ?: 1.0,
+                            minBrightness = acaCyanMinBrightnessInput.toDoubleOrNull() ?: 0.0,
+                            minGreenToBlueRatio = acaCyanMinRatioInput.toDoubleOrNull() ?: 0.0,
+                            maxGreenToBlueRatio = acaCyanMaxRatioInput.toDoubleOrNull() ?: 0.33,
                         )
                     } else {
                         null

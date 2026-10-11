@@ -171,7 +171,7 @@ internal fun CaDialog(
  *
  * The dialog hosts **two independent switches**, each with its own parameter group:
  *  1. **Purple** — the Unpurple core (`UnpurpleSettings`: red:blue ratio bounds).
- *  2. **Green** — the Ungreen core (`UngreenSettings`: hedge + strength).
+ *  2. **Cyan** — the Uncyan core (`UncyanSettings`: green:blue ratio bounds).
  *
  * They are independent on the Rust side too — two separate `Option` fields — so either switch may be
  * on while the other is off, and each group's fields are editable only while its own switch is on.
@@ -192,18 +192,18 @@ internal fun AcaDialog(
     onPurpleMinRatioChange: (String) -> Unit,
     purpleMaxRatio: String,
     onPurpleMaxRatioChange: (String) -> Unit,
-    greenEnabled: Boolean,
-    onGreenEnabledChange: (Boolean) -> Unit,
-    greenRadius: String,
-    onGreenRadiusChange: (String) -> Unit,
-    greenIntensity: String,
-    onGreenIntensityChange: (String) -> Unit,
-    greenMinBrightness: String,
-    onGreenMinBrightnessChange: (String) -> Unit,
-    greenHedge: String,
-    onGreenHedgeChange: (String) -> Unit,
-    greenStrength: String,
-    onGreenStrengthChange: (String) -> Unit,
+    cyanEnabled: Boolean,
+    onCyanEnabledChange: (Boolean) -> Unit,
+    cyanRadius: String,
+    onCyanRadiusChange: (String) -> Unit,
+    cyanIntensity: String,
+    onCyanIntensityChange: (String) -> Unit,
+    cyanMinBrightness: String,
+    onCyanMinBrightnessChange: (String) -> Unit,
+    cyanMinRatio: String,
+    onCyanMinRatioChange: (String) -> Unit,
+    cyanMaxRatio: String,
+    onCyanMaxRatioChange: (String) -> Unit,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -221,7 +221,7 @@ internal fun AcaDialog(
         },
         title = { Text(text = stringResource(id = R.string.studio_aca_title)) },
         text = {
-            // Ten fields plus two switch rows, so the body must scroll or the green group is
+            // Ten fields plus two switch rows, so the body must scroll or the cyan group is
             // unreachable on a short dialog.
             Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                 Text(text = stringResource(id = R.string.studio_aca_body))
@@ -268,44 +268,44 @@ internal fun AcaDialog(
                 )
                 Spacer(modifier = Modifier.height(16.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(text = stringResource(id = R.string.studio_aca_green_label))
+                    Text(text = stringResource(id = R.string.studio_aca_cyan_label))
                     Spacer(modifier = Modifier.weight(1f))
-                    Switch(checked = greenEnabled, onCheckedChange = onGreenEnabledChange)
+                    Switch(checked = cyanEnabled, onCheckedChange = onCyanEnabledChange)
                 }
                 Spacer(modifier = Modifier.height(8.dp))
                 AcaField(
-                    value = greenRadius,
-                    onValueChange = onGreenRadiusChange,
-                    enabled = greenEnabled,
+                    value = cyanRadius,
+                    onValueChange = onCyanRadiusChange,
+                    enabled = cyanEnabled,
                     hint = stringResource(id = R.string.studio_aca_radius_hint),
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 AcaField(
-                    value = greenIntensity,
-                    onValueChange = onGreenIntensityChange,
-                    enabled = greenEnabled,
+                    value = cyanIntensity,
+                    onValueChange = onCyanIntensityChange,
+                    enabled = cyanEnabled,
                     hint = stringResource(id = R.string.studio_aca_intensity_hint),
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 AcaField(
-                    value = greenMinBrightness,
-                    onValueChange = onGreenMinBrightnessChange,
-                    enabled = greenEnabled,
+                    value = cyanMinBrightness,
+                    onValueChange = onCyanMinBrightnessChange,
+                    enabled = cyanEnabled,
                     hint = stringResource(id = R.string.studio_aca_min_brightness_hint),
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 AcaField(
-                    value = greenHedge,
-                    onValueChange = onGreenHedgeChange,
-                    enabled = greenEnabled,
-                    hint = stringResource(id = R.string.studio_aca_hedge_hint),
+                    value = cyanMinRatio,
+                    onValueChange = onCyanMinRatioChange,
+                    enabled = cyanEnabled,
+                    hint = stringResource(id = R.string.studio_aca_min_ratio_hint),
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 AcaField(
-                    value = greenStrength,
-                    onValueChange = onGreenStrengthChange,
-                    enabled = greenEnabled,
-                    hint = stringResource(id = R.string.studio_aca_strength_hint),
+                    value = cyanMaxRatio,
+                    onValueChange = onCyanMaxRatioChange,
+                    enabled = cyanEnabled,
+                    hint = stringResource(id = R.string.studio_aca_max_ratio_hint),
                 )
             }
         },

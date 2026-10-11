@@ -383,16 +383,37 @@ pub struct DevelopParams {
   /// space before calibration and was removed as superseded.
   #[uniffi(default = None)]
   pub defringe_prophoto: Option<crate::defringe_prophoto_unpurple::UnpurpleSettings>,
-  /// **ProPhoto-space green-fringe (ungreen) correction** for the *editing* branch
-  /// (`defringe_prophoto_ungreen.rs`) — the **independent** twin of
-  /// [`Self::defringe_prophoto`]. Same slot in the pipeline (after prophoto clipping, before the
-  /// rawalchemy hand-off) and same linear ProPhoto-D50 `0..1 f32` buffer, but a separate field so
-  /// the two stages can be switched on and off **independently**: purple on / green off,
-  /// green on / purple off, both on, or both off are all distinct, directly expressible states.
+  /// **ProPhoto-space cyan-fringe (uncyan) correction** for the *editing* branch
+  /// (`defringe_prophoto_uncyan.rs`), the **independent** twin of
+  /// [`Self::defringe_prophoto`], wired into the pipeline **between** `defringe_prophoto`
+  /// and [`Self::defringe_ungreen`]. Same slot (after prophoto clipping, before the
+  /// rawalchemy hand-off) and same linear ProPhoto-D50 `0..1 f32` buffer.
   ///
-  /// Independence is real all the way down, not just in the dialog: the two cores touch
-  /// **disjoint** channels — unpurple only ever lowers R and B, ungreeen only ever lowers G — so
-  /// neither can observe or undo the other's edit, and running both is well defined.
+  /// Physics: a real green/cyan fringe is **blue and green acting together** (a glaring
+  /// blue-green/cyan fringe), not a pure-green one. So uncyan reuses unpurple's **blue-channel
+  /// mask** and, relative to unpurple, swaps the secondary-lowered channel from red to green —
+  /// it lowers **G and B toward R** (red is the neutral). Unpurple lowers **R and B toward G**.
+  /// Blue is the primary (mask) channel in both, so the two stages are symmetric and the
+  /// `min/max green:blue` ratio bound is the exact mirror of unpurple's `min/max red:blue`
+  /// bound. `None` (the default) = the stage is skipped (identity), matching the project's
+  /// "every switch defaults off on the Rust/FFI side, Kotlin controls assembly" rule.
+  #[uniffi(default = None)]
+  pub defringe_uncyan: Option<crate::defringe_prophoto_uncyan::UncyanSettings>,
+  /// **ProPhoto-space green-fringe (ungreen) correction** for the *editing* branch
+  /// (`defringe_prophoto_ungreen.rs`). This is the third defringe stage, running **after**
+  /// [`Self::defringe_uncyan`] in the same pipeline slot on the same linear ProPhoto-D50 buffer.
+  /// A separate field so the three stages can be switched on and off **independently**.
+  ///
+  /// **Retained but disabled by default on the Kotlin side.** The physical model behind this
+  /// module (a *pure-green* fringe selected from the green plane) was found to be incorrect — a
+  /// real green/cyan fringe is blue+green together, which is what the `uncyan` stage covers. The
+  /// code is kept for reference/comparison and remains a correct, independent G-lowering stage,
+  /// but Kotlin no longer builds or assembles it; it is only reached when a caller explicitly
+  /// passes a non-`None` [`crate::defringe_prophoto_ungreen::UngreenSettings`].
+  ///
+  /// Independence is real all the way down: the three cores touch **disjoint** channels — unpurple
+  /// only ever lowers R and B, uncyan only ever lowers G and B, ungreen only ever lowers G — so
+  /// none can observe or undo another's edit, and any combination is well defined.
   ///
   /// `None` (this field's default) = the stage is skipped (identity), matching the project's
   /// "every switch defaults off on the Rust/FFI side, Kotlin controls assembly" rule. Note this
