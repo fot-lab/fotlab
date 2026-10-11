@@ -574,8 +574,8 @@ fun StudioScreen() {
                         },
                         onClearLut = StudioEngine::clearGradeLut,
                     )
-                    // Basic bar: the floor — a read-only RAW status indicator followed by the
-                    // camera/lens profile controls (DCP/LCP), which are global to any loaded image.
+                    // Basic bar: the floor — a read-only RAW status indicator, the gamma/linear
+                    // transfer toggle, then the camera/lens profile controls (DCP/LCP).
                     StudioOpBar.Basic -> HorizontalOperationBar(
                         items = listOf(
                             OperationalButton(
@@ -587,7 +587,7 @@ fun StudioScreen() {
                                     modifier = slotModifier,
                                 )
                             },
-OperationalButton(
+                            OperationalButton(
                                 id = "transfer",
                                 label = stringResource(
                                     id = if (outputTransfer == OutputTransfer.GAMMA) {
@@ -595,6 +595,13 @@ OperationalButton(
                                     } else {
                                         R.string.studio_transfer_linear
                                     },
+                                ),
+                            ) { slotModifier ->
+                                OutputTransferStatusButton(
+                                    isGamma = outputTransfer == OutputTransfer.GAMMA,
+                                    modifier = slotModifier,
+                                )
+                            },
                             OperationalButton(
                                 id = "lcp",
                                 label = stringResource(id = R.string.studio_label_lcp),
@@ -628,15 +635,6 @@ OperationalButton(
                                     onClear = StudioEngine::clearCameraProfile,
                                 )
                             },
-                            
-                                ),
-                            ) { slotModifier ->
-                                OutputTransferStatusButton(
-                                    isGamma = outputTransfer == OutputTransfer.GAMMA,
-                                    modifier = slotModifier,
-                                )
-                            },
-
                         ),
                     )
                 }
