@@ -190,7 +190,7 @@ runs:
         docker run -d --name fotlab-emu --privileged --device /dev/kvm \
           -p 127.0.0.1:5554:5554 \
           -p 127.0.0.1:5555:5555 \
-          -e MEMORY=4096 -e CORES=4 -e SKIP_AUTH=true \
+          -e MEMORY=8192 -e CORES=4 -e SKIP_AUTH=true \
           -e EXTRA_FLAGS="-no-metrics -no-audio" \
           "$EMULATOR_IMAGE"
 
@@ -262,6 +262,22 @@ runs:
       run: |
         docker stop fotlab-emu >/dev/null 2>&1 || true
         docker rm -f fotlab-emu >/dev/null 2>&1 || true
+
+    # -------- artifact filename sanitizer --------
+    # ANDROID_SERIAL is 127.0.0.1:5555, so AGP writes the connected-test
+    # profiling artifact as "127.0.0.1:5555_profile.pb". upload-artifact rejects
+    # ':' in any path component (NTFS-incompatible), which fails the whole
+    # upload and masks the real failure. Rename any such file to '_' first.
+    - name: Sanitize connected-test artifact filenames
+      if: failure()
+      shell: bash
+      run: |
+        set -uo pipefail
+        while IFS= read -r -d '' f; do
+          nf="$(printf '%s' "$f" | tr ':' '_')"
+          mv -- "$f" "$nf" && echo "renamed: $f -> $nf" || true
+        done < <(find app/build/outputs/androidTest-results app/build/reports/androidTests -type f -name '*:*' -print0 2>/dev/null)
+        true
 
     # Per-shard diagnostics: build-smoke-<shard>.log on the calling workflow.
     - name: Upload ${{ inputs.shard }} smoke logs
