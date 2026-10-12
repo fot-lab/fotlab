@@ -44,3 +44,7 @@
 	path = external/purple-fringe
 	url = ../purple-fringe.git
 	branch = master
+[submodule "external/docker-android"]
+	path = external/docker-android
+	url = ../docker-android.git
+	branch = main
