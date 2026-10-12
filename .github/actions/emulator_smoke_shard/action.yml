@@ -20,10 +20,11 @@ description: Start a docker-android emulator and run one filtered slice of the i
 inputs:
   emulator-image:
     description: >-
-      Prebuilt Android-emulator Docker image to boot (e.g. halimqarroum/docker-android:api-33).
-      The image fixes the API level / ABI, so there is no separate api-level input.
+      Prebuilt Android-emulator Docker image to boot. The image fixes the API level / ABI,
+      so there is no separate api-level input. Default is OUR GitHub Container Registry build
+      (ghcr.io/fot-lab/docker-android:api-33), published by .github/workflows/docker-android.yaml.
     required: false
-    default: halimqarroum/docker-android:api-33
+    default: ghcr.io/fot-lab/docker-android:api-33
   native-artifact-name:
     description: Native artifact (librawler_fotlab.so + Kotlin bindings) to place; empty skips it.
     required: false

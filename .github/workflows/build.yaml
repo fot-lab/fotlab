@@ -20,6 +20,8 @@ on:
       - 'LICENSE*'
       - '.gitignore'
       - '.readthedocs.yaml'
+      - 'external/docker-android'
+      - 'external/docker-android/**'
   pull_request:
     branches: [main]
     paths-ignore:
@@ -29,6 +31,8 @@ on:
       - 'LICENSE*'
       - '.gitignore'
       - '.readthedocs.yaml'
+      - 'external/docker-android'
+      - 'external/docker-android/**'
   workflow_dispatch:
     inputs:
       release:
