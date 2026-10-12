@@ -38,11 +38,20 @@ jobs:
     name: Build & push docker-android (GHCR)
     runs-on: ubuntu-26.04
     steps:
-      - name: Check out (with docker-android submodule)
+      - name: Check out repository
         uses: actions/checkout@v7
         with:
-          submodules: external/docker-android
           fetch-depth: 1
+
+      # The docker-android submodule is checked out on its own (not via
+      # actions/checkout's `submodules`, which only accepts true/recursive and
+      # would pull all 12 submodules). The relative .gitmodules URL resolves to
+      # https://github.com/fot-lab/docker-android.git; inject the token so the
+      # clone is authenticated.
+      - name: Check out docker-android submodule
+        run: |
+          git config --global url."https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/".insteadOf "https://github.com/"
+          git submodule update --init --depth 1 external/docker-android
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
