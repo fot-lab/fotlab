@@ -18,6 +18,8 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
@@ -26,6 +28,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import io.github.fotlab.fotlab.R
@@ -167,16 +173,16 @@ internal fun CaDialog(
 }
 
 /**
- * ACA (fringe correction) dialog — parameter entry for the two ProPhoto cores, **purple first**.
+ * ACA (fringe correction) dialog — parameter entry for the two ProPhoto cores, split into two tabs.
  *
- * The dialog hosts **two independent switches**, each with its own parameter group:
- *  1. **Purple** — the Unpurple core (`UnpurpleSettings`: red:blue ratio bounds).
- *  2. **Cyan** — the Uncyan core (`UncyanSettings`: green:blue ratio bounds).
+ * The two cores are independent on the Rust side (two separate `Option` fields), so each gets its own
+ * tab — **Purple** (Unpurple, red:blue ratio bounds) and **Cyan** (Uncyan, green:blue ratio bounds) —
+ * with its own enable switch and five-field group. Either tab may be on while the other is off, and a
+ * group's fields are editable only while that group's switch is on. An empty or unparseable field
+ * falls back to that field's default, so OK is always enabled.
  *
- * They are independent on the Rust side too — two separate `Option` fields — so either switch may be
- * on while the other is off, and each group's fields are editable only while its own switch is on.
- * An empty or unparseable field falls back to that field's default rather than being rejected, so
- * OK is always enabled.
+ * The body scrolls within the dialog: the native [AlertDialog] sizes to the content and scrolls
+ * vertically when a tab's fields overflow the available height.
  */
 @Composable
 internal fun AcaDialog(
@@ -207,6 +213,7 @@ internal fun AcaDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    var selectedTab by remember { mutableStateOf(0) }
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
@@ -221,94 +228,174 @@ internal fun AcaDialog(
         },
         title = { Text(text = stringResource(id = R.string.studio_aca_title)) },
         text = {
-            // Ten fields plus two switch rows, so the body must scroll or the cyan group is
-            // unreachable on a short dialog.
-            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+            Column {
                 Text(text = stringResource(id = R.string.studio_aca_body))
                 Spacer(modifier = Modifier.height(8.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(text = stringResource(id = R.string.studio_aca_purple_label))
-                    Spacer(modifier = Modifier.weight(1f))
-                    Switch(checked = purpleEnabled, onCheckedChange = onPurpleEnabledChange)
+                TabRow(selectedTabIndex = selectedTab) {
+                    Tab(
+                        selected = selectedTab == 0,
+                        onClick = { selectedTab = 0 },
+                        text = { Text(text = stringResource(id = R.string.studio_aca_purple_label)) },
+                    )
+                    Tab(
+                        selected = selectedTab == 1,
+                        onClick = { selectedTab = 1 },
+                        text = { Text(text = stringResource(id = R.string.studio_aca_cyan_label)) },
+                    )
                 }
                 Spacer(modifier = Modifier.height(8.dp))
-                AcaField(
-                    value = purpleRadius,
-                    onValueChange = onPurpleRadiusChange,
-                    enabled = purpleEnabled,
-                    hint = stringResource(id = R.string.studio_aca_radius_hint),
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                AcaField(
-                    value = purpleIntensity,
-                    onValueChange = onPurpleIntensityChange,
-                    enabled = purpleEnabled,
-                    hint = stringResource(id = R.string.studio_aca_intensity_hint),
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                AcaField(
-                    value = purpleMinBrightness,
-                    onValueChange = onPurpleMinBrightnessChange,
-                    enabled = purpleEnabled,
-                    hint = stringResource(id = R.string.studio_aca_min_brightness_hint),
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                AcaField(
-                    value = purpleMinRatio,
-                    onValueChange = onPurpleMinRatioChange,
-                    enabled = purpleEnabled,
-                    hint = stringResource(id = R.string.studio_aca_purple_min_ratio_hint),
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                AcaField(
-                    value = purpleMaxRatio,
-                    onValueChange = onPurpleMaxRatioChange,
-                    enabled = purpleEnabled,
-                    hint = stringResource(id = R.string.studio_aca_purple_max_ratio_hint),
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(text = stringResource(id = R.string.studio_aca_cyan_label))
-                    Spacer(modifier = Modifier.weight(1f))
-                    Switch(checked = cyanEnabled, onCheckedChange = onCyanEnabledChange)
+                // Scrollable group body: the native AlertDialog auto-fits to content height and
+                // scrolls vertically when the selected tab's fields overflow the available space.
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    when (selectedTab) {
+                        0 -> AcaPurpleGroup(
+                            enabled = purpleEnabled,
+                            onEnabledChange = onPurpleEnabledChange,
+                            radius = purpleRadius,
+                            onRadiusChange = onPurpleRadiusChange,
+                            intensity = purpleIntensity,
+                            onIntensityChange = onPurpleIntensityChange,
+                            minBrightness = purpleMinBrightness,
+                            onMinBrightnessChange = onPurpleMinBrightnessChange,
+                            minRatio = purpleMinRatio,
+                            onMinRatioChange = onPurpleMinRatioChange,
+                            maxRatio = purpleMaxRatio,
+                            onMaxRatioChange = onPurpleMaxRatioChange,
+                        )
+                        else -> AcaCyanGroup(
+                            enabled = cyanEnabled,
+                            onEnabledChange = onCyanEnabledChange,
+                            radius = cyanRadius,
+                            onRadiusChange = onCyanRadiusChange,
+                            intensity = cyanIntensity,
+                            onIntensityChange = onCyanIntensityChange,
+                            minBrightness = cyanMinBrightness,
+                            onMinBrightnessChange = onCyanMinBrightnessChange,
+                            minRatio = cyanMinRatio,
+                            onMinRatioChange = onCyanMinRatioChange,
+                            maxRatio = cyanMaxRatio,
+                            onMaxRatioChange = onCyanMaxRatioChange,
+                        )
+                    }
                 }
-                Spacer(modifier = Modifier.height(8.dp))
-                AcaField(
-                    value = cyanRadius,
-                    onValueChange = onCyanRadiusChange,
-                    enabled = cyanEnabled,
-                    hint = stringResource(id = R.string.studio_aca_radius_hint),
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                AcaField(
-                    value = cyanIntensity,
-                    onValueChange = onCyanIntensityChange,
-                    enabled = cyanEnabled,
-                    hint = stringResource(id = R.string.studio_aca_intensity_hint),
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                AcaField(
-                    value = cyanMinBrightness,
-                    onValueChange = onCyanMinBrightnessChange,
-                    enabled = cyanEnabled,
-                    hint = stringResource(id = R.string.studio_aca_min_brightness_hint),
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                AcaField(
-                    value = cyanMinRatio,
-                    onValueChange = onCyanMinRatioChange,
-                    enabled = cyanEnabled,
-                    hint = stringResource(id = R.string.studio_aca_cyan_min_ratio_hint),
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                AcaField(
-                    value = cyanMaxRatio,
-                    onValueChange = onCyanMaxRatioChange,
-                    enabled = cyanEnabled,
-                    hint = stringResource(id = R.string.studio_aca_cyan_max_ratio_hint),
-                )
             }
         },
+    )
+}
+
+/** Purple (Unpurple) parameter group — enable switch plus the five red:blue fields. */
+@Composable
+private fun AcaPurpleGroup(
+    enabled: Boolean,
+    onEnabledChange: (Boolean) -> Unit,
+    radius: String,
+    onRadiusChange: (String) -> Unit,
+    intensity: String,
+    onIntensityChange: (String) -> Unit,
+    minBrightness: String,
+    onMinBrightnessChange: (String) -> Unit,
+    minRatio: String,
+    onMinRatioChange: (String) -> Unit,
+    maxRatio: String,
+    onMaxRatioChange: (String) -> Unit,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(text = stringResource(id = R.string.studio_aca_purple_label))
+        Spacer(modifier = Modifier.weight(1f))
+        Switch(checked = enabled, onCheckedChange = onEnabledChange)
+    }
+    Spacer(modifier = Modifier.height(8.dp))
+    AcaField(
+        value = radius,
+        onValueChange = onRadiusChange,
+        enabled = enabled,
+        hint = stringResource(id = R.string.studio_aca_radius_hint),
+    )
+    Spacer(modifier = Modifier.height(8.dp))
+    AcaField(
+        value = intensity,
+        onValueChange = onIntensityChange,
+        enabled = enabled,
+        hint = stringResource(id = R.string.studio_aca_intensity_hint),
+    )
+    Spacer(modifier = Modifier.height(8.dp))
+    AcaField(
+        value = minBrightness,
+        onValueChange = onMinBrightnessChange,
+        enabled = enabled,
+        hint = stringResource(id = R.string.studio_aca_min_brightness_hint),
+    )
+    Spacer(modifier = Modifier.height(8.dp))
+    AcaField(
+        value = minRatio,
+        onValueChange = onMinRatioChange,
+        enabled = enabled,
+        hint = stringResource(id = R.string.studio_aca_purple_min_ratio_hint),
+    )
+    Spacer(modifier = Modifier.height(8.dp))
+    AcaField(
+        value = maxRatio,
+        onValueChange = onMaxRatioChange,
+        enabled = enabled,
+        hint = stringResource(id = R.string.studio_aca_purple_max_ratio_hint),
+    )
+}
+
+/** Cyan (Uncyan) parameter group — enable switch plus the five green:blue fields. */
+@Composable
+private fun AcaCyanGroup(
+    enabled: Boolean,
+    onEnabledChange: (Boolean) -> Unit,
+    radius: String,
+    onRadiusChange: (String) -> Unit,
+    intensity: String,
+    onIntensityChange: (String) -> Unit,
+    minBrightness: String,
+    onMinBrightnessChange: (String) -> Unit,
+    minRatio: String,
+    onMinRatioChange: (String) -> Unit,
+    maxRatio: String,
+    onMaxRatioChange: (String) -> Unit,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(text = stringResource(id = R.string.studio_aca_cyan_label))
+        Spacer(modifier = Modifier.weight(1f))
+        Switch(checked = enabled, onCheckedChange = onEnabledChange)
+    }
+    Spacer(modifier = Modifier.height(8.dp))
+    AcaField(
+        value = radius,
+        onValueChange = onRadiusChange,
+        enabled = enabled,
+        hint = stringResource(id = R.string.studio_aca_radius_hint),
+    )
+    Spacer(modifier = Modifier.height(8.dp))
+    AcaField(
+        value = intensity,
+        onValueChange = onIntensityChange,
+        enabled = enabled,
+        hint = stringResource(id = R.string.studio_aca_intensity_hint),
+    )
+    Spacer(modifier = Modifier.height(8.dp))
+    AcaField(
+        value = minBrightness,
+        onValueChange = onMinBrightnessChange,
+        enabled = enabled,
+        hint = stringResource(id = R.string.studio_aca_min_brightness_hint),
+    )
+    Spacer(modifier = Modifier.height(8.dp))
+    AcaField(
+        value = minRatio,
+        onValueChange = onMinRatioChange,
+        enabled = enabled,
+        hint = stringResource(id = R.string.studio_aca_cyan_min_ratio_hint),
+    )
+    Spacer(modifier = Modifier.height(8.dp))
+    AcaField(
+        value = maxRatio,
+        onValueChange = onMaxRatioChange,
+        enabled = enabled,
+        hint = stringResource(id = R.string.studio_aca_cyan_max_ratio_hint),
     )
 }
 
