@@ -810,13 +810,23 @@ object StudioEngine {
         // render pair one Kelvin's pixels with another Kelvin's key.
         val kelvin = currentWhiteBalanceKelvin ?: 0f
         // Normalise out everything the develop half does not act on. The transfer function is an
-        // encoder concern, and the OKLab sub-switches belong to the stage ABOVE the cache, so
-        // neither changes the cached pixels; letting either into the key would re-run a whole
-        // decode for a render that costs one matrix multiply.
+        // encoder concern, and the OKLab sub-switches, the ProPhoto defringe cores
+        // (unpurple/uncyan/ungreen) and `clipToGamut` all belong to the stage ABOVE the cache
+        // boundary: defringe runs on the linear ProPhoto-D50 buffer after `to_working_space`, and
+        // `clipToGamut` is applied inside `to_working_space` itself — neither touches the cached
+        // demosaiced camera-space pixels. Letting any of them into the key would re-run a whole
+        // decode+demosaic for a render that only costs a matrix multiply (and the defringe/grade
+        // re-apply on the reused buffer for free). The develop half (`develop_to_camera_image`)
+        // consumes only demosaic/exposure/clip/dehaze/denoise/CA/camera-profile/lens-profile/focal
+        // — all of those stay in the key below.
         val key = params.copy(
             outputTransfer = OutputTransfer.GAMMA,
             oklabHighlightCompressSrgb = false,
             oklabHighlightCompressProphoto = false,
+            defringeProphoto = null,
+            defringeUncyan = null,
+            defringeUngreen = null,
+            clipToGamut = false,
         )
         val cache = demosaicedCache
         // A cache hit requires all five to line up: the switch is ON, a buffer exists, it belongs
