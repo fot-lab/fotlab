@@ -9,8 +9,10 @@
 #
 # Published as ghcr.io/<owner>/docker-android:<tag>. The `api-33` tag mirrors the
 # upstream `halimqarroum/docker-android:api-33` the CI smoke tests consume; `main` and
-# the commit SHA are also pushed for traceability. The package is made public so the CI
-# workflows can pull it anonymously (same as the current Docker Hub pull).
+# the commit SHA are also pushed for traceability. The consumer (smoke_emulator.yaml)
+# authenticates to GHCR with a GITHUB_TOKEN passed into the composite action, so the
+# package MAY be private OR public — visibility is a separate UI setting, not a build
+# concern. (ghcr requires an authenticated pull even for public packages.)
 
 name: Docker Android Image
 
@@ -84,8 +86,11 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # NOTE: the image is consumed by the smoke workflows, which now authenticate
-      # to GHCR with their own GITHUB_TOKEN (packages: read) before pulling — so the
-      # package intentionally stays private. A previous attempt to flip it public via
-      # the org package-visibility API returned HTTP 404 (the workflow bot token
-      # cannot change org package visibility), which is why we rely on auth instead.
+      # NOTE: the image is pulled by the smoke workflows, which authenticate to GHCR
+      # with their own GITHUB_TOKEN (packages: read) passed into the composite action
+      # via the `ghcr-token` input — so the pull works whether the package is public or
+      # private. We authenticate regardless of visibility because ghcr requires an
+      # authenticated pull (and it avoids anonymous rate limits). To flip the package to
+      # PUBLIC, change its visibility in the GitHub UI (Packages → docker-android →
+      # Settings → Change visibility): the org package-visibility REST API is blocked for
+      # both the CI bot token (HTTP 404) and the local token (no read:packages scope).

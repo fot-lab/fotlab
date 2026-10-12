@@ -122,9 +122,11 @@ on:
 
 permissions:
   contents: read
-  # Needed so the smoke shards can `docker login ghcr.io` and pull our private
-  # prebuilt emulator image (ghcr.io/fot-lab/docker-android:api-33) instead of
-  # relying on the package being public.
+  # Needed so the smoke shards can `docker login ghcr.io` and pull our
+  # prebuilt emulator image (ghcr.io/fot-lab/docker-android:api-33). The package
+  # is published public, but ghcr requires an authenticated pull, so each shard
+  # passes its GITHUB_TOKEN (packages: read = pull) to the composite action via
+  # the `ghcr-token` input.
   packages: read
 
 jobs:
@@ -214,6 +216,7 @@ jobs:
           test-timeout-minutes: '20'
           log-artifact-name: ${{ inputs.log-artifact-name }}
           log-retention-days: ${{ inputs.log-retention-days }}
+          ghcr-token: ${{ secrets.GITHUB_TOKEN }}
 
   # -------- shard 2: identify / decode / load + open routes (20 tests) --------
   test-image-loader:
@@ -269,6 +272,7 @@ jobs:
           test-timeout-minutes: '35'
           log-artifact-name: ${{ inputs.log-artifact-name }}
           log-retention-days: ${{ inputs.log-retention-days }}
+          ghcr-token: ${{ secrets.GITHUB_TOKEN }}
 
   # -------- shard 3: demosaic / develop (12 tests, the heavy shard) --------
   test-image-develop:
@@ -317,6 +321,7 @@ jobs:
           test-timeout-minutes: '60'
           log-artifact-name: ${{ inputs.log-artifact-name }}
           log-retention-days: ${{ inputs.log-retention-days }}
+          ghcr-token: ${{ secrets.GITHUB_TOKEN }}
 
   # -------- shard 4: grading / alchemy + LUT (5 tests) --------
   test-image-alchemy:
@@ -355,3 +360,4 @@ jobs:
           test-timeout-minutes: '60'
           log-artifact-name: ${{ inputs.log-artifact-name }}
           log-retention-days: ${{ inputs.log-retention-days }}
+          ghcr-token: ${{ secrets.GITHUB_TOKEN }}

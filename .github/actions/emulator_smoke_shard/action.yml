@@ -77,6 +77,15 @@ inputs:
     description: Retention of the failure log artifact, in days.
     required: false
     default: '7'
+  ghcr-token:
+    description: >-
+      GITHUB_TOKEN used to `docker login ghcr.io` so the shard can pull our
+      prebuilt emulator image. Composite actions CANNOT read the `secrets`
+      context directly (doing so breaks workflow compilation → startup_failure),
+      so the CALLER passes the token in here. Leave empty to skip login — only
+      safe when the image is public and anonymous ghcr pulls are allowed.
+    required: false
+    default: ''
 
 runs:
   using: composite
@@ -164,13 +173,15 @@ runs:
     # exposed on 5555 (SKIP_AUTH=true removes the adb-key handshake), and we
     # publish ANDROID_SERIAL so the later `adb` calls in run_smoke_shard.sh target
     # exactly this device.
-    # The emulator image lives in our private GHCR (ghcr.io/fot-lab/docker-android).
-    # Log in with the job's GITHUB_TOKEN so `docker run` can pull it — this avoids
-    # Docker Hub anonymous rate limits and does not require the package to be public.
+    # The emulator image lives in our GHCR (ghcr.io/fot-lab/docker-android). It is
+    # published public, but ghcr still requires an authenticated pull, so the caller
+    # passes its GITHUB_TOKEN in via `ghcr-token`. Composite actions cannot read the
+    # `secrets` context (that breaks workflow compilation), so we take it as an input.
     - name: Log in to GitHub Container Registry
+      if: inputs.ghcr-token != ''
       shell: bash
       run: |
-        echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+        echo "${{ inputs.ghcr-token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
     - name: Start docker-android emulator
       shell: bash
