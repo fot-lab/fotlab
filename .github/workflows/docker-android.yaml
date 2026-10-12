@@ -84,14 +84,8 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # Make the freshly-pushed image pullable by the CI workflows without auth
-      # (mirrors the anonymous Docker Hub pull the smoke tests currently rely on).
-      - name: Set GHCR package visibility to public
-        if: github.event_name == 'push'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh api -X PATCH \
-            "/orgs/${{ github.repository_owner }}/packages/container/docker-android/visibility" \
-            -f visibility=public \
-            || echo "::warning::Could not set package visibility; set it to public manually in GHCR."
+      # NOTE: the image is consumed by the smoke workflows, which now authenticate
+      # to GHCR with their own GITHUB_TOKEN (packages: read) before pulling — so the
+      # package intentionally stays private. A previous attempt to flip it public via
+      # the org package-visibility API returned HTTP 404 (the workflow bot token
+      # cannot change org package visibility), which is why we rely on auth instead.

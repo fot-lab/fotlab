@@ -122,6 +122,10 @@ on:
 
 permissions:
   contents: read
+  # Needed so the smoke shards can `docker login ghcr.io` and pull our private
+  # prebuilt emulator image (ghcr.io/fot-lab/docker-android:api-33) instead of
+  # relying on the package being public.
+  packages: read
 
 jobs:
   # Warms the RAW corpus cache exactly once. The emulator is no longer cached:

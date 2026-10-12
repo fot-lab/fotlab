@@ -164,6 +164,14 @@ runs:
     # exposed on 5555 (SKIP_AUTH=true removes the adb-key handshake), and we
     # publish ANDROID_SERIAL so the later `adb` calls in run_smoke_shard.sh target
     # exactly this device.
+    # The emulator image lives in our private GHCR (ghcr.io/fot-lab/docker-android).
+    # Log in with the job's GITHUB_TOKEN so `docker run` can pull it — this avoids
+    # Docker Hub anonymous rate limits and does not require the package to be public.
+    - name: Log in to GitHub Container Registry
+      shell: bash
+      run: |
+        echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
     - name: Start docker-android emulator
       shell: bash
       env:
