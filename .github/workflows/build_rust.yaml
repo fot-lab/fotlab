@@ -170,12 +170,21 @@ jobs:
       #              this also keeps our own tiny crate's artifacts.
       # Must run AFTER Install Rust (the action runs `cargo metadata`) and BEFORE
       # any cargo invocation.
+      # `key: "v1"` forces a one-time complete re-save: the prior `v0` entry was
+      # frozen incomplete (it was first saved before rawalchemy/cxx landed in
+      # 73f9c80, so the 7 cxx-ecosystem build-deps were never in it and cargo
+      # re-downloaded them on every HIT). rust-cache only re-saves on a MISS, so a
+      # stable-key HIT never refreshed that partial entry. Bumping the key mints a
+      # fresh full save once; later runs HIT the complete entry and stop re-fetching.
+      # Drop this suffix after the v1 entry is confirmed warm (see CI log:
+      # "Cache hit for: v1-rust-build-..." with no "Downloading crates").
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: app/src/binding/rust/rawler_fotlab -> target
           cache-all-crates: true
           env-vars: NDK_VERSION MIN_API DNGLAB_SHA
+          key: "v1"
 
       - name: Install cargo-ndk
         run: cargo install cargo-ndk --locked
@@ -336,6 +345,9 @@ jobs:
 
       # Same volatile-key rationale as the native job: rawler is a path dep under
       # external/, so its artifacts move with the dnglab submodule SHA.
+      # `key: "v1"` mirrors the native job: forces a one-time complete re-save of
+      # the (registry + target) entry so the cxx-ecosystem build-deps land in the
+      # cache; later runs HIT the complete entry. Remove once the v1 entry is warm.
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
         with:
@@ -344,6 +356,7 @@ jobs:
             app/src/binding/rust/rawler_fotlab -> target
           cache-all-crates: true
           env-vars: DNGLAB_SHA
+          key: "v1"
 
       # `rawtrp_demosaic` is its own workspace (a sibling of rawler_fotlab, not a
       # member of it), hence `--manifest-path` rather than `-p`.
