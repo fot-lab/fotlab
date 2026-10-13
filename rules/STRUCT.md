@@ -79,11 +79,11 @@ ID format: `XXXXXX-XXXXXX-NNNNNN` — fixed length, 18 characters excluding hyph
 
 | Segment | Value | Rule |
 | --- | --- | --- |
-| 1 | `XXXXXX` | Project code, always `FOTLAB` |
+| 1 | `XXXXXX` | Project/domain code — `FOTLAB` shown elsewhere is only an **example**; any 6-character code that fits the item's domain is valid (e.g. `DOCKER`) |
 | 2 | `XXXXXX` | Category code, exactly 6 characters (see table below) |
 | 3 | `NNNNNN` | 6-digit zero-padded sequence, counting independently inside the category |
 
-Example: `FOTLAB-STRUCT-000002` — the second `STRUCT` item.
+Example: `FOTLAB-STRUCT-000002` (using the example project code `FOTLAB`) — the second `STRUCT` item.
 
 The detail file name **must** equal its ID plus `.md`.
 

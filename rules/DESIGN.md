@@ -52,7 +52,7 @@ rules/
 ```markdown
 # {Title}
 
-- ID: FOTLAB-FEATUR-000001
+- ID: XXXXXX-FEATUR-000001
 - Status: Draft
 - Priority: P2
 - Created: YYYY-MM-DD
@@ -80,11 +80,11 @@ ID format: `XXXXXX-XXXXXX-NNNNNN` — fixed length, 18 characters excluding hyph
 
 | Segment | Value | Rule |
 | --- | --- | --- |
-| 1 | `XXXXXX` | Project code, always `FOTLAB` |
+| 1 | `XXXXXX` | Project/domain code — `FOTLAB` shown elsewhere is only an **example**; any 6-character code that fits the item's domain is valid (e.g. `DOCKER`) |
 | 2 | `XXXXXX` | Category code, exactly 6 characters (see table below) |
 | 3 | `NNNNNN` | 6-digit zero-padded sequence, **counting independently inside each category** — the first item of a new category starts at `000001` regardless of other categories |
 
-Example: `FOTLAB-RENDER-000003` — the third `RENDER` item, whatever the `UIXDES` counter is at
+Example: `FOTLAB-RENDER-000003` (using the example project code `FOTLAB`) — the third `RENDER` item
 
 The detail file name **must** equal its ID plus `.md`.
 
