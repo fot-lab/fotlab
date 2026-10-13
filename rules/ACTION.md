@@ -111,14 +111,15 @@ process, not on assertions). Below the floor the same filter is re-run **once** 
 applied by `RawRoutingTest.setUp` before any journey launches), and that run decides.
 Shards without RAW journeys disable the protocol (`raw-journey-tests` empty).
 
-The RAW corpus is written solely by `prep-emulator`, **before** any shard runs,
-so every shard restores a warm corpus. That ordering is why prep uses the split
-`actions/cache/restore` + `actions/cache/save` pair instead of `actions/cache`,
-whose save would run as a post-job step. Centralising the write also means the
-four parallel shards can never race to save the same key; a shard that hits an
-evicted corpus simply re-downloads it. The emulator is NOT cached: each shard
-boots the prebuilt docker-android image and runs its slice against it, so there
-is no emulator cache entry to warm or race (see
+The RAW corpus is **no longer cached**. Each shard downloads the five camera RAW
+files directly from the public `fot-lab/rawdb` `samples` branch on demand
+(guarded by `need-raw`); pulling ~250 MB from the runner is cheap, so spending
+the 10 GiB Actions-cache budget on immutable fixtures is not worth it. The old
+`rawdb-samples-v1` cache entry and its dedicated `prep-emulator` warm job are
+gone — every shard is self-sufficient and the four parallel shards simply fetch
+their own copy. The emulator is likewise NOT cached: each shard boots the
+prebuilt docker-android image and runs its slice against it, so there is no
+emulator cache entry to warm or race (see
 [CI cache layers](#ci-cache-layers-slow--fast-changing)).
 
 See the [Test Strategy](#test-strategy) for what the cases assert.
@@ -174,7 +175,7 @@ Everything else triggers, `external/**` included.
 
 #### CI cache layers (slow → fast changing)
 
-1. **RAW corpus (`fot-lab/rawdb`)** — five camera RAW files (~250 MB: Canon CR2, Sony ARW ×2, Nikon NEF, Panasonic RW2), keyed `rawdb-samples-v1` and never re-keyed, because the samples are immutable test fixtures. Owned by `smoke_emulator.yaml`, cached on the runner and `adb push`ed into the app's external files dir. Without the cache every smoke run would re-download 250 MB for files that never change.
+1. ~~**RAW corpus (`fot-lab/rawdb`)**~~ — **No longer a cache layer.** The five camera RAW files (~250 MB: Canon CR2, Sony ARW ×2, Nikon NEF, Panasonic RW2) used to be a `rawdb-samples-v1` cache entry owned by `smoke_emulator.yaml`. They are now pulled directly from the public `fot-lab/rawdb` `samples` branch by each shard on demand (cheap from the runner), so the immutable fixtures no longer consume the Actions-cache budget. See [Downloads deliberately left uncached](#downloads-deliberately-left-uncached).
 2. **Emulator (docker-android image pull)** — each shard boots `halimqarroum/docker-android:api-33` with `docker run --device /dev/kvm`; the image is **pulled per job** (~2.5 GB compressed, ~5.8 GB on disk) and lives on the runner, **not** in the 10 GiB Actions-cache budget. That is the whole point of retiring the self-built AVD + emulator-cache entry (which was ~4–6 GB and competed with the Gradle/Rust layers for the cap). The image is keyed by tag, so a tag bump re-pulls; mirroring to `ghcr.io/fot-lab/docker-android:api-33` keeps pulls off Docker Hub's anonymous rate limit. There is deliberately **no** cache layer for the emulator — see `ACTION-PREPIN-000002`.
 3. **NDK** — preinstalled at `$ANDROID_HOME/ndk/<ver>` on the image; the `install_ndk` fallback `actions/cache` is keyed by NDK version alone (`Linux-ndk-<ver>`). Our code and Rust rebuilds never invalidate it.
 4. **Rust toolchain** — `~/.rustup` (host `rustc`/`cargo` plus the four Android target std libraries), owned by `build_rust.yaml`. `rust-cache` never covered this, so `dtolnay/rust-toolchain` re-fetched `info: downloading 4 components` (~250 MB) on **every** run. It changes only when the `stable` channel moves (every ~6 weeks), hence its place near the top. The restore is by **prefix** and the save is keyed by the toolchain actually installed (`<os>-rustup-<rustc version>`), because a constant key cannot work: `actions/cache` never re-saves an entry it restored, so a fixed key would freeze the archive at the release current on creation day and re-download the difference forever. Each Rust release therefore mints one new entry; the previous one is dead weight and falls to the quota-hygiene pass. See [the layer's comment](.github/workflows/build_rust.yaml) for the full reasoning.
@@ -183,7 +184,7 @@ Everything else triggers, `external/**` included.
 
 `DNGLAB_SHA` is fed via rust-cache `env-vars` (tail of the key), **not** via `key` (which sits before the lockfile segment): on a submodule bump the progressive prefix restore still matches the previous run at the lockfile segment, so layer 5 stays warm and cargo re-fingerprints/rebuilds only rawler + the first-party crate. A mid-chain `key: dnglab-<sha>` would discard the dependency layer on every bump. Layers 5–6 live in one archive because rust-cache always caches `$CARGO_HOME` together with the workspace target; the layering is expressed through key-chain fallback, not separate archives.
 
-Layer 1 is written by the `prep-emulator` job and restored by every shard; the emulator image (layer 2) is pulled per job, not cached; layers 3–6 belong to the `rust` job. The Gradle dependency/output cache restored by `gradle/actions/setup-gradle` is a further, unlisted layer: each shard restores what the `apk` job wrote, so `connectedDebugAndroidTest` re-runs only the androidTest slice instead of recompiling the application. That layer is real, not theoretical: the `apk` job's log shows most tasks `FROM-CACHE` (resources, manifests, dexing) and `~/.gradle/caches/build-cache-1` inside the restored entry, because `setup-gradle` passes `--build-cache`.
+The RAW corpus is no longer a cache layer (it is fetched directly by each shard — see item 1 above); the emulator image (layer 2) is pulled per job, not cached; layers 3–6 belong to the `rust` job. The Gradle dependency/output cache restored by `gradle/actions/setup-gradle` is a further, unlisted layer: each shard restores what the `apk` job wrote, so `connectedDebugAndroidTest` re-runs only the androidTest slice instead of recompiling the application. That layer is real, not theoretical: the `apk` job's log shows most tasks `FROM-CACHE` (resources, manifests, dexing) and `~/.gradle/caches/build-cache-1` inside the restored entry, because `setup-gradle` passes `--build-cache`.
 
 #### Downloads deliberately left uncached
 
@@ -193,6 +194,7 @@ These still cross the network on every run. Each is a conscious trade, not an ov
 | --- | --- | --- |
 | Git submodules — `external/**` (dnglab, RawTherapee, colour, exiftool, rawloader) | a full clone of each, every run | The checked-out submodule tree is exactly what the Rust slice *compiles*, so a stale entry would silently build the wrong source — the one outcome an `external/**` bump must never produce. `actions/checkout` re-clones instead. |
 | The actions themselves — `Download action repository '<owner>/<repo>@<ref>'` | small, per action | Fetching each action's code is inherent to hosted runners; there is nothing in the workflow to cache. |
+| RAW corpus — `fot-lab/rawdb` `samples` branch (5 camera RAW files, ~250 MB total) | ~250 MB per raw shard, every run | Pulled directly from GitHub by each shard (`need-raw`); immutable but cheap to fetch from the runner, so not worth an Actions-cache entry. Previously the `rawdb-samples-v1` cache. |
 
 #### Quota hygiene
 
@@ -282,7 +284,7 @@ Do **not** prune to fewer than one entry per family, and leave the deliberate sa
     **size** of the decoded PNG: Coil can at best pull a RAW container's embedded
     preview (a few hundred to ~2k px wide), so a frame narrower than 3000 px means
     the pixels came from a preview and the rawler path did not run. The corpus is
-    the public `fot-lab/rawdb` `samples` branch, cached as `rawdb-samples-v1` and
+    the public `fot-lab/rawdb` `samples` branch, downloaded directly by each shard and
     pushed by `adb` into the emulated SD card (`/sdcard/Pictures/rawdb`) and picked up the way a real photo is: indexed into MediaStore, imported by `LibraryCore.importUris` (the virtual `uri_storage` mapping, no file is ever copied), thumbnail tapped in the real `LibraryScreen` grid, then the viewer's "Open in Studio" button, whose `StudioEngine.setCurrentNode` is what the assertion reads.
     which needs no storage permission. See [Emulator Smoke Test](#emulator-smoke-test).
 - The emulator job runs on PRs as well as on `main`, since both take the

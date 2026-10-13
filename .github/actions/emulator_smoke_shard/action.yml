@@ -133,13 +133,35 @@ runs:
         mkdir -p app/build/generated/uniffi/main/kotlin
         cp -r native-artifacts/kotlin/. app/build/generated/uniffi/main/kotlin/
 
-    # -------- RAW corpus (warmed by prep; shards only restore) --------
-    - name: Restore RAW sample cache
+    # -------- RAW corpus (fot-lab/rawdb) — pulled directly from GitHub, not cached --------
+    # The samples live in the public `fot-lab/rawdb` `samples` branch; pulling them
+    # from the runner is cheap, so each shard downloads on demand instead of spending
+    # the 10 GiB Actions-cache budget on ~250 MB of immutable fixtures. (We used to warm
+    # a `rawdb-samples-v1` cache in a dedicated prep job; that entry is gone — see
+    # ACTION.md "CI cache layers".)
+    - name: Download RAW samples
       if: inputs.need-raw == 'true'
-      uses: actions/cache/restore@v6
-      with:
-        path: raw-samples
-        key: rawdb-samples-v1
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p raw-samples
+        base="https://github.com/fot-lab/rawdb/raw/refs/heads/samples"
+        curl -fL --retry 3 --retry-delay 5 \
+          -o "raw-samples/Canon EOS 5DS_ISO_1000_RAW.CR2" \
+          "$base/Canon/EOS%205DS/Canon%20EOS%205DS_ISO_1000_RAW.CR2"
+        curl -fL --retry 3 --retry-delay 5 \
+          -o "raw-samples/ILCE-7R_ISO_50_14bits_Sony ARW Compressed.ARW" \
+          "$base/Sony/ILCE-7R/ILCE-7R_ISO_50_14bits_Sony%20ARW%20Compressed.ARW"
+        curl -fL --retry 3 --retry-delay 5 \
+          -o "raw-samples/ILCE-7RM2_ISO_100_14bits_Compressed RAW.ARW" \
+          "$base/Sony/ILCE-7RM2/ILCE-7RM2_ISO_100_14bits_Compressed%20RAW.ARW"
+        curl -fL --retry 3 --retry-delay 5 \
+          -o "raw-samples/NIKON D850_Large_ISO_64_14bits_Lossless.NEF" \
+          "$base/Nikon/D850/NIKON%20D850_Large_ISO_64_14bits_Lossless.NEF"
+        curl -fL --retry 3 --retry-delay 5 \
+          -o "raw-samples/DC-S1R_ISO_100_6fmt_8368x5584.RW2" \
+          "$base/Panasonic/DC-S1R/DC-S1R_ISO_100_6fmt_8368x5584.RW2"
+        ls -l raw-samples
 
     # -------- Grade LUT fixture (small; alchemy shard only, no cache) --------
     - name: Download V-Log grade LUT cube

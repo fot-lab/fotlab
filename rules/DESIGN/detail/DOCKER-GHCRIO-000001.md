@@ -173,3 +173,10 @@ Green milestone: run `38138502801` (Phase A) — `test_app_smoke` + `test_image_
   permissions; corrected stale comments. Encoding rule corrected so `FOTLAB` is documented as an
   example, not a mandated project-code prefix (this item uses `DOCKER-GHCRIO`). This DESIGN doc
   created.
+- **2026-10-13** — Removed the `rawdb-samples-v1` RAW-corpus cache from the CI cache budget. The
+  `fot-lab/rawdb` samples (~250 MB) are hosted on GitHub and cheap to pull from the runner, so each
+  smoke shard now downloads them directly (`need-raw`) instead of restoring a cached entry. Deleted
+  the `prep-emulator` warm job and the four shards' `needs: [prep-emulator]`; the composite action's
+  "Restore RAW sample cache" step became a "Download RAW samples" step. `rules/ACTION.md` cache-layer
+  item 1 and the "Downloads deliberately left uncached" table updated accordingly. The earlier
+  "rawdb-samples-v1 (246 MB) remains" note no longer holds.

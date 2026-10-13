@@ -38,11 +38,11 @@
 #     compares it against the count AGP reports and fails the job on a mismatch,
 #     so a filter that selects the wrong number can no longer pass quietly.
 #
-# A fifth job, prep-emulator, warms the RAW corpus cache exactly once; all four
-# shards `needs: prep-emulator` and only ever RESTORE it. This keeps cache writes
-# off the parallel jobs, so N shards can never race saving the same cache key.
-# The emulator is NOT cached: each shard boots the prebuilt docker-android image
-# (~2.5 GB pull, on runner disk, NOT in the 10 GiB Actions-cache budget).
+# The RAW corpus (fot-lab/rawdb, ~250 MB) is NOT cached: each shard downloads it
+# directly from GitHub on demand (cheap to pull from the runner), so there is no
+# prep/warm job and no shared-cache race. The emulator is likewise NOT cached:
+# each shard boots the prebuilt docker-android image (~2.5 GB pull, on runner
+# disk, NOT in the 10 GiB Actions-cache budget).
 #
 # -------- shard switchboard --------
 #
@@ -124,65 +124,12 @@ permissions:
   contents: read
 
 jobs:
-  # Warms the RAW corpus cache exactly once. The emulator is no longer cached:
-  # each shard boots the prebuilt docker-android image and runs its slice against
-  # it, so there is nothing to warm for the emulator here. All four shards start
-  # only after this finishes, so their RAW-corpus restores are warm and their
-  # saves are unnecessary (a shard that hits an evicted cache simply re-downloads).
-  prep-emulator:
-    name: Smoke prep (RAW corpus)
-    runs-on: ubuntu-26.04
-    timeout-minutes: 30
-    steps:
-      - name: Check out
-        uses: actions/checkout@v7
-
-      # -------- RAW corpus (fot-lab/rawdb) — immutable, cached once --------
-      - name: Restore RAW sample cache
-        id: raw-samples-cache
-        uses: actions/cache/restore@v6
-        with:
-          path: raw-samples
-          key: rawdb-samples-v1
-
-      - name: Download RAW samples
-        if: steps.raw-samples-cache.outputs.cache-hit != 'true'
-        run: |
-          set -euo pipefail
-          mkdir -p raw-samples
-          base="https://github.com/fot-lab/rawdb/raw/refs/heads/samples"
-          curl -fL --retry 3 --retry-delay 5 \
-            -o "raw-samples/Canon EOS 5DS_ISO_1000_RAW.CR2" \
-            "$base/Canon/EOS%205DS/Canon%20EOS%205DS_ISO_1000_RAW.CR2"
-          curl -fL --retry 3 --retry-delay 5 \
-            -o "raw-samples/ILCE-7R_ISO_50_14bits_Sony ARW Compressed.ARW" \
-            "$base/Sony/ILCE-7R/ILCE-7R_ISO_50_14bits_Sony%20ARW%20Compressed.ARW"
-          curl -fL --retry 3 --retry-delay 5 \
-            -o "raw-samples/ILCE-7RM2_ISO_100_14bits_Compressed RAW.ARW" \
-            "$base/Sony/ILCE-7RM2/ILCE-7RM2_ISO_100_14bits_Compressed%20RAW.ARW"
-          curl -fL --retry 3 --retry-delay 5 \
-            -o "raw-samples/NIKON D850_Large_ISO_64_14bits_Lossless.NEF" \
-            "$base/Nikon/D850/NIKON%20D850_Large_ISO_64_14bits_Lossless.NEF"
-          curl -fL --retry 3 --retry-delay 5 \
-            -o "raw-samples/DC-S1R_ISO_100_6fmt_8368x5584.RW2" \
-            "$base/Panasonic/DC-S1R/DC-S1R_ISO_100_6fmt_8368x5584.RW2"
-          ls -l raw-samples
-        shell: bash
-
-      - name: Save RAW sample cache
-        if: steps.raw-samples-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
-        with:
-          path: raw-samples
-          key: rawdb-samples-v1
-
   # -------- shard 1: app shell + gestures (7 tests, no corpus) --------
   test-app-smoke:
     name: Smoke / test_app_smoke
     # Switchboard: skipped entirely (no emulator container start, no runner minutes) unless this
     # shard's id is in `enabled-shards`.
     if: ${{ contains(fromJSON(inputs.enabled-shards), 'app') }}
-    needs: [prep-emulator]
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     env:
@@ -216,7 +163,6 @@ jobs:
     name: Smoke / test_image_loader
     # Switchboard — see test-app-smoke.
     if: ${{ contains(fromJSON(inputs.enabled-shards), 'loader') }}
-    needs: [prep-emulator]
     runs-on: ubuntu-26.04
     timeout-minutes: 45
     env:
@@ -272,7 +218,6 @@ jobs:
     # Switchboard — OFF by default: five 36..50 MP software demosaics plus the
     # every-menu-option redevelop proof, which the hosted emulator cannot finish.
     if: ${{ contains(fromJSON(inputs.enabled-shards), 'develop') }}
-    needs: [prep-emulator]
     runs-on: ubuntu-26.04
     # 75 min: five 36..50 MP software demosaics (minutes per sample) — the budget
     # the old single job carried, now paid by this shard alone.
@@ -321,7 +266,6 @@ jobs:
     # ("Failed to allocate a 186927576 byte allocation … 35MB until OOM") and of
     # 480 s wait timeouts on this runner.
     if: ${{ contains(fromJSON(inputs.enabled-shards), 'alchemy') }}
-    needs: [prep-emulator]
     runs-on: ubuntu-26.04
     timeout-minutes: 75
     env:
