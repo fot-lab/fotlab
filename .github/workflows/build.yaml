@@ -128,15 +128,6 @@ jobs:
     name: Emulator Smoke Test
     needs: [preflight, rust, apk]
     if: ${{ always() && needs.preflight.outputs.release != 'true' && needs.apk.result == 'success' }}
-    # The called reusable workflow requests `packages: read` (to `docker login`
-    # ghcr.io and pull our prebuilt emulator image). A caller may only grant
-    # permissions it itself holds, so this job must allow `packages: read` too —
-    # otherwise GitHub rejects the call at compile time ("only allowed
-    # 'packages: none'"). Matches the job-level `permissions` pattern used by the
-    # github-release job below.
-    permissions:
-      contents: read
-      packages: read
     uses: ./.github/workflows/smoke_emulator.yaml
     with:
       native-artifact-name: ${{ needs.rust.outputs.artifact-name }}
