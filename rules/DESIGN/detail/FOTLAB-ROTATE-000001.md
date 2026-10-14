@@ -18,7 +18,7 @@ We want a **crop & rotate** capability that is applied **after** the PNG is prod
 Goals:
 
 - G1 — Let the user crop (free-rect, aspect-ratio presets, center/shape masks optional later) and rotate/flip the rendered PNG interactively in the Studio canvas.
-- G2 — Keep crop & rotate **non-destructive** as a parameter model, so the original PNG pixels are preserved and the transform can be re-applied (or undone) without re-developing.
+- G2 — Keep crop & rotate **non-destructive and pure-functional**: the Rust-provided PNG is retained, and the transform is a parameter model (`CropRotateParams`) in fully-relative float ratios, so it re-applies (or undoes) on the retained source with **no Rust re-render** and works on any incoming PNG.
 - G3 — Implement the transform with **first-party Android/AndroidX primitives** + Compose UI, mirroring the shell rule `FOTLAB-UIXDES-000001` (first-party-only UI stack). Evaluate a third-party crop view only as a fallback.
 - G4 — Stay memory-safe on large PNGs (>= 50 MP) by operating on a downscaled preview for interaction and on full resolution only at the final apply/export.
 
@@ -62,24 +62,31 @@ There is **no official Google "crop & rotate" library**. The real first-party pr
 - It is a **terminal stage** layered after the develop/process split (`FOTLAB-PIPELN-000001`). It does not re-enter `RawDecoder`/`developToPng`.
 - Output is a new `Bitmap` for display and (later) export; the source PNG bytes are retained unchanged.
 
-### R2 — Non-destructive parameter model
+### R2 — Pure-functional, fully-relative parameter model
 
-- Crop/rotate state is captured as a single value object, e.g. `CropRotateParams(rotationDegrees: Float, flipHorizontal: Boolean, flipVertical: Boolean, cropRect: RectF, aspectRatioLocked: Boolean?)`.
-- The Studio engine keeps the **original** `Bitmap` plus the current `CropRotateParams`; the transformed bitmap is produced by a pure function `applyCropRotate(src: Bitmap, params: CropRotateParams): Bitmap`.
-- Undo/reset = restore `CropRotateParams` to identity; re-apply without re-developing. Parameters are the unit of persistence for the future export path.
+- The transform is a **pure function**: `applyCropRotate(src: Bitmap, params: CropRotateParams): Bitmap`. Same `src` + same `params` ⇒ byte-identical output; no hidden state, no side effects, no I/O. It is safe to call on every adjustment frame.
+- **The Rust PNG is retained, never released.** `StudioEngine` keeps the original `Bitmap` that the native `RawDecoder.developToPng` (rawler path) or Coil (generic source) handed over. The crop/rotate result is a *derived* bitmap only; the source stays intact so any re-adjustment re-runs the pure function on the source and **never triggers a Rust re-render / RAW re-decode**.
+- All geometry is **normalized to the source PNG** as floating-point ratios, so the identical params produce the identical *proportional* result on **any** incoming PNG regardless of resolution or aspect ratio:
+  - `rotationDegrees: Float` — relative rotation to apply (arbitrary angle; `0f` = identity). Positive = clockwise.
+  - `flipHorizontal: Boolean`, `flipVertical: Boolean` — mirror flags.
+  - `cropNormalized: RectF` — `left`/`top`/`width`/`height` each in `[0, 1]`, relative to the source PNG's own `width`/`height`. Crop pixel size is therefore `ratioW × W` × `ratioH × H`; full-frame = `(0f, 0f, 1f, 1f)`.
+  - `aspectRatioLocked: Float?` — locked output aspect (e.g. `1.0f`, `4f/3f`); `null` = free drag.
+- Undo/reset = restore `CropRotateParams` to identity (`rotationDegrees = 0f`, no flip, `cropNormalized = (0,0,1,1)`); re-apply without re-developing. Parameters are the unit of persistence for the future export path.
 
 ### R3 — Rotate & flip (the geometry)
 
-- Rotate by **90° multiples**: swap width/height and emit the rotated sub-bitmap (no resampling needed; use `Matrix.postRotate` + `createBitmap` with `filter = false`).
-- **Free rotation** (arbitrary angle, e.g. horizon correction): build `Matrix` = translate-to-centre ∘ `postRotate(deg)` ∘ translate-back; compute the rotated bounding box
+- Driven entirely by `rotationDegrees` / `flipHorizontal` / `flipVertical` from R2 — all *relative* to the source, so the same value set behaves identically on any PNG.
+- Rotate by **90° multiples** (`rotationDegrees` is a multiple of 90): swap width/height and emit the rotated sub-bitmap (no resampling needed; `Matrix.postRotate` + `createBitmap` with `filter = false`).
+- **Free rotation** (arbitrary angle, e.g. horizon correction): build `Matrix` = translate-to-centre ∘ `postRotate(θ)` ∘ translate-back, with `θ = rotationDegrees`; compute the rotated bounding box
   `W' = |w·cosθ| + |h·sinθ|`, `H' = |w·sinθ| + |h·cosθ|`; allocate a `W'×H'` target and draw with `filter = true` (bilinear). Bilinear is the platform default; a Lanczos-ish filter in linear light is a **future** optimization (see Open Questions Q4).
-- Flip: `postScale(-1, 1)` / `postScale(1, -1)` about the centre, combined into the same `Matrix`.
+- Flip: `postScale(-1, 1)` / `postScale(1, -1)` about the centre, combined into the same `Matrix` (applied before rotation in the concat order).
 
-### R4 — Crop
+### R4 — Crop (normalized, source-relative)
 
-- Axis-aligned rect crop via `Bitmap.createBitmap(src, rect.left, rect.top, rect.width, rect.height)`.
-- **Aspect-ratio presets** (1:1, 4:3, 3:4, 16:9, 3:2, free) constrain the drag handles; custom ratios saved as user preference (mirrors Image Toolbox).
-- Crop rect is expressed in **source bitmap coordinates** (before rotate), and is reconciled with the rotation so the final rect maps correctly after R3.
+- `cropNormalized` is converted to pixels against the **source** PNG: `rectPx = (cropNormalized.left·W, cropNormalized.top·H, cropNormalized.width·W, cropNormalized.height·H)`.
+- Default pipeline order (pure function): **crop-on-source → flip+rotate**. The crop rect is taken from the un-rotated source (its ratios are fixed by R2), then the whole cropped region is flipped/rotated; the result is deterministic and source-independent. (Alternative order — rotate first, then crop in displayed space — is noted in Open Questions Q6; the stored params stay source-normalized either way.)
+- Axis-aligned rect extraction via `Bitmap.createBitmap(src, rectPx.left, rectPx.top, rectPx.width, rectPx.height)`.
+- **Aspect-ratio presets** (1:1, 4:3, 3:4, 16:9, 3:2, free) constrain the drag handles and map to a locked `aspectRatioLocked` float; custom ratios saved as user preference (mirrors Image Toolbox).
 
 ### R5 — Interactive UI (Compose, first-party)
 
@@ -107,11 +114,11 @@ There is **no official Google "crop & rotate" library**. The real first-party pr
 
 ## Acceptance Criteria
 
-- AC1 — Opening crop/rotate on a rendered PNG shows the image with draggable crop handles and rotate/flip controls; no re-develop (RAW decode) occurs while interacting.
+- AC1 — Opening crop/rotate on a rendered PNG shows the image with draggable crop handles and rotate/flip controls; no re-develop (RAW decode) and **no Rust re-render** occurs while interacting or re-adjusting — every change re-runs the pure `applyCropRotate` on the retained source PNG.
 - AC2 — Applying 90°/−90°/180° rotate and H/V flip produces a correctly oriented bitmap with dimensions swapped where expected; pixels are not blurred (filter = false for 90° multiples).
 - AC3 — Free rotation up to ±45° produces an axis-aligned bitmap with **no clipped corners** (full rotated bounding box) and bilinear smoothing.
 - AC4 — Setting an aspect-ratio preset constrains the crop rect to that ratio; a custom ratio can be saved and reused.
-- AC5 — Reset restores the original framing exactly (identity `CropRotateParams`); the original PNG bytes are unchanged.
+- AC5 — Reset restores the original framing exactly (identity `CropRotateParams`); the original PNG bytes are unchanged and no Rust re-render is required.
 - AC6 — On a ≥ 50 MP PNG, interaction stays responsive (preview-resolution path) and full-res apply completes without OOM under the PERFOR guardrails.
 - AC7 — No new third-party dependency is introduced unless R7 fallback is explicitly approved.
 
@@ -129,7 +136,9 @@ There is **no official Google "crop & rotate" library**. The real first-party pr
 - Q3 — Is crop/rotate a Studio-only edit, or also available on Library thumbnails/preview? Recommend Studio-only for v1.
 - Q4 — Resampling quality: bilinear-in-sRGB (platform default, ships now) vs Lanczos-in-linear (better for large free rotations, needs a custom resampler). Defer Lanczos.
 - Q5 — If a third-party `CropImageView` is chosen for speed, how do we keep it non-destructive and visually consistent with our Compose chrome?
+- Q6 — Crop order: crop-on-source-then-rotate (R4 default, params stay source-normalized and orientation-agnostic) vs rotate-then-crop-in-displayed-space. The default favours source-independence; confirm with UI prototype.
 
 ## Change History
 
 - 2026-10-14 — Created as Draft (`FOTLAB-ROTATE-000001`). Captures background, open-source + Google-primitive research (focus on T8RIN/Image Toolbox), non-destructive Kotlin-side design, and acceptance criteria. Awaiting user approval.
+- 2026-10-14 — Refined R2/R3/R4 per user direction: the transform is a **pure function** `applyCropRotate(src, params)`; the **Rust PNG is retained and never released** so re-adjustment never re-renders in Rust; all geometry is **fully-relative float ratios** (`rotationDegrees`, flip flags, `cropNormalized: RectF` in `[0,1]` of the source PNG). Updated goals/AC and added Q6 (crop order).
