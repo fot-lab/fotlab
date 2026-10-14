@@ -34,4 +34,5 @@ This file contains **only** the item table. No statistics, no changelog — git 
 | `FOTLAB-DEHAZE-000002` | OKLab/OKLCH post-demosaic dehaze — guided-filter haze field inside the OKLab highlight block | `DEHAZE` | Draft | P2 | [detail](rules/DESIGN/detail/FOTLAB-DEHAZE-000002.md) |
 | `DOCKER-GHCRIO-000001` | Docker-Android emulator migration & ghcr.io image strategy | `GHCRIO` | Implemented | P1 | [detail](rules/DESIGN/detail/DOCKER-GHCRIO-000001.md) |
 | `MANUAL-GHWIKI-000001` | Showcase screenshots from CI smoke tests → GitHub Wiki | `GHWIKI` | Draft | P2 | [detail](rules/DESIGN/detail/MANUAL-GHWIKI-000001.md) |
-<!-- Next sequence per category: UIXDES 000007, DATABS 000003, NATIVE 000006, IMGMGR 000002, PIPELN 000002, RENDER 000005, DEHAZE 000003, DEFRNG 000004, GHCRIO 000002, GHWIKI 000002. Append one row per new item; never reuse or renumber IDs. -->
+| `FOTLAB-ROTATE-000001` | Crop & Rotate — Kotlin-side transform on the rendered PNG | `ROTATE` | Draft | P2 | [detail](rules/DESIGN/detail/FOTLAB-ROTATE-000001.md) |
+<!-- Next sequence per category: UIXDES 000007, DATABS 000003, NATIVE 000006, IMGMGR 000002, PIPELN 000002, RENDER 000005, DEHAZE 000003, DEFRNG 000004, GHCRIO 000002, GHWIKI 000002, ROTATE 000002. Append one row per new item; never reuse or renumber IDs. -->
