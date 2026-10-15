@@ -125,8 +125,9 @@ class GradeRecentStore(private val context: Context) {
  * LOG curve picker sheet. Left tab = **Recent** (persisted FIFO history, capped at
  * [RECENT_CAPACITY]); right tab = **Choose algorithm** (none + the full native catalogue, no cap).
  *
- * Opens on the Recent tab and scrolls to the last (most-recent) row; switching to Choose algorithm
- * scrolls to the first row, and switching back to Recent scrolls to the last row again.
+ * Opens on the Recent tab with the newest entry on top: the persisted FIFO history is displayed
+ * reversed (newest-first), so no auto-scroll is needed. Switching to Choose algorithm scrolls to the
+ * first row.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -148,11 +149,10 @@ internal fun LogPickerSheet(
     val recentLabel = stringResource(R.string.studio_grade_recent)
     val chooseLabel = stringResource(R.string.studio_grade_tab_algorithm)
 
-    LaunchedEffect(selectedTab, recent.size) {
-        if (selectedTab == RECENT_TAB) {
-            if (recent.isEmpty()) return@LaunchedEffect
-            listState.scrollToItem(recent.lastIndex)
-        } else {
+    // The Recent tab now renders newest-first (top), so no auto-scroll is performed; the CHOOSE tab
+    // simply resets to its first row when opened.
+    LaunchedEffect(selectedTab) {
+        if (selectedTab == CHOOSE_TAB) {
             listState.scrollToItem(0)
         }
     }
@@ -180,7 +180,7 @@ internal fun LogPickerSheet(
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 LazyColumn(state = listState, contentPadding = PaddingValues(vertical = 8.dp)) {
                     if (selectedTab == RECENT_TAB) {
-                        itemsIndexed(recent, key = { _, v -> "log-recent-$v" }) { _, value ->
+                        itemsIndexed(recent.reversed(), key = { _, v -> "log-recent-$v" }) { _, value ->
                             RecentRow(
                                 label = value,
                                 selected = value == logSpace,
@@ -213,8 +213,8 @@ internal fun LogPickerSheet(
  * LUT picker sheet. Left tab = **Recent** (persisted FIFO history of picked filter file URIs, capped
  * at [RECENT_CAPACITY]); right tab = **Choose filter** (none + the SAF file picker).
  *
- * Same scroll contract as [LogPickerSheet]: opens on Recent scrolled to the last row, Choose filter
- * scrolls to the first row, and back to Recent scrolls to the last row again.
+ * Same display order as [LogPickerSheet]: the Recent tab shows the persisted FIFO history reversed
+ * (newest-first, on top) with no auto-scroll; Choose filter scrolls to the first row.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -238,11 +238,10 @@ internal fun LutPickerSheet(
     val recentLabel = stringResource(R.string.studio_grade_recent)
     val chooseLabel = stringResource(R.string.studio_grade_tab_filter)
 
-    LaunchedEffect(selectedTab, recent.size) {
-        if (selectedTab == RECENT_TAB) {
-            if (recent.isEmpty()) return@LaunchedEffect
-            listState.scrollToItem(recent.lastIndex)
-        } else {
+    // The Recent tab now renders newest-first (top), so no auto-scroll is performed; the CHOOSE tab
+    // simply resets to its first row when opened.
+    LaunchedEffect(selectedTab) {
+        if (selectedTab == CHOOSE_TAB) {
             listState.scrollToItem(0)
         }
     }
@@ -274,7 +273,7 @@ internal fun LutPickerSheet(
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 LazyColumn(state = listState, contentPadding = PaddingValues(vertical = 8.dp)) {
                     if (selectedTab == RECENT_TAB) {
-                        itemsIndexed(recent, key = { _, v -> "lut-recent-$v" }) { _, value ->
+                        itemsIndexed(recent.reversed(), key = { _, v -> "lut-recent-$v" }) { _, value ->
                             RecentRow(
                                 label = runCatching { Uri.parse(value).lastPathSegment }.getOrNull() ?: value,
                                 selected = false,

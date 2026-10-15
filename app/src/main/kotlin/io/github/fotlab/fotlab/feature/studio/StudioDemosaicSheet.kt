@@ -117,8 +117,9 @@ class DemosaicRecentStore(private val context: Context) {
  * Demosaic picker sheet. Left tab = **Recent** (persisted FIFO history of chosen algorithm ids, capped
  * at [DEMOSAIC_RECENT_CAPACITY]); right tab = **Choose algorithm** (the full native catalogue, no cap).
  *
- * Opens on the Recent tab and scrolls to the last (most-recent) row; switching to Choose algorithm
- * scrolls to the first row, and switching back to Recent scrolls to the last row again.
+ * Opens on the Recent tab with the newest entry on top: the persisted FIFO history is displayed
+ * reversed (newest-first), so no auto-scroll is needed. Switching to Choose algorithm scrolls to the
+ * first row.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -140,11 +141,10 @@ internal fun DemosaicPickerSheet(
     val recentLabel = stringResource(R.string.studio_grade_recent)
     val chooseLabel = stringResource(R.string.studio_grade_tab_algorithm)
 
-    LaunchedEffect(selectedTab, recent.size) {
-        if (selectedTab == RECENT_TAB) {
-            if (recent.isEmpty()) return@LaunchedEffect
-            listState.scrollToItem(recent.lastIndex)
-        } else {
+    // The Recent tab now renders newest-first (top), so no auto-scroll is performed; the CHOOSE tab
+    // simply resets to its first row when opened.
+    LaunchedEffect(selectedTab) {
+        if (selectedTab == CHOOSE_TAB) {
             listState.scrollToItem(0)
         }
     }
@@ -172,7 +172,7 @@ internal fun DemosaicPickerSheet(
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 LazyColumn(state = listState, contentPadding = PaddingValues(vertical = 8.dp)) {
                     if (selectedTab == RECENT_TAB) {
-                        itemsIndexed(recent, key = { _, v -> "demosaic-recent-$v" }) { _, id ->
+                        itemsIndexed(recent.reversed(), key = { _, v -> "demosaic-recent-$v" }) { _, id ->
                             val candidate = candidates.firstOrNull { it.id == id }
                             if (candidate != null) {
                                 val enabled = candidate.id != SUPERPIXEL_ID || superpixelSupported != false
