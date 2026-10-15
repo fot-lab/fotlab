@@ -248,7 +248,7 @@ pub fn correct_loca_bayer(
         [cfa.fc(0, 0) as i32, cfa.fc(0, 1) as i32],
         [cfa.fc(1, 0) as i32, cfa.fc(1, 1) as i32],
     ];
-    let fc = |r: usize, c: usize| cfa2[(r & 1)][(c & 1)] as usize;
+    let fc = |r: usize, c: usize| cfa2[r & 1][c & 1] as usize;
 
     // Per-position signed G delta at G positions (positive = purple raise,
     // negative = green lower; at most one branch fires per position). O(W*H).

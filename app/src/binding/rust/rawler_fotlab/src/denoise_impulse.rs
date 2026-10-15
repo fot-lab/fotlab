@@ -78,7 +78,7 @@ const MAX_NEIGH: usize = (2 * RADIUS + 1) * (2 * RADIUS + 1) - 1;
 /// Multi-channel (pre-coloured, `cpp > 1`) input is left untouched by the length
 /// check.
 pub(crate) fn denoise_impulse(
-    mut pixels: Vec<f32>,
+    pixels: Vec<f32>,
     width: usize,
     height: usize,
     strength: Option<f32>,

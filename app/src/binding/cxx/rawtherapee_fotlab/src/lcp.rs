@@ -73,20 +73,18 @@ pub fn parse_lcp(path: &str) -> Result<LcpParams, DeprofileError> {
 
     cxx::let_cxx_string!(cpath = path);
     let rc = panic::catch_unwind(AssertUnwindSafe(|| {
-        unsafe {
-            rt_parse_lcp(
-                &cpath,
-                &mut profile_name,
-                &mut camera,
-                &mut lens,
-                &mut is_raw,
-                &mut is_fisheye,
-                &mut sensor_format_factor,
-                &mut pers_model_count,
-                &mut focal_length,
-                &mut errbuf,
-            )
-        }
+        rt_parse_lcp(
+            &cpath,
+            &mut profile_name,
+            &mut camera,
+            &mut lens,
+            &mut is_raw,
+            &mut is_fisheye,
+            &mut sensor_format_factor,
+            &mut pers_model_count,
+            &mut focal_length,
+            &mut errbuf,
+        )
     }))
     .unwrap_or(-99);
 
@@ -135,22 +133,20 @@ pub fn compute_lcp_model(
 
     cxx::let_cxx_string!(cpath = path);
     let rc = panic::catch_unwind(AssertUnwindSafe(|| {
-        unsafe {
-            rt_compute_lcp_model(
-                &cpath,
-                focal_length,
-                focal_length_35mm,
-                focus_dist,
-                aperture,
-                raw_rotation_deg,
-                w as i32,
-                h as i32,
-                &mut model,
-                &mut is_fisheye,
-                &mut swap_xy,
-                &mut errbuf,
-            )
-        }
+        rt_compute_lcp_model(
+            &cpath,
+            focal_length,
+            focal_length_35mm,
+            focus_dist,
+            aperture,
+            raw_rotation_deg,
+            w as i32,
+            h as i32,
+            &mut model,
+            &mut is_fisheye,
+            &mut swap_xy,
+            &mut errbuf,
+        )
     }))
     .unwrap_or(-99);
 

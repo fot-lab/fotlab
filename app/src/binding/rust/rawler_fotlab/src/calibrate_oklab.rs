@@ -8,8 +8,8 @@
 //! them, then hands them to the functions here. Nothing in this module depends on a
 //! database, a `data` struct, or on the destination working-space primaries.
 //!
-//! The four reusable transforms — [`CameraSpaceRGB2D65XYZ`], [`D65XYZ2CameraSpaceRGB`],
-//! [`D65XYZ2OKLab`], [`OKLab2D65XYZ`] — are pure functions: every input is an explicit
+//! The four reusable transforms — [`camera_space_rgb_to_d65_xyz`], [`d65_xyz_to_camera_space_rgb`],
+//! [`d65_xyz_to_oklab`], [`oklab_to_d65_xyz`] — are pure functions: every input is an explicit
 //! parameter (matrices are passed in by reference; large buffers would likewise be passed
 //! by reference), and they reference only the fixed standard OKLab constants. They are
 //! `pub` so any other Rust software can call them directly. The OKLab matrices are the
@@ -89,26 +89,26 @@ fn clamp01(x: f32) -> f32 {
 /// Pure: `cam2xyz` (the caller-supplied camera→XYZ(D65) 3×3 map) and the pixel are the
 /// only inputs. No state, no database.
 #[inline(always)]
-pub fn CameraSpaceRGB2D65XYZ(cam: [f32; 3], cam2xyz: &[[f32; 3]; 3]) -> [f32; 3] {
+pub fn camera_space_rgb_to_d65_xyz(cam: [f32; 3], cam2xyz: &[[f32; 3]; 3]) -> [f32; 3] {
   matvec3(cam2xyz, cam)
 }
 
 /// CIE XYZ (D65) → camera-space linear RGB.
 ///
 /// Pure: `xyz2cam_eff` (the caller-supplied XYZ(D65)→camera 3×3 map) and the pixel are
-/// the only inputs. This is the exact inverse of [`CameraSpaceRGB2D65XYZ`] when the two
+/// the only inputs. This is the exact inverse of [`camera_space_rgb_to_d65_xyz`] when the two
 /// maps are each other's inverse (which the pipeline guarantees by construction).
 #[inline(always)]
-pub fn D65XYZ2CameraSpaceRGB(xyz: [f32; 3], xyz2cam_eff: &[[f32; 3]; 3]) -> [f32; 3] {
+pub fn d65_xyz_to_camera_space_rgb(xyz: [f32; 3], xyz2cam_eff: &[[f32; 3]; 3]) -> [f32; 3] {
   matvec3(xyz2cam_eff, xyz)
 }
 
 /// CIE XYZ (D65) → OKLab.
 ///
 /// Pure: uses only the fixed standard [`OKLAB_M1`] / [`OKLAB_M2`] constants (no inputs
-/// beyond the pixel). Exact inverse of [`OKLab2D65XYZ`].
+/// beyond the pixel). Exact inverse of [`oklab_to_d65_xyz`].
 #[inline(always)]
-pub fn D65XYZ2OKLab(xyz: [f32; 3]) -> [f32; 3] {
+pub fn d65_xyz_to_oklab(xyz: [f32; 3]) -> [f32; 3] {
   let lms = matvec3(&OKLAB_M1, xyz);
   let lms = [lms[0].cbrt(), lms[1].cbrt(), lms[2].cbrt()];
   matvec3(&OKLAB_M2, lms)
@@ -117,9 +117,9 @@ pub fn D65XYZ2OKLab(xyz: [f32; 3]) -> [f32; 3] {
 /// OKLab → CIE XYZ (D65).
 ///
 /// Pure: uses only the fixed standard [`OKLAB_M1_INV`] / [`OKLAB_M2_INV`] constants (no
-/// inputs beyond the pixel). Exact inverse of [`D65XYZ2OKLab`].
+/// inputs beyond the pixel). Exact inverse of [`d65_xyz_to_oklab`].
 #[inline(always)]
-pub fn OKLab2D65XYZ(lab: [f32; 3]) -> [f32; 3] {
+pub fn oklab_to_d65_xyz(lab: [f32; 3]) -> [f32; 3] {
   let lms = matvec3(&OKLAB_M2_INV, lab);
   let lms = [lms[0] * lms[0] * lms[0], lms[1] * lms[1] * lms[1], lms[2] * lms[2] * lms[2]];
   matvec3(&OKLAB_M1_INV, lms)
@@ -217,8 +217,8 @@ pub fn oklab_highlight_compress_pixel(
   cam2xyz: &[[f32; 3]; 3],
   xyz2cam_eff: &[[f32; 3]; 3],
 ) -> [f32; 3] {
-  let xyz = CameraSpaceRGB2D65XYZ(cam, cam2xyz);
-  let lab = D65XYZ2OKLab(xyz);
+  let xyz = camera_space_rgb_to_d65_xyz(cam, cam2xyz);
+  let lab = d65_xyz_to_oklab(xyz);
   let l = lab[0];
   // Below the knee — or a neutral / out-of-gamut-negative-L pixel — leave the camera pixel
   // exactly as-is: no f32 round-trip error bleeds into non-highlight regions.
@@ -238,8 +238,8 @@ pub fn oklab_highlight_compress_pixel(
   let f = t * t * (3.0 - 2.0 * t);
   let scale = 1.0 - f;
   let lab2 = [l, a * scale, b * scale];
-  let xyz2 = OKLab2D65XYZ(lab2);
-  D65XYZ2CameraSpaceRGB(xyz2, xyz2cam_eff)
+  let xyz2 = oklab_to_d65_xyz(lab2);
+  d65_xyz_to_camera_space_rgb(xyz2, xyz2cam_eff)
 }
 
 /// Parallel (rayon) whole-buffer variant of [`oklab_highlight_compress_pixel`].
@@ -272,8 +272,8 @@ mod oklab_tests {
       [0.2, 0.4, 0.3],
       [0.8718, 0.8427, 1.0626],
     ] {
-      let lab = D65XYZ2OKLab(xyz);
-      let back = OKLab2D65XYZ(lab);
+      let lab = d65_xyz_to_oklab(xyz);
+      let back = oklab_to_d65_xyz(lab);
       for i in 0..3 {
         assert!(
           (back[i] - xyz[i]).abs() < 1e-3,
@@ -294,7 +294,7 @@ mod oklab_tests {
     // inverting a neutral lab. With zero chroma the bypass short-circuits (or round-trips to
     // ~machine precision) and returns the pixel unchanged, leaving the white point exactly
     // where the matrix put it.
-    let neutral_xyz = OKLab2D65XYZ([0.95_f32, 0.0, 0.0]);
+    let neutral_xyz = oklab_to_d65_xyz([0.95_f32, 0.0, 0.0]);
     let out = oklab_highlight_compress_pixel(neutral_xyz, &cam2xyz, &xyz2cam_eff);
     for i in 0..3 {
       assert!(
@@ -319,10 +319,10 @@ mod oklab_tests {
     let xyz2cam_eff = [[1.0_f32, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
     // A bright, chroma-rich pixel above the knee — this is the sRGB [1.00, 0.78, 1.00]
     // magenta cast, expressed in XYZ so camera == XYZ under the identity maps.
-    let lab_in = D65XYZ2OKLab([1.0, 0.78, 1.0]);
+    let lab_in = d65_xyz_to_oklab([1.0, 0.78, 1.0]);
     let c_in = (lab_in[1] * lab_in[1] + lab_in[2] * lab_in[2]).sqrt();
     let out = oklab_highlight_compress_pixel([1.0, 0.78, 1.0], &cam2xyz, &xyz2cam_eff);
-    let lab_out = D65XYZ2OKLab(out);
+    let lab_out = d65_xyz_to_oklab(out);
     let c_out = (lab_out[1] * lab_out[1] + lab_out[2] * lab_out[2]).sqrt();
     assert!(c_out < c_in, "highlight chroma should shrink: {} vs {}", c_out, c_in);
   }

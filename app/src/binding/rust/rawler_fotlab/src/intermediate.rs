@@ -102,7 +102,14 @@ pub(crate) struct TagsDngLab(pub BTreeMap<String, TagValue>);
 pub(crate) struct TagsFotLab(pub BTreeMap<String, TagValue>);
 
 /// Self-describing nested value for the non-DNG-ISO namespaces.
+///
+/// `#[allow(dead_code)]`: the `Str` / `List` / `Map` payloads and the `Bool` /
+/// `Bytes` variants are populated by the `FotRaw` tag builders (`dnglab_tags`,
+/// `fotlab_tags`) and consumed on the *other* side of the FFI boundary (the
+/// `FotRaw` tag stream), so Rust's intra-crate analysis cannot observe the
+/// reads. The full variant set is kept for format completeness.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub(crate) enum TagValue {
     Bool(bool),
     I64(i64),
