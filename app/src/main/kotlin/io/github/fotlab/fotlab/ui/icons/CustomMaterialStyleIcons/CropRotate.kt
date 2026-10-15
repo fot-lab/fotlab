@@ -49,13 +49,52 @@ public val CustomMaterialStyleIcons.Filled.CropRotate: ImageVector
                 strokeAlpha = 1.0f,
                 pathFillType = PathFillType.NonZero,
             ) {
-                addPathNodes(
-                    "M7.47 21.49C4.2 19.93 1.86 16.76 1.5 13H0c.51 6.16 5.66 11 11.95 11 " +
-                        ".23 0 .44-.02.66-.03L8.8 20.15l-1.33 1.34zM12.05 0c-.23 0-.44.02-" +
-                        ".66.04l3.81 3.81 1.33-1.33C19.8 4.07 22.14 7.24 22.5 11H24c-.51-6.16" +
-                        "-5.66-11-11.95-11zM16 14h2V8c0-1.11-.9-2-2-2h-6v2h6v6zm-8 2V4H6v2H4v2h2" +
-                        "v8c0 1.1.89 2 2 2h8v2h2v-2h2v-2H8z",
-                )
+                // Top-left arc arrow.
+                moveTo(7.47f, 21.49f)
+                curveTo(4.2f, 19.93f, 1.86f, 16.76f, 1.5f, 13f)
+                horizontalLineTo(0f)
+                relativeCurveTo(0.51f, 6.16f, 5.66f, 11f, 11.95f, 11f)
+                relativeCurveTo(0.23f, 0f, 0.44f, -0.02f, 0.66f, -0.03f)
+                lineTo(8.8f, 20.15f)
+                relativeLineTo(-1.33f, 1.34f)
+                close()
+                // Top-right arc arrow.
+                moveTo(12.05f, 0f)
+                relativeCurveTo(-0.23f, 0f, -0.44f, 0.02f, -0.66f, 0.04f)
+                relativeLineTo(3.81f, 3.81f)
+                relativeLineTo(1.33f, -1.33f)
+                curveTo(19.8f, 4.07f, 22.14f, 7.24f, 22.5f, 11f)
+                horizontalLineTo(24f)
+                relativeCurveTo(-0.51f, -6.16f, -5.66f, -11f, -11.95f, -11f)
+                close()
+                // Crop frame (outer L).
+                moveTo(16f, 14f)
+                relativeHorizontalLineTo(2f)
+                verticalLineTo(8f)
+                relativeCurveTo(0f, -1.11f, -0.9f, -2f, -2f, -2f)
+                relativeHorizontalLineTo(-6f)
+                relativeVerticalLineTo(2f)
+                relativeHorizontalLineTo(6f)
+                relativeVerticalLineTo(6f)
+                close()
+                // Inner tick.
+                moveTo(8f, 16f)
+                verticalLineTo(4f)
+                horizontalLineTo(6f)
+                relativeVerticalLineTo(2f)
+                horizontalLineTo(4f)
+                relativeVerticalLineTo(2f)
+                relativeHorizontalLineTo(2f)
+                relativeVerticalLineTo(8f)
+                relativeCurveTo(0f, 1.1f, 0.89f, 2f, 2f, 2f)
+                relativeHorizontalLineTo(8f)
+                relativeVerticalLineTo(2f)
+                relativeHorizontalLineTo(2f)
+                relativeVerticalLineTo(-2f)
+                relativeHorizontalLineTo(2f)
+                relativeVerticalLineTo(-2f)
+                horizontalLineTo(8f)
+                close()
             }
         }
         return _cropRotate!!
