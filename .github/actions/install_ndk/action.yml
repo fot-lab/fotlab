@@ -7,6 +7,13 @@
 # requires cmdline-tools, which install_sdk guarantees when it runs first
 # (rules/ACTION.md toolchain order). Kept separate from install_sdk so a Kotlin
 # build does not pay for an NDK it never uses.
+#
+# Diagnostics: every step echoes its resolved inputs and the actual on-disk
+# state, so a failed run shows exactly which runner image/architecture it landed
+# on, what NDKs that image preinstalled, whether sdkmanager was reachable, and
+# the final installed revision. This is what makes the preinstall-drift
+# flakiness (ubuntu-26.04 is a floating label across image builds) debuggable
+# instead of a silent exit 1.
 
 name: Install Android NDK
 description: Ensure the pinned NDK exists (prefer runner preinstall, install+cache only when missing).
@@ -29,14 +36,28 @@ runs:
         ANDROID_HOME: ${{ inputs.android-home }}
         NDK_VERSION: ${{ inputs.ndk-version }}
       run: |
+        set -euo pipefail
+        echo "== Check preinstalled NDK =="
+        echo "  ANDROID_HOME = $ANDROID_HOME"
+        echo "  NDK_VERSION  = $NDK_VERSION"
+        echo "  ImageOS      = ${ImageOS:-<unset>}"
+        echo "  RUNNER_ARCH  = ${RUNNER_ARCH:-<unset>}"
         NDK_DIR="$ANDROID_HOME/ndk/$NDK_VERSION"
+        echo "  Target NDK dir: $NDK_DIR"
+        echo "  NDKs present under $ANDROID_HOME/ndk/:"
+        if [ -d "$ANDROID_HOME/ndk" ]; then
+          ls -1 "$ANDROID_HOME/ndk" 2>/dev/null | sed 's/^/    - /' || true
+          [ -n "$(ls -1 "$ANDROID_HOME/ndk" 2>/dev/null)" ] || echo "    (ndk/ is empty)"
+        else
+          echo "    (ndk/ directory does not exist at $ANDROID_HOME)"
+        fi
         # source.properties is written by every sdkmanager NDK install and is
         # what AGP itself probes; its presence means the toolchain is complete.
         if [ -f "$NDK_DIR/source.properties" ]; then
-          echo "NDK $NDK_VERSION already present at $NDK_DIR — nothing to install."
+          echo "  => NDK $NDK_VERSION already present at $NDK_DIR — nothing to install."
           echo "need-install=false" >> "$GITHUB_OUTPUT"
         else
-          echo "NDK $NDK_VERSION missing at $NDK_DIR"
+          echo "  => NDK $NDK_VERSION MISSING at $NDK_DIR — will install via sdkmanager fallback."
           echo "need-install=true" >> "$GITHUB_OUTPUT"
         fi
 
@@ -60,11 +81,58 @@ runs:
         NDK_VERSION: ${{ inputs.ndk-version }}
       run: |
         set -euo pipefail
-        # install_sdk guarantees sdkmanager on PATH (setup-android's bundled
-        # cmdline-tools/<ver>/bin); the binary need not live under our root.
-        command -v sdkmanager
-        yes | sdkmanager --licenses > /dev/null 2>&1 || true
-        sdkmanager --install "ndk;$NDK_VERSION"
+        echo "== Install NDK (fallback) =="
+        echo "  ANDROID_HOME     = $ANDROID_HOME"
+        echo "  ANDROID_SDK_ROOT = $ANDROID_SDK_ROOT"
+        echo "  NDK_VERSION      = $NDK_VERSION"
+
+        # Probe 1 — direct PATH lookup. install_sdk (setup-android) is expected
+        # to have exported sdkmanager's cmdline-tools dir to PATH before this
+        # step. A miss here is NOT fatal: it is captured with `|| true` so the
+        # script never aborts on the probe and the filesystem fallback below
+        # still runs.
+        SDKMANAGER="$(command -v sdkmanager || true)"
+        if [ -n "$SDKMANAGER" ]; then
+          echo "  sdkmanager (PATH): $SDKMANAGER"
+        else
+          echo "::warning::sdkmanager not found on PATH — will probe known cmdline-tools locations."
+          echo "  PATH=$PATH"
+        fi
+
+        # Probe 2 — explicit filesystem lookup under the SDK root. Covers the
+        # case where install_sdk installed cmdline-tools but did not export its
+        # bin dir to PATH. Runs only when Probe 1 missed; never aborts.
+        if [ -z "$SDKMANAGER" ]; then
+          CANDIDATES=(
+            "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+            "$ANDROID_HOME/cmdline-tools/bin/sdkmanager"
+          )
+          for p in "${CANDIDATES[@]}"; do
+            if [ -x "$p" ]; then SDKMANAGER="$p"; break; fi
+          done
+        fi
+        if [ -z "$SDKMANAGER" ]; then
+          FOUND="$(find "$ANDROID_HOME/cmdline-tools" -maxdepth 3 -name sdkmanager -type f 2>/dev/null | head -n1 || true)"
+          if [ -n "$FOUND" ]; then SDKMANAGER="$FOUND"; fi
+        fi
+
+        # Only now, after BOTH probes, is a missing sdkmanager a hard error.
+        if [ -z "$SDKMANAGER" ]; then
+          echo "::error::sdkmanager not found on PATH nor under $ANDROID_HOME/cmdline-tools. install_sdk must run before install_ndk and provide cmdline-tools."
+          exit 1
+        fi
+        echo "  sdkmanager (resolved): $SDKMANAGER"
+        "$SDKMANAGER" --version 2>&1 | sed 's/^/    /' || true
+
+        echo "  Accepting SDK licenses..."
+        yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+
+        echo "  Installing ndk;$NDK_VERSION ..."
+        if ! "$SDKMANAGER" --install "ndk;$NDK_VERSION"; then
+          echo "::error::sdkmanager --install ndk;$NDK_VERSION failed (see sdkmanager output above)."
+          exit 1
+        fi
+        echo "  sdkmanager install finished."
 
     - name: Verify NDK
       shell: bash
@@ -72,9 +140,12 @@ runs:
         ANDROID_HOME: ${{ inputs.android-home }}
         NDK_VERSION: ${{ inputs.ndk-version }}
       run: |
+        set -euo pipefail
+        echo "== Verify NDK =="
         NDK_DIR="$ANDROID_HOME/ndk/$NDK_VERSION"
-        [ -f "$NDK_DIR/source.properties" ] || {
-          echo "::error::ndk;$NDK_VERSION missing under $ANDROID_HOME (and install fallback did not provide it)"
+        if [ ! -f "$NDK_DIR/source.properties" ]; then
+          echo "::error::ndk;$NDK_VERSION missing under $ANDROID_HOME (preinstall absent and install fallback did not provide it)"
           exit 1
-        }
-        echo "NDK verified: $NDK_DIR"
+        fi
+        REV="$(grep -m1 '^Pkg.Revision' "$NDK_DIR/source.properties" 2>/dev/null | cut -d= -f2- | tr -d '[:space:]' || true)"
+        echo "  NDK verified: $NDK_DIR (Pkg.Revision=${REV:-unknown})"
