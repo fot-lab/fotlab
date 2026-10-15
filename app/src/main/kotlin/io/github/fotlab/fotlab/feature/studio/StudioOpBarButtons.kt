@@ -103,12 +103,13 @@ import java.util.Locale
 import kotlin.math.roundToInt
 
 /**
- * Demosaic algorithm picker (the gradient icon anchors an upward-opening dropdown).
+ * Demosaic algorithm picker (the gradient icon opens a two-tab bottom sheet — [DemosaicPickerSheet] —
+ * instead of the old dropdown).
  *
  * The entries come from the native catalogue ([StudioEngine.demosaicCandidates]), not from a list
- * written here: the menu and the pipeline read the same catalogue, so a kernel ported in
+ * written here: the sheet and the pipeline read the same catalogue, so a kernel ported in
  * `rawtrp_demosaic` cannot show up in one without the other (`FOTLAB-NATIVE-000004` D5). See
- * [demosaicLabel] for how each entry's text is chosen.
+ * [demosaicLabel] (in [StudioDemosaicSheet]) for how each entry's text is chosen.
  *
  * [superpixelSupported] `false` greys out the superpixel entry rather than letting the pick resolve
  * to something else: that entry is the quarter-resolution demosaic, and on a sensor that cannot run
@@ -120,6 +121,7 @@ import kotlin.math.roundToInt
 internal fun DemosaicButton(
     candidates: List<DemosaicCandidate>,
     superpixelSupported: Boolean?,
+    currentId: String?,
     onAlgorithmPicked: (DemosaicCandidate) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -131,54 +133,15 @@ internal fun DemosaicButton(
                 contentDescription = stringResource(id = R.string.studio_cd_demosaic),
             )
         }
-        DropdownMenu(
-            expanded = open,
-            onDismissRequest = { open = false },
-            modifier = Modifier.heightIn(max = PickerMenuMaxHeight),
-        ) {
-            for (candidate in candidates) {
-                DropdownMenuItem(
-                    text = { Text(text = demosaicLabel(candidate)) },
-                    onClick = { open = false; onAlgorithmPicked(candidate) },
-                    enabled = candidate.id != SUPERPIXEL_ID || superpixelSupported != false,
-                )
-            }
-        }
+        DemosaicPickerSheet(
+            open = open,
+            onDismiss = { open = false },
+            candidates = candidates,
+            superpixelSupported = superpixelSupported,
+            currentId = currentId,
+            onAlgorithmPicked = onAlgorithmPicked,
+        )
     }
-}
-
-/** The superpixel entry's catalogue id — the one pick whose applicability is sensor-dependent. */
-internal const val SUPERPIXEL_ID = "rawler:superpixel"
-
-/**
- * Display text for one demosaic candidate, **always naming the source library** except for the
- * default entry.
- *
- * The menu lists two independent implementations under similar names — `amaze` and `fast` exist on
- * both sides — so an entry that did not say where it came from would be ambiguous. The native
- * catalogue already prefixes every label with `RAWLER` / `RAWTRP` (`rawtrp_demosaic::algo`); this
- * keeps that prefix while still showing the *translated* algorithm name for the entries Studio has
- * localised. The default is the one exception: it is not an algorithm but "whatever the sensor's CFA
- * calls for", so it carries no source.
- *
- * The prefix is a parameter rather than part of each translated string so the source name stays a
- * single fact: translating "RAWLER" or "RAWTRP" is not a thing, and duplicating it across five
- * strings is how the two halves would drift apart.
- */
-@Composable
-internal fun demosaicLabel(candidate: DemosaicCandidate): String {
-    val localized = when (candidate.id) {
-        "rawler:default" -> return stringResource(id = R.string.studio_demosaic_default)
-        "rawler:ppg" -> stringResource(id = R.string.studio_demosaic_ppg)
-        "rawler:bilinear4" -> stringResource(id = R.string.studio_demosaic_bilinear4)
-        "rawler:xtrans_bilinear" -> stringResource(id = R.string.studio_demosaic_xtrans)
-        SUPERPIXEL_ID -> stringResource(id = R.string.studio_demosaic_superpixel)
-        // A kernel ported later: no translated string exists yet, so it keeps the catalogue's own
-        // already-prefixed label rather than vanishing from the menu.
-        else -> return candidate.label
-    }
-    return stringResource(id = R.string.studio_demosaic_source_prefix, candidate.label.substringBefore(' ')) +
-        " " + localized
 }
 
 /**

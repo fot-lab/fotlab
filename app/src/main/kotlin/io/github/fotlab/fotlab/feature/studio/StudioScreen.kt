@@ -509,11 +509,13 @@ fun StudioScreen() {
                         )
                     }
                 } else {
+                    val currentDemosaicId by StudioEngine.currentDemosaicId.collectAsState(initial = null)
                     when (dockedBar) {
                     // Develop tools (Demosaic/Exposure/WB) were always on the fun bar.
                     StudioOpBar.DevelopFilm -> StudioOperationBarDevelopFilm(
                         demosaicCandidates = StudioEngine.demosaicCandidates,
                         superpixelSupported = superpixelSupported,
+                        currentDemosaicId = currentDemosaicId,
                         onAlgorithmPicked = { candidate -> StudioEngine.develop(candidate) },
                         onDenoise = {
                             denoiseEnabled = StudioEngine.currentDenoiseStrength() != null

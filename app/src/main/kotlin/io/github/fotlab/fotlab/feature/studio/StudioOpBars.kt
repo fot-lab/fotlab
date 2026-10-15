@@ -3,7 +3,6 @@ package io.github.fotlab.fotlab.feature.studio
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.dp
 import io.github.fotlab.fotlab.R
 import io.github.fotlab.fotlab.ui.operation.HorizontalOperationBar
 import io.github.fotlab.fotlab.ui.operation.OperationalButton
@@ -24,18 +23,6 @@ internal fun StudioOpBar.toggle(target: StudioOpBar): StudioOpBar =
     if (this == target) StudioOpBar.Basic else target
 
 /**
- * Max height of the scrolling picker menus (Demosaic / LOG): five 48dp menu rows plus Material3's
- * 8dp top/bottom menu padding = 256dp.
- *
- * The cap MUST be applied through [DropdownMenu]'s own `modifier`, never by wrapping the items in
- * another scrolling `Column`: Material3 already hosts the menu content in a vertically scrolling
- * Column, and a scrollable child nested inside it is measured with unbounded height constraints,
- * crashing during layout ("Vertically scrollable component was measured with an infinity maximum
- * height constraints") before the popup is ever drawn.
- */
-internal val PickerMenuMaxHeight = 256.dp
-
-/**
  * DevelopFilm bar — the develop tools that used to live directly on the fun bar, now ordered
  * Exposure → Denoise → Dehaze → Demosaic → White Balance: exposure is first, the mosaic-cleaning
  * stages run before demosaic, and white balance sits after demosaic. Reordering the list below
@@ -50,6 +37,7 @@ internal val PickerMenuMaxHeight = 256.dp
 internal fun StudioOperationBarDevelopFilm(
     demosaicCandidates: List<DemosaicCandidate>,
     superpixelSupported: Boolean?,
+    currentDemosaicId: String?,
     onAlgorithmPicked: (DemosaicCandidate) -> Unit,
     onDenoise: () -> Unit,
     onDehaze: () -> Unit,
@@ -80,7 +68,7 @@ internal fun StudioOperationBarDevelopFilm(
             OperationalButton(
                 id = "demosaic",
                 label = stringResource(id = R.string.studio_label_demosaic),
-            ) { DemosaicButton(demosaicCandidates, superpixelSupported, onAlgorithmPicked) },
+            ) { DemosaicButton(demosaicCandidates, superpixelSupported, currentDemosaicId, onAlgorithmPicked) },
             OperationalButton(
                 id = "wb",
                 label = stringResource(id = R.string.studio_label_whitebalance),

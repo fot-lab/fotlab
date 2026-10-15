@@ -427,22 +427,30 @@ class RawRoutingTest {
         composeRule.onNodeWithContentDescription(developFilm).performClick()
         step("ui", "opened the DevelopFilm operation bar")
 
-        // The gradient icon inside the bar opens the demosaic algorithm dropdown.
+        // The gradient icon inside the bar opens the demosaic algorithm bottom sheet (Recent tab by
+        // default); the full catalogue lives on the "Choose algorithm" tab.
         val demosaic = context.getString(R.string.studio_cd_demosaic)
+        val chooseTab = context.getString(R.string.studio_grade_tab_algorithm)
         composeRule.waitUntil(30_000) {
             composeRule.onAllNodesWithContentDescription(demosaic).fetchSemanticsNodes().isNotEmpty()
         }
         step("ui", "demosaic icon present")
         composeRule.onNodeWithContentDescription(demosaic).performClick()
         step("ui", "clicked the demosaic icon")
+        // The sheet opens on Recent (empty on first run), so switch to Choose algorithm to reach PPG.
+        composeRule.waitUntil(30_000) {
+            composeRule.onAllNodesWithText(chooseTab).fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithText(chooseTab).performClick()
+        step("ui", "switched to the Choose algorithm tab")
 
-        // The dropdown offers the algorithms; PPG is the Bayer choice for every camera in
+        // The catalogue offers the algorithms; PPG is the Bayer choice for every camera in
         // the corpus (Canon/Sony/Nikon/Panasonic sensors are Bayer RGB).
         val ppg = context.getString(R.string.studio_demosaic_ppg)
         composeRule.waitUntil(30_000) {
             composeRule.onAllNodesWithText(ppg).fetchSemanticsNodes().isNotEmpty()
         }
-        step("ui", "demosaic dropdown shows '$ppg'")
+        step("ui", "demosaic sheet shows '$ppg'")
         composeRule.onNodeWithText(ppg).performClick()
         step("ui", "picked '$ppg' — triggers StudioEngine.develop redevelop")
 

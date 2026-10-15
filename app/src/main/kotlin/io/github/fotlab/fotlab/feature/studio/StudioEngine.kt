@@ -510,6 +510,9 @@ object StudioEngine {
     /** The list the DevelopFilm bar renders; see [demosaicCandidatesCache]. */
     val demosaicCandidates: List<DemosaicCandidate> get() = demosaicCandidatesCache
 
+    /** The persisted demosaic candidate id, or `null` when the user has never picked one. */
+    val currentDemosaicId: Flow<String?> get() = developPreference.demosaicId
+
     /** The white-balance color temperature (Kelvin) retained for the next develop re-render; null = as-shot. */
     @Volatile private var currentWhiteBalanceKelvin: Float? = null
 
