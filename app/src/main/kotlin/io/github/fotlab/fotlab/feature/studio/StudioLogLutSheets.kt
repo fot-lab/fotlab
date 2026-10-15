@@ -108,8 +108,12 @@ class GradeRecentStore(private val context: Context) {
     private suspend fun push(key: Preferences.Key<String>, token: String) {
         store.edit { prefs ->
             val list = prefs[key]?.split(RECENT_SEPARATOR).orEmpty().toMutableList()
+            // Already most-recent: nothing to do (re-selecting the last entry must not duplicate it).
             if (list.lastOrNull() == token) return@edit
-            list.remove(token)
+            // If the value was used before, drop every prior occurrence NOW — i.e. the stale entry is
+            // deleted at push time rather than waiting for FIFO capacity eviction — so the Recent list
+            // never displays a duplicate. The value is then appended as the most-recent entry.
+            list.removeAll { it == token }
             list.add(token)
             while (list.size > RECENT_CAPACITY) list.removeAt(0)
             prefs[key] = list.joinToString(RECENT_SEPARATOR)

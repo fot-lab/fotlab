@@ -49,8 +49,10 @@ its persistence live in one place, separate from the icon buttons in `StudioOpBa
    entry is dropped.
 6. **De-duplication on push** — when the user makes a choice, push only if the chosen value is *not
    already the most-recent entry*. Re-selecting the entry that is already last must **not** push a
-   duplicate; a previously-used value that is not last is moved to the end (becomes most-recent)
-   rather than duplicated. (This is the "只在最近一次使用的算法和上一次不同时进行压栈" rule.)
+   duplicate; a previously-used value that is not last has its **stale occurrence deleted immediately
+   at push time** (not deferred until the 60-capacity eviction) and is then appended as the
+   most-recent entry, so the Recent list never shows a duplicate. (This is the
+   "只在最近一次使用的算法和上一次不同时进行压栈，且旧条目直接删除" rule.)
 7. The `none` selection ("无" / remove) is **not** recorded in the Recent history — only real algorithm
    names (LOG) and real filter file URIs (LUT) are pushed. Picking `none` applies the clear and closes
    the sheet, but leaves the history untouched.
