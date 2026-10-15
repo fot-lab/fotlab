@@ -433,8 +433,10 @@ fun StudioScreen() {
                             cropNormalized = cropRotateParams.cropNormalized,
                             onCropNormalizedChange = { cropRotateParams = cropRotateParams.copy(cropNormalized = it) },
                         )
-                    } else if (!isPipelineRunning) {
+                    } else if (displayedResult == null && !isPipelineRunning) {
                         // No held frame and not running: show the idle / first-decode prompt.
+                        // This block is gated on having NO held frame, so once an image is opened
+                        // the prompt is removed entirely instead of stacking on top of the canvas.
                         // (While running with no frame yet, the processing overlay below covers it.)
                         when {
                             renderResult is StudioRenderResult.Loading -> Text(
