@@ -42,17 +42,24 @@ internal enum class StudioExportFormat(
 }
 
 /**
- * Decode whatever the canvas is currently showing and re-encode it as [format], returning the
- * file bytes, or null when nothing decodable is resident.
+ * Decode whatever the canvas is currently showing, apply any pending crop & rotate as a pure
+ * transform on the decoded source, and re-encode it as [format], returning the file bytes, or null
+ * when nothing decodable is resident.
  *
  * The engine hands back either uncompressed PNG bytes (rawler path) or the source [Uri] (Coil
  * path); both are decoded to a [Bitmap] first, then handed to `Bitmap.compress` so the file the
  * user gets is a real compressed image rather than raw samples.
+ *
+ * Crop & rotate is the [applyCropRotate] pure function: the decoded source bitmap is read-only and
+ * is never mutated — the transform returns a *new* bitmap, so the original PNG the Rust side produced
+ * (and the studio session's source for re-adjustment) stays intact. [cropRotateParams] defaults to
+ * identity, so a session with no crop/rotate is byte-identical to the old behaviour.
  */
 internal fun encodeExport(
     context: Context,
     result: StudioRenderResult?,
     format: StudioExportFormat,
+    cropRotateParams: CropRotateParams = CropRotateParams.Identity,
 ): ByteArray? {
     result ?: return null
     val bitmap = when (val r = result) {
@@ -65,9 +72,15 @@ internal fun encodeExport(
         }
         else -> null
     } ?: return null
+    // Pure transform on the source; [bitmap] is never mutated. outBitmap == bitmap only when the
+    // params are identity (the full-frame shortcut), so recycle exactly once either way.
+    val outBitmap = applyCropRotate(bitmap, cropRotateParams)
     return ByteArrayOutputStream().use { out ->
-        bitmap.compress(format.compressFormat, format.quality, out)
+        outBitmap.compress(format.compressFormat, format.quality, out)
         out.toByteArray()
+    }.also {
+        if (outBitmap != bitmap) outBitmap.recycle()
+        bitmap.recycle()
     }
 }
 

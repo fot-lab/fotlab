@@ -81,6 +81,7 @@ import io.github.fotlab.fotlab.feature.library.LibraryCore
 import io.github.fotlab.fotlab.feature.studio.StudioRenderResult
 import io.github.fotlab.fotlab.media.MediaPreference
 import io.github.fotlab.fotlab.ui.ZoomableAsyncImage
+import io.github.fotlab.fotlab.ui.icons.CropRotate
 import io.github.fotlab.fotlab.ui.icons.CustomMaterialStyleIcons
 import io.github.fotlab.fotlab.ui.icons.MeteringCenterAsterisk
 import io.github.fotlab.fotlab.ui.icons.MeteringCenterAsteriskMatrix
@@ -507,8 +508,9 @@ internal fun BoostParameterDialog(
 }
 
 /**
- * LOG curve picker — none plus every curve rawalchemy enumerates. Primary tint while a curve is
- * selected. The icon is the official Material "movie_edit" glyph, reproduced first-party in
+ * LOG curve picker — opens a two-tab bottom sheet ([LogPickerSheet]) instead of the old dropdown:
+ * a persisted FIFO **Recent** history and the full native algorithm catalogue. Primary tint while a
+ * curve is selected. The icon is the official Material "movie_edit" glyph, reproduced first-party in
  * [CustomMaterialStyleIcons] (the frozen material-icons-extended artifact never generated it).
  */
 @Composable
@@ -520,7 +522,6 @@ internal fun LogButton(
     modifier: Modifier = Modifier,
 ) {
     var open by remember { mutableStateOf(false) }
-    val none = stringResource(id = R.string.studio_grade_none)
     Box(modifier = modifier) {
         IconButton(onClick = { open = true }, enabled = enabled) {
             Icon(
@@ -529,32 +530,27 @@ internal fun LogButton(
                 tint = operationIconTint(enabled = enabled, active = logSpace != null),
             )
         }
-        DropdownMenu(
-            expanded = open,
-            onDismissRequest = { open = false },
-            modifier = Modifier.heightIn(max = PickerMenuMaxHeight),
-        ) {
-            DropdownMenuItem(
-                text = { Text(text = none) },
-                onClick = { open = false; onLogSpace(null) },
-            )
-            for (name in logSpaces) {
-                DropdownMenuItem(
-                    text = { Text(text = name) },
-                    onClick = { open = false; onLogSpace(name) },
-                )
-            }
-        }
+        LogPickerSheet(
+            open = open,
+            onDismiss = { open = false },
+            logSpace = logSpace,
+            logSpaces = logSpaces,
+            onLogSpace = onLogSpace,
+        )
     }
 }
 
 /**
- * LUT picker — "Choose file…" (SAF) / "None (remove LUT)". Primary tint while a LUT is loaded.
+ * LUT picker — opens a two-tab bottom sheet ([LutPickerSheet]) instead of the old dropdown: a
+ * persisted FIFO **Recent** history of picked filter file URIs, and a "Choose filter" tab (none +
+ * the SAF file picker). [onApplyUri] re-applies a URI the user picked from the Recent history;
+ * [onPickFile] opens the SAF picker; [onClear] removes the LUT. Primary tint while a LUT is loaded.
  */
 @Composable
 internal fun LutButton(
     lutName: String?,
-    onPick: () -> Unit,
+    onPickFile: () -> Unit,
+    onApplyUri: (String) -> Unit,
     onClear: () -> Unit,
     enabled: Boolean = true,
     modifier: Modifier = Modifier,
@@ -568,16 +564,32 @@ internal fun LutButton(
                 tint = operationIconTint(enabled = enabled, active = lutName != null),
             )
         }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            DropdownMenuItem(
-                text = { Text(text = stringResource(id = R.string.studio_grade_lut_pick)) },
-                onClick = { open = false; onPick() },
-            )
-            DropdownMenuItem(
-                text = { Text(text = stringResource(id = R.string.studio_grade_lut_clear)) },
-                onClick = { open = false; onClear() },
-            )
-        }
+        LutPickerSheet(
+            open = open,
+            onDismiss = { open = false },
+            lutName = lutName,
+            onPickFile = onPickFile,
+            onApplyUri = onApplyUri,
+            onClear = onClear,
+        )
+    }
+}
+
+/**
+ * Crop & Rotate entry — Material [CustomMaterialStyleIcons.Filled.CropRotate] glyph with the "CR"
+ * caption (same in every locale). Opens the crop/rotate bottom sheet owned by StudioScreen; the
+ * button itself carries no state, matching the other style-filter tools (LOG/LUT).
+ */
+@Composable
+internal fun CrButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    IconButton(onClick = onClick, modifier = modifier) {
+        Icon(
+            imageVector = CustomMaterialStyleIcons.Filled.CropRotate,
+            contentDescription = stringResource(id = R.string.studio_cd_crop_rotate),
+        )
     }
 }
 

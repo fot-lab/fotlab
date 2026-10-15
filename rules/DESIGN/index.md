@@ -35,4 +35,5 @@ This file contains **only** the item table. No statistics, no changelog — git 
 | `DOCKER-GHCRIO-000001` | Docker-Android emulator migration & ghcr.io image strategy | `GHCRIO` | Implemented | P1 | [detail](rules/DESIGN/detail/DOCKER-GHCRIO-000001.md) |
 | `MANUAL-GHWIKI-000001` | Showcase screenshots from CI smoke tests → GitHub Wiki | `GHWIKI` | Draft | P2 | [detail](rules/DESIGN/detail/MANUAL-GHWIKI-000001.md) |
 | `FOTLAB-ROTATE-000001` | Crop & Rotate — Kotlin-side transform on the rendered PNG | `ROTATE` | Draft | P2 | [detail](rules/DESIGN/detail/FOTLAB-ROTATE-000001.md) |
-<!-- Next sequence per category: UIXDES 000007, DATABS 000003, NATIVE 000006, IMGMGR 000002, PIPELN 000002, RENDER 000005, DEHAZE 000003, DEFRNG 000004, GHCRIO 000002, GHWIKI 000002, ROTATE 000002. Append one row per new item; never reuse or renumber IDs. -->
+| `FOTLAB-LOTLUT-000001` | LOG / LUT picker — two-tab bottom sheet with persisted Recent history | `LOTLUT` | Draft | P2 | [detail](rules/DESIGN/detail/FOTLAB-LOTLUT-000001.md) |
+<!-- Next sequence per category: UIXDES 000007, DATABS 000003, NATIVE 000006, IMGMGR 000002, PIPELN 000002, RENDER 000005, DEHAZE 000003, DEFRNG 000004, GHCRIO 000002, GHWIKI 000002, ROTATE 000002, LOTLUT 000002. Append one row per new item; never reuse or renumber IDs. -->

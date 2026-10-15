@@ -147,12 +147,18 @@ internal fun StudioOperationBarStyleFilter(
     logSpaces: List<String>,
     onLogSpace: (String?) -> Unit,
     onPickLut: () -> Unit,
+    onApplyLutUri: (String) -> Unit,
     onClearLut: () -> Unit,
+    onCropRotate: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     HorizontalOperationBar(
         modifier = modifier,
         items = listOf(
+            OperationalButton(
+                id = "cr",
+                label = "CR",
+            ) { CrButton(onCropRotate) },
             OperationalButton(
                 id = "log",
                 label = stringResource(id = R.string.studio_label_log),
@@ -170,7 +176,8 @@ internal fun StudioOperationBarStyleFilter(
             ) {
                 LutButton(
                     lutName = lutName,
-                    onPick = onPickLut,
+                    onPickFile = onPickLut,
+                    onApplyUri = onApplyLutUri,
                     onClear = onClearLut,
                     enabled = rawLoaded,
                 )

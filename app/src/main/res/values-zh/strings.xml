@@ -89,6 +89,7 @@
     <string name="studio_cd_saturation">饱和度</string>
     <string name="studio_cd_log">Log 曲线</string>
     <string name="studio_cd_lut">LUT</string>
+    <string name="studio_cd_crop_rotate">裁剪与旋转</string>
     <!-- Visible labels rendered under each operation-bar icon (short, fits a 56dp slot). -->
     <string name="studio_label_demosaic">解马赛克</string>
     <string name="studio_label_exposure">曝光</string>
@@ -179,6 +180,10 @@
     <!-- LUT dropdown items. -->
     <string name="studio_grade_lut_pick">选择文件…</string>
     <string name="studio_grade_lut_clear">无（移除 LUT）</string>
+    <!-- LOG / LUT 选择器底部抽屉（两页：近期使用 + 完整算法/文件列表）。 -->
+    <string name="studio_grade_recent">近期使用</string>
+    <string name="studio_grade_tab_algorithm">选择算法</string>
+    <string name="studio_grade_tab_filter">选择滤镜</string>
     <!-- DCP / LCP profile dropdowns (mirror the LUT picker). -->
     <string name="studio_dcp_pick">选择配置文件…</string>
     <string name="studio_lcp_pick">选择配置文件…</string>

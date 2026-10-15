@@ -34,6 +34,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.slideInVertically
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.unit.dp
 import coil3.request.ImageRequest
 import io.github.fotlab.fotlab.R
@@ -259,6 +263,22 @@ fun StudioScreen() {
     // Tapping the same fun-bar category icon again hides the bar; tapping another switches to it.
     var activeBar by remember { mutableStateOf(StudioOpBar.Basic) }
 
+    // Crop & Rotate (FOTLAB-ROTATE-000001): the source PNG is retained by the engine; these params
+    // are fully-relative and re-applied via the pure applyCropRotate without re-rendering in Rust.
+    var cropRotateParams by remember { mutableStateOf(CropRotateParams.Identity) }
+    var showCropRotateSheet by remember { mutableStateOf(false) }
+
+    // Recent LOG/LUT history, persisted FIFO (see GradeRecentStore / FOTLAB-LOTLUT-000001).
+    val gradeRecent = remember { GradeRecentStore(context) }
+
+    // Re-apply a LUT already present in the Recent history: the same side effects as the SAF result
+    // below (persist read permission, remember the last folder, copy to cache + re-grade).
+    fun applyLutFromUri(uri: Uri) {
+        persistUriPermission(context, uri, write = false)
+        scope.launch { mediaPref.setLastLutUri(uri.toString()) }
+        StudioEngine.setGradeLut(uri)
+    }
+
     // LUT picker: deliberately `*/*` — the interaction is not format-restricted; rawalchemy decides
     // whether the picked bytes are a usable .cube LUT (and an error dialog reports it if not).
     val lutPickerLauncher = rememberLauncherForActivityResult(
@@ -267,9 +287,9 @@ fun StudioScreen() {
         val picked = result.takeIf { it.resultCode == Activity.RESULT_OK }?.data?.data
         if (picked != null) {
             // Remember read access across process death so the next LUT pick opens here.
-            persistUriPermission(context, picked, write = false)
-            scope.launch { mediaPref.setLastLutUri(picked.toString()) }
-            StudioEngine.setGradeLut(picked)
+            applyLutFromUri(picked)
+            // Record the freshly picked file in the Recent history (FIFO, deduped).
+            scope.launch { gradeRecent.pushLutUri(picked.toString()) }
         }
     }
 
@@ -316,9 +336,10 @@ fun StudioScreen() {
             persistUriPermission(context, target, write = true)
             scope.launch { mediaPref.setLastExportUri(target.toString()) }
             val current = displayedResult
+            val crParams = cropRotateParams
             scope.launch(Dispatchers.IO) {
                 runCatching {
-                    val bytes = encodeExport(context, current, format)
+                    val bytes = encodeExport(context, current, format, crParams)
                     if (bytes != null) {
                         context.contentResolver.openOutputStream(target)?.use { it.write(bytes) }
                     }
@@ -393,7 +414,24 @@ fun StudioScreen() {
                             model = ImageRequest.Builder(context).data((displayed as StudioRenderResult.Ready).model).build(),
                             contentDescription = null,
                             state = zoomState,
-                            modifier = Modifier.fillMaxSize(),
+                            // Live crop & rotate preview: a draw-transform on the retained source
+                            // bitmap (no re-decode, no re-render in Rust). The actual pixel crop is
+                            // produced by applyCropRotate at commit/export.
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .rotate(cropRotateParams.rotationDegrees)
+                                .scale(
+                                    if (cropRotateParams.flipHorizontal) -1f else 1f,
+                                    if (cropRotateParams.flipVertical) -1f else 1f,
+                                ),
+                        )
+                    }
+                    // Crop range editor: a new layer drawn over the canvas while the crop/rotate
+                    // sheet is open (Image Toolbox-style drag-to-move / drag-corner-to-resize).
+                    if (showCropRotateSheet && displayedResult != null) {
+                        CropRotateCanvasLayer(
+                            cropNormalized = cropRotateParams.cropNormalized,
+                            onCropNormalizedChange = { cropRotateParams = cropRotateParams.copy(cropNormalized = it) },
                         )
                     } else if (!isPipelineRunning) {
                         // No held frame and not running: show the idle / first-decode prompt.
@@ -455,7 +493,23 @@ fun StudioScreen() {
                 } else {
                     StudioOpBar.Basic
                 }
-                when (dockedBar) {
+                if (showCropRotateSheet) {
+                    // Crop & Rotate sheet: a panel whose height matches the operation bar, so it
+                    // slides up (from the bottom) and covers exactly the operation-bar slot. Holds
+                    // the rotation slider; the crop range is edited on the canvas layer above.
+                    AnimatedVisibility(
+                        visible = true,
+                        enter = slideInVertically(initialOffsetY = { h -> h }),
+                    ) {
+                        CropRotateControlPanel(
+                            params = cropRotateParams,
+                            onParamsChange = { cropRotateParams = it },
+                            onClose = { showCropRotateSheet = false },
+                            onReset = { cropRotateParams = CropRotateParams.Identity },
+                        )
+                    }
+                } else {
+                    when (dockedBar) {
                     // Develop tools (Demosaic/Exposure/WB) were always on the fun bar.
                     StudioOpBar.DevelopFilm -> StudioOperationBarDevelopFilm(
                         demosaicCandidates = StudioEngine.demosaicCandidates,
@@ -567,11 +621,13 @@ fun StudioScreen() {
                         lutName = gradeSelection.lutName,
                         logSpaces = logSpaces,
                         onLogSpace = StudioEngine::setGradeLogSpace,
+                        onCropRotate = { showCropRotateSheet = true },
                         onPickLut = {
                             lutPickerLauncher.launch(
                                 openDocumentIntent(arrayOf("*/*"), lastLutUri?.let { Uri.parse(it) }),
                             )
                         },
+                        onApplyLutUri = { applyLutFromUri(Uri.parse(it)) },
                         onClearLut = StudioEngine::clearGradeLut,
                     )
                     // Basic bar: the floor — a read-only RAW status indicator, the gamma/linear
@@ -637,6 +693,7 @@ fun StudioScreen() {
                             },
                         ),
                     )
+                }
                 }
             }
         }
