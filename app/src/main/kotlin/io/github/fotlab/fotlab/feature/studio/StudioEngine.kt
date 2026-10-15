@@ -315,11 +315,7 @@ object StudioEngine {
                     if (currentDemosaicedCacheEnabled) {
                         demosaicedCache = freshBuffer
                         demosaicedOwner = loaded
-                        demosaicedKey = params.copy(
-                            outputTransfer = OutputTransfer.GAMMA,
-                            oklabHighlightCompressSrgb = false,
-                            oklabHighlightCompressProphoto = false,
-                        )
+                        demosaicedKey = cacheKeyOf(params)
                         demosaicedKeyKelvin = 0f
                     } else {
                         clearRenderCache()
@@ -765,6 +761,42 @@ object StudioEngine {
         )
 
     /**
+     * Normalise [DevelopParams] down to the demosaiced-cache key.
+     *
+     * Drop every field the develop half ([RawlerFotlabBridge.renderRawlerImage]'s `develop`
+     * branch, `develop_to_camera_image`) does **not** act on, because those sit **above** the
+     * cache boundary and are re-applied for free on the reused buffer:
+     *
+     *  * `outputTransfer` — an encoder concern, never read by the develop half;
+     *  * `oklabHighlightCompressSrgb` / `oklabHighlightCompressProphoto` — the OKLab roll-off
+     *    runs after the cache (in `DemosaicedCameraImage::to_working_space`);
+     *  * `defringeProphoto` / `defringeUncyan` / `defringeUngreen` — the ProPhoto defringe cores
+     *    run on the linear ProPhoto-D50 buffer *after* the camera→working projection;
+     *  * `clipToGamut` — the gamut clip is applied inside `to_working_space`, also above the cache.
+     *
+     * Everything the develop half consumes (demosaic / exposure / clip / dehaze / denoise / CA /
+     * LoCA / camera-profile / lens-profile / focal / white balance) is retained, so a difference
+     * there means the cached pixels are genuinely stale and the next render must re-develop.
+     *
+     * This is the **single** source of truth for the key: both the fresh-open write
+     * ([runPipeline]) and the per-render read/compare ([requestRender]) go through it. A
+     * divergence between the two — the old code normalised the fresh-open key with a *different*
+     * field set (it left `clipToGamut` and the three defringe cores in) — is exactly the class of
+     * bug that makes a cache key never match: with `currentClipToGamut` defaulting to `true`, the
+     * first render after every file open computed a `clipToGamut = true` key against a
+     * `clipToGamut = false` compare key and forced a needless full decode→demosaic re-develop.
+     */
+    private fun cacheKeyOf(params: DevelopParams): DevelopParams = params.copy(
+        outputTransfer = OutputTransfer.GAMMA,
+        oklabHighlightCompressSrgb = false,
+        oklabHighlightCompressProphoto = false,
+        defringeProphoto = null,
+        defringeUncyan = null,
+        defringeUngreen = null,
+        clipToGamut = false,
+    )
+
+    /**
      * Re-render after any parameter change, on whichever output the current state calls for.
      *
      * Every develop control *and* every grade control lands here — they no longer differ in kind,
@@ -819,15 +851,7 @@ object StudioEngine {
         // re-apply on the reused buffer for free). The develop half (`develop_to_camera_image`)
         // consumes only demosaic/exposure/clip/dehaze/denoise/CA/camera-profile/lens-profile/focal
         // — all of those stay in the key below.
-        val key = params.copy(
-            outputTransfer = OutputTransfer.GAMMA,
-            oklabHighlightCompressSrgb = false,
-            oklabHighlightCompressProphoto = false,
-            defringeProphoto = null,
-            defringeUncyan = null,
-            defringeUngreen = null,
-            clipToGamut = false,
-        )
+        val key = cacheKeyOf(params)
         val cache = demosaicedCache
         // A cache hit requires all five to line up: the switch is ON, a buffer exists, it belongs
         // to THIS resident decode (the owner binding — a stale buffer from another file is
