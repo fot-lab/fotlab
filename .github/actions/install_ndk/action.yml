@@ -2,15 +2,21 @@
 # the caller's runner.
 #
 # Preinstalled-first, matched by MAJOR version: the GitHub-hosted ubuntu-26.04
-# image ships a moving set of NDKs (e.g. 27.3 / 28.2.13676358 / 29.0) and the
-# exact patch build drifts between image refreshes. We therefore accept ANY
-# preinstalled NDK whose directory name starts with the pinned major (28 ->
-# 28.2.13676358, 28.3.x, ...): cargo-ndk only cares about the major, so a
-# preinstalled 28.x is used directly and never re-downloaded. Only when NO
-# matching major is present do we fall back to sdkmanager --install of the exact
-# (patch-pinned) version. The action emits the RESOLVED ndk directory so the
-# caller builds against whatever was actually selected (never the hardcoded
-# exact version, which would not exist when a preinstalled 28.x was chosen).
+# image ships a moving set of NDKs (e.g. 27.3 / 28.2.13676358 / 29.0) and both
+# the exact patch build and the set itself drift between image refreshes. We
+# therefore accept ANY preinstalled NDK whose directory name starts with the
+# pinned major (28 -> 28.2.13676358, 28.3.x, ...): cargo-ndk only cares about
+# the major, so a preinstalled 28.x is used directly and never re-downloaded.
+#
+# When NO matching major is preinstalled, we fall back to sdkmanager and install
+# the LATEST ndk;<major>.* available in the repository — we NEVER pin an exact
+# patch build in configuration. The exact patch is resolved at install time and
+# only lives in the resolved ndk-path output, so a future 28.x refresh is picked
+# up automatically with no config change.
+#
+# The action emits the RESOLVED ndk directory (ndk-path / NDK_PATH) so the caller
+# builds against whatever was actually selected (never a hardcoded exact version,
+# which would not exist when a preinstalled or newer 28.x was chosen).
 #
 # Diagnostics: every step echoes its resolved inputs and the actual on-disk
 # state, so a failed run shows exactly which runner image/architecture it landed
@@ -20,23 +26,23 @@
 # instead of a silent exit 1.
 
 name: Install Android NDK
-description: Ensure an NDK matching the pinned major version exists (prefer runner preinstall, install+cache only when no major match).
+description: Ensure an NDK matching the pinned major version exists (prefer runner preinstall, else install latest <major>.x via sdkmanager).
 
 inputs:
   android-home:
     description: ANDROID_HOME path the NDK lives in.
     required: true
   ndk-version:
-    description: Exact NDK version to install as fallback, e.g. 28.2.13676358. Its MAJOR (first dot component) is the preinstall match key.
+    description: NDK MAJOR version to match/install, e.g. 28 (never an exact patch build).
     required: true
 
 outputs:
   need-install:
-    description: Whether the exact NDK had to be installed (false = a preinstalled major match was used).
+    description: Whether the NDK had to be installed (false = a preinstalled major match was used).
     value: ${{ steps.precheck.outputs.need-install }}
   ndk-path:
-    description: Absolute path to the NDK directory to use (preinstalled major match, or the installed exact version).
-    value: ${{ steps.precheck.outputs.ndk-path }}
+    description: Absolute path to the NDK directory to use (preinstalled major match, or the latest installed <major>.x).
+    value: ${{ steps.publish.outputs.ndk-path }}
 
 runs:
   using: 'composite'
@@ -52,8 +58,8 @@ runs:
         NDK_MAJOR="${NDK_VERSION%%.*}"
         echo "== Check preinstalled NDK =="
         echo "  ANDROID_HOME = $ANDROID_HOME"
-        echo "  NDK_VERSION  = $NDK_VERSION (install fallback, exact)"
-        echo "  NDK_MAJOR    = $NDK_MAJOR (preinstall match prefix)"
+        echo "  NDK_VERSION  = $NDK_VERSION (major match key; exact patch never pinned)"
+        echo "  NDK_MAJOR    = $NDK_MAJOR"
         echo "  ImageOS      = ${ImageOS:-<unset>}"
         echo "  RUNNER_ARCH  = ${RUNNER_ARCH:-<unset>}"
         echo "  NDKs present under $ANDROID_HOME/ndk/:"
@@ -81,60 +87,34 @@ runs:
         if [ -n "$PRE" ]; then
           echo "  => Preinstalled NDK '$PRE' matches major $NDK_MAJOR at $ANDROID_HOME/ndk/$PRE — nothing to install."
           echo "need-install=false" >> "$GITHUB_OUTPUT"
+          echo "NDK_PATH=$ANDROID_HOME/ndk/$PRE" >> "$GITHUB_ENV"
         else
-          echo "  => No NDK with major $NDK_MAJOR preinstalled — will install exact $NDK_VERSION via sdkmanager."
+          echo "  => No NDK with major $NDK_MAJOR preinstalled — will install latest $NDK_MAJOR.x via sdkmanager."
           echo "need-install=true" >> "$GITHUB_OUTPUT"
         fi
-        # Resolved directory the caller should build against (preinstall match,
-        # or the exact version we are about to install). Exported both to the
-        # action output and to GITHUB_ENV so later steps see it.
-        NDK_PATH="$ANDROID_HOME/ndk/${PRE:-$NDK_VERSION}"
-        echo "  Resolved NDK path: $NDK_PATH"
-        echo "ndk-path=$NDK_PATH" >> "$GITHUB_OUTPUT"
-        echo "NDK_PATH=$NDK_PATH" >> "$GITHUB_ENV"
 
-    - name: Cache Android NDK
-      if: steps.precheck.outputs.need-install == 'true'
-      uses: actions/cache@v6
-      with:
-        path: ${{ inputs.android-home }}/ndk/${{ inputs.ndk-version }}
-        key: ${{ runner.os }}-ndk-${{ inputs.ndk-version }}
-        restore-keys: |
-          ${{ runner.os }}-ndk-
-
-    - name: Install NDK
+    - name: Resolve latest NDK (fallback)
+      id: resolve
       if: steps.precheck.outputs.need-install == 'true'
       shell: bash
       env:
-        # Pin the target SDK root explicitly: setup-android (run by install_sdk)
-        # exports its own root via GITHUB_ENV; step-level env overrides that.
         ANDROID_HOME: ${{ inputs.android-home }}
         ANDROID_SDK_ROOT: ${{ inputs.android-home }}
         NDK_VERSION: ${{ inputs.ndk-version }}
       run: |
         set -euo pipefail
-        echo "== Install NDK (fallback) =="
+        echo "== Resolve latest NDK (fallback) =="
         echo "  ANDROID_HOME     = $ANDROID_HOME"
         echo "  ANDROID_SDK_ROOT = $ANDROID_SDK_ROOT"
-        echo "  NDK_VERSION      = $NDK_VERSION"
+        echo "  NDK_VERSION      = $NDK_VERSION (major)"
 
         # Probe 1 — direct PATH lookup. install_sdk (setup-android) is expected
-        # to have exported sdkmanager's cmdline-tools dir to PATH before this
-        # step. A miss here is NOT fatal: it is captured with `|| true` so the
-        # script never aborts on the probe and the filesystem fallback below
-        # still runs.
+        # to have exported sdkmanager's cmdline-tools dir to PATH. A miss is NOT
+        # fatal: captured with `|| true` so the filesystem fallback still runs.
         SDKMANAGER="$(command -v sdkmanager || true)"
-        if [ -n "$SDKMANAGER" ]; then
-          echo "  sdkmanager (PATH): $SDKMANAGER"
-        else
-          echo "::warning::sdkmanager not found on PATH — will probe known cmdline-tools locations."
-          echo "  PATH=$PATH"
-        fi
-
-        # Probe 2 — explicit filesystem lookup under the SDK root. Covers the
-        # case where install_sdk installed cmdline-tools but did not export its
-        # bin dir to PATH. Runs only when Probe 1 missed; never aborts.
         if [ -z "$SDKMANAGER" ]; then
+          echo "::warning::sdkmanager not on PATH — probing cmdline-tools locations."
+          echo "  PATH=$PATH"
           CANDIDATES=(
             "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
             "$ANDROID_HOME/cmdline-tools/bin/sdkmanager"
@@ -145,10 +125,8 @@ runs:
         fi
         if [ -z "$SDKMANAGER" ]; then
           FOUND="$(find "$ANDROID_HOME/cmdline-tools" -maxdepth 3 -name sdkmanager -type f 2>/dev/null | head -n1 || true)"
-          if [ -n "$FOUND" ]; then SDKMANAGER="$FOUND"; fi
+          [ -n "$FOUND" ] && SDKMANAGER="$FOUND"
         fi
-
-        # Only now, after BOTH probes, is a missing sdkmanager a hard error.
         if [ -z "$SDKMANAGER" ]; then
           echo "::error::sdkmanager not found on PATH nor under $ANDROID_HOME/cmdline-tools. install_sdk must run before install_ndk and provide cmdline-tools."
           exit 1
@@ -156,12 +134,48 @@ runs:
         echo "  sdkmanager (resolved): $SDKMANAGER"
         "$SDKMANAGER" --version 2>&1 | sed 's/^/    /' || true
 
+        # Pick the LATEST ndk;<major>.* available — never pin an exact patch.
+        NDK_MAJOR="${NDK_VERSION%%.*}"
+        echo "  Resolving latest ndk;$NDK_MAJOR.* from repository..."
+        AVAIL="$($SDKMANAGER --list 2>/dev/null | grep -oE "ndk;${NDK_MAJOR}\.[0-9.]+" | sort -V -u | tail -n1 || true)"
+        if [ -z "$AVAIL" ]; then
+          echo "::error::no ndk;$NDK_MAJOR.* package found in sdkmanager repository."
+          exit 1
+        fi
+        SDK_VER="${AVAIL#ndk;}"
+        echo "  Resolved install package: $AVAIL (version $SDK_VER)"
+        echo "SDKMANAGER=$SDKMANAGER" >> "$GITHUB_ENV"
+        echo "NDK_INSTALL_VER=$SDK_VER" >> "$GITHUB_ENV"
+        echo "NDK_PATH=$ANDROID_HOME/ndk/$SDK_VER" >> "$GITHUB_ENV"
+
+    - name: Cache Android NDK
+      if: steps.precheck.outputs.need-install == 'true'
+      uses: actions/cache@v6
+      with:
+        path: ${{ env.NDK_PATH }}
+        key: ${{ runner.os }}-ndk-${{ env.NDK_INSTALL_VER }}
+        restore-keys: |
+          ${{ runner.os }}-ndk-
+
+    - name: Install NDK
+      if: steps.precheck.outputs.need-install == 'true'
+      shell: bash
+      env:
+        ANDROID_HOME: ${{ inputs.android-home }}
+        ANDROID_SDK_ROOT: ${{ inputs.android-home }}
+        SDKMANAGER: ${{ env.SDKMANAGER }}
+        NDK_INSTALL_VER: ${{ env.NDK_INSTALL_VER }}
+      run: |
+        set -euo pipefail
+        echo "== Install NDK (fallback) =="
+        echo "  sdkmanager        = $SDKMANAGER"
+        echo "  NDK_INSTALL_VER   = $NDK_INSTALL_VER"
+        echo "  Target dir        = $ANDROID_HOME/ndk/$NDK_INSTALL_VER"
         echo "  Accepting SDK licenses..."
         yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
-
-        echo "  Installing ndk;$NDK_VERSION ..."
-        if ! "$SDKMANAGER" --install "ndk;$NDK_VERSION"; then
-          echo "::error::sdkmanager --install ndk;$NDK_VERSION failed (see sdkmanager output above)."
+        echo "  Installing ndk;$NDK_INSTALL_VER ..."
+        if ! "$SDKMANAGER" --install "ndk;$NDK_INSTALL_VER"; then
+          echo "::error::sdkmanager --install ndk;$NDK_INSTALL_VER failed (see sdkmanager output above)."
           exit 1
         fi
         echo "  sdkmanager install finished."
@@ -171,7 +185,7 @@ runs:
       env:
         ANDROID_HOME: ${{ inputs.android-home }}
         NDK_VERSION: ${{ inputs.ndk-version }}
-        NDK_PATH: ${{ steps.precheck.outputs.ndk-path }}
+        NDK_PATH: ${{ env.NDK_PATH }}
       run: |
         set -euo pipefail
         echo "== Verify NDK =="
@@ -182,3 +196,12 @@ runs:
         fi
         REV="$(grep -m1 '^Pkg.Revision' "$NDK_DIR/source.properties" 2>/dev/null | cut -d= -f2- | tr -d '[:space:]' || true)"
         echo "  NDK verified: $NDK_DIR (Pkg.Revision=${REV:-unknown})"
+
+    - name: Publish NDK path
+      id: publish
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "ndk-path=${NDK_PATH:-}" >> "$GITHUB_OUTPUT"
+        echo "== Publish NDK path =="
+        echo "  ndk-path = ${NDK_PATH:-<unset>}"

@@ -22,10 +22,10 @@ on:
         type: boolean
         default: true
       ndk-version:
-        description: Android NDK version to build against.
+        description: Android NDK MAJOR version to build against (exact patch is never pinned; the action installs the latest <major>.x when no preinstall matches).
         required: false
         type: string
-        default: '28.2.13676358'
+        default: '28'
       min-api:
         description: Minimum Android API level the native library is built for.
         required: false
