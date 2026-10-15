@@ -7,12 +7,17 @@ onto RAW images.
 
 This project has been inspired by many awesome projects, including:
 - [RawTherapee](https://github.com/RawTherapee/RawTherapee)
-- [dnglab](https://github.com/dnglab/dnglab)
+- [DNGLab](https://github.com/dnglab/dnglab)
 - [rawloader](https://github.com/pedrocr/rawloader)
 - [LibRaw](https://github.com/LibRaw/LibRaw)
+- [RawDB](https://rawdb.dnglab.org/)
 - [Raw-Alchemy](https://github.com/shenmintao/Raw-Alchemy)
 - [RawAlchemyCpp](https://github.com/GoldJohnKing/RawAlchemyCpp)
 - [RapidRAW](https://github.com/CyberTimon/RapidRAW)
+- [exiftool](https://exiftool.org/)
+- [purple-fringe](https://github.com/mjambon/purple-fringe)
+- [docker-android](https://github.com/HQarroum/docker-android)
+- [alpine-android](https://github.com/alvr/alpine-android)
 
 ## License
 
@@ -29,14 +34,14 @@ Third-party modules under `external/` (git submodules) are independent external 
 - [x] Exposure adjustment
 - [x] Highlight compression
 - [x] Defringe-correction for transitional chromatic aberration
-- [x] Defringe-correction for axial chromatic aberration purple/magenta
-- [x] Defringe-correction for axial chromatic aberration green/cyan
+- [x] Defringe-correction for axial chromatic aberration purple/magenta (heuristic model with 0.00000001 B parameters from purple-fringe)
+- [x] Defringe-correction for axial chromatic aberration green/cyan (inspired by purple-fringe)
 - [ ] Crop and rotate
 - [x] White balance adjustment
 - [x] Demosaic alogrithm (from RawTherapee)
 - [x] Denoise alogrithm (implemented)
 - [ ] Dehaze alogrithm 
-- [x] Applying gamma/LOG curves (from RawAlchemyCpp)
-- [x] Applying LUT filters (from RawAlchemyCpp)
+- [x] Applying gamma/LOG curves (implemented by RawAlchemyCpp)
+- [x] Applying LUT filters (implemented by from RawAlchemyCpp)
 - [x] Image export
 
