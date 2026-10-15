@@ -49,6 +49,9 @@ jobs:
       CRATE_DIR: app/src/binding/rust/rawler_fotlab
       ANDROID_API: '36'
       ANDROID_BUILD_TOOLS: '36.0.0'
+      # Pinned so the cargo-ndk cache key is deterministic and reproducible. Bump
+      # here to roll the native build tool forward (mints one new cache entry).
+      CARGO_NDK_VERSION: '4.1.2'
     steps:
       - name: Check out
         uses: actions/checkout@v7
@@ -190,8 +193,27 @@ jobs:
           env-vars: NDK_VERSION MIN_API DNGLAB_SHA
           key: "v1"
 
+      # cargo-ndk is installed via `cargo install`, which records the install in
+      # ~/.cargo/.crates2.json — a file Swatinem/rust-cache does NOT cache (it only
+      # caches ~/.cargo/bin / registry / git). So rust-cache restores the binary on a
+      # HIT, but cargo still believes cargo-ndk is "not installed" and recompiles it
+      # from scratch on every run. Cache the binary under its own precise version key
+      # and skip the install whenever the cache hit — a hit means the binary is already
+      # on PATH, so there is nothing to build.
+      #
+      # No restore-keys: a partial match would restore a different (stale) cargo-ndk,
+      # then force a reinstall of the pinned version — defeating the cache. The precise
+      # version key makes a miss a true miss with one clean install.
+      - name: Cache cargo-ndk
+        id: cache_cargo_ndk
+        uses: actions/cache@v6
+        with:
+          path: ~/.cargo/bin/cargo-ndk
+          key: ${{ runner.os }}-cargo-ndk-${{ env.CARGO_NDK_VERSION }}
+
       - name: Install cargo-ndk
-        run: cargo install cargo-ndk --locked
+        if: steps.cache_cargo_ndk.outputs.cache-hit != 'true'
+        run: cargo install cargo-ndk --version ${{ env.CARGO_NDK_VERSION }} --locked
         shell: bash
 
       # `cargo ndk -o <dir>` writes <dir>/<abi>/librawler_fotlab.so directly in the
