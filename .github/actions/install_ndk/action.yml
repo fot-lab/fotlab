@@ -1,12 +1,16 @@
-# Composite action: ensure the pinned NDK exists on the caller's runner.
+# Composite action: ensure an NDK matching the pinned MAJOR version exists on
+# the caller's runner.
 #
-# Preinstalled-first: the GitHub-hosted ubuntu-26.04 image ships NDK
-# 27.3 / 28.2.13676358 / 29.0 under its prebuilt ANDROID_HOME, so when the
-# pinned version is already on disk nothing is downloaded or cached. A missing
-# version takes the fallback path (cache + sdkmanager --install); that path
-# requires cmdline-tools, which install_sdk guarantees when it runs first
-# (rules/ACTION.md toolchain order). Kept separate from install_sdk so a Kotlin
-# build does not pay for an NDK it never uses.
+# Preinstalled-first, matched by MAJOR version: the GitHub-hosted ubuntu-26.04
+# image ships a moving set of NDKs (e.g. 27.3 / 28.2.13676358 / 29.0) and the
+# exact patch build drifts between image refreshes. We therefore accept ANY
+# preinstalled NDK whose directory name starts with the pinned major (28 ->
+# 28.2.13676358, 28.3.x, ...): cargo-ndk only cares about the major, so a
+# preinstalled 28.x is used directly and never re-downloaded. Only when NO
+# matching major is present do we fall back to sdkmanager --install of the exact
+# (patch-pinned) version. The action emits the RESOLVED ndk directory so the
+# caller builds against whatever was actually selected (never the hardcoded
+# exact version, which would not exist when a preinstalled 28.x was chosen).
 #
 # Diagnostics: every step echoes its resolved inputs and the actual on-disk
 # state, so a failed run shows exactly which runner image/architecture it landed
@@ -16,15 +20,23 @@
 # instead of a silent exit 1.
 
 name: Install Android NDK
-description: Ensure the pinned NDK exists (prefer runner preinstall, install+cache only when missing).
+description: Ensure an NDK matching the pinned major version exists (prefer runner preinstall, install+cache only when no major match).
 
 inputs:
   android-home:
     description: ANDROID_HOME path the NDK lives in.
     required: true
   ndk-version:
-    description: NDK version, used as ndk;<version>, e.g. 28.2.13676358.
+    description: Exact NDK version to install as fallback, e.g. 28.2.13676358. Its MAJOR (first dot component) is the preinstall match key.
     required: true
+
+outputs:
+  need-install:
+    description: Whether the exact NDK had to be installed (false = a preinstalled major match was used).
+    value: ${{ steps.precheck.outputs.need-install }}
+  ndk-path:
+    description: Absolute path to the NDK directory to use (preinstalled major match, or the installed exact version).
+    value: ${{ steps.precheck.outputs.ndk-path }}
 
 runs:
   using: 'composite'
@@ -37,13 +49,13 @@ runs:
         NDK_VERSION: ${{ inputs.ndk-version }}
       run: |
         set -euo pipefail
+        NDK_MAJOR="${NDK_VERSION%%.*}"
         echo "== Check preinstalled NDK =="
         echo "  ANDROID_HOME = $ANDROID_HOME"
-        echo "  NDK_VERSION  = $NDK_VERSION"
+        echo "  NDK_VERSION  = $NDK_VERSION (install fallback, exact)"
+        echo "  NDK_MAJOR    = $NDK_MAJOR (preinstall match prefix)"
         echo "  ImageOS      = ${ImageOS:-<unset>}"
         echo "  RUNNER_ARCH  = ${RUNNER_ARCH:-<unset>}"
-        NDK_DIR="$ANDROID_HOME/ndk/$NDK_VERSION"
-        echo "  Target NDK dir: $NDK_DIR"
         echo "  NDKs present under $ANDROID_HOME/ndk/:"
         if [ -d "$ANDROID_HOME/ndk" ]; then
           ls -1 "$ANDROID_HOME/ndk" 2>/dev/null | sed 's/^/    - /' || true
@@ -51,15 +63,35 @@ runs:
         else
           echo "    (ndk/ directory does not exist at $ANDROID_HOME)"
         fi
-        # source.properties is written by every sdkmanager NDK install and is
-        # what AGP itself probes; its presence means the toolchain is complete.
-        if [ -f "$NDK_DIR/source.properties" ]; then
-          echo "  => NDK $NDK_VERSION already present at $NDK_DIR — nothing to install."
+
+        # Accept ANY preinstalled dir whose name starts with the pinned major
+        # (e.g. 28.2.13676358 or 28.3.x both satisfy major 28). source.properties
+        # is written by every sdkmanager NDK install and is what AGP probes.
+        PRE=""
+        if [ -d "$ANDROID_HOME/ndk" ]; then
+          for d in $(ls -1 "$ANDROID_HOME/ndk" 2>/dev/null | sort); do
+            case "$d" in
+              "$NDK_MAJOR"*)
+                if [ -f "$ANDROID_HOME/ndk/$d/source.properties" ]; then PRE="$d"; break; fi
+                ;;
+            esac
+          done
+        fi
+
+        if [ -n "$PRE" ]; then
+          echo "  => Preinstalled NDK '$PRE' matches major $NDK_MAJOR at $ANDROID_HOME/ndk/$PRE — nothing to install."
           echo "need-install=false" >> "$GITHUB_OUTPUT"
         else
-          echo "  => NDK $NDK_VERSION MISSING at $NDK_DIR — will install via sdkmanager fallback."
+          echo "  => No NDK with major $NDK_MAJOR preinstalled — will install exact $NDK_VERSION via sdkmanager."
           echo "need-install=true" >> "$GITHUB_OUTPUT"
         fi
+        # Resolved directory the caller should build against (preinstall match,
+        # or the exact version we are about to install). Exported both to the
+        # action output and to GITHUB_ENV so later steps see it.
+        NDK_PATH="$ANDROID_HOME/ndk/${PRE:-$NDK_VERSION}"
+        echo "  Resolved NDK path: $NDK_PATH"
+        echo "ndk-path=$NDK_PATH" >> "$GITHUB_OUTPUT"
+        echo "NDK_PATH=$NDK_PATH" >> "$GITHUB_ENV"
 
     - name: Cache Android NDK
       if: steps.precheck.outputs.need-install == 'true'
@@ -139,12 +171,13 @@ runs:
       env:
         ANDROID_HOME: ${{ inputs.android-home }}
         NDK_VERSION: ${{ inputs.ndk-version }}
+        NDK_PATH: ${{ steps.precheck.outputs.ndk-path }}
       run: |
         set -euo pipefail
         echo "== Verify NDK =="
-        NDK_DIR="$ANDROID_HOME/ndk/$NDK_VERSION"
+        NDK_DIR="${NDK_PATH:-$ANDROID_HOME/ndk/$NDK_VERSION}"
         if [ ! -f "$NDK_DIR/source.properties" ]; then
-          echo "::error::ndk;$NDK_VERSION missing under $ANDROID_HOME (preinstall absent and install fallback did not provide it)"
+          echo "::error::NDK missing at $NDK_DIR (preinstall absent and install fallback did not provide it)"
           exit 1
         fi
         REV="$(grep -m1 '^Pkg.Revision' "$NDK_DIR/source.properties" 2>/dev/null | cut -d= -f2- | tr -d '[:space:]' || true)"

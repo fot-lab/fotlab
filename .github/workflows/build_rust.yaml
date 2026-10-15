@@ -73,16 +73,20 @@ jobs:
           build-tools: ${{ env.ANDROID_BUILD_TOOLS }}
 
       - name: Install NDK
+        id: install_ndk
         uses: ./.github/actions/install_ndk
         with:
           android-home: ${{ env.ANDROID_HOME }}
           ndk-version: ${{ env.NDK_VERSION }}
 
       # cargo-ndk accepts either variable; export both so it cannot miss the NDK.
+      # Use the NDK directory the action actually resolved (a preinstalled major
+      # match, e.g. 28.3.x, NOT necessarily the exact patch-pinned version), so
+      # the build never points at a non-existent $ANDROID_HOME/ndk/$NDK_VERSION.
       - name: Export NDK path
         run: |
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
-          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=${{ steps.install_ndk.outputs.ndk-path }}" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=${{ steps.install_ndk.outputs.ndk-path }}" >> "$GITHUB_ENV"
         shell: bash
 
       # rustup keeps the toolchain in ~/.rustup, which Swatinem/rust-cache does NOT
