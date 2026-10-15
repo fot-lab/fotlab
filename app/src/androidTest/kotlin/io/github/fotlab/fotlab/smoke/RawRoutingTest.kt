@@ -937,8 +937,8 @@ class RawRoutingTest {
     /**
      * UI-level grade journey through the REAL [StudioScreen]: with a RAW resident the grade bar is
      * rendered, the Contrast parameter dialog drives [StudioEngine.setGradeContrast] end to end
-     * (a typed 1.25 derives the boost switch ON and moves pixels) and the LOG dropdown enumerates
-     * the natively-listed log curves; picking S-Log3 from it drives a second real re-grade. The
+     * (a typed 1.25 derives the boost switch ON and moves pixels) and the LOG bottom sheet
+     * enumerates the natively-listed log curves; picking S-Log3 from it drives a second real re-grade. The
      * contrast field is then cleared (blank = unset, switch OFF) and LOG returned to "none", and
      * the canvas must reproduce the as-shot develop frame. Popups are dismissed by picking an
      * option / OK ON PURPOSE — system back can reach the hosted MainActivity once the popup
@@ -958,6 +958,7 @@ class RawRoutingTest {
         val ok = context.getString(R.string.common_action_ok)
         val styleCd = context.getString(R.string.studio_cd_style_filter)
         val logCd = context.getString(R.string.studio_cd_log)
+        val algorithmTab = context.getString(R.string.studio_grade_tab_algorithm)
 
         // TuneImage bar (Contrast / Saturation) is docked by the Tune category icon.
         composeRule.waitUntil(30_000) {
@@ -983,19 +984,25 @@ class RawRoutingTest {
         assertDevelopedIsColor(boosted.bytes, "Sony ILCE-7R boost ON via UI")
 
         // Switch to the StyleFilter bar (LOG / LUT) via the PhotoFilter category icon, then pick
-        // Sony S-Log3 by its aliased display name — the only spelling the menu ever shows. Picking an
-        // item (not system back) closes the popup deterministically — a back press would be delivered
-        // to the hosted MainActivity and finish it. (The LOG button is icon-only, so the menu item is
-        // the only node carrying this text.)
+        // Sony S-Log3 by its aliased display name — the only spelling the sheet ever shows. Picking an
+        // item (not system back) closes the bottom sheet deterministically — a back press would be
+        // delivered to the hosted MainActivity and finish it. (The LOG button is icon-only, so the
+        // sheet item is the only node carrying this text.)
         composeRule.onNodeWithContentDescription(styleCd).performClick()
         composeRule.waitUntil(30_000) {
             composeRule.onAllNodesWithContentDescription(logCd).fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNodeWithContentDescription(logCd).performClick()
+        // New UI: the LOG picker is a bottom sheet that opens on the Recent tab; the full algorithm
+        // catalogue lives on the "Choose algorithm" tab, so switch there before asserting/picking.
+        composeRule.waitUntil(30_000) {
+            composeRule.onAllNodesWithText(algorithmTab).fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithText(algorithmTab).performClick()
         composeRule.waitUntil(30_000) {
             composeRule.onAllNodesWithText("Sony S-Log3").fetchSemanticsNodes().isNotEmpty()
         }
-        step("grade-ui", "LOG dropdown enumerates native spaces (Sony S-Log3 present)")
+        step("grade-ui", "LOG bottom sheet enumerates native spaces (Sony S-Log3 present)")
         composeRule.onNodeWithText("Sony S-Log3").performClick()
         val logged = runBlocking {
             withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame(requireDifferentFrom = boosted.bytes) }
@@ -1027,10 +1034,14 @@ class RawRoutingTest {
         }
         composeRule.onNodeWithContentDescription(logCd).performClick()
         composeRule.waitUntil(30_000) {
+            composeRule.onAllNodesWithText(algorithmTab).fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithText(algorithmTab).performClick()
+        composeRule.waitUntil(30_000) {
             composeRule.onAllNodesWithText(none).fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNodeWithText(none).performClick()
-        step("grade-ui", "picked none from the LOG dropdown")
+        step("grade-ui", "picked none from the LOG bottom sheet")
         val restored = runBlocking {
             withTimeout(DECODE_TIMEOUT_MS) { waitForDevelopedFrame(requireDifferentFrom = logOnly.bytes) }
         }
@@ -1258,6 +1269,7 @@ class RawRoutingTest {
         hostContent { AppTheme { StudioScreen() } }
         val styleCd = context.getString(R.string.studio_cd_style_filter)
         val lutCd = context.getString(R.string.studio_cd_lut)
+        val filterTab = context.getString(R.string.studio_grade_tab_filter)
         // Dock the StyleFilter bar (PhotoFilter category icon) so the LUT icon becomes visible.
         composeRule.waitUntil(30_000) {
             composeRule.onAllNodesWithContentDescription(styleCd).fetchSemanticsNodes().isNotEmpty()
@@ -1277,6 +1289,12 @@ class RawRoutingTest {
                 .respondWith(Instrumentation.ActivityResult(Activity.RESULT_OK, Intent().setData(lutUri)))
 
             composeRule.onNodeWithContentDescription(lutCd).performClick()
+            // New UI: the LUT picker is a bottom sheet that opens on the Recent tab; the SAF file
+            // picker lives on the "Choose filter" tab, so switch there before tapping "Choose file…".
+            composeRule.waitUntil(30_000) {
+                composeRule.onAllNodesWithText(filterTab).fetchSemanticsNodes().isNotEmpty()
+            }
+            composeRule.onNodeWithText(filterTab).performClick()
             val pick = context.getString(R.string.studio_grade_lut_pick)
             composeRule.waitUntil(30_000) {
                 composeRule.onAllNodesWithText(pick).fetchSemanticsNodes().isNotEmpty()
@@ -1297,6 +1315,10 @@ class RawRoutingTest {
 
             // The LUT icon's clear item returns the canvas to the as-shot develop frame.
             composeRule.onNodeWithContentDescription(lutCd).performClick()
+            composeRule.waitUntil(30_000) {
+                composeRule.onAllNodesWithText(filterTab).fetchSemanticsNodes().isNotEmpty()
+            }
+            composeRule.onNodeWithText(filterTab).performClick()
             val clear = context.getString(R.string.studio_grade_lut_clear)
             composeRule.waitUntil(30_000) {
                 composeRule.onAllNodesWithText(clear).fetchSemanticsNodes().isNotEmpty()
