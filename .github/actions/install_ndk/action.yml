@@ -149,16 +149,28 @@ runs:
         echo "NDK_PATH=$ANDROID_HOME/ndk/$SDK_VER" >> "$GITHUB_ENV"
 
     - name: Cache Android NDK
+      id: cache_ndk
       if: steps.precheck.outputs.need-install == 'true'
       uses: actions/cache@v6
       with:
         path: ${{ env.NDK_PATH }}
+        # Exact resolved patch build is the cache key. A hit restores the
+        # identical NDK directory, and the Install step below short-circuits on
+        # `cache-hit`, so sdkmanager is never re-run against an already-cached NDK.
+        #
+        # No `restore-keys` on purpose: a partial match would restore a *different*
+        # (stale) 28.x patch, then force a reinstall of the freshly resolved
+        # version — defeating the cache and leaving an orphaned cache entry behind.
+        # A miss here is therefore a true miss and triggers exactly one clean
+        # install of the resolved version.
         key: ${{ runner.os }}-ndk-${{ env.NDK_INSTALL_VER }}
-        restore-keys: |
-          ${{ runner.os }}-ndk-
 
     - name: Install NDK
-      if: steps.precheck.outputs.need-install == 'true'
+      # Only install when the runner lacks the major AND the cache did NOT
+      # already restore the exact resolved NDK. When `cache-hit` is true the
+      # NDK directory is already on disk, so re-running sdkmanager is pure waste
+      # (this was the "cache restored but NDK reinstalled anyway" defect).
+      if: steps.precheck.outputs.need-install == 'true' && steps.cache_ndk.outputs.cache-hit != 'true'
       shell: bash
       env:
         ANDROID_HOME: ${{ inputs.android-home }}
