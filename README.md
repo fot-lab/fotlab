@@ -3,6 +3,9 @@
 FotLab is an Android APP for digital photography post-processing. It helps user to apply cinematic LUTs
 onto RAW images.
 
+# Manual
+[Wiki](../../wiki)
+
 ## Credits
 
 This project has been inspired by many awesome projects, including:
