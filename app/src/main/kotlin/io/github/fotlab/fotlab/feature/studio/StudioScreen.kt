@@ -36,8 +36,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.slideInVertically
-import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.unit.dp
 import coil3.request.ImageRequest
 import io.github.fotlab.fotlab.R
@@ -420,13 +418,10 @@ fun StudioScreen() {
                             // Live rotate & flip preview: a draw-transform on the retained source
                             // bitmap (no re-decode, no re-render in Rust). The actual pixel transform
                             // is produced by applyCropRotate at commit/export.
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .rotate(viewParams.rotationDegrees)
-                                .scale(
-                                    if (viewParams.flipHorizontal) -1f else 1f,
-                                    if (viewParams.flipVertical) -1f else 1f,
-                                ),
+                            modifier = Modifier.fillMaxSize(),
+                            rotationDegrees = viewParams.rotationDegrees,
+                            flipHorizontal = viewParams.flipHorizontal,
+                            flipVertical = viewParams.flipVertical,
                         )
                     }
                     // Idle / first-decode prompt: shown only when there is no held frame and the

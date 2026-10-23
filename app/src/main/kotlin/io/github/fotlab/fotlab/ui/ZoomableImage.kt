@@ -8,7 +8,9 @@ import androidx.compose.foundation.gestures.calculateCentroidSize
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Stable
@@ -18,6 +20,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
@@ -199,6 +202,11 @@ fun ZoomableAsyncImage(
     state: ZoomState,
     modifier: Modifier = Modifier,
     keepParentDraggable: Boolean = false,
+    /** Live rotate & flip preview (Studio). Applied to the image content, not the layout box, so a
+     * 90°/270° rotation swaps the node's width/height instead of clipping the picture to a square. */
+    rotationDegrees: Float = 0f,
+    flipHorizontal: Boolean = false,
+    flipVertical: Boolean = false,
 ) {
     val painter = rememberAsyncImagePainter(model = model)
     // The decoded size is what the pan limits are measured against; it is known once painted.
@@ -215,24 +223,43 @@ fun ZoomableAsyncImage(
             state.onImageSize(decoded)
         }
     }
-    Box(
-        modifier = modifier
-            .clipToBounds()
-            .zoomable(state = state, keepParentDraggable = keepParentDraggable),
+    // Outer = the available area (`modifier`, usually fillMaxSize). It only clips to that area so a
+    // 90°-rotated node — taller than the area when the area is landscape — never paints over the
+    // surrounding bars. The gesture is read on the *node* (an untransformed box) below.
+    BoxWithConstraints(
+        modifier = modifier.clipToBounds(),
+        contentAlignment = Alignment.Center,
     ) {
-        Image(
-            painter = painter,
-            contentDescription = contentDescription,
-            contentScale = ContentScale.Fit,
+        // A 90°/270° rotation swaps the on-screen axes, so the node that hosts the image is sized to
+        // the swapped available dimensions. Fitting the *original* image into this (H, W) box and then
+        // rotating it 90° is mathematically identical to fitting the *rotated* image into (W, H) at
+        // its largest — without needing the image's intrinsic size. At 0°/180° the node is just (W, H)
+        // and behaviour is unchanged from before.
+        val axesSwapped = (rotationDegrees % 180f) != 0f
+        val nodeWidth = if (axesSwapped) maxHeight else maxWidth
+        val nodeHeight = if (axesSwapped) maxWidth else maxHeight
+        Box(
             modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer {
-                    scaleX = state.scale
-                    scaleY = state.scale
-                    translationX = state.offset.x
-                    translationY = state.offset.y
-                },
-        )
+                .size(nodeWidth, nodeHeight)
+                .zoomable(state = state, keepParentDraggable = keepParentDraggable),
+        ) {
+            Image(
+                painter = painter,
+                contentDescription = contentDescription,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        rotationZ = rotationDegrees
+                        // Flip folds into the zoom scale (about the layer centre, the transform
+                        // origin), matching the export path's flip-then-rotate order.
+                        scaleX = (if (flipHorizontal) -1f else 1f) * state.scale
+                        scaleY = (if (flipVertical) -1f else 1f) * state.scale
+                        translationX = state.offset.x
+                        translationY = state.offset.y
+                    },
+            )
+        }
     }
 }
 
