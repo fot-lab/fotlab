@@ -1,5 +1,7 @@
 package io.github.fotlab.fotlab.feature.studio
 
+import io.github.fotlab.fotlab.R
+
 import android.graphics.Bitmap
 import android.graphics.Matrix
 import androidx.compose.foundation.layout.Arrangement

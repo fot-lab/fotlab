@@ -88,6 +88,7 @@ import io.github.fotlab.fotlab.ui.icons.MeteringCenterWeighted
 import io.github.fotlab.fotlab.ui.icons.MeteringMatrixAverage
 import io.github.fotlab.fotlab.ui.icons.MeteringMatrixSpot
 import io.github.fotlab.fotlab.ui.icons.MovieEdit
+import io.github.fotlab.fotlab.ui.icons.CropRotate
 import io.github.fotlab.fotlab.ui.operation.HorizontalOperationBar
 import io.github.fotlab.fotlab.ui.operation.OperationalButton
 import io.github.fotlab.fotlab.ui.rememberZoomState
