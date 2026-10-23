@@ -81,7 +81,6 @@ import io.github.fotlab.fotlab.feature.library.LibraryCore
 import io.github.fotlab.fotlab.feature.studio.StudioRenderResult
 import io.github.fotlab.fotlab.media.MediaPreference
 import io.github.fotlab.fotlab.ui.ZoomableAsyncImage
-import androidx.compose.material.icons.filled.CropRotate
 import io.github.fotlab.fotlab.ui.icons.CustomMaterialStyleIcons
 import io.github.fotlab.fotlab.ui.icons.MeteringCenterAsterisk
 import io.github.fotlab.fotlab.ui.icons.MeteringCenterAsteriskMatrix
@@ -539,8 +538,9 @@ internal fun LutButton(
 }
 
 /**
- * Crop & Rotate entry — Material [Icons.Filled.CropRotate] glyph with the "CR"
- * caption (same in every locale). Opens the crop/rotate bottom sheet owned by StudioScreen; the
+ * Rotate & flip entry — [CustomMaterialStyleIcons.Filled.CropRotate] glyph (Material extended,
+ * bridged) with the "CR"
+ * caption (same in every locale). Opens the rotate & flip bar owned by StudioScreen; the
  * button itself carries no state, matching the other style-filter tools (LOG/LUT).
  */
 @Composable
@@ -550,8 +550,8 @@ internal fun CrButton(
 ) {
     IconButton(onClick = onClick, modifier = modifier) {
         Icon(
-            imageVector = Icons.Filled.CropRotate,
-            contentDescription = stringResource(id = R.string.studio_cd_crop_rotate),
+            imageVector = CustomMaterialStyleIcons.Filled.CropRotate,
+            contentDescription = stringResource(id = R.string.studio_cd_rotate_flip),
         )
     }
 }

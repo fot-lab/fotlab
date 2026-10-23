@@ -89,7 +89,15 @@
     <string name="studio_cd_saturation">饱和度</string>
     <string name="studio_cd_log">Log 曲线</string>
     <string name="studio_cd_lut">LUT</string>
-    <string name="studio_cd_crop_rotate">裁剪与旋转</string>
+    <string name="studio_cd_rotate_flip">旋转与翻转</string>
+    <!-- Rotate & flip 栏按钮。 -->
+    <string name="studio_cr_close">放弃并关闭</string>
+    <string name="studio_cr_rotate_left">向左旋转 90°</string>
+    <string name="studio_cr_rotate_right">向右旋转 90°</string>
+    <string name="studio_cr_cancel">取消全部</string>
+    <string name="studio_cr_flip_h">水平翻转</string>
+    <string name="studio_cr_flip_v">垂直翻转</string>
+    <string name="studio_cr_apply">应用</string>
     <!-- Visible labels rendered under each operation-bar icon (short, fits a 56dp slot). -->
     <string name="studio_label_demosaic">解马赛克</string>
     <string name="studio_label_exposure">曝光</string>

@@ -263,10 +263,12 @@ fun StudioScreen() {
     // Tapping the same fun-bar category icon again hides the bar; tapping another switches to it.
     var activeBar by remember { mutableStateOf(StudioOpBar.Basic) }
 
-    // Crop & Rotate (FOTLAB-ROTATE-000001): the source PNG is retained by the engine; these params
+    // Rotate & flip (FOTLAB-ROTATE-000001): the source PNG is retained by the engine; these params
     // are fully-relative and re-applied via the pure applyCropRotate without re-rendering in Rust.
-    var cropRotateParams by remember { mutableStateOf(CropRotateParams.Identity) }
-    var showCropRotateSheet by remember { mutableStateOf(false) }
+    // Rotate & flip: a committed value (applied / fallback for X-close) and a draft the bar edits.
+    var committedCropRotateParams by remember { mutableStateOf(CropRotateParams.Identity) }
+    var draftCropRotateParams by remember { mutableStateOf(CropRotateParams.Identity) }
+    var showCropRotateBar by remember { mutableStateOf(false) }
 
     // Recent LOG/LUT history, persisted FIFO (see GradeRecentStore / FOTLAB-LOTLUT-000001).
     val gradeRecent = remember { GradeRecentStore(context) }
@@ -336,7 +338,7 @@ fun StudioScreen() {
             persistUriPermission(context, target, write = true)
             scope.launch { mediaPref.setLastExportUri(target.toString()) }
             val current = displayedResult
-            val crParams = cropRotateParams
+            val crParams = committedCropRotateParams
             scope.launch(Dispatchers.IO) {
                 runCatching {
                     val bytes = encodeExport(context, current, format, crParams)
@@ -408,32 +410,29 @@ fun StudioScreen() {
                     contentAlignment = Alignment.Center,
                 ) {
                     val displayed = displayedResult
+                    val viewParams = if (showCropRotateBar) draftCropRotateParams else committedCropRotateParams
                     if (displayed != null) {
                         ZoomableAsyncImage(
                             // rawler path -> decoded PNG ByteBuffer; Coil path -> original Uri.
                             model = ImageRequest.Builder(context).data((displayed as StudioRenderResult.Ready).model).build(),
                             contentDescription = null,
                             state = zoomState,
-                            // Live crop & rotate preview: a draw-transform on the retained source
-                            // bitmap (no re-decode, no re-render in Rust). The actual pixel crop is
-                            // produced by applyCropRotate at commit/export.
+                            // Live rotate & flip preview: a draw-transform on the retained source
+                            // bitmap (no re-decode, no re-render in Rust). The actual pixel transform
+                            // is produced by applyCropRotate at commit/export.
                             modifier = Modifier
                                 .fillMaxSize()
-                                .rotate(cropRotateParams.rotationDegrees)
+                                .rotate(viewParams.rotationDegrees)
                                 .scale(
-                                    if (cropRotateParams.flipHorizontal) -1f else 1f,
-                                    if (cropRotateParams.flipVertical) -1f else 1f,
+                                    if (viewParams.flipHorizontal) -1f else 1f,
+                                    if (viewParams.flipVertical) -1f else 1f,
                                 ),
                         )
                     }
-                    // Crop range editor: a new layer drawn over the canvas while the crop/rotate
-                    // sheet is open (Image Toolbox-style drag-to-move / drag-corner-to-resize).
-                    if (showCropRotateSheet && displayedResult != null) {
-                        CropRotateCanvasLayer(
-                            cropNormalized = cropRotateParams.cropNormalized,
-                            onCropNormalizedChange = { cropRotateParams = cropRotateParams.copy(cropNormalized = it) },
-                        )
-                    } else if (displayedResult == null && !isPipelineRunning) {
+                    // Idle / first-decode prompt: shown only when there is no held frame and the
+                    // pipeline is not running (the processing overlay covers the running-but-empty
+                    // case). Once an image is opened this is removed entirely.
+                    if (displayedResult == null && !isPipelineRunning) {
                         // No held frame and not running: show the idle / first-decode prompt.
                         // This block is gated on having NO held frame, so once an image is opened
                         // the prompt is removed entirely instead of stacking on top of the canvas.
@@ -495,19 +494,37 @@ fun StudioScreen() {
                 } else {
                     StudioOpBar.Basic
                 }
-                if (showCropRotateSheet) {
-                    // Crop & Rotate sheet: a panel whose height matches the operation bar, so it
-                    // slides up (from the bottom) and covers exactly the operation-bar slot. Holds
-                    // the rotation slider; the crop range is edited on the canvas layer above.
+                if (showCropRotateBar) {
+                    // Rotate & flip bar: a 7-button strip (height matches the operation bar) that
+                    // slides up from the bottom and covers exactly the operation-bar slot. It edits
+                    // a draft of the rotate & flip params; X-close discards, Check commits.
                     AnimatedVisibility(
                         visible = true,
                         enter = slideInVertically(initialOffsetY = { h -> h }),
                     ) {
                         CropRotateControlPanel(
-                            params = cropRotateParams,
-                            onParamsChange = { cropRotateParams = it },
-                            onClose = { showCropRotateSheet = false },
-                            onReset = { cropRotateParams = CropRotateParams.Identity },
+                            onCloseDiscard = {
+                                draftCropRotateParams = committedCropRotateParams
+                                showCropRotateBar = false
+                            },
+                            onRotateLeft = { draftCropRotateParams = draftCropRotateParams.rotateLeft() },
+                            onRotateRight = { draftCropRotateParams = draftCropRotateParams.rotateRight() },
+                            onCancel = {
+                                committedCropRotateParams = CropRotateParams.Identity
+                                draftCropRotateParams = CropRotateParams.Identity
+                            },
+                            onSwapHoriz = {
+                                draftCropRotateParams =
+                                    draftCropRotateParams.copy(flipHorizontal = !draftCropRotateParams.flipHorizontal)
+                            },
+                            onSwapVert = {
+                                draftCropRotateParams =
+                                    draftCropRotateParams.copy(flipVertical = !draftCropRotateParams.flipVertical)
+                            },
+                            onApply = {
+                                committedCropRotateParams = draftCropRotateParams
+                                showCropRotateBar = false
+                            },
                         )
                     }
                 } else {
@@ -625,7 +642,10 @@ fun StudioScreen() {
                         lutName = gradeSelection.lutName,
                         logSpaces = logSpaces,
                         onLogSpace = StudioEngine::setGradeLogSpace,
-                        onCropRotate = { showCropRotateSheet = true },
+                        onCropRotate = {
+                            draftCropRotateParams = committedCropRotateParams
+                            showCropRotateBar = true
+                        },
                         onPickLut = {
                             lutPickerLauncher.launch(
                                 openDocumentIntent(arrayOf("*/*"), lastLutUri?.let { Uri.parse(it) }),

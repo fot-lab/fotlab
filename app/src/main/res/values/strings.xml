@@ -94,7 +94,15 @@
     <string name="studio_cd_saturation">Saturation</string>
     <string name="studio_cd_log">Log curve</string>
     <string name="studio_cd_lut">LUT</string>
-    <string name="studio_cd_crop_rotate">Crop and rotate</string>
+    <string name="studio_cd_rotate_flip">Rotate and flip</string>
+    <!-- Rotate & flip bar buttons. -->
+    <string name="studio_cr_close">Discard and close</string>
+    <string name="studio_cr_rotate_left">Rotate left 90°</string>
+    <string name="studio_cr_rotate_right">Rotate right 90°</string>
+    <string name="studio_cr_cancel">Cancel all</string>
+    <string name="studio_cr_flip_h">Flip horizontal</string>
+    <string name="studio_cr_flip_v">Flip vertical</string>
+    <string name="studio_cr_apply">Apply</string>
     <string name="studio_cd_dcp">DCP camera profile</string>
     <string name="studio_cd_lcp">LCP lens profile</string>
     <!-- Visible labels rendered under each operation-bar icon (short, fits a 56dp slot). -->
