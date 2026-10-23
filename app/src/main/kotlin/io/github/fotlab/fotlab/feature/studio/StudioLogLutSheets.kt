@@ -274,8 +274,14 @@ internal fun LutPickerSheet(
                 LazyColumn(state = listState, contentPadding = PaddingValues(vertical = 8.dp)) {
                     if (selectedTab == RECENT_TAB) {
                         itemsIndexed(recent.reversed(), key = { _, v -> "lut-recent-$v" }) { _, value ->
+                            // The full URI is persisted (so it can be re-applied on tap), but only its
+                            // file name — the segment after the last slash of the decoded path — is
+                            // shown, never the full path.
+                            val display = runCatching {
+                                Uri.parse(value).path?.substringAfterLast('/')
+                            }.getOrNull()?.takeIf { it.isNotBlank() } ?: value
                             RecentRow(
-                                label = runCatching { Uri.parse(value).lastPathSegment }.getOrNull() ?: value,
+                                label = display,
                                 selected = false,
                                 onClick = { applyUriAndClose(value) },
                             )

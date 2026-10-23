@@ -80,7 +80,11 @@ its persistence live in one place, separate from the icon buttons in `StudioOpBa
     (handled in `StudioScreen`).
 14. Tapping a URI in the Recent history re-applies that filter file (`setGradeLut` with the persisted
     URI) and pushes it to the history, then closes the sheet. The persisted URI permission must keep
-    working across process death (already taken via `persistUriPermission`).
+    working across process death (already taken via `persistUriPermission`). **Storage keeps the full
+    URI** (so the path can be re-applied / re-opened on tap), but the Recent row **displays only the
+    file name** — the segment after the last slash of the decoded path (`Uri.parse(value).path
+    .substringAfterLast('/')`) — never the full URI; this avoids showing the long encoded content-URI
+    document id for SAF-picked `.cube` files.
 
 ## Constraints
 
@@ -148,3 +152,6 @@ its persistence live in one place, separate from the icon buttons in `StudioOpBa
 - 2026-10-15 — Initial draft. Extracted LOG / LUT on-press behaviour into
   `StudioLogLutSheets.kt`; replaced both `DropdownMenu`s with two-tab `ModalBottomSheet`s backed by a
   persisted, FIFO, de-duplicated 60-entry Recent history (`GradeRecentStore`).
+- 2026-10-21 — LUT Recent tab now **displays only the file name** (segment after the last slash of the
+  decoded URI path) instead of the full stored URI, while storage keeps the full URI so re-applying
+  still works (`StudioLogLutSheets.kt` `LutPickerSheet` Recent row).
