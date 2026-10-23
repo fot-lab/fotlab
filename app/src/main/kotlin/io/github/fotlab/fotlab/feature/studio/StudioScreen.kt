@@ -514,12 +514,26 @@ fun StudioScreen() {
                                 draftCropRotateParams = CropRotateParams.Identity
                             },
                             onSwapHoriz = {
+                                // Use the *current* rotation (not a previously cached value). The
+                                // matrix applies flip then rotate, so at a 90° multiple (rotation %
+                                // 180 != 0) the on-screen axes are swapped: the horizontal button
+                                // must flip the vertical image axis, and vice-versa.
+                                val axesSwapped = (draftCropRotateParams.rotationDegrees % 180f) != 0f
                                 draftCropRotateParams =
-                                    draftCropRotateParams.copy(flipHorizontal = !draftCropRotateParams.flipHorizontal)
+                                    if (axesSwapped) {
+                                        draftCropRotateParams.copy(flipVertical = !draftCropRotateParams.flipVertical)
+                                    } else {
+                                        draftCropRotateParams.copy(flipHorizontal = !draftCropRotateParams.flipHorizontal)
+                                    }
                             },
                             onSwapVert = {
+                                val axesSwapped = (draftCropRotateParams.rotationDegrees % 180f) != 0f
                                 draftCropRotateParams =
-                                    draftCropRotateParams.copy(flipVertical = !draftCropRotateParams.flipVertical)
+                                    if (axesSwapped) {
+                                        draftCropRotateParams.copy(flipHorizontal = !draftCropRotateParams.flipHorizontal)
+                                    } else {
+                                        draftCropRotateParams.copy(flipVertical = !draftCropRotateParams.flipVertical)
+                                    }
                             },
                             onApply = {
                                 committedCropRotateParams = draftCropRotateParams
