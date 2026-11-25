@@ -58,9 +58,9 @@ class CameraFileRepository(
     /** Downloads objects into Downloads/Camera; MediaStore entries stay pending until complete. */
     suspend fun download(objects: List<PtpObject>): List<Uri> = withContext(Dispatchers.IO) {
         val written = ArrayList<Uri>(objects.size)
-        objects.forEachIndexed { index, object ->
-            val info = operations.objectInfo(object.handle)
-            val name = uniqueName(object.name, info.format)
+        objects.forEachIndexed { index, item ->
+            val info = operations.objectInfo(item.handle)
+            val name = uniqueName(item.name, info.format)
             val mime = PtpFormats.mimeType(info.format)
             val sink = createSink(name, mime)
             _progress.value = TransferProgress(
@@ -71,7 +71,7 @@ class CameraFileRepository(
                 totalBytes = info.sizeBytes,
             )
             try {
-                operations.download(object.handle, info.sizeBytes, sink.output) { completed ->
+                operations.download(item.handle, info.sizeBytes, sink.output) { completed ->
                     _progress.value = TransferProgress(
                         kind = TransferKind.DOWNLOAD,
                         objectName = name,
