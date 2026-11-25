@@ -60,12 +60,15 @@ object SsdpProbe {
                     ?: response.address.hostAddress
                     ?: continue
                 val description = fetchDescription(location)
+                val actionListUrl = extractActionListUrl(headers)
                 val device = DiscoveredIpDevice(
                     host = host,
                     name = description["friendlyName"] ?: "",
                     manufacturer = description["manufacturer"],
                     model = description["modelName"],
                     source = "ssdp",
+                    actionListUrl = actionListUrl,
+                    transportKind = if (actionListUrl != null) TransportKind.HTTP_SONY else TransportKind.PTP,
                 )
                 found.putIfAbsent(host, device)
             }
@@ -122,5 +125,70 @@ object SsdpProbe {
             }
             return values
         }
+    }
+
+    /**
+     * Pull the Sony HTTP API base URL out of the SSDP response headers. Sony
+     * ScalarWebAPI devices publish multiple `X_ScalarWebAPI_*` headers; the
+     * one we need is `X_ScalarWebAPI_ActionList_URL`, which lists the HTTP
+     * base where `av:XXXX` SOAP actions live.
+     */
+    private fun extractActionListUrl(headers: Map<String, String>): String? {
+        val direct = headers["x_scalarwebapi_actionlist_url"]
+        if (!direct.isNullOrBlank()) return direct.trim()
+        // Sony also embeds an XML document in a single X_ScalarWebAPI_DeviceInfo
+        // header that contains every service type and its ActionList_URL.
+        val deviceInfo = headers["x_scalarwebapi_deviceinfo"]
+        if (!deviceInfo.isNullOrBlank()) {
+            runCatching { parseDeviceInfoXml(deviceInfo) }.getOrNull()?.let { return it }
+        }
+        // Some models lowercase or hyphenate the header name differently;
+        // fall back to a prefix scan.
+        return headers.entries.firstOrNull { (k, v) ->
+            k.startsWith("x_scalarwebapi_", ignoreCase = true) &&
+                k.contains("actionlist", ignoreCase = true) &&
+                v.isNotBlank()
+        }?.value?.trim()
+    }
+
+    /**
+     * Parse the Sony-specific XML that the camera ships in
+     * `X_ScalarWebAPI_DeviceInfo`. It contains one `X_ScalarWebAPI_Service`
+     * block per endpoint (`camera`, `avContent`, etc.) and we want the URL of
+     * whichever one exposes the `camera` service — that is the HTTP base for
+     * the JSON-RPC control API.
+     */
+    private fun parseDeviceInfoXml(xml: String): String? {
+        val parser = Xml.newPullParser()
+        parser.setInput(xml.reader())
+        var event = parser.eventType
+        var inService = false
+        var serviceType: String? = null
+        var actionList: String? = null
+        while (event != XmlPullParser.END_DOCUMENT) {
+            val name = parser.name
+            if (event == XmlPullParser.START_TAG) {
+                when {
+                    name?.equals("X_ScalarWebAPI_Service", ignoreCase = true) == true -> {
+                        inService = true
+                        serviceType = null
+                        actionList = null
+                    }
+                    inService && name?.equals("X_ScalarWebAPI_ServiceType", ignoreCase = true) == true ->
+                        serviceType = parser.nextText()?.trim()
+                    inService && name?.equals("X_ScalarWebAPI_ActionList_URL", ignoreCase = true) == true ->
+                        actionList = parser.nextText()?.trim()
+                }
+            } else if (event == XmlPullParser.END_TAG &&
+                name?.equals("X_ScalarWebAPI_Service", ignoreCase = true) == true
+            ) {
+                if (actionList != null && (serviceType == "camera" || serviceType == null)) {
+                    return actionList
+                }
+                inService = false
+            }
+            event = parser.next()
+        }
+        return actionList
     }
 }

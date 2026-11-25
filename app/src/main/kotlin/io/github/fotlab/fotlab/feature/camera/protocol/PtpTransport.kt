@@ -18,6 +18,17 @@ data class PtpTransactionResult(
 interface PtpTransport {
     val label: String
 
+    /**
+     * Hook registered by the facade when the transport is handed over to a
+     * session. The transport invokes it exactly once when it detects the wire
+     * is broken beyond recovery — a closed socket, a vanished USB endpoint, a
+     * persistent read error. The callback is the facade's only path to learn
+     * about failures that happen outside an explicit [transact] call (for
+     * example in an event reader loop). It is never invoked on a normal
+     * [close].
+     */
+    var onLinkBroken: (() -> Unit)?
+
     /** Bring up the link (USB claim or TCP init handshake). */
     suspend fun open()
 

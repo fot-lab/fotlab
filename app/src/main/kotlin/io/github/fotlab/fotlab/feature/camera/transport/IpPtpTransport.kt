@@ -32,10 +32,13 @@ class IpPtpTransport(
 
     override val label: String get() = "PTP/IP $host"
 
+    override var onLinkBroken: (() -> Unit)? = null
+
     private val mutex = Mutex()
     private val events = MutableSharedFlow<CameraEvent>(extraBufferCapacity = 64)
     private var links: IpLinks? = null
     private var eventJob: Job? = null
+    private var linkBroken: Boolean = false
 
     override fun events(): Flow<CameraEvent> = events.asSharedFlow()
 
@@ -52,6 +55,7 @@ class IpPtpTransport(
         mutex.withLock {
             eventJob?.cancel()
             eventJob = null
+            linkBroken = false
             links?.command?.let { runCatching { it.close() } }
             links?.event?.let { runCatching { it.close() } }
             links = null
@@ -91,6 +95,7 @@ class IpPtpTransport(
                     return@withLock PtpTransactionResult(response.code, response.params, data)
                 }
             } catch (error: IOException) {
+                markLinkBroken()
                 throw CameraLinkException("PTP/IP link failed: ${error.message ?: error.javaClass.simpleName}", error)
             }
         }
@@ -98,18 +103,28 @@ class IpPtpTransport(
 
     private fun startEventReader(socket: java.net.Socket) {
         eventJob = CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
-            while (isActive) {
+            while (isActive && !linkBroken) {
                 try {
                     val packet: IpPacket = IpHandshake.readPacket(socket.getInputStream())
                     if (packet.type == PtpIpType.EVENT) {
                         val event = PtpContainer.parseIpCodePacket(packet)
                         events.tryEmit(CameraEvent(event.code, event.transactionId, event.params))
                     }
-                } catch (_: IOException) {
+                } catch (error: IOException) {
+                    markLinkBroken()
                     break
                 }
             }
         }
+    }
+
+    private fun markLinkBroken() {
+        if (linkBroken) return
+        linkBroken = true
+        eventJob?.cancel()
+        val callback = onLinkBroken
+        onLinkBroken = null
+        callback?.invoke()
     }
 
     private fun OutputStream.write(data: ByteArray) {

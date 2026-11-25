@@ -83,6 +83,12 @@ object CameraCore {
     @Volatile
     private var active: ActiveConnection? = null
 
+    @Volatile
+    private var reconnectJob: Job? = null
+
+    @Volatile
+    private var keepaliveJob: Job? = null
+
     private val _devices = MutableStateFlow<List<CameraDevice>>(emptyList())
     val devices: StateFlow<List<CameraDevice>> = _devices.asStateFlow()
 
@@ -151,6 +157,7 @@ object CameraCore {
         val context = appContext ?: throw IllegalStateException("CameraCore.prepare() was not called")
         val engine = discovery ?: throw IllegalStateException("CameraCore.prepare() was not called")
         disconnect()
+        lastSeenDevice = device
         _state.value = CameraConnectionState.Connecting(device)
         try {
             if (device is CameraDevice.Usb) {
@@ -165,6 +172,7 @@ object CameraCore {
             )
             val transport = transportFor(engine, device, profile)
             val session = PtpSession(transport, profile.sessionId)
+            transport.onLinkBroken = { handleLinkBroken(transport.label) }
             val identity = session.open()
             val operations = PtpFileOperations(session, profile)
             val eventJob = scope.launch {
@@ -180,6 +188,9 @@ object CameraCore {
                 repository = CameraFileRepository(context, operations),
                 eventJob = eventJob,
             )
+            reconnectJob?.cancel()
+            reconnectJob = null
+            startKeepalive(device)
             _state.value = CameraConnectionState.Connected(device, profile, identity)
         } catch (error: Throwable) {
             _state.value = CameraConnectionState.Failed(device, error.message ?: error.toString())
@@ -188,6 +199,10 @@ object CameraCore {
     }
 
     suspend fun disconnect() {
+        reconnectJob?.cancel()
+        reconnectJob = null
+        keepaliveJob?.cancel()
+        keepaliveJob = null
         val current = active ?: run {
             _state.value = CameraConnectionState.Idle
             return
@@ -262,11 +277,46 @@ object CameraCore {
         if (active !== connection) return
         active = null
         connection.eventJob.cancel()
+        keepaliveJob?.cancel()
+        keepaliveJob = null
         withContext(Dispatchers.IO) { runCatching { connection.session.close() } }
         _state.value = CameraConnectionState.Failed(
             connection.device,
             error.message ?: error.toString(),
         )
+    }
+
+    /**
+     * Entry point invoked from the transport's [PtpTransport.onLinkBroken] hook.
+     * Unlike [runFileOperation] which catches failures inside an explicit call,
+     * the hook fires for failures that happen outside one — for example when the
+     * event reader hits a closed socket and nobody was actively transacting.
+     *
+     * This is **not** on the main suspend path of [connect], so it can run
+     * before [active] is assigned; in that case we still tear down the session
+     * that [connect] was building and mark the device as failed.
+     */
+    private fun handleLinkBroken(transportLabel: String) {
+        val connection = active
+        if (connection != null) {
+            val device = connection.device
+            scope.launch {
+                failLink(
+                    connection,
+                    CameraLinkException("Link torn down: $transportLabel"),
+                )
+                // USB detach is handled by the broadcast receiver and should not
+                // be auto-retried; IP flakiness (Wi-Fi jitter, camera sleep) is.
+                if (device.link == io.github.fotlab.fotlab.feature.camera.model.CameraLink.IP) {
+                    startReconnect(device)
+                }
+            }
+        } else if (_state.value is CameraConnectionState.Connecting) {
+            scope.launch {
+                val st = _state.value as? CameraConnectionState.Connecting ?: return@launch
+                _state.value = CameraConnectionState.Failed(st.device, "Link torn down during connect: $transportLabel")
+            }
+        }
     }
 
     private fun transportFor(
@@ -275,9 +325,16 @@ object CameraCore {
         profile: CameraProfile,
     ): PtpTransport = when (device) {
         is CameraDevice.Usb -> UsbPtpTransport(device.device, engine.usbDiscovery)
-        is CameraDevice.Ip -> {
-            val port = if (device.port == 15740) profile.initPort else device.port
-            IpPtpTransport(device.host, port, profile)
+        is CameraDevice.Ip -> when (device.transportKind) {
+            io.github.fotlab.fotlab.feature.camera.discovery.TransportKind.HTTP_SONY ->
+                throw UnsupportedOperationException(
+                    "HTTP_SONY transport for ${device.displayName} (${device.host}) is scaffolded; " +
+                        "full browse/download wiring follows",
+                )
+            io.github.fotlab.fotlab.feature.camera.discovery.TransportKind.PTP -> {
+                val port = if (device.port == 15740) profile.initPort else device.port
+                IpPtpTransport(device.host, port, profile)
+            }
         }
     }
 
@@ -304,5 +361,79 @@ object CameraCore {
             engine.usbDiscovery.requestPermission(device.device)
         }
         if (!granted) throw SecurityException("USB permission denied for ${device.displayName}")
+    }
+
+    /**
+     * Retry the most recently failed or disconnected device.
+     *
+     * Returns `true` if the device was found and a reconnect was kicked off,
+     * `false` if there is nothing to retry or the device vanished before we
+     * could start. The caller can observe the state flow to follow the attempt.
+     */
+    fun retry(): Boolean {
+        val last = lastSeenDevice ?: return false
+        if (reconnectJob?.isActive == true) return false
+        val isConnecting = _state.value is CameraConnectionState.Connecting
+        if (isConnecting) return false
+        startReconnect(last)
+        return true
+    }
+
+    private fun startReconnect(device: CameraDevice) {
+        reconnectJob?.cancel()
+        reconnectJob = null
+        reconnectJob = scope.launch {
+            var attempt = 0
+            var currentDelay = RECONNECT_BASE_DELAY_MS
+            while (attempt < MAX_RECONNECT_ATTEMPTS && isActive) {
+                attempt++
+                delay(currentDelay)
+                // User may have explicitly disconnected or switched device while
+                // we were backing off; bail out cleanly if so.
+                if (active != null) return@launch
+                val state = _state.value
+                if (state is CameraConnectionState.Idle) return@launch
+                if (!isActive) return@launch
+                runCatching { connect(device) }
+                    .onSuccess { return@launch }
+                    .onFailure { currentDelay *= 2 }
+            }
+            reconnectJob = null
+        }
+    }
+
+    /**
+     * Probe the link periodically so an idle connection tears the socket down
+     * instead of being left half-open. We send [PtpSession.deviceInfo] every
+     * [KEEPALIVE_INTERVAL_MS] — it is a cheap read that the PTP spec allows
+     * after OpenSession, and the session guards against OpenSession racing.
+     *
+     * This only runs on IP links; USB is physical and does not need it.
+     */
+    private fun startKeepalive(device: CameraDevice) {
+        keepaliveJob?.cancel()
+        if (device.link != io.github.fotlab.fotlab.feature.camera.model.CameraLink.IP) return
+        keepaliveJob = scope.launch {
+            while (isActive && active != null) {
+                delay(KEEPALIVE_INTERVAL_MS)
+                val connection = active ?: return@launch
+                try {
+                    connection.session.deviceInfo()
+                } catch (error: Throwable) {
+                    runCatching { failLink(connection, CameraLinkException("Keepalive probe failed: ${error.message}", error)) }
+                    return@launch
+                }
+            }
+        }
+    }
+
+    /** Last device we ever saw (from failed or disconnected attempts) — used by [retry]. */
+    @Volatile
+    private var lastSeenDevice: CameraDevice? = null
+
+    private companion object {
+        private const val MAX_RECONNECT_ATTEMPTS: Int = 5
+        private const val RECONNECT_BASE_DELAY_MS: Long = 1_000L
+        private const val KEEPALIVE_INTERVAL_MS: Long = 120_000L
     }
 }

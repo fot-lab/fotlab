@@ -22,6 +22,8 @@ class CameraDiscovery(context: Context) {
             manufacturer = device.manufacturer,
             model = device.model,
             friendlyName = device.name.ifBlank { null },
+            actionListUrl = device.actionListUrl,
+            transportKind = device.transportKind,
         )
     }
 

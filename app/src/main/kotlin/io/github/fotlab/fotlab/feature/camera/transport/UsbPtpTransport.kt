@@ -36,6 +36,8 @@ class UsbPtpTransport(
 
     override val label: String get() = "USB ${device.productName.orEmpty()}".trim()
 
+    override var onLinkBroken: (() -> Unit)? = null
+
     private val mutex = Mutex()
     private val events = MutableSharedFlow<CameraEvent>(extraBufferCapacity = 64)
     private var connection: UsbDeviceConnection? = null
@@ -43,6 +45,7 @@ class UsbPtpTransport(
     private var bulkIn: UsbEndpoint? = null
     private var interruptIn: UsbEndpoint? = null
     private var eventJob: Job? = null
+    private var linkBroken: Boolean = false
 
     override fun events(): Flow<CameraEvent> = events.asSharedFlow()
 
@@ -72,6 +75,7 @@ class UsbPtpTransport(
         mutex.withLock {
             eventJob?.cancel()
             eventJob = null
+            linkBroken = false
             connection?.close()
             connection = null
             bulkOut = null
@@ -112,6 +116,7 @@ class UsbPtpTransport(
                 }
                 PtpTransactionResult(response.code, response.params, data)
             } catch (error: IOException) {
+                markLinkBroken()
                 throw CameraLinkException(
                     "USB PTP link failed: ${error.message ?: error.javaClass.simpleName}",
                     error,
@@ -179,9 +184,11 @@ class UsbPtpTransport(
 
     private fun startEventReader(link: UsbDeviceConnection, endpoint: UsbEndpoint) {
         eventJob = CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
-            while (isActive) {
+            while (isActive && !linkBroken) {
                 val buffer = ByteArray(512)
-                val count = link.bulkTransfer(endpoint, buffer, buffer.size, 1_000)
+                val count = runCatching {
+                    link.bulkTransfer(endpoint, buffer, buffer.size, 1_000)
+                }.getOrNull()
                 if (count != null && count > 6) {
                     runCatching {
                         val container = PtpContainer.parseUsb(buffer.copyOfRange(6, count))
@@ -191,9 +198,21 @@ class UsbPtpTransport(
                             )
                         }
                     }
+                } else if (count != null && count < 0) {
+                    markLinkBroken()
+                    break
                 }
             }
         }
+    }
+
+    private fun markLinkBroken() {
+        if (linkBroken) return
+        linkBroken = true
+        eventJob?.cancel()
+        val callback = onLinkBroken
+        onLinkBroken = null
+        callback?.invoke()
     }
 
     /** Exposed so the session can report device identity if discovery had no name. */

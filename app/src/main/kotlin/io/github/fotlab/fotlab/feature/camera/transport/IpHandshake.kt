@@ -50,6 +50,9 @@ object IpHandshake {
         withContext(Dispatchers.IO) {
             val command = Socket().apply {
                 soTimeout = COMMAND_TIMEOUT_MS
+                // Enable TCP keepalive so a dead peer tears the socket down
+                // instead of leaving a half-open link.
+                keepAlive = true
                 connect(InetSocketAddress(host, port), CONNECT_TIMEOUT_MS)
             }
             // The responder connects back to us for the event channel. Bind before
@@ -76,6 +79,7 @@ object IpHandshake {
                     val accepted = runCatching { server.accept() }.getOrNull()
                     if (accepted != null) {
                         accepted.soTimeout = COMMAND_TIMEOUT_MS
+                        accepted.keepAlive = true
                         val initEvent = PtpContainer.ipInitEvent(sessionId)
                         accepted.getOutputStream().write(initEvent)
                         accepted.getOutputStream().flush()

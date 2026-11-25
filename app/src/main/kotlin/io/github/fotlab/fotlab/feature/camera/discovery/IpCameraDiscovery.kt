@@ -37,12 +37,20 @@ class IpCameraDiscovery(private val context: Context) {
             if (existing == null) {
                 byHost[device.host] = device
             } else {
+                // HTTP_SONY (SSDP + ActionList_URL) wins over a plain PTP mDNS
+                // hit on the same host: an older Sony camera may advertise
+                // both protocols on the wire, and we want the explicit API.
+                val preferHttp =
+                    device.transportKind == TransportKind.HTTP_SONY ||
+                        existing.transportKind == TransportKind.HTTP_SONY
                 byHost[device.host] = existing.copy(
                     name = existing.name.ifBlank { device.name },
                     manufacturer = existing.manufacturer ?: device.manufacturer,
                     model = existing.model ?: device.model,
                     port = if (existing.port != 15740) existing.port else device.port,
                     source = "${existing.source}+${device.source}",
+                    actionListUrl = if (existing.actionListUrl != null) existing.actionListUrl else device.actionListUrl,
+                    transportKind = if (preferHttp) TransportKind.HTTP_SONY else existing.transportKind,
                 )
             }
         }
