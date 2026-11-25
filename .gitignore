@@ -2,6 +2,7 @@
 .gradle/
 build/
 .kotlin/
+.venv/
 captures/
 .externalNativeBuild/
 .cxx/
@@ -70,6 +71,8 @@ docs/_build/
 # CI logs — downloaded locally for inspection, never committed
 log/
 tmp/
+reverse/
+
 
 
 

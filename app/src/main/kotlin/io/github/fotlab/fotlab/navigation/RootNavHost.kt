@@ -5,6 +5,7 @@ import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.rememberNavController
+import io.github.fotlab.fotlab.navigation.camera.cameraGraph
 import io.github.fotlab.fotlab.navigation.library.libraryGraph
 import io.github.fotlab.fotlab.navigation.studio.studioGraph
 
@@ -26,6 +27,7 @@ fun RootNavHost(
     ) {
         libraryGraph(navController)
         studioGraph()
+        cameraGraph()
         // Further destinations: one `xxxGraph()` call per feature package.
     }
 }

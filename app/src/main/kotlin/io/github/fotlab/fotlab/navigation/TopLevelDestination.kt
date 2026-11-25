@@ -4,8 +4,10 @@ import androidx.annotation.StringRes
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CameraRoll
 import androidx.compose.material.icons.filled.PermMedia
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.ui.graphics.vector.ImageVector
 import io.github.fotlab.fotlab.R
+import io.github.fotlab.fotlab.navigation.camera.CameraDestination
 import io.github.fotlab.fotlab.navigation.library.LibraryDestination
 import io.github.fotlab.fotlab.navigation.studio.StudioDestination
 
@@ -15,7 +17,8 @@ import io.github.fotlab.fotlab.navigation.studio.StudioDestination
  *
  * Open question Q1 of that item: the definitive destination set, its order and
  * its start destination are still TBD. Adding a destination means adding one
- * entry here plus one graph contribution in [RootNavHost] — nothing else.
+ * entry here, its label in the `app` string block, and one graph contribution in
+ * [RootNavHost] — nothing else.
  */
 enum class TopLevelDestination(
     val route: String,
@@ -31,6 +34,11 @@ enum class TopLevelDestination(
         route = StudioDestination.ROUTE,
         label = R.string.app_nav_studio_label,
         icon = Icons.Filled.CameraRoll,
+    ),
+    CAMERA(
+        route = CameraDestination.ROUTE,
+        label = R.string.app_nav_camera_label,
+        icon = Icons.Filled.PhotoCamera,
     ),
     ;
 

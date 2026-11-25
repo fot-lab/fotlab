@@ -31,6 +31,7 @@
     <string name="app_name">FotLab</string>
     <string name="app_nav_library_label">Library</string>
     <string name="app_nav_studio_label">Studio</string>
+    <string name="app_nav_camera_label">Camera</string>
 
     <!-- ===== feature: library ===== -->
     <string name="library_new_collection_name">New Folder</string>
@@ -251,5 +252,49 @@
     <string name="library_viewer_label_focal">Focal length</string>
     <string name="library_viewer_label_flash">Flash</string>
     <string name="library_viewer_label_duration">Duration</string>
+
+    <!-- ===== feature: camera ===== -->
+    <!-- transfer: labels and states -->
+    <string name="camera_transfer_channel_name">Camera transfer</string>
+    <string name="camera_transfer_preparing">Preparing transfer</string>
+    <string name="camera_transfer_completed">Transfer complete</string>
+    <string name="camera_transfer_failed">Transfer failed</string>
+    <string name="camera_transfer_cancelled">Transfer cancelled</string>
+    <string name="camera_transfer_progress">%1$s · %2$d%%</string>
+    <!-- screen: labels -->
+    <string name="camera_status_idle">Not connected</string>
+    <string name="camera_status_connecting">Connecting to %1$s</string>
+    <string name="camera_status_connected">Connected to %1$s</string>
+    <string name="camera_status_failed">Connection to %1$s failed</string>
+    <string name="camera_section_devices">Cameras</string>
+    <string name="camera_label_usb">USB</string>
+    <string name="camera_label_network">Network</string>
+    <string name="camera_label_storage">Storage %1$d</string>
+    <string name="camera_label_size">%1$d B</string>
+    <string name="camera_filter_all">All</string>
+    <string name="camera_filter_image">Photos</string>
+    <string name="camera_filter_video">Videos</string>
+    <string name="camera_drawer_hint">Find cameras over USB or the local network, then browse, transfer and manage files.</string>
+    <!-- screen: actions -->
+    <string name="camera_action_refresh">Refresh</string>
+    <string name="camera_action_connect">Connect</string>
+    <string name="camera_action_disconnect">Disconnect</string>
+    <string name="camera_action_add">Add</string>
+    <string name="camera_action_download">Download</string>
+    <string name="camera_action_upload">Upload</string>
+    <string name="camera_action_delete">Delete</string>
+    <string name="camera_action_cancel">Cancel</string>
+    <string name="camera_action_up">Up one level</string>
+    <!-- screen: hint, message, error, empty -->
+    <string name="camera_hint_host">Camera address</string>
+    <string name="camera_delete_title">Delete selected files?</string>
+    <string name="camera_delete_message">Delete %1$d selected file(s) from the camera?</string>
+    <string name="camera_error">Error: %1$s</string>
+    <string name="camera_empty_devices">No cameras found. Tap Refresh, or add one by address.</string>
+    <string name="camera_empty_files">No files on this storage</string>
+    <!-- screen: content descriptions -->
+    <string name="camera_cd_more_options">More options</string>
+    <string name="camera_cd_upload">Upload a file</string>
+    <string name="camera_cd_delete">Delete selected files</string>
 
 </resources>

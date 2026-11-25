@@ -30,6 +30,7 @@
     <string name="app_name">FotLab</string>
     <string name="app_nav_library_label">图库</string>
     <string name="app_nav_studio_label">片坊</string>
+    <string name="app_nav_camera_label">相机</string>
 
     <!-- ===== feature: library ===== -->
     <string name="library_new_collection_name">新建文件夹</string>
@@ -221,5 +222,49 @@
     <string name="library_viewer_label_focal">焦距</string>
     <string name="library_viewer_label_flash">闪光灯</string>
     <string name="library_viewer_label_duration">时长</string>
+
+    <!-- ===== feature: camera ===== -->
+    <!-- transfer: labels and states -->
+    <string name="camera_transfer_channel_name">相机传输</string>
+    <string name="camera_transfer_preparing">正在准备传输</string>
+    <string name="camera_transfer_completed">传输完成</string>
+    <string name="camera_transfer_failed">传输失败</string>
+    <string name="camera_transfer_cancelled">传输已取消</string>
+    <string name="camera_transfer_progress">%1$s · %2$d%%</string>
+    <!-- screen: labels -->
+    <string name="camera_status_idle">未连接</string>
+    <string name="camera_status_connecting">正在连接 %1$s</string>
+    <string name="camera_status_connected">已连接 %1$s</string>
+    <string name="camera_status_failed">连接 %1$s 失败</string>
+    <string name="camera_section_devices">相机设备</string>
+    <string name="camera_label_usb">USB</string>
+    <string name="camera_label_network">网络</string>
+    <string name="camera_label_storage">存储 %1$d</string>
+    <string name="camera_label_size">%1$d B</string>
+    <string name="camera_filter_all">全部</string>
+    <string name="camera_filter_image">照片</string>
+    <string name="camera_filter_video">视频</string>
+    <string name="camera_drawer_hint">通过 USB 或局域网发现相机，然后浏览、传输和管理文件。</string>
+    <!-- screen: actions -->
+    <string name="camera_action_refresh">刷新</string>
+    <string name="camera_action_connect">连接</string>
+    <string name="camera_action_disconnect">断开连接</string>
+    <string name="camera_action_add">添加</string>
+    <string name="camera_action_download">下载</string>
+    <string name="camera_action_upload">上传</string>
+    <string name="camera_action_delete">删除</string>
+    <string name="camera_action_cancel">取消</string>
+    <string name="camera_action_up">返回上一级</string>
+    <!-- screen: hint, message, error, empty -->
+    <string name="camera_hint_host">相机地址</string>
+    <string name="camera_delete_title">删除所选文件？</string>
+    <string name="camera_delete_message">从相机中删除所选的 %1$d 个文件？</string>
+    <string name="camera_error">错误：%1$s</string>
+    <string name="camera_empty_devices">未找到相机。点击“刷新”，或按地址添加。</string>
+    <string name="camera_empty_files">此存储中没有文件</string>
+    <!-- screen: content descriptions -->
+    <string name="camera_cd_more_options">更多选项</string>
+    <string name="camera_cd_upload">上传文件</string>
+    <string name="camera_cd_delete">删除所选文件</string>
 
 </resources>
