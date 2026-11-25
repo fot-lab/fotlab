@@ -23,6 +23,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -30,6 +31,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -108,8 +111,9 @@ object CameraCore {
     fun prepare(context: Context) {
         val applicationContext = context.applicationContext
         appContext = applicationContext
-        discovery = CameraDiscovery(applicationContext)
-        watchUsbHotPlug(applicationContext, discovery)
+        val engine = CameraDiscovery(applicationContext)
+        discovery = engine
+        watchUsbHotPlug(applicationContext, engine)
     }
 
     /**
@@ -385,7 +389,7 @@ object CameraCore {
         reconnectJob = scope.launch {
             var attempt = 0
             var currentDelay = RECONNECT_BASE_DELAY_MS
-            while (attempt < MAX_RECONNECT_ATTEMPTS && isActive) {
+            while (attempt < MAX_RECONNECT_ATTEMPTS && this.isActive) {
                 attempt++
                 delay(currentDelay)
                 // User may have explicitly disconnected or switched device while
@@ -393,7 +397,7 @@ object CameraCore {
                 if (active != null) return@launch
                 val state = _state.value
                 if (state is CameraConnectionState.Idle) return@launch
-                if (!isActive) return@launch
+                if (!this.isActive) return@launch
                 runCatching { connect(device) }
                     .onSuccess { return@launch }
                     .onFailure { currentDelay *= 2 }
@@ -414,7 +418,7 @@ object CameraCore {
         keepaliveJob?.cancel()
         if (device.link != io.github.fotlab.fotlab.feature.camera.model.CameraLink.IP) return
         keepaliveJob = scope.launch {
-            while (isActive && active != null) {
+            while (this.isActive && active != null) {
                 delay(KEEPALIVE_INTERVAL_MS)
                 val connection = active ?: return@launch
                 try {
@@ -431,9 +435,7 @@ object CameraCore {
     @Volatile
     private var lastSeenDevice: CameraDevice? = null
 
-    private companion object {
-        private const val MAX_RECONNECT_ATTEMPTS: Int = 5
-        private const val RECONNECT_BASE_DELAY_MS: Long = 1_000L
-        private const val KEEPALIVE_INTERVAL_MS: Long = 120_000L
-    }
+    private const val MAX_RECONNECT_ATTEMPTS: Int = 5
+    private const val RECONNECT_BASE_DELAY_MS: Long = 1_000L
+    private const val KEEPALIVE_INTERVAL_MS: Long = 120_000L
 }

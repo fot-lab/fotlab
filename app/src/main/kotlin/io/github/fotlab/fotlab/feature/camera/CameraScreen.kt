@@ -95,7 +95,8 @@ fun CameraScreen() {
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
 
     val devices by CameraCore.devices.collectAsState()
-    val connection by CameraCore.state.collectAsState()
+    val connectionState = CameraCore.state.collectAsState()
+    val connection = connectionState.value
 
     var hostInput by remember { mutableStateOf("") }
     var manualDevices by remember { mutableStateOf<List<CameraDevice.Ip>>(emptyList()) }
@@ -117,10 +118,10 @@ fun CameraScreen() {
             scope.launch {
                 busy = true
                 errorMessage = null
-                runCatching {
+                try {
                     CameraCore.upload(uri, storage, parent)
                     reloadObjects()
-                }.onFailure { error ->
+                } catch (error: Throwable) {
                     errorMessage = error.message ?: error.toString()
                 }
                 busy = false

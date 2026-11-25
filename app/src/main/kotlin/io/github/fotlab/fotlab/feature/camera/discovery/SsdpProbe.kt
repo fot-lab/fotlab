@@ -30,13 +30,13 @@ object SsdpProbe {
         val found = LinkedHashMap<String, DiscoveredIpDevice>()
         val socket = DatagramSocket().apply {
             soTimeout = SOCKET_TIMEOUT_MS
-            timeToLive = 4
+            setTimeToLive(4)
         }
         try {
             val address = InetAddress.getByName(MULTICAST)
             repeat(2) { round ->
                 SEARCH_TARGETS.forEach { target ->
-                    val request = buildSearch(target)
+                    val request = buildSearch(target).toByteArray()
                     val packet = DatagramPacket(request, request.size, address, PORT)
                     runCatching { socket.send(packet) }
                     delay(100)

@@ -49,6 +49,7 @@ class IpPtpTransport(
             links = opened
             opened.event?.let { startEventReader(it) }
         }
+        Unit
     }
 
     override suspend fun close() = withContext(Dispatchers.IO) {

@@ -278,8 +278,8 @@ class PtpFileOperations(
     private fun decodeSonyStorages(raw: ByteArray?): List<Long> {
         if (raw == null) return emptyList()
         val result = ArrayList<Long>(2)
-        if (contains(raw, byteArrayOf(0x30, 0xCE, 0x02, 0x00))) result += 0x01000000L
-        if (contains(raw, byteArrayOf(0x56, 0xCE, 0x02, 0x00))) result += 0x02000000L
+        if (contains(raw, byteArrayOf(0x30.toByte(), 0xCE.toByte(), 0x02.toByte(), 0x00.toByte()))) result += 0x01000000L
+        if (contains(raw, byteArrayOf(0x56.toByte(), 0xCE.toByte(), 0x02.toByte(), 0x00.toByte()))) result += 0x02000000L
         return result
     }
 

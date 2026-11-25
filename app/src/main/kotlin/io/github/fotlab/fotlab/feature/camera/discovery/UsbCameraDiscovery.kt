@@ -84,8 +84,8 @@ class UsbCameraDiscovery(private val context: Context) {
                     intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
                 } ?: return
                 when (intent.action) {
-                    UsbManager.ACTION_USB_DEVICE_ATTACHED -> onAttached(device)
-                    UsbManager.ACTION_USB_DEVICE_DETACHED -> onDetached(device)
+                    UsbManager.ACTION_USB_DEVICE_ATTACHED -> onAttached(device ?: return)
+                    UsbManager.ACTION_USB_DEVICE_DETACHED -> onDetached(device ?: return)
                 }
             }
         }

@@ -69,6 +69,7 @@ class UsbPtpTransport(
             opened.controlTransfer(0x21, 0x66, 0, 0, null, 0, 1_500)
             interruptIn?.let { startEventReader(opened, it) }
         }
+        Unit
     }
 
     override suspend fun close() = withContext(Dispatchers.IO) {

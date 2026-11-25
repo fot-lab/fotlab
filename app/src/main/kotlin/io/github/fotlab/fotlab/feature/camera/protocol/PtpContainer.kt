@@ -211,7 +211,7 @@ object PtpContainer {
             chars[i] = ((high shl 8) or low).toChar()
         }
         val end = chars.indexOf('\u0000')
-        return String(CharBuffer.wrap(chars, 0, if (end >= 0) end else chars.size))
+        return String(chars, 0, if (end >= 0) end else chars.size)
     }
 
     fun encodeUtf16Le(value: String): ByteArray =

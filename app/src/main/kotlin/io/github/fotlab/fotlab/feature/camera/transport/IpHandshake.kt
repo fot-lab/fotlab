@@ -63,7 +63,7 @@ object IpHandshake {
                 command.getOutputStream().write(request)
                 command.getOutputStream().flush()
 
-                val ack = PtpContainer.parseIp(readPacket(command.getInputStream()))
+                val ack = readPacket(command.getInputStream())
                 if (ack.type != PtpIpType.INIT_COMMAND_ACK) {
                     throw IOException("Unexpected PTP/IP init response: ${ack.type}")
                 }
@@ -83,7 +83,7 @@ object IpHandshake {
                         val initEvent = PtpContainer.ipInitEvent(sessionId)
                         accepted.getOutputStream().write(initEvent)
                         accepted.getOutputStream().flush()
-                        val eventAck = PtpContainer.parseIp(readPacket(accepted.getInputStream()))
+                        val eventAck = readPacket(accepted.getInputStream())
                         if (eventAck.type != PtpIpType.INIT_EVENT_ACK) {
                             accepted.close()
                             null

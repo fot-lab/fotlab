@@ -118,4 +118,4 @@ class SonyHttpTransport(
 }
 
 /** Protocol-level error from the Sony JSON-RPC API (camera returned an "error" array). */
-class SonyHttpException(val code: Int, val message: String) : RuntimeException("Sony API error $code: $message")
+class SonyHttpException(val code: Int, override val message: String) : RuntimeException("Sony API error $code: $message")

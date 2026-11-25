@@ -1,6 +1,7 @@
 package io.github.fotlab.fotlab.feature.camera.profile
 
 import io.github.fotlab.fotlab.feature.camera.model.CameraLink
+import io.github.fotlab.fotlab.feature.camera.model.UsbVendorIds
 
 /** Selects a protocol profile from the identity a device reports during discovery. */
 object CameraProfileResolver {
