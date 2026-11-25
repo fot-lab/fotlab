@@ -95,6 +95,7 @@ class IpPtpTransport(
                     if (response.transactionId != transactionId.toLong()) continue
                     return@withLock PtpTransactionResult(response.code, response.params, data)
                 }
+                error("Unreachable — PTP/IP response loop never exits normally")
             } catch (error: IOException) {
                 markLinkBroken()
                 throw CameraLinkException("PTP/IP link failed: ${error.message ?: error.javaClass.simpleName}", error)

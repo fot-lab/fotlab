@@ -28,10 +28,9 @@ object SsdpProbe {
 
     suspend fun probe(): List<DiscoveredIpDevice> = withContext(Dispatchers.IO) {
         val found = LinkedHashMap<String, DiscoveredIpDevice>()
-        val socket = DatagramSocket().apply {
-            soTimeout = SOCKET_TIMEOUT_MS
-            setTimeToLive(4)
-        }
+        val socket = DatagramSocket()
+        socket.soTimeout = SOCKET_TIMEOUT_MS
+        socket.setTimeToLive(4)
         try {
             val address = InetAddress.getByName(MULTICAST)
             repeat(2) { round ->

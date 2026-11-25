@@ -111,24 +111,6 @@ fun CameraScreen() {
     var progress by remember { mutableStateOf<TransferProgress?>(null) }
     var confirmDelete by remember { mutableStateOf(false) }
 
-    val uploadLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
-            val storage = selectedStorage ?: 0L
-            val parent = path.lastOrNull()?.handle ?: PTP_PARENT_ROOT
-            scope.launch {
-                busy = true
-                errorMessage = null
-                try {
-                    CameraCore.upload(uri, storage, parent)
-                    reloadObjects()
-                } catch (error: Throwable) {
-                    errorMessage = error.message ?: error.toString()
-                }
-                busy = false
-            }
-        }
-    }
-
     suspend fun reloadObjects() {
         val storage = selectedStorage ?: return
         val parent = path.lastOrNull()?.handle ?: PTP_PARENT_ROOT
@@ -148,6 +130,24 @@ fun CameraScreen() {
             emptyList()
         }
         selection = emptySet()
+    }
+
+    val uploadLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            val storage = selectedStorage ?: 0L
+            val parent = path.lastOrNull()?.handle ?: PTP_PARENT_ROOT
+            scope.launch {
+                busy = true
+                errorMessage = null
+                try {
+                    CameraCore.upload(uri, storage, parent)
+                    reloadObjects()
+                } catch (error: Throwable) {
+                    errorMessage = error.message ?: error.toString()
+                }
+                busy = false
+            }
+        }
     }
 
     fun startDownload() {
