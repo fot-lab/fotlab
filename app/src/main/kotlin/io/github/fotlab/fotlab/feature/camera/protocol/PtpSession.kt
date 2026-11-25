@@ -75,18 +75,21 @@ class PtpSession(
         callLocked(PtpOpcode.GET_DEVICE_INFO, intArrayOf(), null, true, false)
     }
 
-    suspend fun close() = mutex.withLock {
-        if (closed) return@withLock
-        closed = true
-        if (sessionOpen) {
-            runCatching {
-                val tid = ids.incrementAndGet() and 0x7FFFFFFF
-                val result = link { transport.transact(tid, PtpOpcode.CLOSE_SESSION) }
-                checkResponse(PtpOpcode.CLOSE_SESSION, result.responseCode)
+    suspend fun close() {
+        mutex.withLock {
+            if (closed) return@withLock
+            closed = true
+            if (sessionOpen) {
+                runCatching {
+                    val tid = ids.incrementAndGet() and 0x7FFFFFFF
+                    val result = link { transport.transact(tid, PtpOpcode.CLOSE_SESSION) }
+                    checkResponse(PtpOpcode.CLOSE_SESSION, result.responseCode)
+                }
+                sessionOpen = false
             }
-            sessionOpen = false
+            runCatching { transport.close() }
+            Unit
         }
-        runCatching { transport.close() }
     }
 
     private suspend fun callLocked(
