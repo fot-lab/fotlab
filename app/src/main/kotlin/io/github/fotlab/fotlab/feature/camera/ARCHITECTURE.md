@@ -15,6 +15,13 @@ CameraScreen + CameraChrome (UI: discovery / connect / browse / transfer)
    v   (assembled by navigation/camera/CameraGraph, outside this package)
 CameraCore (process facade: state, active session, delegate calls)
    |
+   +-- CameraQueueManager (transfer queue: rows in CameraDatabase, one running item)
+   |        |
+   |        +-- CameraQueueRepository (queue reads and writes)
+   |        |        |
+   |        |        +-- CameraFileQueueDao (the camera_file_queue table)
+   |        |        +-- CameraDatabase (the camera feature's own Room database)
+   |
    +-- CameraFileRepository (list / download / delete / upload use cases)
    |        |
    |        +-- operation/PtpFileOperations (PTP-level file primitives)
@@ -48,7 +55,14 @@ package imports back into one that depends on it (`FOTLAB-STRUCT-000002` R2).
 | `CameraChrome.kt` | Module-owned fun bar and drawer (`FOTLAB-UIXDES-000002`): leading cluster = drawer toggle, list/grid switch and refresh of the open folder; trailing cluster = the selection trio in a drop-up overflow plus two selection-dependent slots (upload / new folder with an empty selection, download / delete with a non-empty one); in-place close row in the drawer. |
 | `CameraCore.kt` | Process-wide facade, `StateFlow` of devices and connection state, the device event stream, USB hot-plug watching, the active transport/session, and the link-failure policy. |
 | `CameraFileRepository.kt` | API-facing file operations: storage listing, object listing by parent with filtering, thumbnail/full download, delete, upload from a content URI, folder creation. Owns progress and the output side — a SAF tree the user picked, or the public downloads area. |
-| `CameraTransferService.kt` | Foreground service wrapper so a transfer survives UI teardown; delegates to the repository. |
+| `CameraTransferService.kt` | Foreground service that **runs the queue**: it reads the pending rows back and executes them one at a time, so a transfer survives UI teardown and an interrupted transfer stays queued (`FOTLAB-DATABS-000004`). |
+| `CameraDatabase.kt` | The camera feature's own Room database (`camera`), holding the transfer queue; the library's `fs_node` schema is untouched. |
+| `CameraFileQueue.kt` | The `camera_file_queue` entity: one row per queued transfer, with text-valued timestamp columns. |
+| `CameraFileQueueDao.kt` | The queue's own DAO, in a file of its own: reads return `Flow`, writes are `suspend`. |
+| `CameraQueueRepository.kt` | Lower-layer access to the queue: maps the entity to the feature's value types and groups the rows into batches. |
+| `CameraQueueManager.kt` | The queue's near-stateless machine: everything observable is a row, only the running transfer is in memory. |
+| `CameraQueueList.kt` | The queue view: one card per batch, newest first, expandable to the individual file names. |
+| `CameraViewMode.kt` | The drawer's two views — the camera's storages and the transfer queue. |
 | `CameraSettings.kt` | The two user-tunable discovery values and the single source of their defaults. |
 | `CameraPreference.kt` | Durable `DataStore` for the camera module's own settings (`camera_prefs`), including the URI of the last file a download wrote. |
 | `model/CameraModels.kt` | `PtpStorage`, `PtpObject`, `PtpObjectInfo`, `PtpMediaFilter`, `TransferProgress`, `CameraEvent`, format helpers, and the link/response exceptions. |
@@ -86,6 +100,25 @@ package imports back into one that depends on it (`FOTLAB-STRUCT-000002` R2).
    `OpenSession` (0x1002). Every later operation goes through one serialized path
    that lazily opens the session, so no command can overtake `OpenSession`.
 4. `CameraCore.disconnect()` sends `CloseSession` (0x1003) and releases the link.
+
+### The transfer queue
+
+A download no longer starts a one-shot batch: it **appends rows** to the
+`camera_file_queue` table, and the transfer service runs whatever is queued.
+
+1. The user picks files and a destination folder; the screen builds one row per file
+   (direction, camera-side URI, phone-side URI) and checks the triple against the rows
+   that already exist.
+2. A transfer whose identity is already queued raises a dialog: overwrite (the old row
+   goes, a fresh one is appended) or leave everything alone.
+3. The rows are appended with a shared `timestamp_batchadd`, so they render as one card.
+4. `CameraTransferService` reads the pending rows and executes them one at a time. A row
+   that completes is stamped with the finishing time; a row the device refuses is stamped
+   `failed`; a row whose **link** dies is left unfinished, so the next camera picks it up
+   again.
+
+The queue outlives the camera, the screen and the process, which is exactly what the
+one-shot batch could not do.
 
 ### File operations
 
@@ -167,12 +200,22 @@ differs only in the fields it actually changes.
 - **Hot-plug.** `CameraCore` registers a receiver for the USB attach and detach actions.
   Attaching a camera refreshes the device list; detaching the camera that is currently
   connected ends the session.
+- **The queue resumes when a camera comes up.** `CameraCore.connect` checks for pending
+  rows after a successful connection and starts the transfer service, so a transfer the
+  previous link interrupted runs again without the user asking for it twice.
 - **Device events.** The session's event channel is republished as `CameraCore.events`,
   so the screen can react to a camera that changes on its own (a new capture, a deleted
   object) instead of showing a stale directory.
 
 ## Known gaps (within scope, not yet implemented)
 
+- **A queued transfer cannot be moved to another camera.** A PTP object handle is a
+  device-local number, so the camera-side URI is only meaningful on the camera that
+  produced it. Re-resolving a row against a different camera needs a stable device
+  identity, which the PTP device info does not expose today (`FOTLAB-DATABS-000004`,
+  Open Question 1).
+- **Uploads do not go through the queue yet.** The schema and the runner carry the
+  `phoneTOcamera` direction, but the screen still uploads directly.
 - **Sony HTTP transport.** `SsdpProbe` does not parse the `X_ScalarWebAPI_*` /
   `ActionList_URL` headers, and no HTTP transport exists yet. The PTP Sony profile
   (`0x92xx` opcodes) is complete and still the preferred path for Sony cameras that

@@ -11,6 +11,11 @@ import android.net.Uri
 import android.os.Build
 import android.os.IBinder
 import io.github.fotlab.fotlab.R
+import io.github.fotlab.fotlab.feature.camera.model.CameraQueueItem
+import io.github.fotlab.fotlab.feature.camera.model.CameraQueueStates
+import io.github.fotlab.fotlab.feature.camera.model.CameraQueueUri
+import io.github.fotlab.fotlab.feature.camera.model.CameraTransferDirection
+import io.github.fotlab.fotlab.feature.camera.model.PtpResponseException
 import io.github.fotlab.fotlab.feature.camera.model.TransferKind
 import io.github.fotlab.fotlab.feature.camera.model.TransferProgress
 import io.github.fotlab.fotlab.feature.camera.model.TransferState
@@ -23,12 +28,16 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 /**
- * Keeps a batch download alive while the UI is gone.
+ * Runs the camera transfer queue (`FOTLAB-DATABS-000004`).
  *
- * The service owns the transfer's lifetime, not its content: the bytes still come
- * from [CameraCore], so the session stays the single owner of the link. A cancel
- * request stops the transfer job and publishes the cancelled state, which the
- * screen reads from the repository's progress flow.
+ * The service is the queue's **runner**, not its owner: the rows live in the
+ * `camera_file_queue` table and the service reads the pending ones back, one at a time.
+ * That inversion is what makes the queue survive what a one-shot batch download could not —
+ * a half-finished transfer, a closed screen, a vanished camera. The row is still there when
+ * the next camera comes up, and the run continues from it.
+ *
+ * The service owns the transfer's *lifetime*, not its content: the bytes still come from
+ * [CameraCore], so the session stays the single owner of the link.
  */
 class CameraTransferService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -49,52 +58,13 @@ class CameraTransferService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_DOWNLOAD -> {
-                val handles = intent.getLongArrayExtra(EXTRA_HANDLES) ?: LongArray(0)
-                if (handles.isEmpty()) {
-                    stopSelf()
-                    return START_NOT_STICKY
-                }
-                // The folder the user picked, if any: a SAF tree URI the bytes are written into.
-                val target = intent.getStringExtra(EXTRA_TARGET_URI)?.let(Uri::parse)
+            ACTION_RUN_QUEUE -> {
                 startInForeground()
                 transferJob?.cancel()
-                transferJob = scope.launch {
-                    val repository = runCatching { CameraCore.repository() }.getOrNull()
-                    if (repository == null) {
-                        finish()
-                        return@launch
-                    }
-                    val watcher = launch {
-                        repository.progress.collectLatest { progress ->
-                            progress?.let { publish(it) }
-                        }
-                    }
-                    try {
-                        val written = CameraCore.download(handles.toList(), target)
-                        // Remember the file the download wrote, so the next folder picker opens
-                        // in that file's folder.
-                        written.lastOrNull()?.let { last ->
-                            runCatching { CameraPreference(applicationContext).setDownloadLastUri(last.toString()) }
-                        }
-                    } catch (_: Throwable) {
-                        // The repository exposes the failure in its progress flow.
-                    } finally {
-                        watcher.cancel()
-                        finish()
-                    }
-                }
+                transferJob = scope.launch { runQueue() }
             }
             ACTION_CANCEL -> {
-                transferJob?.cancel("Download cancelled")
-                transferJob = null
-                publish(
-                    TransferProgress(
-                        kind = TransferKind.DOWNLOAD,
-                        objectName = "",
-                        state = TransferState.CANCELLED,
-                    ),
-                )
+                cancelRunning()
             }
         }
         return START_STICKY
@@ -105,6 +75,120 @@ class CameraTransferService : Service() {
     override fun onDestroy() {
         scope.cancel()
         super.onDestroy()
+    }
+
+    /**
+     * Runs every queued transfer that is not finished yet.
+     *
+     * The pending rows are read from the table, oldest batch first, and each one is executed
+     * on its own. A row that completes is stamped with the finishing time; a row the device
+     * refuses is stamped with `failed`; a row whose **link** dies is left unfinished, so the
+     * next run picks it up again — the queue outlives the camera.
+     */
+    private suspend fun CoroutineScope.runQueue() {
+        val manager = runCatching { CameraCore.queueManager() }.getOrNull()
+        if (manager == null) {
+            finish()
+            return
+        }
+        try {
+            val pending = manager.pending()
+            if (pending.isNotEmpty()) {
+                startInForeground()
+                val watcher = launch {
+                    runCatching { CameraCore.repository() }.getOrNull()?.progress
+                        ?.collectLatest { progress -> progress?.let { publish(it) } }
+                }
+                try {
+                    for (item in pending) {
+                        if (!execute(item)) break
+                    }
+                } finally {
+                    watcher.cancel()
+                }
+            }
+        } catch (_: Throwable) {
+            // The repository exposes the failure in its progress flow.
+        } finally {
+            CameraCore.setQueueRunning(null)
+            finish()
+        }
+    }
+
+    /**
+     * Executes one queued transfer.
+     *
+     * @return `false` when the run must stop — the camera is gone, or the row was cancelled.
+     */
+    private suspend fun execute(item: CameraQueueItem): Boolean {
+        CameraCore.setQueueRunning(item)
+        val cameraRef = CameraQueueUri.parseCamera(item.uriCamera)
+        if (cameraRef == null) {
+            // The row cannot be interpreted, so it will never succeed either.
+            CameraCore.markQueueItemFinished(item.id, CameraQueueStates.FAILED)
+            return true
+        }
+        return try {
+            when (item.direction) {
+                CameraTransferDirection.CAMERA_TO_PHONE -> {
+                    // The phone side carries the destination folder and the file name; the
+                    // folder is everything before the last segment.
+                    val folder = item.uriPhone.substringBeforeLast('/', missingDelimiterValue = "")
+                    val target = if (folder.isEmpty()) null else Uri.parse(folder)
+                    CameraCore.download(listOf(cameraRef.handle), target)
+                    Unit
+                }
+                CameraTransferDirection.PHONE_TO_CAMERA -> {
+                    val source = Uri.parse(item.uriPhone)
+                    CameraCore.upload(source, cameraRef.storageId, cameraRef.handle)
+                    Unit
+                }
+            }
+            CameraCore.markQueueItemFinished(item.id, CameraQueueStates.now())
+            true
+        } catch (error: Throwable) {
+            when (error) {
+                // The device answered and refused: this row will never succeed, so it is
+                // stamped with a terminal state rather than retried forever.
+                is PtpResponseException -> {
+                    CameraCore.markQueueItemFinished(item.id, CameraQueueStates.FAILED)
+                    true
+                }
+                // The link is gone. The row stays unfinished, so the queue keeps it and the
+                // next camera picks it up again.
+                else -> {
+                    publish(
+                        TransferProgress(
+                            kind = TransferKind.DOWNLOAD,
+                            objectName = item.fileName,
+                            state = TransferState.FAILED,
+                            failure = error,
+                        ),
+                    )
+                    false
+                }
+            }
+        }
+    }
+
+    /** Stops the running transfer and stamps the row it was working on. */
+    private fun cancelRunning() {
+        val running = CameraCore.queueRunning().value
+        transferJob?.cancel("Download cancelled")
+        transferJob = null
+        scope.launch {
+            running?.let { item ->
+                runCatching { CameraCore.markQueueItemFinished(item.id, CameraQueueStates.CANCELED) }
+            }
+        }
+        CameraCore.setQueueRunning(null)
+        publish(
+            TransferProgress(
+                kind = TransferKind.DOWNLOAD,
+                objectName = "",
+                state = TransferState.CANCELLED,
+            ),
+        )
     }
 
     private fun startInForeground() {
@@ -151,9 +235,25 @@ class CameraTransferService : Service() {
     companion object {
         private const val CHANNEL_ID = "camera_transfer"
         private const val NOTIFICATION_ID = 7711
-        const val ACTION_DOWNLOAD: String = "io.github.fotlab.fotlab.camera.DOWNLOAD"
+        const val ACTION_RUN_QUEUE: String = "io.github.fotlab.fotlab.camera.RUN_QUEUE"
         const val ACTION_CANCEL: String = "io.github.fotlab.fotlab.camera.CANCEL"
-        const val EXTRA_HANDLES: String = "io.github.fotlab.fotlab.camera.HANDLES"
-        const val EXTRA_TARGET_URI: String = "io.github.fotlab.fotlab.camera.TARGET_URI"
+
+        /**
+         * Asks the service to run the queue.
+         *
+         * The service reads the pending rows itself, so this call carries no payload: it
+         * says "run what is queued", not "run this".
+         */
+        fun start(context: Context) {
+            val intent = Intent(context, CameraTransferService::class.java).apply {
+                action = ACTION_RUN_QUEUE
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                @Suppress("DEPRECATION")
+                context.startService(intent)
+            }
+        }
     }
 }

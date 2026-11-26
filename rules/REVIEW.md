@@ -94,6 +94,7 @@ The detail file name **must** equal its ID plus `.md`.
 | `RAWLER` | RAW Decoder / dnglab binding | First-party `rawler_fotlab` Rust binding and integration lessons with the external `dnglab` rawler (Rust) decoder — FFI call selection, header-vs-full-decode contracts, preview quality. Area prefix `DNGLAB` for upstream dnglab findings, `FOTLAB` (or `ACTION`) for first-party binding lessons |
 | `PERFRM` | Performance & Render Pipeline | Latency / memory / throughput of the render pipeline end to end: bottleneck attribution, pixel transport across the FFI, preview resolution policy, parallelism and build-profile headroom, render-backend trade-offs under the `minSdk 26` ceiling. Item count: see `OPTIMZ-PERFRM-000001` (master) + `000002`–`000009` |
 | `ROLLBK` | Architecture Rollback Guard | Process rules that forbid silently degrading or removing first-party architecture to make CI green or to simplify a fix. Item count: see `ACTION-ROLLBK-000001` |
+| `QUEUED` | Camera Transfer Queue | First-party camera feature transfer semantics: download/upload batch queueing, link-loss behaviour, resume and persistence, cross-device identity, and user-facing queue management. Area prefix `CAMERA` |
 
 ## Status & Priority
 

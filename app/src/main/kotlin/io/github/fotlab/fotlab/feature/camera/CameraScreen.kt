@@ -3,7 +3,6 @@ package io.github.fotlab.fotlab.feature.camera
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.net.Uri
-import android.os.Build
 import android.provider.DocumentsContract
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -71,6 +70,9 @@ import io.github.fotlab.fotlab.R
 import io.github.fotlab.fotlab.feature.camera.discovery.CameraDevice
 import io.github.fotlab.fotlab.feature.camera.model.CameraEventCode
 import io.github.fotlab.fotlab.feature.camera.model.CameraLink
+import io.github.fotlab.fotlab.feature.camera.model.CameraQueueStates
+import io.github.fotlab.fotlab.feature.camera.model.CameraQueueUri
+import io.github.fotlab.fotlab.feature.camera.model.CameraTransferDirection
 import io.github.fotlab.fotlab.feature.camera.model.PTP_PARENT_ROOT
 import io.github.fotlab.fotlab.feature.camera.model.PtpMediaFilter
 import io.github.fotlab.fotlab.feature.camera.model.PtpObject
@@ -86,6 +88,29 @@ import kotlinx.coroutines.withContext
 private data class CameraFolder(
     val handle: Long,
     val name: String,
+)
+
+/**
+ * One transfer the user asked for, before it is appended to the queue table.
+ *
+ * The two URIs are the identity the queue checks for duplicates, together with the
+ * direction (`FOTLAB-DATABS-000004`).
+ */
+private data class QueueDraft(
+    val direction: CameraTransferDirection,
+    val uriCamera: String,
+    val uriPhone: String,
+)
+
+/**
+ * The transfers that are already queued, and the answer the user still owes.
+ *
+ * [count] is how many of the [drafts] are duplicates; the drafts themselves are the whole
+ * selection, because a confirmation queues the ones that are new as well.
+ */
+private data class DuplicatePrompt(
+    val drafts: List<QueueDraft>,
+    val count: Int,
 )
 
 /**
@@ -127,6 +152,14 @@ fun CameraScreen() {
     var confirmDelete by remember { mutableStateOf(false) }
     var gridMode by remember { mutableStateOf(false) }
     var newFolderName by remember { mutableStateOf<String?>(null) }
+    // Which view the drawer's tabs selected: the camera's storages or the transfer queue.
+    var viewMode by remember { mutableStateOf(CameraViewMode.STORAGE) }
+    // The transfers whose identity is already in the queue, awaiting the user's decision.
+    var pendingDuplicates by remember { mutableStateOf<DuplicatePrompt?>(null) }
+
+    // The queue, read from the table — the same rows the transfer service works through.
+    val queueBatches by CameraCore.queueBatches().collectAsState(initial = emptyList())
+    val runningItem by CameraCore.queueRunning().collectAsState()
 
     suspend fun reloadObjects() {
         val storage = selectedStorage ?: return
@@ -157,6 +190,30 @@ fun CameraScreen() {
             errorMessage = error.message ?: error.toString()
         }
         busy = false
+    }
+
+    /**
+     * Appends transfers to the queue table, after checking what is already there.
+     *
+     * A transfer's identity is its direction plus both URIs. When one of the candidates
+     * already carries that identity, the user is asked whether to overwrite it — until that
+     * answer comes, nothing is queued at all.
+     */
+    suspend fun enqueueTransfers(drafts: List<QueueDraft>) {
+        val entries = drafts.map { draft ->
+            CameraQueueManager.QueueEntry(
+                direction = draft.direction,
+                uriCamera = draft.uriCamera,
+                uriPhone = draft.uriPhone,
+            )
+        }
+        val duplicates = CameraCore.findQueueDuplicates(entries)
+        if (duplicates.isEmpty()) {
+            CameraCore.enqueueTransfers(CameraQueueStates.now(), entries)
+            CameraTransferService.start(context)
+        } else {
+            pendingDuplicates = DuplicatePrompt(drafts, duplicates.size)
+        }
     }
 
     val uploadLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -202,17 +259,16 @@ fun CameraScreen() {
                     Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
                 )
             }
-            val intent = Intent(context, CameraTransferService::class.java).apply {
-                action = CameraTransferService.ACTION_DOWNLOAD
-                putExtra(CameraTransferService.EXTRA_HANDLES, handles)
-                putExtra(CameraTransferService.EXTRA_TARGET_URI, treeUri.toString())
+            // One queue row per selected file; the batch key groups them into one card.
+            val drafts = handles.map { handle ->
+                val name = objects.firstOrNull { it.handle == handle }?.name ?: handle.toString()
+                QueueDraft(
+                    direction = CameraTransferDirection.CAMERA_TO_PHONE,
+                    uriCamera = CameraQueueUri.cameraObject(handle, name),
+                    uriPhone = CameraQueueUri.phoneTarget(treeUri.toString(), name),
+                )
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                @Suppress("DEPRECATION")
-                context.startService(intent)
-            }
+            scope.launch { enqueueTransfers(drafts) }
             selection = emptySet()
         }
     }
@@ -274,6 +330,8 @@ fun CameraScreen() {
 
     val visibleDevices = (devices + manualDevices).distinctBy { it.id }
     val connected = connection is CameraConnectionState.Connected
+    // The fun bar's storage actions only make sense while the storages are on screen.
+    val storageView = viewMode == CameraViewMode.STORAGE
     val hasSelection = selection.isNotEmpty()
     // The selection acts on the objects on screen; a folder is navigated, never selected.
     val selectableHandles = objects.filter { !it.isFolder }.map { it.handle }
@@ -282,7 +340,11 @@ fun CameraScreen() {
         drawerState = drawerState,
         gesturesEnabled = false,
         drawerContent = {
-            CameraDrawer(onClose = { scope.launch { drawerState.close() } })
+            CameraDrawer(
+                viewMode = viewMode,
+                onSelectView = { selected -> viewMode = selected },
+                onClose = { scope.launch { drawerState.close() } },
+            )
         },
     ) {
         Scaffold(
@@ -291,13 +353,13 @@ fun CameraScreen() {
                 CameraScreenFunBar(
                     drawerOpen = drawerState.isOpen,
                     gridMode = gridMode,
-                    gridEnabled = connected,
-                    refreshEnabled = connected && selectedStorage != null,
+                    gridEnabled = connected && storageView,
+                    refreshEnabled = connected && selectedStorage != null && storageView,
                     hasSelection = hasSelection,
-                    deleteEnabled = connected && hasSelection,
-                    uploadEnabled = connected,
-                    downloadEnabled = connected && hasSelection,
-                    createFolderEnabled = connected && selectedStorage != null,
+                    deleteEnabled = connected && hasSelection && storageView,
+                    uploadEnabled = connected && storageView,
+                    downloadEnabled = connected && hasSelection && storageView,
+                    createFolderEnabled = connected && selectedStorage != null && storageView,
                     onToggleDrawer = {
                         scope.launch {
                             if (drawerState.isOpen) drawerState.close() else drawerState.open()
@@ -381,25 +443,108 @@ fun CameraScreen() {
                     Text(text = label, style = MaterialTheme.typography.bodySmall)
                 }
 
-                if (connection is CameraConnectionState.Connected) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Spacer(modifier = Modifier.weight(1f))
-                        TextButton(onClick = { scope.launch { CameraCore.disconnect() } }) {
-                            Text(text = stringResource(id = R.string.camera_action_disconnect))
-                        }
-                    }
+                when (viewMode) {
+                    CameraViewMode.STORAGE -> {
+                        if (connection is CameraConnectionState.Connected) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Spacer(modifier = Modifier.weight(1f))
+                                TextButton(onClick = { scope.launch { CameraCore.disconnect() } }) {
+                                    Text(text = stringResource(id = R.string.camera_action_disconnect))
+                                }
+                            }
 
-                    if (storages.size > 1) {
-                        LazyRow(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                            items(storages, key = { it.id }) { storage ->
-                                FilterChip(
-                                    selected = storage.id == selectedStorage,
-                                    onClick = {
-                                        selectedStorage = storage.id
-                                        path = emptyList()
+                            if (storages.size > 1) {
+                                LazyRow(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                                    items(storages, key = { it.id }) { storage ->
+                                        FilterChip(
+                                            selected = storage.id == selectedStorage,
+                                            onClick = {
+                                                selectedStorage = storage.id
+                                                path = emptyList()
+                                                scope.launch {
+                                                    busy = true
+                                                    runCatching { reloadObjects() }
+                                                        .onFailure { error ->
+                                                            errorMessage = error.message ?: error.toString()
+                                                        }
+                                                    busy = false
+                                                }
+                                            },
+                                            label = { Text(text = storageLabel(storage)) },
+                                        )
+                                    }
+                                }
+                            }
+
+                            LazyRow(
+                                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                items(PtpMediaFilter.entries.toList(), key = { it.name }) { entry ->
+                                    FilterChip(
+                                        selected = filter == entry,
+                                        onClick = {
+                                            filter = entry
+                                            scope.launch {
+                                                busy = true
+                                                runCatching { reloadObjects() }
+                                                    .onFailure { error ->
+                                                        errorMessage = error.message ?: error.toString()
+                                                    }
+                                                busy = false
+                                            }
+                                        },
+                                        label = { Text(text = stringResource(id = filterLabel(entry))) },
+                                    )
+                                }
+                            }
+
+                            if (path.isNotEmpty()) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    IconButton(onClick = {
+                                        path = path.dropLast(1)
+                                        scope.launch {
+                                            busy = true
+                                            runCatching { reloadObjects() }
+                                                .onFailure { error ->
+                                                    errorMessage = error.message ?: error.toString()
+                                                }
+                                            busy = false
+                                        }
+                                    }) {
+                                        Icon(
+                                            imageVector = Icons.Filled.ArrowBack,
+                                            contentDescription = stringResource(id = R.string.camera_action_up),
+                                        )
+                                    }
+                                    Text(
+                                        text = path.last().name,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
+
+                            if (gridMode) {
+                                ObjectGrid(
+                                    objects = objects,
+                                    selection = selection,
+                                    onToggleSelection = { handle ->
+                                        selection = if (handle in selection) {
+                                            selection - handle
+                                        } else {
+                                            selection + handle
+                                        }
+                                    },
+                                    onOpenFolder = { item ->
+                                        path = path + CameraFolder(item.handle, item.name)
                                         scope.launch {
                                             busy = true
                                             runCatching { reloadObjects() }
@@ -409,219 +554,148 @@ fun CameraScreen() {
                                             busy = false
                                         }
                                     },
-                                    label = { Text(text = storageLabel(storage)) },
+                                    modifier = Modifier.fillMaxSize().padding(top = 8.dp),
                                 )
+                            } else {
+                                LazyColumn(modifier = Modifier.fillMaxSize().padding(top = 8.dp)) {
+                                    if (objects.isEmpty()) {
+                                        item {
+                                            Text(
+                                                text = stringResource(id = R.string.camera_empty_files),
+                                                style = MaterialTheme.typography.bodyMedium,
+                                            )
+                                        }
+                                    } else {
+                                        items(objects, key = { it.handle }) { item ->
+                                            if (item.isFolder) {
+                                                FolderRow(item.name) {
+                                                    path = path + CameraFolder(item.handle, item.name)
+                                                    scope.launch {
+                                                        busy = true
+                                                        runCatching { reloadObjects() }
+                                                            .onFailure { error ->
+                                                                errorMessage = error.message ?: error.toString()
+                                                            }
+                                                        busy = false
+                                                    }
+                                                }
+                                            } else {
+                                                ObjectRow(
+                                                    item = item,
+                                                    checked = item.handle in selection,
+                                                    onCheckedChange = { checked ->
+                                                        selection = if (checked) {
+                                                            selection + item.handle
+                                                        } else {
+                                                            selection - item.handle
+                                                        }
+                                                    },
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
                             }
-                        }
-                    }
-
-                    LazyRow(
-                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        items(PtpMediaFilter.entries.toList(), key = { it.name }) { entry ->
-                            FilterChip(
-                                selected = filter == entry,
+                        } else {
+                            Text(
+                                text = stringResource(id = R.string.camera_section_devices),
+                                style = MaterialTheme.typography.titleSmall,
+                                modifier = Modifier.padding(top = 16.dp),
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                OutlinedTextField(
+                                    value = hostInput,
+                                    onValueChange = { hostInput = it },
+                                    label = { Text(text = stringResource(id = R.string.camera_hint_host)) },
+                                    modifier = Modifier.weight(1f),
+                                    singleLine = true,
+                                )
+                                TextButton(onClick = {
+                                    val host = hostInput.trim()
+                                    if (host.isNotEmpty()) {
+                                        manualDevices = manualDevices + CameraDevice.Ip(host = host)
+                                        hostInput = ""
+                                    }
+                                }) {
+                                    Text(text = stringResource(id = R.string.camera_action_add))
+                                }
+                            }
+                            Button(
                                 onClick = {
-                                    filter = entry
                                     scope.launch {
                                         busy = true
-                                        runCatching { reloadObjects() }
-                                            .onFailure { error ->
-                                                errorMessage = error.message ?: error.toString()
-                                            }
+                                        errorMessage = null
+                                        runCatching { CameraCore.discover() }.onFailure { error ->
+                                            errorMessage = error.message ?: error.toString()
+                                        }
                                         busy = false
                                     }
                                 },
-                                label = { Text(text = stringResource(id = filterLabel(entry))) },
-                            )
-                        }
-                    }
-
-                    if (path.isNotEmpty()) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            IconButton(onClick = {
-                                path = path.dropLast(1)
-                                scope.launch {
-                                    busy = true
-                                    runCatching { reloadObjects() }
-                                        .onFailure { error ->
-                                            errorMessage = error.message ?: error.toString()
-                                        }
-                                    busy = false
-                                }
-                            }) {
-                                Icon(
-                                    imageVector = Icons.Filled.ArrowBack,
-                                    contentDescription = stringResource(id = R.string.camera_action_up),
-                                )
+                                modifier = Modifier.padding(top = 8.dp),
+                            ) {
+                                Text(text = stringResource(id = R.string.camera_action_refresh))
                             }
-                            Text(
-                                text = path.last().name,
-                                style = MaterialTheme.typography.titleSmall,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
 
-                    if (gridMode) {
-                        ObjectGrid(
-                            objects = objects,
-                            selection = selection,
-                            onToggleSelection = { handle ->
-                                selection = if (handle in selection) {
-                                    selection - handle
-                                } else {
-                                    selection + handle
-                                }
-                            },
-                            onOpenFolder = { item ->
-                                path = path + CameraFolder(item.handle, item.name)
-                                scope.launch {
-                                    busy = true
-                                    runCatching { reloadObjects() }
-                                        .onFailure { error ->
-                                            errorMessage = error.message ?: error.toString()
-                                        }
-                                    busy = false
-                                }
-                            },
-                            modifier = Modifier.fillMaxSize().padding(top = 8.dp),
-                        )
-                    } else {
-                        LazyColumn(modifier = Modifier.fillMaxSize().padding(top = 8.dp)) {
-                            if (objects.isEmpty()) {
-                                item {
-                                    Text(
-                                        text = stringResource(id = R.string.camera_empty_files),
-                                        style = MaterialTheme.typography.bodyMedium,
-                                    )
-                                }
-                            } else {
-                                items(objects, key = { it.handle }) { item ->
-                                    if (item.isFolder) {
-                                        FolderRow(item.name) {
-                                            path = path + CameraFolder(item.handle, item.name)
-                                            scope.launch {
-                                                busy = true
-                                                runCatching { reloadObjects() }
-                                                    .onFailure { error ->
-                                                        errorMessage = error.message ?: error.toString()
-                                                    }
-                                                busy = false
-                                            }
-                                        }
-                                    } else {
-                                        ObjectRow(
-                                            item = item,
-                                            checked = item.handle in selection,
-                                            onCheckedChange = { checked ->
-                                                selection = if (checked) {
-                                                    selection + item.handle
-                                                } else {
-                                                    selection - item.handle
-                                                }
-                                            },
+                            LazyColumn(modifier = Modifier.fillMaxSize().padding(top = 8.dp)) {
+                                if (visibleDevices.isEmpty()) {
+                                    item {
+                                        Text(
+                                            text = stringResource(id = R.string.camera_empty_devices),
+                                            style = MaterialTheme.typography.bodyMedium,
                                         )
                                     }
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    Text(
-                        text = stringResource(id = R.string.camera_section_devices),
-                        style = MaterialTheme.typography.titleSmall,
-                        modifier = Modifier.padding(top = 16.dp),
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        OutlinedTextField(
-                            value = hostInput,
-                            onValueChange = { hostInput = it },
-                            label = { Text(text = stringResource(id = R.string.camera_hint_host)) },
-                            modifier = Modifier.weight(1f),
-                            singleLine = true,
-                        )
-                        TextButton(onClick = {
-                            val host = hostInput.trim()
-                            if (host.isNotEmpty()) {
-                                manualDevices = manualDevices + CameraDevice.Ip(host = host)
-                                hostInput = ""
-                            }
-                        }) {
-                            Text(text = stringResource(id = R.string.camera_action_add))
-                        }
-                    }
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                busy = true
-                                errorMessage = null
-                                runCatching { CameraCore.discover() }.onFailure { error ->
-                                    errorMessage = error.message ?: error.toString()
-                                }
-                                busy = false
-                            }
-                        },
-                        modifier = Modifier.padding(top = 8.dp),
-                    ) {
-                        Text(text = stringResource(id = R.string.camera_action_refresh))
-                    }
-
-                    LazyColumn(modifier = Modifier.fillMaxSize().padding(top = 8.dp)) {
-                        if (visibleDevices.isEmpty()) {
-                            item {
-                                Text(
-                                    text = stringResource(id = R.string.camera_empty_devices),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                )
-                            }
-                        } else {
-                            items(visibleDevices, key = { it.id }) { device ->
-                                Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                                    Row(
-                                        modifier = Modifier.padding(12.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = device.displayName,
-                                                style = MaterialTheme.typography.bodyLarge,
-                                            )
-                                            Text(
-                                                text = stringResource(
-                                                    id = if (device.link == CameraLink.USB) {
-                                                        R.string.camera_label_usb
-                                                    } else {
-                                                        R.string.camera_label_network
-                                                    },
-                                                ),
-                                                style = MaterialTheme.typography.bodySmall,
-                                            )
-                                        }
-                                        Button(onClick = {
-                                            scope.launch {
-                                                busy = true
-                                                errorMessage = null
-                                                runCatching { CameraCore.connect(device) }.onFailure { error ->
-                                                    errorMessage = error.message ?: error.toString()
+                                } else {
+                                    items(visibleDevices, key = { it.id }) { device ->
+                                        Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                                            Row(
+                                                modifier = Modifier.padding(12.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                            ) {
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(
+                                                        text = device.displayName,
+                                                        style = MaterialTheme.typography.bodyLarge,
+                                                    )
+                                                    Text(
+                                                        text = stringResource(
+                                                            id = if (device.link == CameraLink.USB) {
+                                                                R.string.camera_label_usb
+                                                            } else {
+                                                                R.string.camera_label_network
+                                                            },
+                                                        ),
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                    )
                                                 }
-                                                busy = false
+                                                Button(onClick = {
+                                                    scope.launch {
+                                                        busy = true
+                                                        errorMessage = null
+                                                        runCatching { CameraCore.connect(device) }.onFailure { error ->
+                                                            errorMessage = error.message ?: error.toString()
+                                                        }
+                                                        busy = false
+                                                    }
+                                                }) {
+                                                    Text(text = stringResource(id = R.string.camera_action_connect))
+                                                }
                                             }
-                                        }) {
-                                            Text(text = stringResource(id = R.string.camera_action_connect))
                                         }
                                     }
                                 }
                             }
                         }
+                    }
+
+                    CameraViewMode.QUEUE -> {
+                        CameraQueueList(
+                            batches = queueBatches,
+                            runningId = runningItem?.id,
+                            modifier = Modifier.fillMaxSize(),
+                        )
                     }
                 }
             }
@@ -655,6 +729,46 @@ fun CameraScreen() {
             },
             dismissButton = {
                 TextButton(onClick = { confirmDelete = false }) {
+                    Text(text = stringResource(id = R.string.camera_action_cancel))
+                }
+            },
+        )
+    }
+
+    pendingDuplicates?.let { prompt ->
+        AlertDialog(
+            onDismissRequest = { pendingDuplicates = null },
+            title = { Text(text = stringResource(id = R.string.camera_queue_duplicate_title)) },
+            text = {
+                Text(
+                    text = stringResource(
+                        id = R.string.camera_queue_duplicate_message,
+                        prompt.count,
+                    ),
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingDuplicates = null
+                    scope.launch {
+                        val entries = prompt.drafts.map { draft ->
+                            CameraQueueManager.QueueEntry(
+                                direction = draft.direction,
+                                uriCamera = draft.uriCamera,
+                                uriPhone = draft.uriPhone,
+                            )
+                        }
+                        // "Overwrite" means: the row that carries the same identity goes,
+                        // and the selection is queued again behind it.
+                        CameraCore.overwriteTransfers(CameraQueueStates.now(), entries)
+                        CameraTransferService.start(context)
+                    }
+                }) {
+                    Text(text = stringResource(id = R.string.camera_queue_duplicate_confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDuplicates = null }) {
                     Text(text = stringResource(id = R.string.camera_action_cancel))
                 }
             },

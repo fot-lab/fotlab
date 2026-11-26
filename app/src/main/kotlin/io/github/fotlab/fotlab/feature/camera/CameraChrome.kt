@@ -39,6 +39,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -291,12 +293,18 @@ private fun CameraRefreshIcon(onRefresh: suspend () -> Unit, enabled: Boolean) {
 /**
  * The camera drawer, at 80% of the module width (`FOTLAB-UIXDES-000002` R3). Its bottom-left
  * close button shares the fun bar's height and inset so opening the drawer replaces the menu
- * icon in place (R6). Content is module-private (R5): only discovery/transfer help and this
- * module's own discovery settings, no app-level entries.
+ * icon in place (R6). Content is module-private (R5): only the view tabs, discovery/transfer
+ * help and this module's own discovery settings, no app-level entries.
+ *
+ * The tabs sit at the very top of the drawer and switch the **content region**, the way the
+ * library's drawer switches between its views (`FOTLAB-UIXDES-000004`): picking a tab closes
+ * the drawer, so the user lands on the view they chose.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun CameraDrawer(
+    viewMode: CameraViewMode,
+    onSelectView: (CameraViewMode) -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -305,6 +313,19 @@ internal fun CameraDrawer(
             .fillMaxHeight()
             .fillMaxWidth(0.8f),
     ) {
+        TabRow(selectedTabIndex = viewMode.ordinal) {
+            CameraViewMode.entries.forEach { entry ->
+                Tab(
+                    selected = viewMode == entry,
+                    onClick = {
+                        onSelectView(entry)
+                        onClose()
+                    },
+                    text = { Text(text = stringResource(id = entry.labelRes)) },
+                )
+            }
+        }
+
         Text(
             text = stringResource(id = R.string.app_nav_camera_label),
             style = MaterialTheme.typography.titleMedium,

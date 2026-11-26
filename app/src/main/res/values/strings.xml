@@ -311,5 +311,27 @@
     <string name="camera_cd_refresh">Refresh this folder</string>
     <string name="camera_cd_layout_grid">Show as thumbnails</string>
     <string name="camera_cd_layout_list">Show as a list</string>
+    <!-- screen: drawer tabs -->
+    <string name="camera_tab_storage">Storage</string>
+    <string name="camera_tab_queue">Queue</string>
+    <string name="camera_cd_tab_storage">Show the camera storages</string>
+    <string name="camera_cd_tab_queue">Show the transfer queue</string>
+    <!-- screen: transfer queue -->
+    <string name="camera_queue_title">Transfer queue</string>
+    <string name="camera_queue_empty">No transfers queued yet. Select files on the camera and tap Download.</string>
+    <string name="camera_queue_batch_summary">%1$d of %2$d done</string>
+    <string name="camera_queue_item_pending">Queued</string>
+    <string name="camera_queue_item_running">Transferring</string>
+    <string name="camera_queue_item_done">Done</string>
+    <string name="camera_queue_item_paused">Paused</string>
+    <string name="camera_queue_item_canceled">Canceled</string>
+    <string name="camera_queue_item_failed">Failed</string>
+    <string name="camera_cd_expand">Show the files in this batch</string>
+    <string name="camera_cd_collapse">Hide the files in this batch</string>
+    <string name="camera_cd_queue_remove">Remove this batch from the queue</string>
+    <!-- screen: duplicate transfer -->
+    <string name="camera_queue_duplicate_title">Transfer already queued</string>
+    <string name="camera_queue_duplicate_message">%1$d of the selected transfers are already in the queue. Replace them?</string>
+    <string name="camera_queue_duplicate_confirm">Replace</string>
 
 </resources>

@@ -8,6 +8,8 @@ import io.github.fotlab.fotlab.feature.camera.discovery.CameraDiscovery
 import io.github.fotlab.fotlab.feature.camera.discovery.UsbCameraDiscovery
 import io.github.fotlab.fotlab.feature.camera.model.CameraEvent
 import io.github.fotlab.fotlab.feature.camera.model.CameraLinkException
+import io.github.fotlab.fotlab.feature.camera.model.CameraQueueBatch
+import io.github.fotlab.fotlab.feature.camera.model.CameraQueueItem
 import io.github.fotlab.fotlab.feature.camera.model.PTP_PARENT_ROOT
 import io.github.fotlab.fotlab.feature.camera.model.PtpMediaFilter
 import io.github.fotlab.fotlab.feature.camera.model.PtpObject
@@ -24,6 +26,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -31,8 +34,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -122,6 +125,19 @@ object CameraCore {
     @Volatile
     private var usbWatcher: android.content.BroadcastReceiver? = null
 
+    /**
+     * The transfer queue (`FOTLAB-DATABS-000004`).
+     *
+     * The queue is the driver of a transfer: the screen appends rows to it and the transfer
+     * service reads them back, so an interrupted transfer is still queued and runs again once
+     * a camera is available.
+     */
+    @Volatile
+    private var queue: CameraQueueManager? = null
+
+    /** The pre-prepare fallback: nothing is running, and the queue is empty. */
+    private val emptyQueueRunning = MutableStateFlow<CameraQueueItem?>(null)
+
     /** Call once from the application class. */
     fun prepare(context: Context) {
         val applicationContext = context.applicationContext
@@ -130,6 +146,7 @@ object CameraCore {
         discovery = engine
         val prefs = CameraPreference(applicationContext)
         preference = prefs
+        queue = CameraQueueManager(applicationContext)
         watchUsbHotPlug(applicationContext, engine)
         // The stored values are loaded once, in the background: the first discovery
         // uses the defaults and a value that lands later is picked up by the next one.
@@ -283,6 +300,15 @@ object CameraCore {
             reconnectJob = null
             startKeepalive(device)
             _state.value = CameraConnectionState.Connected(device, profile, identity)
+            // A camera came up: the queue picks up where it stopped, so a transfer the
+            // previous link interrupted runs again without the user asking twice.
+            scope.launch {
+                val manager = queue ?: return@launch
+                val serviceContext = appContext ?: return@launch
+                if (manager.pending().isNotEmpty()) {
+                    CameraTransferService.start(serviceContext)
+                }
+            }
         } catch (error: Throwable) {
             _state.value = CameraConnectionState.Failed(device, error.message ?: error.toString())
             throw error
@@ -355,6 +381,55 @@ object CameraCore {
 
     suspend fun upload(source: Uri, storageId: Long, parent: Long) =
         runFileOperation { repository -> repository.upload(source, storageId, parent) }
+
+    // --- Transfer queue (`FOTLAB-DATABS-000004`) ---
+
+    /** The queue manager; the facade's way into the transfer queue. */
+    fun queueManager(): CameraQueueManager =
+        queue ?: error("CameraCore.prepare(context) must be called before use")
+
+    /** The queued batches, newest first. Empty before the facade is prepared. */
+    fun queueBatches(): Flow<List<CameraQueueBatch>> =
+        queue?.observeBatches() ?: emptyFlow()
+
+    /** The transfer currently in flight, or `null` when nothing is running. */
+    fun queueRunning(): StateFlow<CameraQueueItem?> = queue?.running ?: emptyQueueRunning
+
+    /**
+     * The queued transfers that already carry one of [entries]' identities.
+     *
+     * A transfer's identity is its direction plus both URIs; the screen asks this before it
+     * appends anything, so it can ask the user whether to overwrite.
+     */
+    suspend fun findQueueDuplicates(entries: List<CameraQueueManager.QueueEntry>) =
+        queueManager().findDuplicates(entries)
+
+    /** Appends transfers to the queue; every entry of one action shares a batch key. */
+    suspend fun enqueueTransfers(
+        batchAdd: String,
+        entries: List<CameraQueueManager.QueueEntry>,
+    ) = queueManager().enqueue(batchAdd, entries)
+
+    /** Replaces the queued transfers that carry the same identities, then queues them again. */
+    suspend fun overwriteTransfers(
+        batchAdd: String,
+        entries: List<CameraQueueManager.QueueEntry>,
+    ) = queueManager().overwrite(batchAdd, entries)
+
+    /** Removes a whole batch from the queue. */
+    suspend fun removeQueueBatch(batch: String) = queueManager().removeBatch(batch)
+
+    /**
+     * Records how one queued transfer left the queue.
+     *
+     * [state] is a millisecond timestamp when it completed, or a state word such as `paused`,
+     * `canceled` or `failed`.
+     */
+    suspend fun markQueueItemFinished(queueId: Long, state: String) =
+        queueManager().markFinished(queueId, state)
+
+    /** Marks the transfer in flight, or clears it when [item] is `null`. */
+    fun setQueueRunning(item: CameraQueueItem?) = queueManager().setRunning(item)
 
     /**
      * Runs a file operation and reports a dead link as a failed connection.
