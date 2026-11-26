@@ -5,6 +5,7 @@ import android.content.Context
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import io.github.fotlab.fotlab.feature.camera.model.PtpFormats
@@ -55,14 +56,21 @@ class CameraFileRepository(
         runCatching { operations.thumbnail(handle) }.getOrNull()
     }
 
-    /** Downloads objects into Downloads/Camera; MediaStore entries stay pending until complete. */
-    suspend fun download(objects: List<PtpObject>): List<Uri> = withContext(Dispatchers.IO) {
-        val written = ArrayList<Uri>(objects.size)
+    /**
+     * Downloads objects into [target].
+     *
+     * [target] is a SAF tree URI the user picked: every object becomes a document created in
+     * that tree, so the bytes land where the user chose instead of in a fixed app folder.
+     * A `null` target falls back to the public downloads area (MediaStore on API 29+).
+     */
+    suspend fun download(objects: List<PtpObject>, target: Uri? = null): List<Uri> =
+        withContext(Dispatchers.IO) {
+            val written = ArrayList<Uri>(objects.size)
         objects.forEachIndexed { index, item ->
             val info = operations.objectInfo(item.handle)
             val name = uniqueName(item.name, info.format)
             val mime = PtpFormats.mimeType(info.format)
-            val sink = createSink(name, mime)
+            val sink = createSink(name, mime, target)
             _progress.value = TransferProgress(
                 kind = TransferKind.DOWNLOAD,
                 objectName = name,
@@ -114,6 +122,10 @@ class CameraFileRepository(
     suspend fun delete(handles: List<Long>) = withContext(Dispatchers.IO) {
         handles.forEach { operations.delete(it) }
     }
+
+    /** Creates a folder (a PTP association) on the device. */
+    suspend fun createFolder(storageId: Long, parent: Long, name: String): Long =
+        withContext(Dispatchers.IO) { operations.createFolder(storageId, parent, name) }
 
     /** Uploads a content URI to the selected storage and parent folder. */
     suspend fun upload(source: Uri, storageId: Long, parent: Long): Long = withContext(Dispatchers.IO) {
@@ -172,7 +184,25 @@ class CameraFileRepository(
 
     private data class Sink(val uri: Uri, val output: OutputStream, val finish: () -> Unit, val discard: () -> Unit)
 
-    private fun createSink(name: String, mime: String): Sink {
+    /**
+     * The place a downloaded object is written to.
+     *
+     * With a SAF tree URI the object becomes a document inside the folder the user picked;
+     * the name is made unique inside that tree the way MediaStore makes it unique on its own.
+     * Without one the object lands in the public downloads area under a camera folder.
+     */
+    private fun createSink(name: String, mime: String, treeUri: Uri?): Sink {
+        if (treeUri != null) {
+            val uri = createDocument(treeUri, mime, name)
+                ?: throw IOException("Cannot create $name in the chosen folder")
+            val output = resolver.openOutputStream(uri) ?: throw IOException("Cannot open $uri")
+            return Sink(
+                uri = uri,
+                output = output,
+                finish = {},
+                discard = { runCatching { resolver.delete(uri, null, null) } },
+            )
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val values = ContentValues().apply {
                 put(MediaStore.Downloads.DISPLAY_NAME, name)
@@ -208,5 +238,56 @@ class CameraFileRepository(
             finish = {},
             discard = { runCatching { if (file.exists()) file.delete() } },
         )
+    }
+
+    /**
+     * Create a document under a SAF tree, with a name no sibling already uses.
+     *
+     * `DocumentsContract.createDocument` rejects a duplicate name on some providers and
+     * silently renames it on others, so the name is checked against the tree's children first
+     * and suffixed until it is free.
+     */
+    private fun createDocument(treeUri: Uri, mime: String, name: String): Uri? {
+        val taken = existingNames(treeUri)
+        var candidate = name
+        var counter = 1
+        while (candidate in taken) {
+            val stem = name.substringBeforeLast('.', name)
+            val extension = name.substringAfterLast('.', "")
+            candidate = if (extension.isEmpty()) "$stem ($counter)" else "$stem ($counter).$extension"
+            counter++
+        }
+        // `createDocument` wants the *parent document*, not the tree: the tree URI names the
+        // tree, the document URI names the folder inside it.
+        val parent = DocumentsContract.buildDocumentUriUsingTree(
+            treeUri,
+            DocumentsContract.getTreeDocumentId(treeUri),
+        )
+        // A provider needs a concrete type; a wildcard MIME type is not one.
+        val concreteMime = if (mime.contains('*')) "application/octet-stream" else mime
+        return runCatching {
+            DocumentsContract.createDocument(resolver, parent, concreteMime, candidate)
+        }.getOrNull()
+    }
+
+    /** The display names already present directly under a SAF tree. */
+    private fun existingNames(treeUri: Uri): Set<String> {
+        val children = DocumentsContract.buildChildDocumentsUriUsingTree(
+            treeUri,
+            DocumentsContract.getTreeDocumentId(treeUri),
+        )
+        return runCatching {
+            resolver.query(children, arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME), null, null, null)
+                ?.use { cursor ->
+                    buildSet {
+                        val index = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                        if (index >= 0) {
+                            while (cursor.moveToNext()) {
+                                cursor.getString(index)?.let { add(it) }
+                            }
+                        }
+                    }
+                } ?: emptySet()
+        }.getOrDefault(emptySet())
     }
 }

@@ -119,9 +119,12 @@ Goals:
 
 - Downloading is available for any selection of media objects. It runs in the **background**: it
   continues when the user leaves the destination, and its progress is visible in a notification.
-- The downloaded files land in the device's public downloads area, under a camera folder, and are
+- The user picks the destination folder in the system folder picker; the files land there and are
   only published as complete when the last byte has arrived — a half-written file is never left
   visible in the user's library.
+- The folder picker remembers where the user was: the URI of the last file a download wrote is
+  kept, and the next picker opens in that file's folder. The system keeps only one global last
+  folder for the whole app, so the camera module keeps its own.
 - Progress is reported per object, so a multi-object download shows which file it is on.
 
 **Moving media into the camera.**
@@ -199,8 +202,9 @@ Goals:
 - AC7 — The current folder's name is visible while a folder is open.
 - AC8 — Filtering to photos shows only photo objects, filtering to videos only video objects, and
   the unfiltered view shows both.
-- AC9 — Selecting media objects and downloading writes complete files into the device's public
-  downloads area; a file that is still being written is not visible as a finished one.
+- AC9 — Selecting media objects and downloading writes complete files into the folder the user
+  picked; a file that is still being written is not visible as a finished one. The next download's
+  folder picker opens in the folder of the file the previous download wrote.
 - AC10 — A download continues after the user leaves the destination, and its progress is visible in
   a notification.
 - AC11 — Uploading a picked file places it in the folder that is currently open.
@@ -277,3 +281,10 @@ Goals:
   next discovery. Added AC19 and AC20 to make both halves checkable. The USB bearer is explicitly
   out of scope for both settings — the device list comes from the platform and a USB link is
   physical.
+- 2026-11-26 — R2's download paragraph and AC9 follow the owner's decision that a download asks
+  the user for the destination folder: the files land in the picked folder instead of a fixed
+  public-downloads folder, and the picker reopens in the folder of the last file written. The
+  fun bar of the camera destination was rebuilt on the same decision — the leading cluster carries
+  the drawer toggle, the list/grid layout switch and the refresh of the open folder, the trailing
+  cluster carries the selection trio in the overflow and two slots whose glyph depends on the
+  selection (upload / new folder with an empty selection, download / delete with a non-empty one).

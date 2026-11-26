@@ -7,6 +7,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.Uri
 import android.os.Build
 import android.os.IBinder
 import io.github.fotlab.fotlab.R
@@ -54,6 +55,8 @@ class CameraTransferService : Service() {
                     stopSelf()
                     return START_NOT_STICKY
                 }
+                // The folder the user picked, if any: a SAF tree URI the bytes are written into.
+                val target = intent.getStringExtra(EXTRA_TARGET_URI)?.let(Uri::parse)
                 startInForeground()
                 transferJob?.cancel()
                 transferJob = scope.launch {
@@ -68,7 +71,12 @@ class CameraTransferService : Service() {
                         }
                     }
                     try {
-                        CameraCore.download(handles.toList())
+                        val written = CameraCore.download(handles.toList(), target)
+                        // Remember the file the download wrote, so the next folder picker opens
+                        // in that file's folder.
+                        written.lastOrNull()?.let { last ->
+                            runCatching { CameraPreference(applicationContext).setDownloadLastUri(last.toString()) }
+                        }
                     } catch (_: Throwable) {
                         // The repository exposes the failure in its progress flow.
                     } finally {
@@ -146,5 +154,6 @@ class CameraTransferService : Service() {
         const val ACTION_DOWNLOAD: String = "io.github.fotlab.fotlab.camera.DOWNLOAD"
         const val ACTION_CANCEL: String = "io.github.fotlab.fotlab.camera.CANCEL"
         const val EXTRA_HANDLES: String = "io.github.fotlab.fotlab.camera.HANDLES"
+        const val EXTRA_TARGET_URI: String = "io.github.fotlab.fotlab.camera.TARGET_URI"
     }
 }

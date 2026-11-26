@@ -132,7 +132,7 @@ The Library top bar is laid out as follows, and this order never changes:
 - The two slots are **mutually exclusive per state**: import and export never appear together, and
   neither do new-collection and delete. One position, one meaning per state.
 - When the selection becomes empty again — the last node deselected, or the overflow menu's
-  "Deselect all" used — the bar returns to import + new collection.
+  "Select none" used — the bar returns to import + new collection.
 - Every icon carries a non-null `contentDescription` from resources (`FOTLAB-UIXDES-000003`).
 - Icons (Material, first-party; `material-icons-core`, `material-icons-extended` when needed):
 
@@ -155,7 +155,7 @@ entry is **icon + text** (no brackets, no decorative punctuation in the copy):
 | --- | --- | --- |
 | Select all | `Icons.Default.SelectAll` | Every node of the currently shown virtual directory becomes selected |
 | Invert selection | `Icons.Default.FlipToBack` | Selected nodes become unselected and vice versa, within the currently shown directory |
-| Deselect all | `Icons.Default.Deselect` | The list becomes empty, returning the bar to its empty state |
+| Select none | `Icons.Default.Deselect` | The list becomes empty, returning the bar to its empty state |
 
 - The three entries are always present, in this order — **select all → invert → deselect all** —
   whatever the current selection is; entries are not hidden, reordered or disabled based on state.
@@ -164,7 +164,7 @@ entry is **icon + text** (no brackets, no decorative punctuation in the copy):
   stand for a single item's checked state and for "finished / downloaded", not for a bulk operation.
 - They operate on the **currently shown virtual directory** — the directory whose children the
   content region is displaying. Nodes outside it are untouched (see Q5 for recursion).
-- "Deselect all" is the only way, other than deselecting every node, to return to the empty state.
+- "Select none" is the only way, other than deselecting every node, to return to the empty state.
 - Because the dropdown holds selection operations and the destructive action lives in slot B, the
   dropdown itself contains no destructive entry (`FOTLAB-UIXDES-000002` R4).
 
@@ -219,7 +219,7 @@ Every label, content description and the default collection name comes from the 
   `library_cd_layout_mode`, `library_cd_sync`, `library_cd_rename`. (`library_title` is not used:
   the Library renders an empty title slot, `FOTLAB-UIXDES-000004` R6.)
 - `common` block — the selection trio and the count: `common_selection_select_all`,
-  `common_selection_invert`, `common_selection_deselect_all`, `common_selection_count` (plural);
+  `common_selection_invert`, `common_selection_select_none`, `common_selection_count` (plural);
   the two slot actions: `common_action_import`, `common_action_export`; the drawer:
   `common_drawer_empty`, `common_drawer_open`, `common_drawer_close`; and the dialog actions
   `common_action_delete`, `common_action_cancel`.
@@ -354,9 +354,9 @@ usually finishes in well under a second — so it is what tells the user the pre
   icon, three-dot icon; neither import nor add is present.
 - AC3 — Deselecting back to zero nodes restores the bar of AC1.
 - AC4 — Activating the three-dot icon shows exactly three entries — Select all, Invert selection,
-  Deselect all — in that order, each with an icon and a text label and no other decoration, the
+  Select none — in that order, each with an icon and a text label and no other decoration, the
   icons being `SelectAll`, `FlipToBack` and `Deselect`.
-- AC5 — "Select all" selects every node of the currently shown directory; "Deselect all" empties
+- AC5 — "Select all" selects every node of the currently shown directory; "Select none" empties
   the list and restores the empty-state bar; "Invert selection" exchanges the selected and
   unselected nodes of that directory.
 - AC6 — Switching to another bottom-navigation destination and returning to Library shows the same
@@ -458,7 +458,7 @@ deletable; their deletion semantics are owned by `FOTLAB-DATABS-000002` R9–R13
 R7). The retired numbers are intentionally not reused.
 
 Resolved and retired on 2026-09-10: Q3 (the invert icon — invert now uses `Icons.Default.FlipToBack`
-and "clear selection" became "Deselect all" with `Icons.Default.Deselect`; the three entries and
+and "clear selection" became "Select none" with `Icons.Default.Deselect`; the three entries and
 their icons are fixed in R5 and recorded with their Chinese and English names in
 `FOTLAB-UIXDES-000005` R3). The retired number is intentionally not reused.
 
@@ -514,7 +514,8 @@ their icons are fixed in R5 and recorded with their Chinese and English names in
 - 2026-09-10 — The top bar icons are now recorded, code / 中文名称 / 英文名称, in `FOTLAB-UIXDES-000005`; R4 here keeps the meaning of the slots, that item owns which glyph fills them. Import and export are confirmed as `Download` (箭头向下入盘) and `Upload` (箭头向上出盘).
 - 2026-09-10 — The library drawer became the **native Material3 `ModalNavigationDrawer`** around the module's whole region, replacing the hand-written scrim and sheet, and the screen no longer nests a `Scaffold` inside the shell's: the top bar and the content region are now two sibling regions laid out by the screen itself. The sheet keeps the 80% width (C1) and carries the close (X) button of `FOTLAB-UIXDES-000002` R6 in its own top-left corner, with the new key `library_cd_close_drawer` added to the copy list of R8. The drawer may now cover the top bar — native behaviour — while the bottom navigation region stays outside the module region and untouched.
 - 2026-09-10 — Slot A corrected after checking the glyphs on a device: import is `Icons.Default.SaveAlt` (入盘 — the arrow comes from outside into the tray) and export is `Icons.Default.IosShare` (出盘 — the arrow rises out of the box), replacing `Download` / `Upload`, which render as an arrow next to a plain line in this project's icon set and keep the network download / upload meaning (`FOTLAB-UIXDES-000005` R2/R4).
-- 2026-09-10 — R5 fixed the three selection entries and their icons: **Select all → `Icons.Default.SelectAll`, Invert selection → `Icons.Default.FlipToBack`, Deselect all → `Icons.Default.Deselect`**, always in that order. "Clear selection" became **"Deselect all"** (`library_menu_deselect_all`, replacing `library_menu_clear`), and `SwapHoriz` / `Clear` are no longer used for these entries; `CheckCircle` / `CheckCircleOutline` stay reserved for a single item's checked state. Q3 (the invert icon) is retired; AC4/AC5 and the copy list of R8 follow the new wording.
+- 2026-09-10 — R5 fixed the three selection entries and their icons: **Select all → `Icons.Default.SelectAll`, Invert selection → `Icons.Default.FlipToBack`, Select none → `Icons.Default.Deselect`**, always in that order. "Clear selection" became **"Deselect all"** (`library_menu_deselect_all`, replacing `library_menu_clear`; the copy key was later renamed to `common_selection_select_none`), and `SwapHoriz` / `Clear` are no longer used for these entries; `CheckCircle` / `CheckCircleOutline` stay reserved for a single item's checked state. Q3 (the invert icon) is retired; AC4/AC5 and the copy list of R8 follow the new wording.
 - 2026-09-10 — The interaction around this selection is no longer defined here alone: `FOTLAB-UIXDES-000006` now owns how selection mode is entered (long press), what the top bar shows in it (close (X) at the left, count in the middle), how it is left (close or back) and where the batch actions live. This item keeps what the selection **is** (R2/R3), what the slots mean (R4) and what the overflow menu holds (R5); whether the library adopts an explicit mode flag or keeps deriving it from a non-empty selection is `FOTLAB-UIXDES-000006` Q1.
 - 2026-09-11 — Docs aligned with the shipped Library implementation: the title slot renders empty (R6) with the selection count surfaced in the leading cluster and a rename pencil for a single selection (R6); the layout-toggle and refresh icons are shown in browse mode only, hidden in selection mode (R1); refresh uses `Icons.Filled.Sync` / `library_cd_sync` and new collection uses `Icons.Filled.CreateNewFolder`, both recorded in `FOTLAB-UIXDES-000005` R3 (R1/R4). R8 copy keys follow the implementation (`library_cd_sync`, `library_cd_rename`; `library_title` unused). Q9 reworded to the empty-title choice; Q10 added for the per-mode glyph and the `Sync` / `Refresh` refresh glyph.
 - 2026-10-05 — Added R11, C12 and AC23–AC25 (human request, same day): the refresh icon now rotates for as long as the reconcile it fires, and an added composable `SweepSyncIcon` carries the animation for both fun bars. The one minute is a **ceiling on the animation only** and is deliberately a separate timer that just clears the spinning flag, *not* a `withTimeout` around `refresh()` — cancelling the reconcile at the ceiling would archive part of the sweep under its batch id and abandon the rest, breaking R10's single-batch-id guarantee, so a hung sweep costs a stale icon at worst and never a half-archived library. Whichever arrives first stops the icon: the sweep returning, or the ceiling. A press during a spin is ignored (the reconcile is idempotent, and stacking one would make the stop time meaningless), and a spin stopped mid-turn eases forward to the next whole turn so the icon never rests at a random tilt. The two bars share the composable so the ceiling and the early stop cannot drift between them; the state is per-composable, and as only one bar is ever on screen each bar owns its own sweep. `onRefresh` became a `suspend` lambda on both fun bars, since the icon now owns the sweep's lifetime.
+- 2026-11-26 — R5's third entry is renamed in copy: "Deselect all" becomes "Select none" (中文 不选) and the shared key becomes `common_selection_select_none`. The icon stays `Icons.Default.Deselect` and the order stays select all → invert → select none; only the wording and the key name change.

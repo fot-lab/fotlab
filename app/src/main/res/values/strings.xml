@@ -20,7 +20,7 @@
     <!-- Selection: the trio every list shares. -->
     <string name="common_selection_select_all">Select all</string>
     <string name="common_selection_invert">Invert selection</string>
-    <string name="common_selection_deselect_all">Deselect all</string>
+    <string name="common_selection_select_none">Select none</string>
 
     <!-- Drawer: shared by every module drawer — open/close affordance and the empty state. -->
     <string name="common_drawer_empty">No drawer entries yet</string>
@@ -289,11 +289,12 @@
     <string name="camera_action_connect">Connect</string>
     <string name="camera_action_disconnect">Disconnect</string>
     <string name="camera_action_add">Add</string>
-    <string name="camera_action_download">Download</string>
-    <string name="camera_action_upload">Upload</string>
     <string name="camera_action_delete">Delete</string>
     <string name="camera_action_cancel">Cancel</string>
     <string name="camera_action_up">Up one level</string>
+    <string name="camera_action_new_folder">New folder</string>
+    <string name="camera_hint_folder_name">Folder name</string>
+    <string name="camera_action_create">Create</string>
     <!-- screen: hint, message, error, empty -->
     <string name="camera_hint_host">Camera address</string>
     <string name="camera_delete_title">Delete selected files?</string>
@@ -303,7 +304,12 @@
     <string name="camera_empty_files">No files on this storage</string>
     <!-- screen: content descriptions -->
     <string name="camera_cd_more_options">More options</string>
-    <string name="camera_cd_upload">Upload a file</string>
+    <string name="camera_cd_upload">Upload a file to the camera</string>
     <string name="camera_cd_delete">Delete selected files</string>
+    <string name="camera_cd_download">Download selected files to this phone</string>
+    <string name="camera_cd_new_folder">Create a folder on the camera</string>
+    <string name="camera_cd_refresh">Refresh this folder</string>
+    <string name="camera_cd_layout_grid">Show as thumbnails</string>
+    <string name="camera_cd_layout_list">Show as a list</string>
 
 </resources>

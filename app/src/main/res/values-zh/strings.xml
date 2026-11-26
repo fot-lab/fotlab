@@ -19,7 +19,7 @@
     <!-- Selection: the trio every list shares. -->
     <string name="common_selection_select_all">全选</string>
     <string name="common_selection_invert">反选</string>
-    <string name="common_selection_deselect_all">取消全选</string>
+    <string name="common_selection_select_none">不选</string>
 
     <!-- Drawer: shared by every module drawer — open/close affordance and the empty state. -->
     <string name="common_drawer_empty">抽屉暂无条目</string>
@@ -259,11 +259,12 @@
     <string name="camera_action_connect">连接</string>
     <string name="camera_action_disconnect">断开连接</string>
     <string name="camera_action_add">添加</string>
-    <string name="camera_action_download">下载</string>
-    <string name="camera_action_upload">上传</string>
     <string name="camera_action_delete">删除</string>
     <string name="camera_action_cancel">取消</string>
     <string name="camera_action_up">返回上一级</string>
+    <string name="camera_action_new_folder">新建文件夹</string>
+    <string name="camera_hint_folder_name">文件夹名称</string>
+    <string name="camera_action_create">创建</string>
     <!-- screen: hint, message, error, empty -->
     <string name="camera_hint_host">相机地址</string>
     <string name="camera_delete_title">删除所选文件？</string>
@@ -273,7 +274,12 @@
     <string name="camera_empty_files">此存储中没有文件</string>
     <!-- screen: content descriptions -->
     <string name="camera_cd_more_options">更多选项</string>
-    <string name="camera_cd_upload">上传文件</string>
+    <string name="camera_cd_upload">上传文件到相机</string>
     <string name="camera_cd_delete">删除所选文件</string>
+    <string name="camera_cd_download">下载所选文件到本机</string>
+    <string name="camera_cd_new_folder">在相机中新建文件夹</string>
+    <string name="camera_cd_refresh">刷新当前目录</string>
+    <string name="camera_cd_layout_grid">以缩略图显示</string>
+    <string name="camera_cd_layout_list">以列表显示</string>
 
 </resources>

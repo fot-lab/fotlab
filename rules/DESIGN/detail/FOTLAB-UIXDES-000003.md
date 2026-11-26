@@ -239,7 +239,7 @@ by a file per feature (`FOTLAB-STRUCT-000001` R5).
   order itself — `common` first, then `app`, then features — is unchanged.
 - 2026-09-10 — Promoted shared copy from `feature: library` into `common` (R3 promotion path), per the
   owner's decision that these are app-wide, not library-private: the selection trio and count
-  (`common_selection_select_all`, `common_selection_invert`, `common_selection_deselect_all`,
+  (`common_selection_select_all`, `common_selection_invert`, `common_selection_select_none`,
   `common_selection_count` — replacing `library_menu_select_all`, `library_menu_invert`,
   `library_menu_deselect_all`, the `library_selection_count` plural), the two slot actions
   (`common_action_import`, `common_action_export` — replacing `library_cd_import`,
@@ -250,3 +250,4 @@ by a file per feature (`FOTLAB-STRUCT-000001` R5).
   ending in `_cd` was never an owner decision and is withdrawn. Content descriptions still must come
   from resources (R6); the `_cd` suffix remains an available naming suffix in R4, nothing more. AC
   numbering keeps the gap so history stays greppable.
+- 2026-11-26 — The selection trio's third copy key is renamed: `common_selection_deselect_all` becomes `common_selection_select_none`, and its copy changes from 取消全选 / "Deselect all" to 不选 / "Select none" (owner's decision — "取消全选" reads as "undo the selection", not "select none"). The key change is app-wide: the library, the recycle bin and the camera module all read the renamed key.

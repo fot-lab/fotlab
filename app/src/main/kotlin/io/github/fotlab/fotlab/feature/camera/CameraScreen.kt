@@ -1,16 +1,22 @@
 package io.github.fotlab.fotlab.feature.camera
 
 import android.content.Intent
+import android.graphics.BitmapFactory
+import android.net.Uri
 import android.os.Build
+import android.provider.DocumentsContract
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -21,6 +27,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Folder
@@ -51,6 +60,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -65,8 +77,10 @@ import io.github.fotlab.fotlab.feature.camera.model.PtpObject
 import io.github.fotlab.fotlab.feature.camera.model.PtpStorage
 import io.github.fotlab.fotlab.feature.camera.model.TransferProgress
 import io.github.fotlab.fotlab.feature.camera.model.TransferState
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** One level of the folder path the user descended into. */
 private data class CameraFolder(
@@ -83,9 +97,10 @@ private data class CameraFolder(
  *
  * The content region has two states. While idle it lists discovered devices (USB and network)
  * and accepts a manually entered address; the primary action there is Connect. Once connected it
- * browses the camera's storages as folders, lets the user select objects, and offers Download as
- * the primary action while Upload and the destructive Delete sit in the fun bar's drop-up
- * overflow. Downloads run through [CameraTransferService] so they survive leaving the screen.
+ * browses the camera's storages as folders, lets the user select objects, and offers the
+ * transfers in the fun bar. Downloads run through [CameraTransferService] so they survive leaving
+ * the screen; the user picks the destination folder in the system picker, and the last file a
+ * download wrote is remembered so the next picker opens in that folder.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -110,6 +125,8 @@ fun CameraScreen() {
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var progress by remember { mutableStateOf<TransferProgress?>(null) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var gridMode by remember { mutableStateOf(false) }
+    var newFolderName by remember { mutableStateOf<String?>(null) }
 
     suspend fun reloadObjects() {
         val storage = selectedStorage ?: return
@@ -132,6 +149,16 @@ fun CameraScreen() {
         selection = emptySet()
     }
 
+    /** Re-reads the folder on screen. The fun bar's refresh button calls this. */
+    suspend fun refreshCurrentFolder() {
+        busy = true
+        errorMessage = null
+        runCatching { reloadObjects() }.onFailure { error ->
+            errorMessage = error.message ?: error.toString()
+        }
+        busy = false
+    }
+
     val uploadLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             val storage = selectedStorage ?: 0L
@@ -150,18 +177,43 @@ fun CameraScreen() {
         }
     }
 
-    fun startDownload() {
-        val handles = selection.toLongArray()
-        if (handles.isEmpty()) return
-        val intent = Intent(context, CameraTransferService::class.java).apply {
-            action = CameraTransferService.ACTION_DOWNLOAD
-            putExtra(CameraTransferService.EXTRA_HANDLES, handles)
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.startForegroundService(intent)
-        } else {
-            @Suppress("DEPRECATION")
-            context.startService(intent)
+    /**
+     * The folder picker for a download.
+     *
+     * The last file a download wrote is remembered and handed to the picker as
+     * `EXTRA_INITIAL_URI`, so the picker opens in that file's folder rather than in whatever
+     * folder the app last used — the system keeps only one global last directory, so each
+     * module keeps its own.
+     */
+    val preference = remember { CameraPreference(context) }
+    val lastDownloadUri by preference.downloadLastUri.collectAsState(initial = null)
+    val folderLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        val treeUri = result.takeIf { it.resultCode == android.app.Activity.RESULT_OK }
+            ?.data?.data
+        if (treeUri != null) {
+            val handles = selection.toLongArray()
+            if (handles.isEmpty()) return@rememberLauncherForActivityResult
+            // The service writes into this folder; the grant has to outlive the picker.
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    treeUri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                )
+            }
+            val intent = Intent(context, CameraTransferService::class.java).apply {
+                action = CameraTransferService.ACTION_DOWNLOAD
+                putExtra(CameraTransferService.EXTRA_HANDLES, handles)
+                putExtra(CameraTransferService.EXTRA_TARGET_URI, treeUri.toString())
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                @Suppress("DEPRECATION")
+                context.startService(intent)
+            }
+            selection = emptySet()
         }
     }
 
@@ -222,8 +274,9 @@ fun CameraScreen() {
 
     val visibleDevices = (devices + manualDevices).distinctBy { it.id }
     val connected = connection is CameraConnectionState.Connected
-    val canDelete = connected && selection.isNotEmpty()
-    val canDownload = connected && selection.isNotEmpty()
+    val hasSelection = selection.isNotEmpty()
+    // The selection acts on the objects on screen; a folder is navigated, never selected.
+    val selectableHandles = objects.filter { !it.isFolder }.map { it.handle }
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -236,11 +289,47 @@ fun CameraScreen() {
             contentWindowInsets = WindowInsets.navigationBars,
             bottomBar = {
                 CameraScreenFunBar(
-                    canUpload = connected,
-                    canDelete = canDelete,
-                    onOpenDrawer = { scope.launch { drawerState.open() } },
-                    onUpload = { uploadLauncher.launch(arrayOf("*/*")) },
+                    drawerOpen = drawerState.isOpen,
+                    gridMode = gridMode,
+                    gridEnabled = connected,
+                    refreshEnabled = connected && selectedStorage != null,
+                    hasSelection = hasSelection,
+                    deleteEnabled = connected && hasSelection,
+                    uploadEnabled = connected,
+                    downloadEnabled = connected && hasSelection,
+                    createFolderEnabled = connected && selectedStorage != null,
+                    onToggleDrawer = {
+                        scope.launch {
+                            if (drawerState.isOpen) drawerState.close() else drawerState.open()
+                        }
+                    },
+                    onToggleGrid = { gridMode = !gridMode },
+                    onRefresh = { refreshCurrentFolder() },
+                    onSelectAll = { selection = selection + selectableHandles },
+                    onInvert = {
+                        val before = selection
+                        selection = (selectableHandles.filterNot { it in before } +
+                            before.filterNot { it in selectableHandles }).toSet()
+                    },
+                    onSelectNone = { selection = emptySet() },
+                    onCreateFolder = { newFolderName = "" },
                     onDelete = { confirmDelete = true },
+                    onDownload = {
+                        // The destination folder is chosen first; the download then runs in the
+                        // foreground service and survives leaving the screen.
+                        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+                            addFlags(
+                                Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                                    Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION,
+                            )
+                            lastDownloadUri?.let {
+                                putExtra(DocumentsContract.EXTRA_INITIAL_URI, Uri.parse(it))
+                            }
+                        }
+                        folderLauncher.launch(intent)
+                    },
+                    onUpload = { uploadLauncher.launch(arrayOf("*/*")) },
                 )
             },
         ) { innerPadding ->
@@ -297,9 +386,6 @@ fun CameraScreen() {
                         modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Button(onClick = { startDownload() }, enabled = canDownload) {
-                            Text(text = stringResource(id = R.string.camera_action_download))
-                        }
                         Spacer(modifier = Modifier.weight(1f))
                         TextButton(onClick = { scope.launch { CameraCore.disconnect() } }) {
                             Text(text = stringResource(id = R.string.camera_action_disconnect))
@@ -382,40 +468,66 @@ fun CameraScreen() {
                         }
                     }
 
-                    LazyColumn(modifier = Modifier.fillMaxSize().padding(top = 8.dp)) {
-                        if (objects.isEmpty()) {
-                            item {
-                                Text(
-                                    text = stringResource(id = R.string.camera_empty_files),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                )
-                            }
-                        } else {
-                            items(objects, key = { it.handle }) { item ->
-                                if (item.isFolder) {
-                                    FolderRow(item.name) {
-                                        path = path + CameraFolder(item.handle, item.name)
-                                        scope.launch {
-                                            busy = true
-                                            runCatching { reloadObjects() }
-                                                .onFailure { error ->
-                                                    errorMessage = error.message ?: error.toString()
-                                                }
-                                            busy = false
-                                        }
-                                    }
+                    if (gridMode) {
+                        ObjectGrid(
+                            objects = objects,
+                            selection = selection,
+                            onToggleSelection = { handle ->
+                                selection = if (handle in selection) {
+                                    selection - handle
                                 } else {
-                                    ObjectRow(
-                                        item = item,
-                                        checked = item.handle in selection,
-                                        onCheckedChange = { checked ->
-                                            selection = if (checked) {
-                                                selection + item.handle
-                                            } else {
-                                                selection - item.handle
-                                            }
-                                        },
+                                    selection + handle
+                                }
+                            },
+                            onOpenFolder = { item ->
+                                path = path + CameraFolder(item.handle, item.name)
+                                scope.launch {
+                                    busy = true
+                                    runCatching { reloadObjects() }
+                                        .onFailure { error ->
+                                            errorMessage = error.message ?: error.toString()
+                                        }
+                                    busy = false
+                                }
+                            },
+                            modifier = Modifier.fillMaxSize().padding(top = 8.dp),
+                        )
+                    } else {
+                        LazyColumn(modifier = Modifier.fillMaxSize().padding(top = 8.dp)) {
+                            if (objects.isEmpty()) {
+                                item {
+                                    Text(
+                                        text = stringResource(id = R.string.camera_empty_files),
+                                        style = MaterialTheme.typography.bodyMedium,
                                     )
+                                }
+                            } else {
+                                items(objects, key = { it.handle }) { item ->
+                                    if (item.isFolder) {
+                                        FolderRow(item.name) {
+                                            path = path + CameraFolder(item.handle, item.name)
+                                            scope.launch {
+                                                busy = true
+                                                runCatching { reloadObjects() }
+                                                    .onFailure { error ->
+                                                        errorMessage = error.message ?: error.toString()
+                                                    }
+                                                busy = false
+                                            }
+                                        }
+                                    } else {
+                                        ObjectRow(
+                                            item = item,
+                                            checked = item.handle in selection,
+                                            onCheckedChange = { checked ->
+                                                selection = if (checked) {
+                                                    selection + item.handle
+                                                } else {
+                                                    selection - item.handle
+                                                }
+                                            },
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -548,6 +660,48 @@ fun CameraScreen() {
             },
         )
     }
+
+    newFolderName?.let { draft ->
+        AlertDialog(
+            onDismissRequest = { newFolderName = null },
+            title = { Text(text = stringResource(id = R.string.camera_action_new_folder)) },
+            text = {
+                OutlinedTextField(
+                    value = draft,
+                    onValueChange = { newFolderName = it },
+                    label = { Text(text = stringResource(id = R.string.camera_hint_folder_name)) },
+                    singleLine = true,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val name = draft.trim()
+                    newFolderName = null
+                    if (name.isEmpty()) return@TextButton
+                    val storage = selectedStorage ?: return@TextButton
+                    val parent = path.lastOrNull()?.handle ?: PTP_PARENT_ROOT
+                    scope.launch {
+                        busy = true
+                        errorMessage = null
+                        runCatching {
+                            CameraCore.createFolder(storage, parent, name)
+                            reloadFiles()
+                        }.onFailure { error ->
+                            errorMessage = error.message ?: error.toString()
+                        }
+                        busy = false
+                    }
+                }) {
+                    Text(text = stringResource(id = R.string.camera_action_create))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { newFolderName = null }) {
+                    Text(text = stringResource(id = R.string.camera_action_cancel))
+                }
+            },
+        )
+    }
 }
 
 /** A folder row; tapping it descends one level. */
@@ -598,6 +752,107 @@ private fun ObjectRow(
                 style = MaterialTheme.typography.bodySmall,
             )
         }
+    }
+}
+
+/**
+ * The thumbnail grid: the second presentation of the same object list.
+ *
+ * A cell shows the camera's own thumbnail where the device has one and a placeholder
+ * otherwise; a folder cell opens the folder, a media cell toggles its selection box, which
+ * is what the list presentation does with the same object.
+ */
+@Composable
+private fun ObjectGrid(
+    objects: List<PtpObject>,
+    selection: Set<Long>,
+    onToggleSelection: (Long) -> Unit,
+    onOpenFolder: (PtpObject) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (objects.isEmpty()) {
+        Text(
+            text = stringResource(id = R.string.camera_empty_files),
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        return
+    }
+    LazyVerticalGrid(
+        columns = GridCells.Adaptive(minSize = 96.dp),
+        modifier = modifier,
+    ) {
+        gridItems(objects, key = { it.handle }) { item ->
+            Box {
+                Column(
+                    modifier = Modifier
+                        .padding(4.dp)
+                        .clickable {
+                            if (item.isFolder) onOpenFolder(item) else onToggleSelection(item.handle)
+                        },
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(1f),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (item.isFolder) {
+                            Icon(
+                                imageVector = Icons.Filled.Folder,
+                                contentDescription = null,
+                                modifier = Modifier.size(40.dp),
+                            )
+                        } else {
+                            ThumbnailImage(handle = item.handle, hasThumbnail = item.hasThumbnail)
+                        }
+                    }
+                    Text(
+                        text = item.name,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                if (!item.isFolder) {
+                    Checkbox(
+                        checked = item.handle in selection,
+                        onCheckedChange = { onToggleSelection(item.handle) },
+                        modifier = Modifier.align(Alignment.TopEnd),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * One thumbnail, fetched from the camera on demand.
+ *
+ * The bytes come from the device's own thumbnail command, so a cell that has never been
+ * shown costs nothing; an object the device holds no thumbnail for is not asked for one.
+ * The decoding happens off the main thread — a thumbnail is a full image, and decoding a
+ * handful of them on the UI thread is what makes a grid stutter.
+ */
+@Composable
+private fun ThumbnailImage(handle: Long, hasThumbnail: Boolean) {
+    var bitmap by remember(handle) { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(handle) {
+        if (!hasThumbnail || bitmap != null) return@LaunchedEffect
+        val bytes = runCatching { CameraCore.thumbnail(handle) }.getOrNull() ?: return@LaunchedEffect
+        val decoded = withContext(Dispatchers.Default) {
+            runCatching { BitmapFactory.decodeByteArray(bytes, 0, bytes.size) }.getOrNull()
+        } ?: return@LaunchedEffect
+        bitmap = decoded.asImageBitmap()
+    }
+    val current = bitmap
+    if (current != null) {
+        Image(
+            bitmap = current,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize(),
+        )
     }
 }
 

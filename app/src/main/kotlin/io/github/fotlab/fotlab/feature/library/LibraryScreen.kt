@@ -729,7 +729,7 @@ private fun LibraryScreenFunBar(
                         },
                     )
                     DropdownMenuItem(
-                        text = { Text(text = stringResource(id = R.string.common_selection_deselect_all)) },
+                        text = { Text(text = stringResource(id = R.string.common_selection_select_none)) },
                         leadingIcon = {
                             Icon(imageVector = Icons.Filled.Deselect, contentDescription = null)
                         },

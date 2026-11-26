@@ -44,13 +44,13 @@ package imports back into one that depends on it (`FOTLAB-STRUCT-000002` R2).
 
 | File | Responsibility |
 | --- | --- |
-| `CameraScreen.kt` | Third top-level screen: module-level `Scaffold` inside a modal drawer; device list, manual address, storage/object list with folder navigation and media filter, selection, download dispatch and delete confirmation. |
-| `CameraChrome.kt` | Module-owned fun bar and drawer (`FOTLAB-UIXDES-000002`): menu at the left end, drop-up overflow for Upload/Delete at the right end, in-place close row in the drawer. |
+| `CameraScreen.kt` | Third top-level screen: module-level `Scaffold` inside a modal drawer; device list, manual address, storage/object list with folder navigation and media filter, selection, list/grid presentation, download dispatch and delete confirmation. |
+| `CameraChrome.kt` | Module-owned fun bar and drawer (`FOTLAB-UIXDES-000002`): leading cluster = drawer toggle, list/grid switch and refresh of the open folder; trailing cluster = the selection trio in a drop-up overflow plus two selection-dependent slots (upload / new folder with an empty selection, download / delete with a non-empty one); in-place close row in the drawer. |
 | `CameraCore.kt` | Process-wide facade, `StateFlow` of devices and connection state, the device event stream, USB hot-plug watching, the active transport/session, and the link-failure policy. |
-| `CameraFileRepository.kt` | API-facing file operations: storage listing, object listing by parent with filtering, thumbnail/full download, delete, upload from a content URI. Owns progress and MediaStore output. |
+| `CameraFileRepository.kt` | API-facing file operations: storage listing, object listing by parent with filtering, thumbnail/full download, delete, upload from a content URI, folder creation. Owns progress and the output side — a SAF tree the user picked, or the public downloads area. |
 | `CameraTransferService.kt` | Foreground service wrapper so a transfer survives UI teardown; delegates to the repository. |
 | `CameraSettings.kt` | The two user-tunable discovery values and the single source of their defaults. |
-| `CameraPreference.kt` | Durable `DataStore` for the camera module's own settings (`camera_prefs`). |
+| `CameraPreference.kt` | Durable `DataStore` for the camera module's own settings (`camera_prefs`), including the URI of the last file a download wrote. |
 | `model/CameraModels.kt` | `PtpStorage`, `PtpObject`, `PtpObjectInfo`, `PtpMediaFilter`, `TransferProgress`, `CameraEvent`, format helpers, and the link/response exceptions. |
 | `protocol/PtpOpcode.kt` | Standard PTP operation/response/event codes and vendor code constants used by profiles. |
 | `protocol/PtpContainer.kt` | USB and PTP/IP container writers/parsers, little-endian primitives. |
@@ -69,7 +69,7 @@ package imports back into one that depends on it (`FOTLAB-STRUCT-000002` R2).
 | `transport/IpHandshake.kt` | PTP/IP command and event connection setup, init frames, known GUID values. |
 | `transport/IpPtpTransport.kt` | PTP/IP command/data/event packet framing and transaction handling. |
 | `operation/ObjectInfoDecoder.kt` | Parses the standard PTP object-info dataset (including the 64-bit size extension). |
-| `operation/PtpFileOperations.kt` | High-level PTP primitives for listing by folder, thumbnails, range download, delete and upload. |
+| `operation/PtpFileOperations.kt` | High-level PTP primitives for listing by folder, thumbnails, range download, delete, upload and folder creation. |
 
 ## Data flow
 
@@ -109,6 +109,9 @@ package imports back into one that depends on it (`FOTLAB-STRUCT-000002` R2).
   `SendObject` (0x100D) with the file bytes; the new handle comes from the
   `SendObjectInfo` response. The parent is the folder currently open, so a file lands
   where the user is looking.
+- Folder: `SendObjectInfo` (0x100C) with the association format, then an empty `SendObject`
+  (0x100D) that closes it. Support is device-dependent — a camera that refuses answers with a
+  response code, which surfaces as an error rather than a silent no-op.
 
 ## Transport details
 
@@ -144,6 +147,8 @@ differs only in the fields it actually changes.
 - Nikon's Bluetooth pairing and property/event UI mapping are separate links and
   are not part of this package.
 - No live view, capture, or multi-camera session code is present.
+- Folder creation is attempted through the standard PTP path only; a device that answers
+  `OperationNotSupported` gets no vendor fallback.
 
 ## Connection lifecycle
 
@@ -155,6 +160,10 @@ differs only in the fields it actually changes.
   session and publishes `CameraConnectionState.Failed`. A `PtpResponseException` is
   *not* a dead link — the device answered and refused the request — so it leaves the
   session connected and surfaces as an ordinary error.
+- **The download destination is the user's choice.** A download asks for a folder in the system
+  picker and writes each object as a document inside it; the URI of the last file written is
+  persisted so the next picker opens in that file's folder. The system keeps only one global
+  last folder, so the camera module keeps its own.
 - **Hot-plug.** `CameraCore` registers a receiver for the USB attach and detach actions.
   Attaching a camera refreshes the device list; detaching the camera that is currently
   connected ends the session.

@@ -236,6 +236,42 @@ class PtpFileOperations(
         return newHandle
     }
 
+    /**
+     * Create a folder (a PTP association) on the device.
+     *
+     * The standard path is SendObjectInfo with the association format followed by an empty
+     * SendObject data phase: the first command reserves the object and names it, the second
+     * closes it. Support is device-dependent — a camera that refuses answers with a response
+     * code, which surfaces as a [PtpResponseException] rather than a silent no-op.
+     *
+     * @return the handle of the new folder.
+     */
+    suspend fun createFolder(storageId: Long, parent: Long, name: String): Long {
+        val dataset = ObjectInfoDecoder.encodeForUpload(
+            storageId = storageId,
+            parent = parent,
+            format = PtpFormats.ASSOCIATION,
+            size = 0L,
+            name = name,
+        )
+        val info = session.execute(
+            PtpOpcode.SEND_OBJECT_INFO,
+            intArrayOf(storageId.toInt(), parent.toInt(), 0),
+            dataOut = dataset,
+        )
+        if (info.params.size < 3) throw IOException("SendObjectInfo did not return a handle")
+        val handle = info.params[2]
+        // The closing data phase carries no bytes. A device that *refuses* the empty phase has
+        // already reserved the folder, so that refusal is not fatal for the result — but a dead
+        // link still is, and it must not be swallowed here.
+        try {
+            session.execute(PtpOpcode.SEND_OBJECT, intArrayOf(), dataOut = ByteArray(0))
+        } catch (refusal: PtpResponseException) {
+            // The folder was reserved by SendObjectInfo; the device declined the empty body.
+        }
+        return handle
+    }
+
     /** Standard GetPartialObject uses a 32-bit byte offset. Vendor ranges may differ. */
     private fun partialParams(handle: Long, offset: Long, size: Int): IntArray = when {
         profile.partialObjectOpcode == PtpOpcode.Sony.PARTIAL_OBJECT -> intArrayOf(

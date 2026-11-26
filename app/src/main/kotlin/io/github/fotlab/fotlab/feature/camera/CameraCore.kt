@@ -320,7 +320,7 @@ object CameraCore {
     suspend fun thumbnail(handle: Long) = runFileOperation { repository -> repository.thumbnail(handle) }
 
     /** Builds grid objects from known handles so the transfer service needs no UI types. */
-    suspend fun download(handles: Collection<Long>): List<Uri> {
+    suspend fun download(handles: Collection<Long>, target: Uri? = null): List<Uri> {
         val connection = active ?: throw IllegalStateException("No camera session is connected")
         val objects = withContext(Dispatchers.IO) {
             handles.map { handle ->
@@ -336,8 +336,19 @@ object CameraCore {
                 )
             }
         }
-        return runFileOperation { repository -> repository.download(objects) }
+        return runFileOperation { repository -> repository.download(objects, target) }
     }
+
+    /**
+     * Creates a folder in the given storage and parent folder.
+     *
+     * The device decides whether it supports the operation: a camera that refuses answers with
+     * a response code, which reaches the screen as an ordinary error.
+     */
+    suspend fun createFolder(storageId: Long, parent: Long, name: String): Long =
+        runFileOperation { repository ->
+            repository.createFolder(storageId, parent, name)
+        }
 
     suspend fun delete(handles: Collection<Long>) =
         runFileOperation { repository -> repository.delete(handles.toList()) }

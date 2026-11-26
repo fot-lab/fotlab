@@ -3,6 +3,7 @@ package io.github.fotlab.fotlab.feature.camera
 import android.content.Context
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -22,6 +23,7 @@ private val Context.cameraPrefs by preferencesDataStore(name = "camera_prefs")
 
 private val KEY_MDNS_TIMEOUT_SECONDS = intPreferencesKey("camera_mdns_timeout_seconds")
 private val KEY_KEEPALIVE_INTERVAL_SECONDS = intPreferencesKey("camera_keepalive_interval_seconds")
+private val KEY_DOWNLOAD_LAST_URI = stringPreferencesKey("camera_download_last_uri")
 
 class CameraPreference(context: Context) {
 
@@ -37,6 +39,19 @@ class CameraPreference(context: Context) {
         prefs[KEY_KEEPALIVE_INTERVAL_SECONDS]
     }
 
+    /**
+     * The URI of the last file a download wrote, or `null` when nothing was downloaded yet.
+     *
+     * The system file picker remembers only one global last directory for the whole app, so
+     * the camera module keeps its own: the URI of the last file it wrote is handed back to the
+     * picker as `EXTRA_INITIAL_URI`, which opens the picker in that file's folder. The URI is
+     * the *file's* own, not the folder's, because the picker derives the containing folder
+     * from it — the same trick the studio module uses for its exports.
+     */
+    val downloadLastUri: Flow<String?> = store.data.map { prefs ->
+        prefs[KEY_DOWNLOAD_LAST_URI]
+    }
+
     /** Persist the mDNS timeout; the next discovery uses it. */
     suspend fun setMdnsTimeoutSeconds(seconds: Int) {
         store.edit { prefs ->
@@ -48,6 +63,13 @@ class CameraPreference(context: Context) {
     suspend fun setKeepaliveIntervalSeconds(seconds: Int) {
         store.edit { prefs ->
             prefs[KEY_KEEPALIVE_INTERVAL_SECONDS] = CameraSettings.clampKeepaliveInterval(seconds)
+        }
+    }
+
+    /** Remember the file the last download wrote (or clear it with `null`). */
+    suspend fun setDownloadLastUri(value: String?) {
+        store.edit { prefs ->
+            if (value != null) prefs[KEY_DOWNLOAD_LAST_URI] = value else prefs.remove(KEY_DOWNLOAD_LAST_URI)
         }
     }
 }
