@@ -8,27 +8,69 @@ import io.github.fotlab.fotlab.feature.camera.protocol.PtpIpType
 import java.io.IOException
 import java.io.InputStream
 import java.net.InetSocketAddress
-import java.net.ServerSocket
 import java.net.Socket
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+/**
+ * Three TCP links make up a full PTP/IP session on the wire.
+ *
+ * | Field | Port | Purpose |
+ * |-------|------|---------|
+ * | command | 15740 (type-12) / 55740 (type-11) | Commands + inline command-ack data |
+ * | event   | same (type-12) / 55741 (type-11)  | Async notifications |
+ * | data    | **55742** (always, optional)      | Fuji WiFi bulk reads |
+ *
+ * The data socket is NOT opened eagerly — we try it lazily when a caller
+ * asks for it (see [IpHandshake.openDataSocket]). Cameras that do not
+ * speak the independent-data variant will refuse the TCP connect and we
+ * fall back to the command-ack payload path.
 data class IpLinks(
+    val host: String,
     val command: Socket,
     val event: Socket?,
     val sessionId: Int,
     val responderGuid: String,
     val responderName: String,
-)
+) {
+    /** Fixed independent-data port; cameras answer only when they have data to push. */
+    val dataPort: Int = 55742
+}
 
-/** PTP/IP init exchange on the command and event TCP connections. */
+/**
+ * PTP/IP init exchange on the command and event TCP connections.
+ *
+ * Two on-wire variants share the same CIPA header shape; the choice is
+ * driven by [CameraProfile.extendedInit] (type-11 = Fuji WiFi VID 1227,
+ * 82B init with magic 0x8F53E4F2, ports 55740/55741) vs the standard
+ * CIPA type-12 (46B init, ports 15740 on both channels).
+ */
 object IpHandshake {
     private const val INITIATOR_NAME = "CameraClient"
     private const val CONNECT_TIMEOUT_MS = 5_000
     private const val COMMAND_TIMEOUT_MS = 12_000
-    private const val EVENT_ACCEPT_TIMEOUT_MS = 5_000
+    private const val EVENT_READ_TIMEOUT_MS = 1_000
+    private const val DATA_CONNECT_TIMEOUT_MS = 1_000
+    private const val DATA_READ_TIMEOUT_MS = 120_000
+
+    /** Fixed port where PTP/IP cameras report their independent bulk-data channel. */
+    private const val DATA_PORT = 55742
+
+    /**
+     * Standard PTP/IP ports — one responder handles command and event on the
+     * same listening socket (CIPA DC-X005 §2.2.1).
+     */
+    private const val STANDARD_COMMAND_PORT = 15740
+    private const val STANDARD_EVENT_PORT = 15740
+
+    /**
+     * Type-11 (Fuji WiFi VID 1227) ports — the event channel listens on the
+     * adjacent odd port while command moves to 55740.
+     */
+    private const val TYPE11_COMMAND_PORT = 55740
+    private const val TYPE11_EVENT_PORT = 55741
 
     private val PRIMARY_GUID = hex("25283BBA5823476CBA715185941CBE90")
     private val ALTERNATE_GUID = hex("05AC5E3583389640B13A70E5A68A336D")
@@ -48,20 +90,28 @@ object IpHandshake {
 
     suspend fun open(host: String, port: Int, profile: CameraProfile): IpLinks =
         withContext(Dispatchers.IO) {
-            val command = Socket().apply {
-                soTimeout = COMMAND_TIMEOUT_MS
-                // Enable TCP keepalive so a dead peer tears the socket down
-                // instead of leaving a half-open link.
-                keepAlive = true
-                connect(InetSocketAddress(host, port), CONNECT_TIMEOUT_MS)
+            val extendedInit = profile.extendedInit
+            val guid = guid(profile.guidVariant, host)
+
+            // Pick ports by protocol variant — caller's `port` arg still wins
+            // when it differs (explicit profile.initPort override).
+            val commandPort = port
+            val eventPort = when {
+                extendedInit && port == TYPE11_COMMAND_PORT -> TYPE11_EVENT_PORT
+                else -> commandPort
             }
-            // The responder connects back to us for the event channel. Bind before
-            // the init request so the callback cannot arrive before we listen.
-            val eventServer = runCatching { ServerSocket(port) }.getOrNull()
+
+            val command = connect(host, commandPort, COMMAND_TIMEOUT_MS)
             try {
-                val request = PtpContainer.ipInitCommand(guid(profile.guidVariant, host), INITIATOR_NAME)
-                command.getOutputStream().write(request)
-                command.getOutputStream().flush()
+                val init = if (extendedInit) {
+                    PtpContainer.ipInitCommandType11(guid, INITIATOR_NAME)
+                } else {
+                    PtpContainer.ipInitCommand(guid, INITIATOR_NAME)
+                }
+                command.getOutputStream().apply {
+                    write(init)
+                    flush()
+                }
 
                 val ack = readPacket(command.getInputStream())
                 if (ack.type != PtpIpType.INIT_COMMAND_ACK) {
@@ -74,34 +124,66 @@ object IpHandshake {
                 val guidBytes = ByteArray(16).also { buffer.get(it) }
                 val name = PtpContainer.decodeUtf16Le(payload.copyOfRange(20, payload.size))
 
-                val event = eventServer?.let { server ->
-                    server.soTimeout = EVENT_ACCEPT_TIMEOUT_MS
-                    val accepted = runCatching { server.accept() }.getOrNull()
-                    if (accepted != null) {
-                        accepted.soTimeout = COMMAND_TIMEOUT_MS
-                        accepted.keepAlive = true
-                        val initEvent = PtpContainer.ipInitEvent(sessionId)
-                        accepted.getOutputStream().write(initEvent)
-                        accepted.getOutputStream().flush()
-                        val eventAck = readPacket(accepted.getInputStream())
-                        if (eventAck.type != PtpIpType.INIT_EVENT_ACK) {
-                            accepted.close()
-                            null
-                        } else {
-                            accepted
+                // Event channel — second TCP connection. We tolerate cameras that
+                // do not speak the event channel (Sony in HTTP-only mode, some
+                // low-end Canon). In those cases `event` is null and callers
+                // continue with command-channel transactions only.
+                val event: Socket? = runCatching {
+                    val ev = connect(host, eventPort, EVENT_READ_TIMEOUT_MS)
+                    try {
+                        ev.soTimeout = EVENT_READ_TIMEOUT_MS
+                        ev.getOutputStream().apply {
+                            write(PtpContainer.ipInitEvent(sessionId))
+                            flush()
                         }
-                    } else {
+                        val evAck = readPacket(ev.getInputStream())
+                        when (evAck.type) {
+                            PtpIpType.INIT_EVENT_ACK -> ev
+                            PtpIpType.INIT_FAIL, PtpIpType.INIT_COMMAND_ACK -> {
+                                ev.close()
+                                null
+                            }
+                            else -> {
+                                ev.close()
+                                null
+                            }
+                        }
+                    } catch (_: IOException) {
+                        runCatching { ev.close() }
                         null
                     }
-                }
+                }.getOrNull()
 
-                IpLinks(command, event, sessionId, PtpContainer.hex(guidBytes), name)
+                IpLinks(host, command, event, sessionId, PtpContainer.hex(guidBytes), name)
             } catch (error: Throwable) {
                 runCatching { command.close() }
                 throw error
-            } finally {
-                eventServer?.let { runCatching { it.close() } }
             }
+        }
+
+    /**
+     * Open the independent data channel. Callers invoke this lazily, immediately
+     * before a GetObject (ReceiveObject, opcode 4124) that would stream a large
+     * file. Cameras that speak the channel answer on port 55742 with a pure TCP
+     * byte stream — no PTP headers, no START/DATA/END framing. Cameras that do
+     * not speak it either refuse the connection silently or close their end;
+     * both are treated as "fall back to command-socket START/DATA/END".
+     */
+    suspend fun openDataSocket(host: String): Socket? = withContext(Dispatchers.IO) {
+        runCatching {
+            val socket = connect(host, DATA_PORT, DATA_CONNECT_TIMEOUT_MS)
+            socket.soTimeout = DATA_READ_TIMEOUT_MS
+            socket
+        }.getOrNull()
+    }
+
+    private fun connect(host: String, port: Int, soTimeout: Int): Socket =
+        Socket().apply {
+            this.soTimeout = soTimeout
+            this.tcpNoDelay = true
+            this.reuseAddress = true
+            this.keepAlive = true
+            connect(InetSocketAddress(host, port), CONNECT_TIMEOUT_MS)
         }
 
     /** Read one length-prefixed PTP/IP packet; shared by handshake and transport. */
