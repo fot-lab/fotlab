@@ -31,6 +31,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -84,6 +85,20 @@ object CameraCore {
     private var discovery: CameraDiscovery? = null
 
     @Volatile
+    private var preference: CameraPreference? = null
+
+    /** The live settings; the defaults apply until the user stores something. */
+    private val _settings = MutableStateFlow(CameraSettings())
+    val settings: StateFlow<CameraSettings> = _settings.asStateFlow()
+
+    /** Set once the user changes a value, so a late store read cannot undo it. */
+    @Volatile
+    private var mdnsTimeoutTouched = false
+
+    @Volatile
+    private var keepaliveIntervalTouched = false
+
+    @Volatile
     private var active: ActiveConnection? = null
 
     @Volatile
@@ -113,7 +128,39 @@ object CameraCore {
         appContext = applicationContext
         val engine = CameraDiscovery(applicationContext)
         discovery = engine
+        val prefs = CameraPreference(applicationContext)
+        preference = prefs
         watchUsbHotPlug(applicationContext, engine)
+        // The stored values are loaded once, in the background: the first discovery
+        // uses the defaults and a value that lands later is picked up by the next one.
+        scope.launch {
+            runCatching {
+                prefs.mdnsTimeoutSeconds.collect { stored ->
+                    // A value the user just set wins over a slower disk read: the
+                    // collector must never revert a choice that was already made.
+                    if (stored != null && !mdnsTimeoutTouched) {
+                        _settings.update { current ->
+                            current.copy(
+                                mdnsTimeoutSeconds = CameraSettings.clampMdnsTimeout(stored),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        scope.launch {
+            runCatching {
+                prefs.keepaliveIntervalSeconds.collect { stored ->
+                    if (stored != null && !keepaliveIntervalTouched) {
+                        _settings.update { current ->
+                            current.copy(
+                                keepaliveIntervalSeconds = CameraSettings.clampKeepaliveInterval(stored),
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /**
@@ -152,9 +199,49 @@ object CameraCore {
 
     suspend fun discover(): List<CameraDevice> {
         val engine = discovery ?: throw IllegalStateException("CameraCore.prepare() was not called")
-        val found = engine.discover()
+        val found = engine.discover(mdnsTimeoutMs())
         _devices.value = found
         return found
+    }
+
+    /** The mDNS window in milliseconds, from the user's setting. */
+    private fun mdnsTimeoutMs(): Long =
+        _settings.value.mdnsTimeoutSeconds * 1000L
+
+    /**
+     * Store the mDNS timeout (in seconds) and apply it to the next discovery.
+     *
+     * The clamp lives in [CameraSettings] so the drawer, the store and the probe
+     * agree on what is a legal value.
+     */
+    fun setMdnsTimeoutSeconds(seconds: Int) {
+        val clamped = CameraSettings.clampMdnsTimeout(seconds)
+        mdnsTimeoutTouched = true
+        _settings.value = _settings.value.copy(mdnsTimeoutSeconds = clamped)
+        val prefs = preference ?: return
+        scope.launch { runCatching { prefs.setMdnsTimeoutSeconds(clamped) } }
+    }
+
+    /**
+     * Store the keepalive interval (in seconds) and apply it to a live link.
+     *
+     * A connected network camera restarts its probe schedule with the new interval,
+     * so the change is not deferred to the next connection.
+     */
+    fun setKeepaliveIntervalSeconds(seconds: Int) {
+        val clamped = CameraSettings.clampKeepaliveInterval(seconds)
+        keepaliveIntervalTouched = true
+        _settings.value = _settings.value.copy(keepaliveIntervalSeconds = clamped)
+        // The live link picks the new interval up right away, whether or not the
+        // value could be persisted.
+        val connection = active
+        if (connection != null &&
+            connection.device.link == io.github.fotlab.fotlab.feature.camera.model.CameraLink.IP
+        ) {
+            startKeepalive(connection.device)
+        }
+        val prefs = preference ?: return
+        scope.launch { runCatching { prefs.setKeepaliveIntervalSeconds(clamped) } }
     }
 
     suspend fun connect(device: CameraDevice, preferAlternateGuid: Boolean = false) {
@@ -409,8 +496,12 @@ object CameraCore {
     /**
      * Probe the link periodically so an idle connection tears the socket down
      * instead of being left half-open. We send [PtpSession.deviceInfo] every
-     * [KEEPALIVE_INTERVAL_MS] — it is a cheap read that the PTP spec allows
-     * after OpenSession, and the session guards against OpenSession racing.
+     * keepalive interval — it is a cheap read that the PTP spec allows after
+     * OpenSession, and the session guards against OpenSession racing.
+     *
+     * The interval is the user's setting ([CameraSettings]); it is read before every
+     * probe, so a change takes effect on the next cycle even if the job was not
+     * restarted.
      *
      * This only runs on IP links; USB is physical and does not need it.
      */
@@ -419,7 +510,7 @@ object CameraCore {
         if (device.link != io.github.fotlab.fotlab.feature.camera.model.CameraLink.IP) return
         keepaliveJob = scope.launch {
             while (this.isActive && active != null) {
-                delay(KEEPALIVE_INTERVAL_MS)
+                delay(_settings.value.keepaliveIntervalSeconds * 1000L)
                 val connection = active ?: return@launch
                 try {
                     connection.session.deviceInfo()
@@ -437,5 +528,4 @@ object CameraCore {
 
     private const val MAX_RECONNECT_ATTEMPTS: Int = 5
     private const val RECONNECT_BASE_DELAY_MS: Long = 1_000L
-    private const val KEEPALIVE_INTERVAL_MS: Long = 120_000L
 }

@@ -245,6 +245,15 @@
     <string name="camera_filter_image">照片</string>
     <string name="camera_filter_video">视频</string>
     <string name="camera_drawer_hint">通过 USB 或局域网发现相机，然后浏览、传输和管理文件。</string>
+    <!-- screen: drawer settings -->
+    <string name="camera_drawer_settings_title">发现</string>
+    <string name="camera_setting_mdns_timeout">mDNS 超时</string>
+    <string name="camera_setting_mdns_timeout_supporting">等待网络相机应答的秒数。调小可加快扫描速度。</string>
+    <string name="camera_setting_keepalive">保活间隔</string>
+    <string name="camera_setting_keepalive_supporting">已连接网络相机两次保活探测之间的秒数。</string>
+    <string name="camera_setting_seconds">%1$d 秒</string>
+    <string name="camera_setting_decrease">减少%1$s</string>
+    <string name="camera_setting_increase">增加%1$s</string>
     <!-- screen: actions -->
     <string name="camera_action_refresh">刷新</string>
     <string name="camera_action_connect">连接</string>

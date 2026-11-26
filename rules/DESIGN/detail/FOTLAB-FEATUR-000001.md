@@ -53,6 +53,22 @@ Goals:
 - The device list is the union of what discovery found and what the user added by hand; a device
   appears once even when both routes report it.
 
+**Tuning the discovery window.**
+
+- The **mDNS wait window** is a user setting, exposed in the destination's own drawer
+  (`FOTLAB-UIXDES-000002` R5 — module-private content). It bounds how long the network probe waits
+  for cameras to answer, so a user on a slow or crowded network can shorten the wait and reach the
+  device list sooner.
+- The **keepalive interval** is a user setting as well. It bounds how often a connected network
+  camera is probed to keep the link from going idle.
+- Both settings have a **defined default that applies when the user has never changed them**
+  (mDNS 10 s, keepalive 20 s), and both persist across launches. A fresh install therefore behaves
+  exactly like an install whose stored value equals the default.
+- A change takes effect **without requiring a reconnect** where that is meaningful: the keepalive
+  interval applies to a live link immediately, and the mDNS window applies to the next discovery.
+- The USB bearer needs neither setting: the device list comes from the platform, and a USB link is
+  physical, so there is nothing to time out and nothing to keep alive.
+
 **Establishing the session.**
 
 - Connecting is a single user action on one device. It resolves that device's **profile** — the
@@ -201,6 +217,10 @@ Goals:
   carry the same key set for this destination's block.
 - AC18 — The feature package imports neither `ui` nor `navigation`, and the package graph within
   the feature is acyclic.
+- AC19 — The destination's drawer exposes the mDNS wait window and the keepalive interval; on a
+  fresh install they show their defaults (10 s and 20 s), and a changed value survives a relaunch.
+- AC20 — Changing the keepalive interval while a network camera is connected changes the probe
+  schedule of that live link without requiring a reconnect.
 
 ## Impacted Modules
 
@@ -250,3 +270,10 @@ Goals:
   copy-and-presentation rules (R4), the constraints (C1–C12), the verifiable acceptance criteria
   (AC1–AC18), and left the open product questions — live view, remote capture, multi-camera,
   camera-side deletion, thumbnails, quota display and automatic reconnect — as Q1–Q7.
+- 2026-11-26 — Added the tunable discovery window: the mDNS wait window and the keepalive
+  interval are now user settings in the destination's own drawer, each with a defined default that
+  applies when the user has never changed them (10 s and 20 s) and each persisted across launches.
+  A keepalive change applies to a live network link immediately; the mDNS window applies to the
+  next discovery. Added AC19 and AC20 to make both halves checkable. The USB bearer is explicitly
+  out of scope for both settings — the device list comes from the platform and a USB link is
+  physical.

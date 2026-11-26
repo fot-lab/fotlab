@@ -14,7 +14,9 @@ import kotlinx.coroutines.withContext
 object MdnsProbe {
     private const val ADDRESS = "224.0.0.251"
     private const val PORT = 5353
-    private const val TIMEOUT_MS = 10_000
+
+    /** The default window a fresh install waits for answers; see [CameraSettings]. */
+    const val DEFAULT_TIMEOUT_MS = 10_000L
     private const val ATTEMPTS = 4
     private const val SERVICE = "_ptp._tcp.local."
 
@@ -23,10 +25,21 @@ object MdnsProbe {
     private const val TYPE_SRV = 33
     private const val CLASS_IN = 1
 
-    suspend fun probe(): List<DiscoveredIpDevice> = withContext(Dispatchers.IO) {
+    /**
+     * Queries `_ptp._tcp.local.` and returns the cameras that answer.
+     *
+     * [timeoutMs] is the total window for the whole probe, not a per-attempt socket
+     * timeout: the deadline is checked before every query and every receive, so a
+     * shorter window simply yields fewer attempts. The caller supplies the user's
+     * configured value; [DEFAULT_TIMEOUT_MS] is what a fresh install uses.
+     */
+    suspend fun probe(timeoutMs: Long = DEFAULT_TIMEOUT_MS): List<DiscoveredIpDevice> = withContext(Dispatchers.IO) {
         val result = LinkedHashMap<String, DiscoveredIpDevice>()
-        val socket = DatagramSocket().apply { soTimeout = 1_500 }
-        val deadline = System.currentTimeMillis() + TIMEOUT_MS.toLong()
+        val window = timeoutMs.coerceAtLeast(1_000L)
+        // The socket timeout never outlasts the window, so a short window really
+        // does return in a short time rather than one socket timeout later.
+        val socket = DatagramSocket().apply { soTimeout = minOf(1_500L, window).toInt() }
+        val deadline = System.currentTimeMillis() + window
         try {
             val target = InetAddress.getByName(ADDRESS)
             var attempt = 0

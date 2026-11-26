@@ -8,7 +8,15 @@ import kotlinx.coroutines.coroutineScope
 /** Runs the two network probes together and merges their results by host. */
 class IpCameraDiscovery(private val context: Context) {
 
-    suspend fun discover(): List<DiscoveredIpDevice> {
+    /**
+     * Runs the SSDP and mDNS probes concurrently and merges their results.
+     *
+     * [mdnsTimeoutMs] is the window the mDNS query is given to collect answers; the
+     * SSDP probe keeps its own, shorter, socket timeouts. A shorter mDNS window makes
+     * the whole discovery return sooner, which is what the user trades away when they
+     * lower the setting: fewer chances for a slow camera to answer.
+     */
+    suspend fun discover(mdnsTimeoutMs: Long = MdnsProbe.DEFAULT_TIMEOUT_MS): List<DiscoveredIpDevice> {
         val wifi = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
         val lock = runCatching {
             wifi?.createMulticastLock("camera-discovery")?.apply {
@@ -19,7 +27,7 @@ class IpCameraDiscovery(private val context: Context) {
         return try {
             coroutineScope {
                 val ssdp = async { runCatching { SsdpProbe.probe() }.getOrDefault(emptyList()) }
-                val mdns = async { runCatching { MdnsProbe.probe() }.getOrDefault(emptyList()) }
+                val mdns = async { runCatching { MdnsProbe.probe(mdnsTimeoutMs) }.getOrDefault(emptyList()) }
                 merge(ssdp.await() + mdns.await())
             }
         } finally {

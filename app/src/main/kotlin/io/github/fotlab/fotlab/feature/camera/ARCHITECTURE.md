@@ -49,6 +49,8 @@ package imports back into one that depends on it (`FOTLAB-STRUCT-000002` R2).
 | `CameraCore.kt` | Process-wide facade, `StateFlow` of devices and connection state, the device event stream, USB hot-plug watching, the active transport/session, and the link-failure policy. |
 | `CameraFileRepository.kt` | API-facing file operations: storage listing, object listing by parent with filtering, thumbnail/full download, delete, upload from a content URI. Owns progress and MediaStore output. |
 | `CameraTransferService.kt` | Foreground service wrapper so a transfer survives UI teardown; delegates to the repository. |
+| `CameraSettings.kt` | The two user-tunable discovery values and the single source of their defaults. |
+| `CameraPreference.kt` | Durable `DataStore` for the camera module's own settings (`camera_prefs`). |
 | `model/CameraModels.kt` | `PtpStorage`, `PtpObject`, `PtpObjectInfo`, `PtpMediaFilter`, `TransferProgress`, `CameraEvent`, format helpers, and the link/response exceptions. |
 | `protocol/PtpOpcode.kt` | Standard PTP operation/response/event codes and vendor code constants used by profiles. |
 | `protocol/PtpContainer.kt` | USB and PTP/IP container writers/parsers, little-endian primitives. |
@@ -74,7 +76,9 @@ package imports back into one that depends on it (`FOTLAB-STRUCT-000002` R2).
 ### Discovery to connection
 
 1. `CameraCore.discover()` launches `CameraDiscovery`, which merges `UsbCameraDiscovery`
-   with `IpCameraDiscovery` (SSDP + mDNS running concurrently).
+   with `IpCameraDiscovery` (SSDP + mDNS running concurrently). The mDNS probe is
+   given the user's configured window (`CameraSettings.mdnsTimeoutSeconds`, 10 s on a
+   fresh install); the SSDP probe keeps its own shorter socket timeouts.
 2. `CameraCore.connect(device)` asks `UsbCameraDiscovery` for permission when the
    descriptor is USB, resolves a `CameraProfile`, builds a `PtpTransport`, and creates a
    `PtpSession`.
@@ -160,14 +164,25 @@ differs only in the fields it actually changes.
 
 ## Known gaps (within scope, not yet implemented)
 
-- **Reconnect strategy.** There is no automatic reconnect on transient network jitter or
-  USB unplug/plug; the user reconnects explicitly from the device list.
-- **Keepalive.** PTP/IP command sockets are opened without `SO_KEEPALIVE`; no periodic
-  light probe prevents an idle device from tearing the link down.
 - **Sony HTTP transport.** `SsdpProbe` does not parse the `X_ScalarWebAPI_*` /
   `ActionList_URL` headers, and no HTTP transport exists yet. The PTP Sony profile
   (`0x92xx` opcodes) is complete and still the preferred path for Sony cameras that
   support it.
+
+## Module settings
+
+The camera drawer's **Discovery** section carries the module's own settings
+(`FOTLAB-UIXDES-000002` R5 — module-private content, no application-level entries):
+
+| Setting | Default | Range | Effect |
+| --- | --- | --- | --- |
+| mDNS timeout | 10 s | 1–60 s | The window the mDNS probe is given to collect answers. Lower it to make a scan return sooner, at the cost of fewer chances for a slow camera to answer. |
+| Keepalive interval | 20 s | 5–600 s | How often a connected network camera is probed with `GetDeviceInfo`. A live link picks a new value up immediately; USB links are unaffected (they are physical). |
+
+Both live in `CameraSettings` as the single source of their defaults, and are persisted
+in the module's own `DataStore` (`camera_prefs`). A value that was never stored is
+reported as "unset", so a fresh install runs on the defaults without the defaults ever
+being written to disk.
 
 ## Copy and localisation
 
