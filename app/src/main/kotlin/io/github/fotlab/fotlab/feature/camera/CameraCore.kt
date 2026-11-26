@@ -242,7 +242,7 @@ object CameraCore {
                     if (connected.device.deviceId == device.deviceId) {
                         // The camera is gone, and no recovery can bring a detached USB
                         // camera back: the queue's wait ends here.
-                        _retryState.value = CameraRetryState.Exhausted(connected.device)
+                        _retryState.value = CameraRetryState.Exhausted(connected)
                         disconnect(userInitiated = false)
                     }
                 }

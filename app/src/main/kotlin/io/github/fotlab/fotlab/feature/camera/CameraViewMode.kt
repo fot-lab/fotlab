@@ -1,6 +1,7 @@
 package io.github.fotlab.fotlab.feature.camera
 
 import androidx.annotation.StringRes
+import io.github.fotlab.fotlab.R
 
 /**
  * The two views the camera drawer's tabs switch between.
