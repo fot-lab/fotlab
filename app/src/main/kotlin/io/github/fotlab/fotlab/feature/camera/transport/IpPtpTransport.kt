@@ -95,9 +95,11 @@ class IpPtpTransport(
                 // ReceiveObject data phase — two on-the-wire paths observed
                 // across current PTP/IP devices:
                 //
-                // 1. type-12 (Canon/Nikon/Sony): responder pushes COMMAND_ACK(type=2)
-                //    whose payload IS the raw file bytes, then COMMAND_RESPONSE(type=3)
-                //    carries the status code.
+                // 1. type-12 (Canon/Nikon/Sony): responder pushes payload-bearing
+                //    COMMAND_RESPONSE(type=7) whose payload IS the raw file bytes,
+                //    then a COMMAND_RESPONSE(type=7) with the status code.
+                //    [note: both frames are PtpIpType.COMMAND_RESPONSE; we
+                //    disambiguate by transactionId]
                 //
                 // 2. type-11 (Fuji WiFi VID 1227): responder pushes raw TCP to the
                 //    independent 55742 data socket — first 8B LE long totalBytes,
@@ -133,12 +135,13 @@ class IpPtpTransport(
     }
 
     /**
-     * type-12 Canon/Nikon/Sony path. The responder pushes COMMAND_ACK(type=2)
-     * whose payload IS the data stream, followed by a COMMAND_RESPONSE(type=3)
-     * with the status code.
+     * type-12 Canon/Nikon/Sony path. The responder pushes payload-bearing
+     * COMMAND_RESPONSE(type=7) whose payload IS the data stream, followed by
+     * another COMMAND_RESPONSE(type=7) with the status code (disambiguated
+     * by transactionId).
      *
      * Tolerates three variants so cameras are not locked into one behaviour:
-     *   a) COMMAND_ACK carries the full payload → read its payload directly
+     *   a) COMMAND_RESPONSE carries the full payload → read its payload directly
      *   b) CIPA-standard START_DATA(9) declares size → drain DATA×N + END_DATA
      *   c) COMMAND_RESPONSE comes first, with data already packed into payload
      */
@@ -157,8 +160,11 @@ class IpPtpTransport(
             }
         }
 
-        // Variant (a): COMMAND_ACK carries all data inline in its payload.
-        if (responseFirst.type == PtpIpType.COMMAND_ACK) {
+        // Variant (a): COMMAND_RESPONSE carries all data inline in its payload.
+        // We already fall through here when the first COMMAND_RESPONSE tid did
+        // not match — collect its payload and continue looking for the matching
+        // COMMAND_RESPONSE that terminates the data phase.
+        if (responseFirst.type == PtpIpType.COMMAND_RESPONSE) {
             chunks.add(responseFirst.payload)
         }
 
@@ -169,7 +175,6 @@ class IpPtpTransport(
             when (packet.type) {
                 PtpIpType.START_DATA -> continue
                 PtpIpType.DATA, PtpIpType.END_DATA -> chunks.add(PtpContainer.parseIpDataPayload(packet))
-                PtpIpType.COMMAND_ACK -> chunks.add(packet.payload)
                 PtpIpType.COMMAND_RESPONSE -> {
                     val response = PtpContainer.parseIpCodePacket(packet)
                     if (response.transactionId == transactionId.toLong()) {
