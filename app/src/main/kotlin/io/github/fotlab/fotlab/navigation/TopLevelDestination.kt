@@ -25,6 +25,11 @@ enum class TopLevelDestination(
     @param:StringRes val label: Int,
     val icon: ImageVector,
 ) {
+    CAMERA(
+        route = CameraDestination.ROUTE,
+        label = R.string.app_nav_camera_label,
+        icon = Icons.Filled.PhotoCamera,
+    ),
     LIBRARY(
         route = LibraryDestination.ROUTE,
         label = R.string.app_nav_library_label,
@@ -34,11 +39,6 @@ enum class TopLevelDestination(
         route = StudioDestination.ROUTE,
         label = R.string.app_nav_studio_label,
         icon = Icons.Filled.CameraRoll,
-    ),
-    CAMERA(
-        route = CameraDestination.ROUTE,
-        label = R.string.app_nav_camera_label,
-        icon = Icons.Filled.PhotoCamera,
     ),
     ;
 
