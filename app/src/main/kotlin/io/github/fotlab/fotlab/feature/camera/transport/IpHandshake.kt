@@ -27,6 +27,7 @@ import kotlinx.coroutines.withContext
  * asks for it (see [IpHandshake.openDataSocket]). Cameras that do not
  * speak the independent-data variant will refuse the TCP connect and we
  * fall back to the command-ack payload path.
+ */
 data class IpLinks(
     val host: String,
     val command: Socket,
