@@ -117,6 +117,34 @@ class CameraQueueRepository(private val database: CameraDatabase) {
         dao().markFinished(queueId, state)
     }
 
+    /** Marks the given rows with the given state — a multi-selection's "pause" or "cancel". */
+    suspend fun markStates(queueIds: List<Long>, state: String) {
+        if (queueIds.isEmpty()) return
+        dao().markStates(queueIds, state)
+    }
+
+    /**
+     * Marks every row that is still queued with the given state.
+     *
+     * This is what an unrecoverable link does: the rows that never ran are stamped `failed`,
+     * and the user decides afterwards whether to put them back.
+     */
+    suspend fun markUnfinished(state: String) {
+        dao().markUnfinished(state)
+    }
+
+    /** Puts the given rows back into the queue by clearing their finish stamp. */
+    suspend fun clearFinished(queueIds: List<Long>) {
+        if (queueIds.isEmpty()) return
+        dao().clearFinished(queueIds)
+    }
+
+    /** Removes the given rows. */
+    suspend fun removeByIds(queueIds: List<Long>) {
+        if (queueIds.isEmpty()) return
+        dao().deleteByIds(queueIds)
+    }
+
     /** One queued transfer, as the repository takes it. */
     data class QueueEntry(
         val direction: CameraTransferDirection,

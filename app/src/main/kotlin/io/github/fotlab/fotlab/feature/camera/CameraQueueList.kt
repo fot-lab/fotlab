@@ -1,13 +1,14 @@
 package io.github.fotlab.fotlab.feature.camera
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -15,6 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -43,11 +45,20 @@ import io.github.fotlab.fotlab.feature.camera.model.CameraQueueStates
  *
  * The list is a read of the table, not of any in-memory transfer state, so it shows the same
  * thing whether the app was just started or has been running for hours.
+ *
+ * **Long-pressing enters the multi-selection.** A long press on a card takes the whole batch,
+ * a long press on a row takes that row; the mode stays on until the user leaves it, and
+ * the fun bar carries the actions that apply to the selection.
  */
 @Composable
 internal fun CameraQueueList(
     batches: List<CameraQueueBatch>,
     runningId: Long?,
+    selection: Set<Long>,
+    selectionActive: Boolean,
+    onToggleSelection: (Long) -> Unit,
+    onLongPressItem: (Long) -> Unit,
+    onLongPressBatch: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     if (batches.isEmpty()) {
@@ -63,25 +74,59 @@ internal fun CameraQueueList(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         items(batches, key = { batch -> batch.batchAdd }) { batch ->
-            CameraQueueBatchCard(batch = batch, runningId = runningId)
+            CameraQueueBatchCard(
+                batch = batch,
+                runningId = runningId,
+                selection = selection,
+                selectionActive = selectionActive,
+                onToggleSelection = onToggleSelection,
+                onLongPressItem = onLongPressItem,
+                onLongPressBatch = onLongPressBatch,
+            )
         }
     }
 }
 
 /** One batch: a header with the progress and the expand arrow, then the files. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun CameraQueueBatchCard(
     batch: CameraQueueBatch,
     runningId: Long?,
+    selection: Set<Long>,
+    selectionActive: Boolean,
+    onToggleSelection: (Long) -> Unit,
+    onLongPressItem: (Long) -> Unit,
+    onLongPressBatch: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember(batch.batchAdd) { mutableStateOf(false) }
+    val selectedInBatch = batch.items.count { it.id in selection }
+    val allSelected = selectionActive && selectedInBatch == batch.items.size
+
     Card(modifier = modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Column(
+            modifier = Modifier
+                .combinedClickable(
+                    onClick = {},
+                    onLongClick = { onLongPressBatch(batch.batchAdd) },
+                )
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+        ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                if (selectionActive) {
+                    Checkbox(
+                        checked = allSelected,
+                        onCheckedChange = { checked ->
+                            batch.items.forEach { item ->
+                                if (checked != (item.id in selection)) onToggleSelection(item.id)
+                            }
+                        },
+                    )
+                }
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = stringResource(
@@ -114,7 +159,14 @@ private fun CameraQueueBatchCard(
             AnimatedVisibility(visible = expanded) {
                 Column {
                     batch.items.forEach { item ->
-                        CameraQueueItemRow(item = item, running = item.id == runningId)
+                        CameraQueueItemRow(
+                            item = item,
+                            running = item.id == runningId,
+                            selected = item.id in selection,
+                            selectionActive = selectionActive,
+                            onToggleSelection = { onToggleSelection(item.id) },
+                            onLongPress = { onLongPressItem(item.id) },
+                        )
                     }
                 }
             }
@@ -123,18 +175,30 @@ private fun CameraQueueBatchCard(
 }
 
 /** One queued file: its name and where it stands. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun CameraQueueItemRow(
     item: CameraQueueItem,
     running: Boolean,
+    selected: Boolean,
+    selectionActive: Boolean,
+    onToggleSelection: () -> Unit,
+    onLongPress: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Row(
         modifier = modifier
             .fillMaxWidth()
+            .combinedClickable(
+                onClick = { if (selectionActive) onToggleSelection() },
+                onLongClick = onLongPress,
+            )
             .padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (selectionActive) {
+            Checkbox(checked = selected, onCheckedChange = { onToggleSelection() })
+        }
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = item.fileName,

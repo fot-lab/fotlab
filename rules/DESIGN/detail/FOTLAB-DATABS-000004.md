@@ -65,9 +65,9 @@ Both timestamp columns are `TEXT`, because a row has to record **when** somethin
 | --- | --- |
 | `NULL` | queued, not finished — the row is pending |
 | a decimal millisecond timestamp | the transfer finished at that moment |
-| `paused` | stopped, and may be picked up again |
+| `paused` | stopped on the user's request, and may be picked up again |
 | `canceled` | stopped at the user's request |
-| `failed` | the device refused; the row will never succeed as it stands |
+| `failed` | the transfer failed; the row will not run again as it stands |
 
 The same flexibility applies to `timestamp_batchadd`, which groups the rows of one user action
 into a batch.
@@ -87,8 +87,13 @@ not duplicates.
 `uri_camera` is a `ptp://` URI. Its last segment is the file name — which is exactly what the
 queue list shows, since the list shows the file name only, not the full URI.
 
-- `ptp://<handle>/<name>` — an object that is read from the device.
+- `ptp://<storageId>/<parent>/<handle>/<name>` — an object that is read from the device.
 - `ptp://<storageId>/<parent>/<name>` — the place an upload writes to.
+
+The download shape carries the storage and the folder as well as the handle, and that is
+deliberate: **a PTP handle is a device-local number**, so a row queued on one camera cannot be
+transferred to another by its handle alone. With the folder and the file name in the row, the
+transfer can be re-resolved against whichever camera is connected now (R8).
 
 `uri_phone` is the local side: for a download, the destination folder plus the file name; for an
 upload, the source document.
@@ -119,7 +124,46 @@ The consequence that matters is what happens when the link dies mid-transfer:
 
 The last rule is the fix for the audit's central finding: the queue outlives the camera.
 
-### R8 — The queue view
+### R8 — The link's fate decides the queue's fate
+
+The queue reads the link's state, not just its own rows. `CameraCore` publishes a **retry
+state** next to the connection state, and the queue follows it:
+
+| Retry state | What it means | What the queue does |
+| --- | --- | --- |
+| `Idle` | no recovery is running | nothing |
+| `Retrying(attempt, maxAttempts)` | a recovery attempt is running | the rows keep waiting; the run resumes when the link comes back |
+| `Exhausted` | the recovery was given up | **every row that is still queued is stamped `failed`** |
+
+The `Exhausted` rule is the end of the road: the rows that never ran would otherwise wait
+forever for a camera that is not coming back. They are stamped `failed` — and **the user
+decides from there**, which is also how a batch built on one camera is carried over to another:
+the user resumes the rows (R9) on the camera that has the files, and the transfer is re-resolved
+by name (R5).
+
+An explicit disconnect is *not* a failure: the rows stay queued and wait for the next camera.
+
+The re-resolution itself belongs to the runner: the stored handle is checked first — it still
+names the same file — and the file is looked up **by name** in the folder the row remembers
+when it does not. A file that is not on the connected camera at all leaves the row `failed`,
+with the reason stated, rather than silently transferring the wrong object.
+
+### R9 — The user's controls over the queue
+
+Every state a row can be in is reachable by hand:
+
+| Action | Effect on the row |
+| --- | --- |
+| **pause** | `timestamp_itemfinish = 'paused'` |
+| **resume** | `timestamp_itemfinish = NULL` — the row waits again |
+| **retry** | as resume, and the runner is started when a camera is connected |
+| **cancel** | `timestamp_itemfinish = 'canceled'` |
+| **delete** | the row is removed |
+
+A paused row is the user's own decision, so a later link failure does not touch it: only the
+rows that are still **queued** (`NULL`) are stamped `failed` when a recovery is given up.
+
+### R10 — The queue view
 
 The camera drawer's top carries two tabs, `Storage` and `Queue`, and picking one switches the
 content region (the way the library's drawer switches between its views).
@@ -129,29 +173,42 @@ first. The card's right-hand arrow expands it to the individual files, each show
 only. The list is a read of the table, so it shows the same thing whether the app was just
 started or has been running for hours.
 
+The view also states what the link is doing with the queue — connected, waiting, reconnecting
+(attempt and total), or given up — because that is what decides whether the transfers in it
+will move.
+
+**Multi-selection.** A long press on a card takes the whole batch, a long press on a row takes
+that row; the fun bar then offers the three actions that apply to the selection — cancel, retry
+and delete — next to the drawer toggle and the overflow menu, which also carries the two
+remaining states, pause and resume.
+
 The fun bar's storage actions (download, upload, delete, refresh, grid, new folder) act on the
 storage view only.
 
 ## Open Questions
 
-1. **Cross-camera resumption.** A PTP object handle is a *device-local* number: the same handle
-   means different files on different cameras. `uri_camera` therefore encodes a handle that is
-   only meaningful on the camera that produced it, and a queued row cannot yet be re-resolved
-   against a different camera. The device exposes no stable serial in
-   `PtpDeviceIdentity` today; a future identity (serial or a stable GUID derived from the
-   profile plus the object path) plus a name-based re-resolution would be needed to run a queue
-   that was built on one camera against another. Until then, a row transferred to a different
-   camera must be rejected rather than silently resolved to the wrong object.
+1. **Cross-camera resumption is solved by name, with two limits.** The row remembers the
+   storage, the folder and the file name, so the file is found again on another camera. What
+   is *not* solved: a camera whose folders or names differ (the file is simply not there, and
+   the row is left `failed` with the reason), and the case of two cameras that hold a file of
+   the same name in different folders. The device exposes no stable serial in
+   `PtpDeviceIdentity`, so the row cannot tell the two apart.
 2. **Byte-level resume.** A row that was interrupted restarts from the beginning; the byte
-   offset is not persisted.
-3. **Upload through the queue.** The schema carries `phoneTOcamera` and the runner implements
-   it, but the screen still uploads directly. Routing the upload through the table is a
-   separate change.
-4. **SAF tree permission.** The destination tree's persistable grant is taken when the folder
+   offset is not persisted. The half-written file is deleted, as it always was.
+3. **SAF tree permission.** The destination tree's persistable grant is taken when the folder
    is picked. A grant the user later revokes in system settings leaves the row queued and
    failing, rather than failing permanently.
+4. **The HTTP transport is not part of this queue.** Sony's JSON-RPC API has its own
+   transport, session and content API, but they are not wired into the browse/download
+   pipeline, so an HTTP-only camera cannot be connected at all — and therefore cannot be the
+   other end of a queued transfer.
 
 ## Change History
 
 - 2026-11-26 — Created. Initial schema, the text-valued timestamp columns, the identity rule,
   the runner/queue split, and the queue view.
+- 2026-11-26 — Added R8 (the link's fate decides the queue's fate: the retry state, the
+  `failed` stamp when a recovery is given up, and the by-name re-resolution that carries a
+  batch to another camera), R9 (the user's controls: pause, resume, retry, cancel, delete),
+  and the multi-selection in R10. Uploads are queued through the same table; the download URI
+  now carries the storage and the folder so the file can be found again by name.

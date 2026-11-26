@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Delete
@@ -26,6 +27,9 @@ import androidx.compose.material.icons.filled.FlipToBack
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Sync
@@ -76,10 +80,18 @@ internal val CameraScreenFunBarHeight = 64.dp
  * selection they offer download and delete; without one they offer upload and new folder.
  * The two pairs are mutually exclusive by construction: upload and download are the two ends
  * of one transfer, and a new folder and a delete are the two ends of one destructive action.
+ *
+ * **The queue has its own face.** In the queue view the bar drops the layout switch and the
+ * refresh — neither means anything there — and, once the user has picked rows with a long
+ * press, it offers the three actions that apply to the selection: cancel, retry and delete.
+ * The drawer toggle and the overflow menu stay in place in every mode: the overflow also
+ * carries the queue's two remaining states, pause and resume.
  */
 @Composable
 internal fun CameraScreenFunBar(
     drawerOpen: Boolean,
+    queueMode: Boolean,
+    queueSelectionActive: Boolean,
     gridMode: Boolean,
     gridEnabled: Boolean,
     refreshEnabled: Boolean,
@@ -100,6 +112,13 @@ internal fun CameraScreenFunBar(
     onDelete: () -> Unit,
     onDownload: () -> Unit,
     onUpload: () -> Unit,
+    // The queue's multi-selection: the three actions that apply to the selected rows.
+    onCancelSelected: () -> Unit,
+    onRetrySelected: () -> Unit,
+    onDeleteSelected: () -> Unit,
+    // The two states a selected row can be moved between, in the overflow menu.
+    onPauseSelected: () -> Unit,
+    onResumeSelected: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var overflowOpen by remember { mutableStateOf(false) }
@@ -130,58 +149,88 @@ internal fun CameraScreenFunBar(
                 )
             }
 
-            IconButton(onClick = onToggleGrid, enabled = gridEnabled) {
-                Icon(
-                    // The glyph names the layout the button switches to, the way the library's
-                    // layout switch does.
-                    imageVector = if (gridMode) Icons.Filled.ViewList else Icons.Filled.GridView,
-                    contentDescription = stringResource(
-                        id = if (gridMode) {
-                            R.string.camera_cd_layout_list
-                        } else {
-                            R.string.camera_cd_layout_grid
-                        },
-                    ),
-                )
-            }
+            // The layout switch and the refresh belong to the storage view; the queue has
+            // neither a layout nor a folder to re-read, so the bar carries the drawer
+            // toggle alone there.
+            if (!queueMode) {
+                IconButton(onClick = onToggleGrid, enabled = gridEnabled) {
+                    Icon(
+                        // The glyph names the layout the button switches to, the way the library's
+                        // layout switch does.
+                        imageVector = if (gridMode) Icons.Filled.ViewList else Icons.Filled.GridView,
+                        contentDescription = stringResource(
+                            id = if (gridMode) {
+                                R.string.camera_cd_layout_list
+                            } else {
+                                R.string.camera_cd_layout_grid
+                            },
+                        ),
+                    )
+                }
 
-            CameraRefreshIcon(onRefresh = onRefresh, enabled = refreshEnabled)
+                CameraRefreshIcon(onRefresh = onRefresh, enabled = refreshEnabled)
+            }
 
             Spacer(modifier = Modifier.weight(1f))
 
-            // Slot A: upload without a selection, download with one. The two are the two ends of
-            // one transfer, so they share the slot.
-            IconButton(
-                onClick = if (hasSelection) onDownload else onUpload,
-                enabled = if (hasSelection) downloadEnabled else uploadEnabled,
-            ) {
-                Icon(
-                    imageVector = if (hasSelection) Icons.Filled.Download else Icons.Filled.Upload,
-                    contentDescription = stringResource(
-                        id = if (hasSelection) {
-                            R.string.camera_cd_download
-                        } else {
-                            R.string.camera_cd_upload
-                        },
-                    ),
-                )
-            }
+            if (queueMode) {
+                // The queue's selection: three actions on the rows the user picked. They are
+                // the queue's own actions and never touch the camera's storages.
+                if (queueSelectionActive) {
+                    IconButton(onClick = onCancelSelected) {
+                        Icon(
+                            imageVector = Icons.Filled.Cancel,
+                            contentDescription = stringResource(id = R.string.camera_queue_action_cancel),
+                        )
+                    }
+                    IconButton(onClick = onRetrySelected) {
+                        Icon(
+                            imageVector = Icons.Filled.Refresh,
+                            contentDescription = stringResource(id = R.string.camera_queue_action_retry),
+                        )
+                    }
+                    IconButton(onClick = onDeleteSelected) {
+                        Icon(
+                            imageVector = Icons.Filled.Delete,
+                            contentDescription = stringResource(id = R.string.camera_queue_action_delete),
+                        )
+                    }
+                }
+            } else {
+                // Slot A: upload without a selection, download with one. The two are the two ends of
+                // one transfer, so they share the slot.
+                IconButton(
+                    onClick = if (hasSelection) onDownload else onUpload,
+                    enabled = if (hasSelection) downloadEnabled else uploadEnabled,
+                ) {
+                    Icon(
+                        imageVector = if (hasSelection) Icons.Filled.Download else Icons.Filled.Upload,
+                        contentDescription = stringResource(
+                            id = if (hasSelection) {
+                                R.string.camera_cd_download
+                            } else {
+                                R.string.camera_cd_upload
+                            },
+                        ),
+                    )
+                }
 
-            // Slot B: a new folder without a selection, delete with one.
-            IconButton(
-                onClick = if (hasSelection) onDelete else onCreateFolder,
-                enabled = if (hasSelection) deleteEnabled else createFolderEnabled,
-            ) {
-                Icon(
-                    imageVector = if (hasSelection) Icons.Filled.Delete else Icons.Filled.CreateNewFolder,
-                    contentDescription = stringResource(
-                        id = if (hasSelection) {
-                            R.string.camera_cd_delete
-                        } else {
-                            R.string.camera_cd_new_folder
-                        },
-                    ),
-                )
+                // Slot B: a new folder without a selection, delete with one.
+                IconButton(
+                    onClick = if (hasSelection) onDelete else onCreateFolder,
+                    enabled = if (hasSelection) deleteEnabled else createFolderEnabled,
+                ) {
+                    Icon(
+                        imageVector = if (hasSelection) Icons.Filled.Delete else Icons.Filled.CreateNewFolder,
+                        contentDescription = stringResource(
+                            id = if (hasSelection) {
+                                R.string.camera_cd_delete
+                            } else {
+                                R.string.camera_cd_new_folder
+                            },
+                        ),
+                    )
+                }
             }
 
             Box {
@@ -225,6 +274,30 @@ internal fun CameraScreenFunBar(
                             onSelectNone()
                         },
                     )
+                    // The queue's own two states: a selected row can be held back, and a
+                    // held-back row can be put back into the queue.
+                    if (queueMode) {
+                        DropdownMenuItem(
+                            text = { Text(text = stringResource(id = R.string.camera_queue_action_pause)) },
+                            leadingIcon = {
+                                Icon(imageVector = Icons.Filled.Pause, contentDescription = null)
+                            },
+                            onClick = {
+                                overflowOpen = false
+                                onPauseSelected()
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(text = stringResource(id = R.string.camera_queue_action_resume)) },
+                            leadingIcon = {
+                                Icon(imageVector = Icons.Filled.PlayArrow, contentDescription = null)
+                            },
+                            onClick = {
+                                overflowOpen = false
+                                onResumeSelected()
+                            },
+                        )
+                    }
                 }
             }
         }

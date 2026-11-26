@@ -87,17 +87,34 @@ object CameraQueueStates {
 /**
  * Encodes and decodes the two URIs a queued transfer is identified by.
  *
- * The camera side is a `ptp://` URI: its last segment is the file name, which is what the
- * queue list shows, and the segments before it address the object on the device. The phone
- * side is the local URI — the destination folder plus file name for a download, the source
- * document for an upload.
+ * The camera side is a `ptp://` URI whose **last segment is the file name** — which is what
+ * the queue list shows, since the list shows the file name only, not the full URI.
+ *
+ * Two shapes exist, told apart by the number of segments:
+ *
+ * - `ptp://<storageId>/<parent>/<handle>/<name>` — an object that is read from the device.
+ * - `ptp://<storageId>/<parent>/<name>` — the place an upload writes to.
+ *
+ * The download shape carries the storage and the folder as well as the handle, and that is
+ * deliberate: **a PTP handle is a device-local number**, so a row queued on one camera
+ * cannot be transferred to another by its handle alone. With the folder and the file name
+ * in the row, the transfer can be re-resolved against whichever camera is connected now
+ * (`FOTLAB-DATABS-000004` R5).
+ *
+ * The phone side is the local URI — the destination folder plus file name for a download,
+ * the source document for an upload.
  */
 object CameraQueueUri {
 
     private const val SCHEME = "ptp://"
 
     /** The camera-side URI of an object that is being read from the device. */
-    fun cameraObject(handle: Long, fileName: String): String = "$SCHEME$handle/$fileName"
+    fun cameraObject(
+        storageId: Long,
+        parent: Long,
+        handle: Long,
+        fileName: String,
+    ): String = "$SCHEME$storageId/$parent/$handle/$fileName"
 
     /** The camera-side URI of the place an upload writes to. */
     fun cameraTarget(storageId: Long, parent: Long, fileName: String): String =
@@ -107,30 +124,31 @@ object CameraQueueUri {
     fun phoneTarget(folderUri: String, fileName: String): String =
         "${folderUri.trimEnd('/')}/$fileName"
 
-    /** The decoded camera side of a queued transfer. */
+    /**
+     * The decoded camera side of a queued transfer.
+     *
+     * @param handle the object handle on the device; the parent handle for an upload target.
+     * @param storageId the storage the object lives on.
+     * @param parent the folder the object lives in.
+     */
     data class CameraRef(
-        /** The object handle on the device; the parent handle for an upload target. */
         val handle: Long,
         val storageId: Long,
+        val parent: Long,
         val fileName: String,
     )
 
     /**
      * The camera side of [uri].
      *
-     * The scheme is dropped and the body is split into its segments. Two segments are an
-     * object on the device — the handle and the file name; three segments are the place an
-     * upload writes to — the storage, the parent folder and the file name.
+     * The scheme is dropped and the body is split into its segments: three segments are an
+     * upload target (storage, parent, name), four are an object (storage, parent, handle,
+     * name).
      */
     fun parseCamera(uri: String): CameraRef? {
         if (!uri.startsWith(SCHEME)) return null
         val segments = uri.removePrefix(SCHEME).split('/')
         return when (segments.size) {
-            2 -> {
-                val handle = segments[0].toLongOrNull() ?: return null
-                val name = segments[1]
-                if (name.isEmpty()) null else CameraRef(handle = handle, storageId = 0L, fileName = name)
-            }
             3 -> {
                 val storageId = segments[0].toLongOrNull() ?: return null
                 val parent = segments[1].toLongOrNull() ?: return null
@@ -138,7 +156,18 @@ object CameraQueueUri {
                 if (name.isEmpty()) {
                     null
                 } else {
-                    CameraRef(handle = parent, storageId = storageId, fileName = name)
+                    CameraRef(handle = parent, storageId = storageId, parent = parent, fileName = name)
+                }
+            }
+            4 -> {
+                val storageId = segments[0].toLongOrNull() ?: return null
+                val parent = segments[1].toLongOrNull() ?: return null
+                val handle = segments[2].toLongOrNull() ?: return null
+                val name = segments[3]
+                if (name.isEmpty()) {
+                    null
+                } else {
+                    CameraRef(handle = handle, storageId = storageId, parent = parent, fileName = name)
                 }
             }
             else -> null

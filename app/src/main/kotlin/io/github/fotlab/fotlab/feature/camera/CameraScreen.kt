@@ -156,10 +156,14 @@ fun CameraScreen() {
     var viewMode by remember { mutableStateOf(CameraViewMode.STORAGE) }
     // The transfers whose identity is already in the queue, awaiting the user's decision.
     var pendingDuplicates by remember { mutableStateOf<DuplicatePrompt?>(null) }
+    // The queue's multi-selection: the rows a long press picked.
+    var queueSelection by remember { mutableStateOf<Set<Long>>(emptySet()) }
 
     // The queue, read from the table — the same rows the transfer service works through.
     val queueBatches by CameraCore.queueBatches().collectAsState(initial = emptyList())
     val runningItem by CameraCore.queueRunning().collectAsState()
+    // The link's own state, so the queue can say what is happening to the transfers in it.
+    val retryState by CameraCore.retryState.collectAsState()
 
     suspend fun reloadObjects() {
         val storage = selectedStorage ?: return
@@ -216,22 +220,34 @@ fun CameraScreen() {
         }
     }
 
-    val uploadLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
-            val storage = selectedStorage ?: 0L
-            val parent = path.lastOrNull()?.handle ?: PTP_PARENT_ROOT
-            scope.launch {
-                busy = true
-                errorMessage = null
-                try {
-                    CameraCore.upload(uri, storage, parent)
-                    reloadObjects()
-                } catch (error: Throwable) {
-                    errorMessage = error.message ?: error.toString()
-                }
-                busy = false
+    /**
+     * The upload picker.
+     *
+     * An upload is queued exactly like a download: the row carries the source document and
+     * the place on the device the file is to land in, and the transfer service runs it. The
+     * grant on the source has to outlive the picker, because the transfer happens later.
+     */
+    val uploadLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments(),
+    ) { uris ->
+        if (uris.isEmpty()) return@rememberLauncherForActivityResult
+        val storage = selectedStorage ?: return@rememberLauncherForActivityResult
+        val parent = path.lastOrNull()?.handle ?: PTP_PARENT_ROOT
+        val drafts = uris.map { uri ->
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
             }
+            val name = CameraSourceName.displayName(context, uri)
+            QueueDraft(
+                direction = CameraTransferDirection.PHONE_TO_CAMERA,
+                uriCamera = CameraQueueUri.cameraTarget(storage, parent, name),
+                uriPhone = uri.toString(),
+            )
         }
+        scope.launch { enqueueTransfers(drafts) }
     }
 
     /**
@@ -260,16 +276,78 @@ fun CameraScreen() {
                 )
             }
             // One queue row per selected file; the batch key groups them into one card.
+            // The row remembers the storage and the folder as well as the handle, so the
+            // file can be found again on another camera by name.
+            val storage = selectedStorage ?: 0L
+            val parent = path.lastOrNull()?.handle ?: PTP_PARENT_ROOT
             val drafts = handles.map { handle ->
                 val name = objects.firstOrNull { it.handle == handle }?.name ?: handle.toString()
                 QueueDraft(
                     direction = CameraTransferDirection.CAMERA_TO_PHONE,
-                    uriCamera = CameraQueueUri.cameraObject(handle, name),
+                    uriCamera = CameraQueueUri.cameraObject(
+                        storageId = storage,
+                        parent = parent,
+                        handle = handle,
+                        fileName = name,
+                    ),
                     uriPhone = CameraQueueUri.phoneTarget(treeUri.toString(), name),
                 )
             }
             scope.launch { enqueueTransfers(drafts) }
             selection = emptySet()
+        }
+    }
+
+    /** Every row the queue shows — what "select all" acts on. */
+    fun allQueueItemIds(): List<Long> = queueBatches.flatMap { batch -> batch.items.map { it.id } }
+
+    /** Cancels the picked rows: they carry `canceled` from now on. */
+    fun cancelSelectedQueueItems() {
+        val ids = queueSelection.toList()
+        if (ids.isEmpty()) return
+        scope.launch {
+            CameraCore.cancelQueueItems(ids)
+            queueSelection = emptySet()
+        }
+    }
+
+    /** Puts the picked rows back into the queue and lets the service run them again. */
+    fun resumeSelectedQueueItems() {
+        val ids = queueSelection.toList()
+        if (ids.isEmpty()) return
+        scope.launch {
+            CameraCore.resumeQueueItems(ids)
+            queueSelection = emptySet()
+        }
+    }
+
+    /** Runs the picked rows again: they go back into the queue and the service takes them. */
+    fun retrySelectedQueueItems() {
+        val ids = queueSelection.toList()
+        if (ids.isEmpty()) return
+        scope.launch {
+            CameraCore.retryQueueItems(ids)
+            queueSelection = emptySet()
+        }
+    }
+
+    /** Holds the picked rows back: they carry `paused` until the user resumes them. */
+    fun pauseSelectedQueueItems() {
+        val ids = queueSelection.toList()
+        if (ids.isEmpty()) return
+        scope.launch {
+            CameraCore.pauseQueueItems(ids)
+            queueSelection = emptySet()
+        }
+    }
+
+    /** Removes the picked rows from the queue. */
+    fun deleteSelectedQueueItems() {
+        val ids = queueSelection.toList()
+        if (ids.isEmpty()) return
+        scope.launch {
+            CameraCore.removeQueueItems(ids)
+            queueSelection = emptySet()
         }
     }
 
@@ -352,6 +430,8 @@ fun CameraScreen() {
             bottomBar = {
                 CameraScreenFunBar(
                     drawerOpen = drawerState.isOpen,
+                    queueMode = viewMode == CameraViewMode.QUEUE,
+                    queueSelectionActive = queueSelection.isNotEmpty(),
                     gridMode = gridMode,
                     gridEnabled = connected && storageView,
                     refreshEnabled = connected && selectedStorage != null && storageView,
@@ -367,13 +447,35 @@ fun CameraScreen() {
                     },
                     onToggleGrid = { gridMode = !gridMode },
                     onRefresh = { refreshCurrentFolder() },
-                    onSelectAll = { selection = selection + selectableHandles },
-                    onInvert = {
-                        val before = selection
-                        selection = (selectableHandles.filterNot { it in before } +
-                            before.filterNot { it in selectableHandles }).toSet()
+                    onSelectAll = {
+                        // The trio acts on whichever list is on screen: the camera's files in
+                        // the storage view, the queue's rows in the queue view.
+                        if (viewMode == CameraViewMode.QUEUE) {
+                            queueSelection = allQueueItemIds().toSet()
+                        } else {
+                            selection = selection + selectableHandles
+                        }
                     },
-                    onSelectNone = { selection = emptySet() },
+                    onInvert = {
+                        if (viewMode == CameraViewMode.QUEUE) {
+                            val all = allQueueItemIds()
+                            queueSelection = all
+                                .map { id -> if (id in queueSelection) null else id }
+                                .filterNotNull()
+                                .toSet()
+                        } else {
+                            val before = selection
+                            selection = (selectableHandles.filterNot { it in before } +
+                                before.filterNot { it in selectableHandles }).toSet()
+                        }
+                    },
+                    onSelectNone = {
+                        if (viewMode == CameraViewMode.QUEUE) {
+                            queueSelection = emptySet()
+                        } else {
+                            selection = emptySet()
+                        }
+                    },
                     onCreateFolder = { newFolderName = "" },
                     onDelete = { confirmDelete = true },
                     onDownload = {
@@ -392,6 +494,11 @@ fun CameraScreen() {
                         folderLauncher.launch(intent)
                     },
                     onUpload = { uploadLauncher.launch(arrayOf("*/*")) },
+                    onCancelSelected = { cancelSelectedQueueItems() },
+                    onRetrySelected = { retrySelectedQueueItems() },
+                    onDeleteSelected = { deleteSelectedQueueItems() },
+                    onPauseSelected = { pauseSelectedQueueItems() },
+                    onResumeSelected = { resumeSelectedQueueItems() },
                 )
             },
         ) { innerPadding ->
@@ -691,9 +798,49 @@ fun CameraScreen() {
                     }
 
                     CameraViewMode.QUEUE -> {
+                        // What the link is doing with the transfers that wait in the queue.
+                        val linkLabel = when (val retry = retryState) {
+                            is CameraRetryState.Retrying -> stringResource(
+                                id = R.string.camera_queue_link_retrying,
+                                retry.attempt,
+                                retry.maxAttempts,
+                            )
+                            is CameraRetryState.Exhausted ->
+                                stringResource(id = R.string.camera_queue_link_failed)
+                            else -> if (connected) {
+                                stringResource(id = R.string.camera_queue_link_connected)
+                            } else {
+                                stringResource(id = R.string.camera_queue_link_disconnected)
+                            }
+                        }
+                        Text(
+                            text = linkLabel,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            text = stringResource(id = R.string.camera_queue_hint_select),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                         CameraQueueList(
                             batches = queueBatches,
                             runningId = runningItem?.id,
+                            selection = queueSelection,
+                            selectionActive = queueSelection.isNotEmpty(),
+                            onToggleSelection = { id ->
+                                queueSelection = if (id in queueSelection) {
+                                    queueSelection - id
+                                } else {
+                                    queueSelection + id
+                                }
+                            },
+                            onLongPressItem = { id -> queueSelection = queueSelection + id },
+                            onLongPressBatch = { batchAdd ->
+                                val batch = queueBatches.firstOrNull { it.batchAdd == batchAdd }
+                                val ids = batch?.items?.map { it.id } ?: emptyList()
+                                queueSelection = queueSelection + ids
+                            },
                             modifier = Modifier.fillMaxSize(),
                         )
                     }

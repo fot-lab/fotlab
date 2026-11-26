@@ -63,6 +63,7 @@ package imports back into one that depends on it (`FOTLAB-STRUCT-000002` R2).
 | `CameraQueueManager.kt` | The queue's near-stateless machine: everything observable is a row, only the running transfer is in memory. |
 | `CameraQueueList.kt` | The queue view: one card per batch, newest first, expandable to the individual file names. |
 | `CameraViewMode.kt` | The drawer's two views — the camera's storages and the transfer queue. |
+| `CameraSourceName.kt` | The name a source document will carry on the device — an upload is queued before it runs, so the name has to be known when the row is written. |
 | `CameraSettings.kt` | The two user-tunable discovery values and the single source of their defaults. |
 | `CameraPreference.kt` | Durable `DataStore` for the camera module's own settings (`camera_prefs`), including the URI of the last file a download wrote. |
 | `model/CameraModels.kt` | `PtpStorage`, `PtpObject`, `PtpObjectInfo`, `PtpMediaFilter`, `TransferProgress`, `CameraEvent`, format helpers, and the link/response exceptions. |
@@ -104,7 +105,9 @@ package imports back into one that depends on it (`FOTLAB-STRUCT-000002` R2).
 ### The transfer queue
 
 A download no longer starts a one-shot batch: it **appends rows** to the
-`camera_file_queue` table, and the transfer service runs whatever is queued.
+`camera_file_queue` table, and the transfer service runs whatever is queued. An upload is
+queued the same way, with the source document on the phone side and the folder it is to
+land in on the camera side.
 
 1. The user picks files and a destination folder; the screen builds one row per file
    (direction, camera-side URI, phone-side URI) and checks the triple against the rows
@@ -119,6 +122,39 @@ A download no longer starts a one-shot batch: it **appends rows** to the
 
 The queue outlives the camera, the screen and the process, which is exactly what the
 one-shot batch could not do.
+
+### The link decides the queue's fate
+
+`CameraCore` publishes a **retry state** beside the connection state, and the queue
+follows it:
+
+- a recovery that is running leaves the rows waiting;
+- a recovery that comes back lets the queue run on;
+- a recovery that is **given up** stamps every still-queued row `failed` — the rows would
+  otherwise wait forever for a camera that is not coming back. An explicit disconnect is
+  not a failure: those rows keep waiting for the next camera.
+
+A row the user paused on purpose is never touched by that rule.
+
+### Carrying a batch to another camera
+
+A PTP handle is a device-local number, so a row cannot simply be replayed against another
+camera. The row therefore remembers the storage, the folder **and the file name** beside
+the handle, and the runner re-resolves the file when the handle no longer names it: the
+stored handle is checked first, and the file is looked up by name in the remembered folder
+when it does not match. A file that is not on the connected camera leaves the row `failed`
+with the reason stated, rather than transferring the wrong object.
+
+Resuming a failed row is therefore how the user moves a batch to the camera that has the
+files.
+
+### The queue's own controls
+
+The queue view supports a multi-selection: a long press on a card takes the batch, a long
+press on a row takes the row. The fun bar then offers cancel, retry and delete for the
+selection, and its overflow menu carries pause and resume. Pausing writes `paused` into
+the row, resuming and retrying clear the stamp so the row waits again — retrying also
+starts the runner when a camera is connected.
 
 ### File operations
 
@@ -209,17 +245,23 @@ differs only in the fields it actually changes.
 
 ## Known gaps (within scope, not yet implemented)
 
-- **A queued transfer cannot be moved to another camera.** A PTP object handle is a
-  device-local number, so the camera-side URI is only meaningful on the camera that
-  produced it. Re-resolving a row against a different camera needs a stable device
-  identity, which the PTP device info does not expose today (`FOTLAB-DATABS-000004`,
-  Open Question 1).
-- **Uploads do not go through the queue yet.** The schema and the runner carry the
-  `phoneTOcamera` direction, but the screen still uploads directly.
-- **Sony HTTP transport.** `SsdpProbe` does not parse the `X_ScalarWebAPI_*` /
-  `ActionList_URL` headers, and no HTTP transport exists yet. The PTP Sony profile
-  (`0x92xx` opcodes) is complete and still the preferred path for Sony cameras that
-  support it.
+- **Sony's HTTP API is not wired into the pipeline.** `SsdpProbe` does parse the
+  `X_ScalarWebAPI_*` headers and records the `ActionList_URL`, `SonyHttpTransport` speaks
+  the JSON-RPC dialect and `SonyHttpSession` covers open, storages, listing, download,
+  thumbnail and events. What is missing is the layer that turns those into the feature's
+  handle-and-storage model: the browse and transfer pipeline runs on PTP handles, and the
+  Sony content API addresses files by URI instead. An HTTP-only camera therefore cannot be
+  connected — `CameraCore.transportFor` refuses it — and cannot be the other end of a
+  queued transfer.
+  Two consequences were fixed along the way: a host that answers **both** protocols is now
+  discovered as PTP, because preferring the unwired HTTP path made a camera that works
+  over PTP unconnectable; and the refusal now says what is actually missing.
+- **A queued transfer cannot tell two cameras apart.** The file is found again by name in
+  the remembered folder, which carries a batch to another camera — but a camera whose
+  folders or names differ simply does not have the file, and the device exposes no stable
+  serial to disambiguate (`FOTLAB-DATABS-000004`, Open Question 1).
+- **Interrupted transfers restart from the beginning.** The half-written file is deleted,
+  as it always was; the byte offset is not persisted.
 
 ## Module settings
 

@@ -10,6 +10,7 @@ import android.provider.MediaStore
 import android.provider.OpenableColumns
 import io.github.fotlab.fotlab.feature.camera.model.PtpFormats
 import io.github.fotlab.fotlab.feature.camera.model.PtpMediaFilter
+import io.github.fotlab.fotlab.feature.camera.model.PtpResponseException
 import io.github.fotlab.fotlab.feature.camera.model.PtpObject
 import io.github.fotlab.fotlab.feature.camera.model.PtpStorage
 import io.github.fotlab.fotlab.feature.camera.model.TransferKind
@@ -118,6 +119,34 @@ class CameraFileRepository(
         }
         written
     }
+
+    /**
+     * The file name of an object, or `null` when the device does not know the handle.
+     *
+     * A refused request is an ordinary answer — the handle is simply not there — while a
+     * dead link propagates, because it means the session is gone.
+     */
+    suspend fun objectName(handle: Long): String? = withContext(Dispatchers.IO) {
+        try {
+            operations.objectInfo(handle).name
+        } catch (error: PtpResponseException) {
+            null
+        }
+    }
+
+    /**
+     * The handle of the object with this name in this folder, or `null` when there is none.
+     *
+     * A PTP handle is a device-local number, so this lookup is what carries a queued
+     * transfer over to another camera: the file is found again by name in the folder the
+     * row remembers.
+     */
+    suspend fun findObjectByName(storageId: Long, parent: Long, name: String): Long? =
+        withContext(Dispatchers.IO) {
+            operations.objects(storageId, parent, PtpMediaFilter.ALL)
+                .firstOrNull { it.name == name }
+                ?.handle
+        }
 
     suspend fun delete(handles: List<Long>) = withContext(Dispatchers.IO) {
         handles.forEach { operations.delete(it) }

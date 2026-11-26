@@ -131,20 +131,34 @@ class CameraTransferService : Service() {
         return try {
             when (item.direction) {
                 CameraTransferDirection.CAMERA_TO_PHONE -> {
-                    // The phone side carries the destination folder and the file name; the
-                    // folder is everything before the last segment.
-                    val folder = item.uriPhone.substringBeforeLast('/', missingDelimiterValue = "")
-                    val target = if (folder.isEmpty()) null else Uri.parse(folder)
-                    CameraCore.download(listOf(cameraRef.handle), target)
+                    val handle = resolveHandle(cameraRef)
+                    if (handle == null) {
+                        // The file is not on the camera that is connected now. The row is
+                        // stamped `failed` and the user decides whether to resume it on a
+                        // camera that does have it.
+                        CameraCore.markQueueItemFinished(item.id, CameraQueueStates.FAILED)
+                        publishFailure(
+                            item,
+                            IllegalStateException("${cameraRef.fileName} is not on this camera"),
+                        )
+                    } else {
+                        // The phone side carries the destination folder and the file name;
+                        // the folder is everything before the last segment.
+                        val folder =
+                            item.uriPhone.substringBeforeLast('/', missingDelimiterValue = "")
+                        val target = if (folder.isEmpty()) null else Uri.parse(folder)
+                        CameraCore.download(listOf(handle), target)
+                        CameraCore.markQueueItemFinished(item.id, CameraQueueStates.now())
+                    }
                     Unit
                 }
                 CameraTransferDirection.PHONE_TO_CAMERA -> {
                     val source = Uri.parse(item.uriPhone)
                     CameraCore.upload(source, cameraRef.storageId, cameraRef.handle)
+                    CameraCore.markQueueItemFinished(item.id, CameraQueueStates.now())
                     Unit
                 }
             }
-            CameraCore.markQueueItemFinished(item.id, CameraQueueStates.now())
             true
         } catch (error: Throwable) {
             when (error) {
@@ -169,6 +183,35 @@ class CameraTransferService : Service() {
                 }
             }
         }
+    }
+
+    /**
+     * The handle the transfer should use on the camera that is connected now.
+     *
+     * A PTP handle is a device-local number: the same handle means a different file on a
+     * different camera. The stored handle is therefore checked first — it still names the
+     * same file — and the file is looked up **by name** in the folder the row remembers
+     * when it does not. That lookup is what lets the user carry a batch over to another
+     * camera by resuming it there.
+     *
+     * @return the handle to transfer, or `null` when this camera does not have the file.
+     */
+    private suspend fun resolveHandle(ref: CameraQueueUri.CameraRef): Long? {
+        val stored = CameraCore.objectName(ref.handle)
+        if (stored != null && stored == ref.fileName) return ref.handle
+        return CameraCore.findObjectByName(ref.storageId, ref.parent, ref.fileName)
+    }
+
+    /** Reports a failed row in the notification. */
+    private fun publishFailure(item: CameraQueueItem, error: Throwable) {
+        publish(
+            TransferProgress(
+                kind = TransferKind.DOWNLOAD,
+                objectName = item.fileName,
+                state = TransferState.FAILED,
+                failure = error,
+            ),
+        )
     }
 
     /** Stops the running transfer and stamps the row it was working on. */

@@ -329,6 +329,18 @@
     <string name="camera_cd_expand">Show the files in this batch</string>
     <string name="camera_cd_collapse">Hide the files in this batch</string>
     <string name="camera_cd_queue_remove">Remove this batch from the queue</string>
+    <!-- screen: the queue's multi-selection and its actions -->
+    <string name="camera_queue_action_cancel">Cancel the selected transfers</string>
+    <string name="camera_queue_action_retry">Run the selected transfers again</string>
+    <string name="camera_queue_action_delete">Remove the selected transfers from the queue</string>
+    <string name="camera_queue_action_pause">Pause the selected transfers</string>
+    <string name="camera_queue_action_resume">Put the selected transfers back into the queue</string>
+    <string name="camera_queue_hint_select">Long-press a batch or a file to select it.</string>
+    <!-- screen: what the link is doing with the queue -->
+    <string name="camera_queue_link_connected">A camera is connected — the queue runs on it.</string>
+    <string name="camera_queue_link_disconnected">No camera is connected — the queue waits.</string>
+    <string name="camera_queue_link_retrying">Reconnecting to the camera (%1$d/%2$d) — the queue waits.</string>
+    <string name="camera_queue_link_failed">The link could not be recovered — the unfinished transfers are marked failed.</string>
     <!-- screen: duplicate transfer -->
     <string name="camera_queue_duplicate_title">Transfer already queued</string>
     <string name="camera_queue_duplicate_message">%1$d of the selected transfers are already in the queue. Replace them?</string>

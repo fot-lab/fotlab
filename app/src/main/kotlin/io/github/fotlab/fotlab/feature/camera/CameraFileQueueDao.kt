@@ -92,4 +92,41 @@ interface CameraFileQueueDao {
      */
     @Query("UPDATE camera_file_queue SET timestamp_itemfinish = :state WHERE queue_id = :queueId")
     suspend fun markFinished(queueId: Long, state: String)
+
+    /**
+     * Marks the given rows with the given state.
+     *
+     * The rows are addressed by their queue key, which is how a multi-selection acts on
+     * exactly the items the user picked.
+     */
+    @Query("UPDATE camera_file_queue SET timestamp_itemfinish = :state WHERE queue_id IN (:queueIds)")
+    suspend fun markStates(queueIds: List<Long>, state: String)
+
+    /**
+     * Marks every row that is still queued with the given state.
+     *
+     * This is what a link that could not be recovered does: the rows that never ran are
+     * stamped `failed`, and the user decides afterwards whether to put them back.
+     */
+    @Query(
+        "UPDATE camera_file_queue SET timestamp_itemfinish = :state " +
+            "WHERE timestamp_itemfinish IS NULL",
+    )
+    suspend fun markUnfinished(state: String)
+
+    /**
+     * Puts the given rows back into the queue.
+     *
+     * The finish stamp is cleared, which is exactly what "resume" means: the row is waiting
+     * again, and the next run picks it up.
+     */
+    @Query(
+        "UPDATE camera_file_queue SET timestamp_itemfinish = NULL " +
+            "WHERE queue_id IN (:queueIds)",
+    )
+    suspend fun clearFinished(queueIds: List<Long>)
+
+    /** Removes the given rows. */
+    @Query("DELETE FROM camera_file_queue WHERE queue_id IN (:queueIds)")
+    suspend fun deleteByIds(queueIds: List<Long>)
 }

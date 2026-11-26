@@ -54,6 +54,24 @@ sealed class CameraConnectionState {
     data class Failed(val device: CameraDevice, val message: String) : CameraConnectionState()
 }
 
+/**
+ * The state of the automatic recovery that follows a dropped link.
+ *
+ * The transfer queue reads this. While the link is being recovered the queued transfers
+ * wait; when the recovery is given up, the rows that never ran are stamped `failed` and the
+ * user decides from there — including the decision to carry a batch over to another camera.
+ */
+sealed class CameraRetryState {
+    /** No recovery is in flight. */
+    object Idle : CameraRetryState()
+
+    /** A recovery attempt is running. */
+    data class Retrying(val attempt: Int, val maxAttempts: Int) : CameraRetryState()
+
+    /** The recovery gave up: the link is not coming back on its own. */
+    data class Exhausted(val device: CameraDevice) : CameraRetryState()
+}
+
 private class ActiveConnection(
     val device: CameraDevice,
     val session: PtpSession,
@@ -122,6 +140,17 @@ object CameraCore {
     private val _lastEvent = MutableStateFlow<CameraEvent?>(null)
     val lastEvent: StateFlow<CameraEvent?> = _lastEvent.asStateFlow()
 
+    private val _retryState = MutableStateFlow<CameraRetryState>(CameraRetryState.Idle)
+
+    /**
+     * The state of the link recovery.
+     *
+     * The queue follows it: a recovery that succeeds lets the queued transfers run on, and
+     * a recovery that is given up ends the queue's wait by stamping the unfinished rows
+     * `failed`.
+     */
+    val retryState: StateFlow<CameraRetryState> = _retryState.asStateFlow()
+
     @Volatile
     private var usbWatcher: android.content.BroadcastReceiver? = null
 
@@ -148,6 +177,15 @@ object CameraCore {
         preference = prefs
         queue = CameraQueueManager(applicationContext)
         watchUsbHotPlug(applicationContext, engine)
+        // The link's fate drives the queue: a recovery that is given up ends the wait of
+        // the rows that never ran, and the user decides from there.
+        scope.launch {
+            _retryState.collect { state ->
+                if (state is CameraRetryState.Exhausted) {
+                    runCatching { queue?.failUnfinished() }
+                }
+            }
+        }
         // The stored values are loaded once, in the background: the first discovery
         // uses the defaults and a value that lands later is picked up by the next one.
         scope.launch {
@@ -202,7 +240,10 @@ object CameraCore {
                     val current = active ?: return@launch
                     val connected = current.device as? CameraDevice.Usb ?: return@launch
                     if (connected.device.deviceId == device.deviceId) {
-                        disconnect()
+                        // The camera is gone, and no recovery can bring a detached USB
+                        // camera back: the queue's wait ends here.
+                        _retryState.value = CameraRetryState.Exhausted(connected.device)
+                        disconnect(userInitiated = false)
                     }
                 }
             },
@@ -300,6 +341,8 @@ object CameraCore {
             reconnectJob = null
             startKeepalive(device)
             _state.value = CameraConnectionState.Connected(device, profile, identity)
+            // The link is up: whatever recovery was running is over.
+            _retryState.value = CameraRetryState.Idle
             // A camera came up: the queue picks up where it stopped, so a transfer the
             // previous link interrupted runs again without the user asking twice.
             scope.launch {
@@ -315,7 +358,14 @@ object CameraCore {
         }
     }
 
-    suspend fun disconnect() {
+    /**
+     * Closes the session.
+     *
+     * @param userInitiated `true` when the user asked for it. An explicit disconnect leaves
+     *   the queue's rows alone: they wait for the next camera. A link that went away on its
+     *   own is a different matter — the recovery either brings it back or ends the wait.
+     */
+    suspend fun disconnect(userInitiated: Boolean = true) {
         reconnectJob?.cancel()
         reconnectJob = null
         keepaliveJob?.cancel()
@@ -328,6 +378,9 @@ object CameraCore {
         current.eventJob.cancel()
         withContext(Dispatchers.IO) { runCatching { current.session.close() } }
         _state.value = CameraConnectionState.Idle
+        if (userInitiated) {
+            _retryState.value = CameraRetryState.Idle
+        }
     }
 
     fun isConnected(): Boolean = active != null
@@ -344,6 +397,24 @@ object CameraCore {
     ) = runFileOperation { repository -> repository.objects(storageId, parent, filter) }
 
     suspend fun thumbnail(handle: Long) = runFileOperation { repository -> repository.thumbnail(handle) }
+
+    /**
+     * The file name of an object on the device, or `null` when the device does not know the
+     * handle.
+     *
+     * A dead link is not swallowed here: it is the caller's signal that the session is gone.
+     */
+    suspend fun objectName(handle: Long): String? =
+        runFileOperation { repository -> repository.objectName(handle) }
+
+    /**
+     * The handle of the object with this name in this folder, or `null` when there is none.
+     *
+     * This is how a queued transfer is carried over to another camera: a PTP handle is
+     * device-local, so the file is looked up by name in the folder the row remembers.
+     */
+    suspend fun findObjectByName(storageId: Long, parent: Long, name: String): Long? =
+        runFileOperation { repository -> repository.findObjectByName(storageId, parent, name) }
 
     /** Builds grid objects from known handles so the transfer service needs no UI types. */
     suspend fun download(handles: Collection<Long>, target: Uri? = null): List<Uri> {
@@ -431,6 +502,36 @@ object CameraCore {
     /** Marks the transfer in flight, or clears it when [item] is `null`. */
     fun setQueueRunning(item: CameraQueueItem?) = queueManager().setRunning(item)
 
+    // --- The user's controls over the queue -------------------------------------
+
+    /** Cancels the given queued transfers: their finish stamp becomes `canceled`. */
+    suspend fun cancelQueueItems(ids: List<Long>) = queueManager().cancel(ids)
+
+    /** Holds the given queued transfers back: their finish stamp becomes `paused`. */
+    suspend fun pauseQueueItems(ids: List<Long>) = queueManager().pause(ids)
+
+    /** Puts the given queued transfers back into the queue. */
+    suspend fun resumeQueueItems(ids: List<Long>) = queueManager().resume(ids)
+
+    /** Removes the given queued transfers from the queue. */
+    suspend fun removeQueueItems(ids: List<Long>) = queueManager().removeItems(ids)
+
+    /**
+     * Runs the given queued transfers again.
+     *
+     * The rows are put back into the queue, and the transfer service is started when a
+     * camera is connected. This is also how a batch built on one camera is carried over to
+     * another: the file is found again **by name** in the folder the row remembers, because
+     * a PTP handle is device-local.
+     */
+    suspend fun retryQueueItems(ids: List<Long>) {
+        queueManager().resume(ids)
+        val context = appContext ?: return
+        if (isConnected()) {
+            CameraTransferService.start(context)
+        }
+    }
+
     /**
      * Runs a file operation and reports a dead link as a failed connection.
      *
@@ -486,6 +587,9 @@ object CameraCore {
                 // be auto-retried; IP flakiness (Wi-Fi jitter, camera sleep) is.
                 if (device.link == io.github.fotlab.fotlab.feature.camera.model.CameraLink.IP) {
                     startReconnect(device)
+                } else {
+                    // Nothing can recover a detached camera, so the queue's wait ends now.
+                    _retryState.value = CameraRetryState.Exhausted(device)
                 }
             }
         } else if (_state.value is CameraConnectionState.Connecting) {
@@ -504,9 +608,13 @@ object CameraCore {
         is CameraDevice.Usb -> UsbPtpTransport(device.device, engine.usbDiscovery)
         is CameraDevice.Ip -> when (device.transportKind) {
             io.github.fotlab.fotlab.feature.camera.discovery.TransportKind.HTTP_SONY ->
+                // The Sony JSON-RPC transport, its session and the content API exist, but
+                // they are not wired into the browse/download pipeline, which runs on PTP
+                // handles and storages. An HTTP-only camera therefore cannot be opened
+                // yet; one that also speaks PTP/IP is discovered as PTP and works.
                 throw UnsupportedOperationException(
-                    "HTTP_SONY transport for ${device.displayName} (${device.host}) is scaffolded; " +
-                        "full browse/download wiring follows",
+                    "Sony's HTTP API is not wired into the transfer pipeline yet; " +
+                        "${device.displayName} (${device.host}) has to be reachable over PTP/IP",
                 )
             io.github.fotlab.fotlab.feature.camera.discovery.TransportKind.PTP -> {
                 val port = if (device.port == 15740) profile.initPort else device.port
@@ -559,11 +667,13 @@ object CameraCore {
     private fun startReconnect(device: CameraDevice) {
         reconnectJob?.cancel()
         reconnectJob = null
+        _retryState.value = CameraRetryState.Retrying(0, MAX_RECONNECT_ATTEMPTS)
         reconnectJob = scope.launch {
             var attempt = 0
             var currentDelay = RECONNECT_BASE_DELAY_MS
             while (attempt < MAX_RECONNECT_ATTEMPTS && this.isActive) {
                 attempt++
+                _retryState.value = CameraRetryState.Retrying(attempt, MAX_RECONNECT_ATTEMPTS)
                 delay(currentDelay)
                 // User may have explicitly disconnected or switched device while
                 // we were backing off; bail out cleanly if so.
@@ -576,6 +686,9 @@ object CameraCore {
                     .onFailure { currentDelay *= 2 }
             }
             reconnectJob = null
+            // The recovery is over: the rows that never ran are stamped `failed`, and the
+            // user decides whether to put them back.
+            _retryState.value = CameraRetryState.Exhausted(device)
         }
     }
 

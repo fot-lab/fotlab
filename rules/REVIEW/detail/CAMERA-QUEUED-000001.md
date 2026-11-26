@@ -202,19 +202,25 @@ queue's memory; the transfer service is only its runner). The recommendations be
 to different degrees:
 
 - **Persist the queue** — done. The rows live in a Room table, so they survive the process.
-- **Resume after reconnect** — done for the same camera: a link loss leaves the row
-  unfinished and the next connection picks it up. Resuming on a *different* camera is not
-  solved: a PTP handle is device-local, and the device exposes no stable identity to
-  re-resolve the object from (see `FOTLAB-DATABS-000004`, Open Question 1).
-- **Bind progress to a task, not to a repository instance** — partly: the running item lives
+- **Resume after reconnect** — done. A link loss leaves the row unfinished; the retry state
+  decides what happens next: a recovery that succeeds lets the queue run on, and a recovery
+  that is given up stamps the still-queued rows `failed` so they stop waiting forever. The
+  user then resumes them by hand — which is also how a batch reaches another camera, since
+  the row remembers the folder and the file name and the file is found again by name.
+- **Bind progress to a task, not to a repository instance** — done: the running item lives
   in `CameraCore`, above the session, so a reconnect no longer orphans it.
-- **Give the user real controls** — partly: the queue view shows every batch with its items
-  and their state. A per-item cancel button and a retry action are still missing.
+- **Give the user real controls** — done: the queue view shows every batch with its items
+  and their state, a long press selects rows or a whole batch, and the fun bar acts on the
+  selection with cancel, retry and delete, plus pause and resume in the overflow menu.
 - **Byte-level resume and the partial-file policy** — not done: an interrupted transfer
-  restarts from the beginning.
+  restarts from the beginning. The half-written file is deleted, as it always was.
 
 ## Change History
 
+- 2026-11-26 — Follow-up updated. The queue now exists (`FOTLAB-DATABS-000004`): the table
+  is its memory, the link's retry state decides its fate, and the user has the controls
+  (pause, resume, retry, cancel, delete) over a multi-selection of rows and batches.
+  Uploads are queued through the same table. Byte-level resume is still open.
 - 2026-11-26 — Created. Recorded the traced behaviour of multi-file camera transfers:
   no queue abstraction, whole-batch abort on link loss with the remaining objects
   discarded, no byte-level resume, no persistence and no restart path, handle-based

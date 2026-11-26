@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import io.github.fotlab.fotlab.feature.camera.model.CameraQueueBatch
 import io.github.fotlab.fotlab.feature.camera.model.CameraQueueItem
+import io.github.fotlab.fotlab.feature.camera.model.CameraQueueStates
 import io.github.fotlab.fotlab.feature.camera.model.CameraTransferDirection
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -133,6 +134,51 @@ class CameraQueueManager(context: Context) {
     /** Marks the transfer in flight. */
     fun setRunning(item: CameraQueueItem?) {
         _running.value = item
+    }
+
+    // --- The user's controls over the queue -------------------------------------
+
+    /**
+     * Pauses the given items.
+     *
+     * A paused row keeps its place in the table and carries the word `paused` instead of a
+     * finish stamp, so the user can see that it was held back on purpose — and a link that
+     * later fails does not touch it.
+     */
+    suspend fun pause(ids: List<Long>) {
+        repository.markStates(ids, CameraQueueStates.PAUSED)
+    }
+
+    /** Cancels the given items: their finish stamp becomes `canceled`. */
+    suspend fun cancel(ids: List<Long>) {
+        repository.markStates(ids, CameraQueueStates.CANCELED)
+    }
+
+    /**
+     * Puts the given items back into the queue.
+     *
+     * The finish stamp is cleared, so the rows are waiting again and the next run picks them
+     * up. This is the user's way of resuming a batch that a dead link had failed.
+     */
+    suspend fun resume(ids: List<Long>) {
+        repository.clearFinished(ids)
+    }
+
+    /** Removes the given items from the queue. */
+    suspend fun removeItems(ids: List<Long>) {
+        repository.removeByIds(ids)
+    }
+
+    /**
+     * Marks every row that is still queued as failed.
+     *
+     * This is the end of the road for a link that could not be recovered: the rows that
+     * never ran are stamped `failed` rather than waiting forever for a camera that is not
+     * coming back. The user still decides whether to resume them — which is also how a
+     * batch built on one camera is carried over to another.
+     */
+    suspend fun failUnfinished() {
+        repository.markUnfinished(CameraQueueStates.FAILED)
     }
 
     /** One queued transfer. */

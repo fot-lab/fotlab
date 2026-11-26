@@ -299,6 +299,18 @@
     <string name="camera_cd_expand">展开该批次的文件</string>
     <string name="camera_cd_collapse">收起该批次的文件</string>
     <string name="camera_cd_queue_remove">将该批次移出队列</string>
+    <!-- screen: the queue's multi-selection and its actions -->
+    <string name="camera_queue_action_cancel">取消所选传输</string>
+    <string name="camera_queue_action_retry">重新执行所选传输</string>
+    <string name="camera_queue_action_delete">将所选传输从队列中删除</string>
+    <string name="camera_queue_action_pause">暂停所选传输</string>
+    <string name="camera_queue_action_resume">将所选传输重新放回队列</string>
+    <string name="camera_queue_hint_select">长按批次或文件进入多选。</string>
+    <!-- screen: what the link is doing with the queue -->
+    <string name="camera_queue_link_connected">已连接相机，队列将在该相机上运行。</string>
+    <string name="camera_queue_link_disconnected">未连接相机，队列等待中。</string>
+    <string name="camera_queue_link_retrying">正在重连相机（%1$d/%2$d），队列等待中。</string>
+    <string name="camera_queue_link_failed">连接无法恢复，未完成的传输已标记为失败。</string>
     <!-- screen: duplicate transfer -->
     <string name="camera_queue_duplicate_title">传输记录已存在</string>
     <string name="camera_queue_duplicate_message">所选传输中有 %1$d 项已在队列中，是否覆盖？</string>

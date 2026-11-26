@@ -45,12 +45,20 @@ class IpCameraDiscovery(private val context: Context) {
             if (existing == null) {
                 byHost[device.host] = device
             } else {
-                // HTTP_SONY (SSDP + ActionList_URL) wins over a plain PTP mDNS
-                // hit on the same host: an older Sony camera may advertise
-                // both protocols on the wire, and we want the explicit API.
-                val preferHttp =
+                // A host that answers PTP/IP keeps the PTP transport, even when the
+                // SSDP answer also carries Sony's `ActionList_URL`. The HTTP API is
+                // not wired into the session yet (`CameraCore.transportFor`), so
+                // preferring it would make a camera that works over PTP unconnectable.
+                // The HTTP endpoint is still recorded, for the day it is wired up.
+                val speaksPtp =
+                    device.transportKind == TransportKind.PTP ||
+                        existing.transportKind == TransportKind.PTP
+                val transportKind = when {
+                    speaksPtp -> TransportKind.PTP
                     device.transportKind == TransportKind.HTTP_SONY ||
-                        existing.transportKind == TransportKind.HTTP_SONY
+                        existing.transportKind == TransportKind.HTTP_SONY -> TransportKind.HTTP_SONY
+                    else -> existing.transportKind
+                }
                 byHost[device.host] = existing.copy(
                     name = existing.name.ifBlank { device.name },
                     manufacturer = existing.manufacturer ?: device.manufacturer,
@@ -58,7 +66,7 @@ class IpCameraDiscovery(private val context: Context) {
                     port = if (existing.port != 15740) existing.port else device.port,
                     source = "${existing.source}+${device.source}",
                     actionListUrl = if (existing.actionListUrl != null) existing.actionListUrl else device.actionListUrl,
-                    transportKind = if (preferHttp) TransportKind.HTTP_SONY else existing.transportKind,
+                    transportKind = transportKind,
                 )
             }
         }
