@@ -43,6 +43,13 @@ enum class TopLevelDestination(
     ;
 
     companion object {
+        /**
+         * The destination the app opens on. It is intentionally [LIBRARY], even
+         * though the nav bar lists Camera first: the leading nav slot is a
+         * layout choice, while the start destination is the app's home. The
+         * two are decided independently — do not "fix" this to match the
+         * declaration order.
+         */
         val START: TopLevelDestination = LIBRARY
 
         fun fromRoute(route: String?): TopLevelDestination? =
