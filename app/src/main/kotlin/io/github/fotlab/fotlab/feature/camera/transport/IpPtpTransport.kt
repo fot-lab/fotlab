@@ -13,6 +13,7 @@ import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.Socket
+import java.net.SocketTimeoutException
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlinx.coroutines.CoroutineScope
@@ -267,6 +268,12 @@ class IpPtpTransport(
                         val event = PtpContainer.parseIpCodePacket(packet)
                         events.tryEmit(CameraEvent(event.code, event.transactionId, event.params))
                     }
+                } catch (_: SocketTimeoutException) {
+                    // The event socket's 1 s read timeout is the poll interval, not a
+                    // link failure: cameras only send events when something happens.
+                    // Treating an idle second as a torn-down link disconnects every
+                    // session within a second of a successful handshake.
+                    continue
                 } catch (error: IOException) {
                     markLinkBroken()
                     break

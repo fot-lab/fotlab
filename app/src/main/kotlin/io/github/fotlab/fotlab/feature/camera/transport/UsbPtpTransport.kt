@@ -190,9 +190,14 @@ class UsbPtpTransport(
                 val count = runCatching {
                     link.bulkTransfer(endpoint, buffer, buffer.size, 1_000)
                 }.getOrNull()
-                if (count != null && count > 6) {
+                // A PTP/USB container has a fixed 12-byte header:
+                // u32 length | u16 type | u16 code | u32 transactionId | params.
+                // The interrupt endpoint returns that container verbatim; there is
+                // no 6-byte prefix to strip. Skipping 6 bytes misaligns the header
+                // and makes parseUsb reject every ordinary event container.
+                if (count != null && count >= PtpContainer.USB_HEADER_BYTES) {
                     runCatching {
-                        val container = PtpContainer.parseUsb(buffer.copyOfRange(6, count))
+                        val container = PtpContainer.parseUsb(buffer.copyOfRange(0, count))
                         if (container.type == PtpContainer.TYPE_EVENT) {
                             events.tryEmit(
                                 CameraEvent(container.code, container.transactionId, container.params),

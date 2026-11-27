@@ -52,6 +52,8 @@ object IpHandshake {
     private const val INITIATOR_NAME = "CameraClient"
     private const val CONNECT_TIMEOUT_MS = 5_000
     private const val COMMAND_TIMEOUT_MS = 12_000
+    /** Cameras may take longer to answer the one-shot init request than normal commands. */
+    private const val INIT_ACK_TIMEOUT_MS = 30_000
     private const val EVENT_READ_TIMEOUT_MS = 1_000
     private const val DATA_CONNECT_TIMEOUT_MS = 1_000
     private const val DATA_READ_TIMEOUT_MS = 120_000
@@ -114,7 +116,17 @@ object IpHandshake {
                     flush()
                 }
 
-                val ack = readPacket(command.getInputStream())
+                val ack = try {
+                    command.soTimeout = INIT_ACK_TIMEOUT_MS
+                    readPacket(command.getInputStream())
+                } finally {
+                    command.soTimeout = COMMAND_TIMEOUT_MS
+                }
+                if (ack.type == PtpIpType.INIT_FAIL) {
+                    val detail = runCatching { PtpContainer.parseInitFail(ack).toString() }
+                        .getOrDefault("INIT_FAIL")
+                    throw IOException("PTP/IP init refused: $detail")
+                }
                 if (ack.type != PtpIpType.INIT_COMMAND_ACK) {
                     throw IOException("Unexpected PTP/IP init response: ${ack.type}")
                 }

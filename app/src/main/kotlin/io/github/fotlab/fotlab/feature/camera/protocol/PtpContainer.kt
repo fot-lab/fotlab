@@ -157,7 +157,7 @@ object PtpContainer {
         out.putInt(PTP_TYPE11_MAGIC)
         out.put(guid)
         out.put(encodeUtf16Le(name))
-        out.putShort(0)                                       // UTF-16LE null terminator for "RupiApps"
+        out.putShort(0)                                       // UTF-16LE initiator-name terminator
         out.putShort(0)                                       // reserved pad
         out.putShort(PTP_IP_PROTOCOL_VERSION.toShort())        // protocol version = 1
         val trailing = out.remaining()
@@ -169,41 +169,24 @@ object PtpContainer {
     private const val TYPE11_PACKET_SIZE: Int = 82
 
     /**
-     * INIT_FAIL packet payload parser (CIPA DC-X005 §2.3.6):
-     *   ResponderGUID (16B) | ReasonCode (u32 LE) | ResponderFriendlyName (UTF-16LE null-terminated)
+     * INIT_FAIL payload parser (CIPA DC-X005 §2.3.5, Figure 11): the packet has
+     * only one payload field — Reason, UINT32 LE (4 bytes). There is no responder
+     * GUID or friendly name in an INIT_FAIL; those fields belong to the init
+     * request/ack packets. Older notes that claimed a 20+ byte payload were wrong.
      */
     data class InitFailInfo(
-        val responderGuid: ByteArray,
         val reasonCode: Int,
         val reasonName: String,
-        val responderName: String,
     ) {
-        init {
-            require(responderGuid.size == 16) { "ResponderGUID must be 16 bytes" }
-        }
-
         override fun toString(): String =
-            "INIT_FAIL reason=0x${reasonCode.toString(16).padStart(4, '0')}($reasonName) responder=${responderName.ifBlank { hex(responderGuid) }}"
-
-        override fun equals(other: Any?): Boolean {
-            if (this === other) return true
-            if (other !is InitFailInfo) return false
-            return responderGuid.contentEquals(other.responderGuid) &&
-                reasonCode == other.reasonCode &&
-                reasonName == other.reasonName &&
-                responderName == other.responderName
-        }
-
-        override fun hashCode(): Int {
-            var result = responderGuid.contentHashCode()
-            result = 31 * result + reasonCode
-            result = 31 * result + reasonName.hashCode()
-            result = 31 * result + responderName.hashCode()
-            return result
-        }
+            "INIT_FAIL reason=0x${reasonCode.toString(16).padStart(8, '0')}($reasonName)"
 
         companion object {
-            /** Human-readable names for common PTP-IP init failure reason codes. */
+            /**
+             * Best-effort labels only. DC-X005 §2.3.5 defines FAIL_REJECTED_INITIATOR,
+             * FAIL_BUSY and FAIL_UNSPECIFIED but masks their numeric codes in the
+             * public PDF, so the numeric mapping below is a hint, not normative.
+             */
             private val INIT_FAIL_REASONS = mapOf(
                 0x0001 to "unspecified",
                 0x0002 to "protocol version mismatch",
@@ -214,15 +197,12 @@ object PtpContainer {
 
             fun parseInitFail(packet: IpPacket): InitFailInfo {
                 val payload = packet.payload
-                if (payload.size < 20) {
-                    return InitFailInfo(ByteArray(16).also { payload.copyInto(it, 0, 0, payload.size.coerceAtMost(16)) }, -1, "short-packet", "")
+                if (payload.size < 4) {
+                    return InitFailInfo(-1, "short-packet")
                 }
-                val buffer = ByteBuffer.wrap(payload).order(ByteOrder.LITTLE_ENDIAN)
-                val guid = ByteArray(16).also { buffer.get(it) }
-                val reason = buffer.int
-                val name = PtpContainer.decodeUtf16Le(payload.copyOfRange(20, payload.size))
+                val reason = ByteBuffer.wrap(payload, 0, 4).order(ByteOrder.LITTLE_ENDIAN).int
                 val reasonName = INIT_FAIL_REASONS[reason] ?: "unknown(0x${reason.toString(16)})"
-                return InitFailInfo(guid, reason, reasonName, name)
+                return InitFailInfo(reason, reasonName)
             }
         }
     }
