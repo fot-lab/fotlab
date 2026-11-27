@@ -65,10 +65,15 @@ class PtpFileOperations(
         }
     }
 
-    /** GetObjectHandles. A busy store gets one retry, matching observed camera timing. */
+    /**
+     * GetObjectHandles. A busy store gets one retry, matching observed camera timing.
+     *
+     * A format code of zero means "all formats" to a responder; 0xFFFFFFFF is not a
+     * wildcard and makes some cameras return an empty handle list.
+     */
     suspend fun objectHandles(
         storageId: Long,
-        format: Long = 0xFFFFFFFFL,
+        format: Long = 0L,
         parent: Long = PTP_PARENT_ALL,
     ): List<Long> {
         delay(profile.preListDelayUsbMs)

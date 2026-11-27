@@ -6,6 +6,7 @@ import io.github.fotlab.fotlab.feature.camera.profile.CameraProfile
 import io.github.fotlab.fotlab.feature.camera.protocol.IpPacket
 import io.github.fotlab.fotlab.feature.camera.protocol.PtpContainer
 import io.github.fotlab.fotlab.feature.camera.protocol.PtpIpType
+import io.github.fotlab.fotlab.feature.camera.protocol.PtpOpcode
 import io.github.fotlab.fotlab.feature.camera.protocol.PtpTransactionResult
 import io.github.fotlab.fotlab.feature.camera.protocol.PtpTransport
 import java.io.ByteArrayOutputStream
@@ -93,23 +94,18 @@ class IpPtpTransport(
                     return@withLock waitForResponse(link.command.getInputStream(), transactionId)
                 }
 
-                // ReceiveObject data phase — two on-the-wire paths observed
-                // across current PTP/IP devices:
-                //
-                // 1. type-12 (Canon/Nikon/Sony): responder pushes payload-bearing
-                //    COMMAND_RESPONSE(type=7) whose payload IS the raw file bytes,
-                //    then a COMMAND_RESPONSE(type=7) with the status code.
-                //    [note: both frames are PtpIpType.COMMAND_RESPONSE; we
-                //    disambiguate by transactionId]
-                //
-                // 2. type-11 (Fuji WiFi VID 1227): responder pushes raw TCP to the
-                //    independent 55742 data socket — first 8B LE long totalBytes,
-                //    then the file payload, then socket close.
-                //
-                // We dispatch by profile.extendedInit and fall back gracefully
-                // when the camera behaves differently.
+                // A data-in phase has two possible wire paths: CIPA packets on the
+                // command connection, or an independent data socket used for
+                // object bytes by some devices. Browsing transactions always use
+                // the command connection.
 
-                if (profile.extendedInit) {
+                // The independent data channel carries object bytes only. Browsing
+                // operations (storage IDs, object handles, object info) must use the
+                // command connection's data phase instead.
+                val objectDataOperation = code == PtpOpcode.GET_OBJECT ||
+                    code == PtpOpcode.GET_PARTIAL_OBJECT ||
+                    code == profile.partialObjectOpcode
+                if (profile.extendedInit && objectDataOperation) {
                     val dataSocket = IpHandshake.openDataSocket(link.host)
                     if (dataSocket != null) {
                         return@withLock readDataSocket(link.command.getInputStream(), dataSocket, transactionId)
@@ -136,64 +132,38 @@ class IpPtpTransport(
     }
 
     /**
-     * type-12 Canon/Nikon/Sony path. The responder pushes payload-bearing
-     * COMMAND_RESPONSE(type=7) whose payload IS the data stream, followed by
-     * another COMMAND_RESPONSE(type=7) with the status code (disambiguated
-     * by transactionId).
-     *
-     * Tolerates three variants so cameras are not locked into one behaviour:
-     *   a) COMMAND_RESPONSE carries the full payload → read its payload directly
-     *   b) CIPA-standard START_DATA(9) declares size → drain DATA×N + END_DATA
-     *   c) COMMAND_RESPONSE comes first, with data already packed into payload
+     * Data-in phase on the command connection. CIPA DC-X005 §2.3.6 and
+     * §2.3.9–2.3.11 define START_DATA → DATA×N → END_DATA followed by an
+     * Operation Response. An operation without a data phase answers with the
+     * Operation Response alone; its payload is a response code, transaction ID
+     * and parameters, never a data set.
      */
     private fun readCommandAckPayload(commandIn: InputStream, transactionId: Int): PtpTransactionResult {
         val chunks = mutableListOf<ByteArray>()
-        var responseCode = -1
-        var responseParams: List<Long> = emptyList()
-
-        // Variant (c): COMMAND_RESPONSE arrives directly, no separate data phase.
-        // Its payload may already hold the file data.
-        val responseFirst = IpHandshake.readPacket(commandIn)
-        if (responseFirst.type == PtpIpType.COMMAND_RESPONSE) {
-            val parsed = PtpContainer.parseIpCodePacket(responseFirst)
-            if (parsed.transactionId == transactionId.toLong()) {
-                return PtpTransactionResult(parsed.code, parsed.params, responseFirst.payload)
-            }
-        }
-
-        // Variant (a): COMMAND_RESPONSE carries all data inline in its payload.
-        // We already fall through here when the first COMMAND_RESPONSE tid did
-        // not match — collect its payload and continue looking for the matching
-        // COMMAND_RESPONSE that terminates the data phase.
-        if (responseFirst.type == PtpIpType.COMMAND_RESPONSE) {
-            chunks.add(responseFirst.payload)
-        }
-
-        // Variant (b): CIPA standard START_DATA → DATA×N → END_DATA → COMMAND_RESPONSE.
-        // Also catches stray DATA/END_DATA frames from a camera that mixes variants.
         while (true) {
             val packet = IpHandshake.readPacket(commandIn)
             when (packet.type) {
-                PtpIpType.START_DATA -> continue
-                PtpIpType.DATA, PtpIpType.END_DATA -> chunks.add(PtpContainer.parseIpDataPayload(packet))
                 PtpIpType.COMMAND_RESPONSE -> {
                     val response = PtpContainer.parseIpCodePacket(packet)
-                    if (response.transactionId == transactionId.toLong()) {
-                        responseCode = response.code
-                        responseParams = response.params
-                        break
+                    if (response.transactionId != transactionId.toLong()) continue
+                    val data = if (chunks.isEmpty()) {
+                        null
+                    } else {
+                        ByteArray(chunks.sumOf { it.size }).also { all ->
+                            var pos = 0
+                            for (chunk in chunks) {
+                                chunk.copyInto(all, destinationOffset = pos)
+                                pos += chunk.size
+                            }
+                        }
                     }
+                    return PtpTransactionResult(response.code, response.params, data)
                 }
+                PtpIpType.START_DATA -> continue
+                PtpIpType.DATA, PtpIpType.END_DATA -> chunks.add(PtpContainer.parseIpDataPayload(packet))
+                else -> continue
             }
         }
-
-        val all = ByteArray(chunks.sumOf { it.size })
-        var pos = 0
-        for (c in chunks) {
-            c.copyInto(all, destinationOffset = pos)
-            pos += c.size
-        }
-        return PtpTransactionResult(responseCode, responseParams, all)
     }
 
     /**
