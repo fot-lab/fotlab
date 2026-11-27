@@ -48,3 +48,7 @@
 	path = external/docker-android
 	url = ../docker-android.git
 	branch = main
+[submodule "external/NikonCameraControl"]
+	path = external/NikonCameraControl
+	url = ../NikonCameraControl.git
+	branch = main
