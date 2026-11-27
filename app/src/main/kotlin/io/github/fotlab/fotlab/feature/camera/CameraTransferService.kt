@@ -147,8 +147,9 @@ class CameraTransferService : Service() {
                         val folder =
                             item.uriPhone.substringBeforeLast('/', missingDelimiterValue = "")
                         val target = if (folder.isEmpty()) null else Uri.parse(folder)
-                        CameraCore.download(listOf(handle), target)
+                        val saved = CameraCore.download(listOf(handle), target)
                         CameraCore.markQueueItemFinished(item.id, CameraQueueStates.now())
+                        CameraCore.addToLibraryRoot(saved)
                     }
                     Unit
                 }

@@ -21,6 +21,8 @@ import io.github.fotlab.fotlab.feature.camera.protocol.PtpSession
 import io.github.fotlab.fotlab.feature.camera.protocol.PtpTransport
 import io.github.fotlab.fotlab.feature.camera.transport.IpPtpTransport
 import io.github.fotlab.fotlab.feature.camera.transport.UsbPtpTransport
+import io.github.fotlab.fotlab.feature.library.LibraryCore
+import io.github.fotlab.fotlab.feature.library.LibraryRoot
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -434,6 +436,27 @@ object CameraCore {
             }
         }
         return runFileOperation { repository -> repository.download(objects, target) }
+    }
+
+    /**
+     * Register downloaded camera files in the library's virtual root.
+     *
+     * Called by the transfer service right after a queued download completes — the file now
+     * lives on the phone and the library should know about it so the user can view it from
+     * the library grid without a separate manual import.
+     *
+     * The import targets [LibraryRoot.ID] (top level) by default. A future iteration may let
+     * the caller specify a collection or subfolder instead of the root — the [targetParentId]
+     * parameter placeholder keeps that door open so this method's signature does not have
+     * to grow later.
+     */
+    suspend fun addToLibraryRoot(
+        uris: List<Uri>,
+        // TODO: allow caller to specify a virtual parent (collection) instead of always the root
+        targetParentId: Long = LibraryRoot.ID,
+    ) {
+        if (uris.isEmpty()) return
+        runCatching { LibraryCore.importUris(targetParentId, uris) }
     }
 
     /**
