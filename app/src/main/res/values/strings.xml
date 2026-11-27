@@ -284,6 +284,8 @@
     <string name="camera_setting_seconds">%1$d s</string>
     <string name="camera_setting_decrease">Decrease %1$s</string>
     <string name="camera_setting_increase">Increase %1$s</string>
+    <string name="camera_setting_ptp_std_only">PTP std. only</string>
+    <string name="camera_setting_ptp_std_only_supporting">Use only standard PTP opcodes; disables vendor extensions that may break the link.</string>
     <!-- screen: actions -->
     <string name="camera_action_refresh">Refresh</string>
     <string name="camera_action_connect">Connect</string>

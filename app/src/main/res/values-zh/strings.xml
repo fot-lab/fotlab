@@ -254,6 +254,8 @@
     <string name="camera_setting_seconds">%1$d 秒</string>
     <string name="camera_setting_decrease">减少%1$s</string>
     <string name="camera_setting_increase">增加%1$s</string>
+    <string name="camera_setting_ptp_std_only">仅用标准 PTP</string>
+    <string name="camera_setting_ptp_std_only_supporting">只使用标准 PTP 指令；禁用可能导致断连的厂商扩展指令。</string>
     <!-- screen: actions -->
     <string name="camera_action_refresh">刷新</string>
     <string name="camera_action_connect">连接</string>

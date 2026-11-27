@@ -122,6 +122,9 @@ object CameraCore {
     private var keepaliveIntervalTouched = false
 
     @Volatile
+    private var ptpStdOnlyTouched = false
+
+    @Volatile
     private var active: ActiveConnection? = null
 
     @Volatile
@@ -218,6 +221,17 @@ object CameraCore {
                 }
             }
         }
+        scope.launch {
+            runCatching {
+                prefs.ptpStdOnly.collect { stored ->
+                    if (stored != null && !ptpStdOnlyTouched) {
+                        _settings.update { current ->
+                            current.copy(ptpStdOnly = stored)
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /**
@@ -304,6 +318,20 @@ object CameraCore {
         scope.launch { runCatching { prefs.setKeepaliveIntervalSeconds(clamped) } }
     }
 
+    /**
+     * Store the "standard PTP only" flag.
+     *
+     * A change takes effect on the **next** connection — the `PtpFileOperations` is
+     * built in [connect], so a live session keeps whatever flag it was born with.
+     * Toggle away from a broken vendor opcode mid-session: disconnect and reconnect.
+     */
+    fun setPtpStdOnly(value: Boolean) {
+        ptpStdOnlyTouched = true
+        _settings.value = _settings.value.copy(ptpStdOnly = value)
+        val prefs = preference ?: return
+        scope.launch { runCatching { prefs.setPtpStdOnly(value) } }
+    }
+
     suspend fun connect(device: CameraDevice, preferAlternateGuid: Boolean = false) {
         val context = appContext ?: throw IllegalStateException("CameraCore.prepare() was not called")
         val engine = discovery ?: throw IllegalStateException("CameraCore.prepare() was not called")
@@ -325,7 +353,7 @@ object CameraCore {
             val session = PtpSession(transport, profile.sessionId)
             transport.onLinkBroken = { handleLinkBroken(transport.label) }
             val identity = session.open()
-            val operations = PtpFileOperations(session, profile)
+            val operations = PtpFileOperations(session, profile, ptpStdOnly = _settings.value.ptpStdOnly)
             val eventJob = scope.launch {
                 session.events().collect { event ->
                     _lastEvent.value = event

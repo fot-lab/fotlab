@@ -16,10 +16,20 @@ data class CameraSettings(
     val mdnsTimeoutSeconds: Int = DEFAULT_MDNS_TIMEOUT_SECONDS,
     /** How often a connected network camera is probed to keep the link alive, in seconds. */
     val keepaliveIntervalSeconds: Int = DEFAULT_KEEPALIVE_INTERVAL_SECONDS,
+    /**
+     * When true, every PTP operation uses only standard ISO/PIMA 15740 opcodes and never
+     * falls back to vendor-specific extensions even if the profile carries them.
+     *
+     * When false, the profile's vendor extensions (Sony 0x92xx, Canon 0x91xx, etc.) are
+     * allowed — the current behavior. Some cameras are known to answer vendor commands
+     * with a network-tearing response, so the safer default is standard-only.
+     */
+    val ptpStdOnly: Boolean = DEFAULT_PTP_STD_ONLY,
 ) {
     companion object {
         const val DEFAULT_MDNS_TIMEOUT_SECONDS: Int = 10
         const val DEFAULT_KEEPALIVE_INTERVAL_SECONDS: Int = 20
+        const val DEFAULT_PTP_STD_ONLY: Boolean = true
 
         const val MIN_MDNS_TIMEOUT_SECONDS: Int = 1
         const val MAX_MDNS_TIMEOUT_SECONDS: Int = 60

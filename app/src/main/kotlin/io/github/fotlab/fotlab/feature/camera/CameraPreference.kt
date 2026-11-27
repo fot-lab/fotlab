@@ -1,6 +1,7 @@
 package io.github.fotlab.fotlab.feature.camera
 
 import android.content.Context
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -24,6 +25,7 @@ private val Context.cameraPrefs by preferencesDataStore(name = "camera_prefs")
 private val KEY_MDNS_TIMEOUT_SECONDS = intPreferencesKey("camera_mdns_timeout_seconds")
 private val KEY_KEEPALIVE_INTERVAL_SECONDS = intPreferencesKey("camera_keepalive_interval_seconds")
 private val KEY_DOWNLOAD_LAST_URI = stringPreferencesKey("camera_download_last_uri")
+private val KEY_PTP_STD_ONLY = booleanPreferencesKey("camera_ptp_std_only")
 
 class CameraPreference(context: Context) {
 
@@ -63,6 +65,18 @@ class CameraPreference(context: Context) {
     suspend fun setKeepaliveIntervalSeconds(seconds: Int) {
         store.edit { prefs ->
             prefs[KEY_KEEPALIVE_INTERVAL_SECONDS] = CameraSettings.clampKeepaliveInterval(seconds)
+        }
+    }
+
+    /** The stored "standard PTP only" flag, or `null` when the user never set one. */
+    val ptpStdOnly: Flow<Boolean?> = store.data.map { prefs ->
+        prefs[KEY_PTP_STD_ONLY]
+    }
+
+    /** Persist the "standard PTP only" flag. */
+    suspend fun setPtpStdOnly(value: Boolean) {
+        store.edit { prefs ->
+            prefs[KEY_PTP_STD_ONLY] = value
         }
     }
 

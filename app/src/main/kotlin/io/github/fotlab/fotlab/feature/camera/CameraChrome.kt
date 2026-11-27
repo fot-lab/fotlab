@@ -43,6 +43,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
@@ -439,6 +440,13 @@ internal fun CameraDrawer(
             onChange = { CameraCore.setKeepaliveIntervalSeconds(it) },
         )
 
+        SwitchSetting(
+            title = stringResource(id = R.string.camera_setting_ptp_std_only),
+            supporting = stringResource(id = R.string.camera_setting_ptp_std_only_supporting),
+            checked = settings.ptpStdOnly,
+            onChange = { CameraCore.setPtpStdOnly(it) },
+        )
+
         Spacer(modifier = Modifier.weight(1f))
 
         Row(
@@ -455,6 +463,41 @@ internal fun CameraDrawer(
                 )
             }
         }
+    }
+}
+
+/**
+ * One boolean setting row: a title, a supporting line and a Switch toggle.
+ *
+ * A switch rather than a checkbox on purpose — the value is a live preference that
+ * takes effect on the next session start, and a switch communicates "next state"
+ * more clearly than a checkbox does.
+ */
+@Composable
+private fun SwitchSetting(
+    title: String,
+    supporting: String,
+    checked: Boolean,
+    onChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 16.dp, top = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = title, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                text = supporting,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onChange,
+        )
     }
 }
 

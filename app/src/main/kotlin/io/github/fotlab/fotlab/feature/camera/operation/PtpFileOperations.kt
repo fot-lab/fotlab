@@ -32,6 +32,12 @@ import kotlinx.coroutines.delay
 class PtpFileOperations(
     private val session: PtpSession,
     private val profile: CameraProfile,
+    /**
+     * When true, every PTP operation uses only the standard ISO/PIMA 15740 opcode.
+     * When false, the profile may skip the standard attempt for device families
+     * (notably Sony) that answer with empty/truncated data rather than a refusal.
+     */
+    private val ptpStdOnly: Boolean = false,
 ) {
 
     /**
@@ -48,7 +54,7 @@ class PtpFileOperations(
 
     /** GetStorageIDs followed by GetStorageInfo for each volume. */
     suspend fun storages(): List<PtpStorage> {
-        val skipSony = profile.objectHandlesOpcode == PtpOpcode.Sony.CONTENT_LIST
+        val skipSony = profile.objectHandlesOpcode == PtpOpcode.Sony.CONTENT_LIST && !ptpStdOnly
         val result = executeWithStandardFallback(
             PtpOpcode.GET_STORAGE_IDS,
             profile.storageIdsOpcode,
@@ -104,10 +110,10 @@ class PtpFileOperations(
     suspend fun objectHandles(
         storageId: Long,
         format: Long = 0L,
-        parent: Long = PTP_PARENT_ALL,
+        parent: Long = PTP_PARENT_ROOT,
     ): List<Long> {
         delay(profile.preListDelayUsbMs)
-        val skipSony = profile.objectHandlesOpcode == PtpOpcode.Sony.CONTENT_LIST
+        val skipSony = profile.objectHandlesOpcode == PtpOpcode.Sony.CONTENT_LIST && !ptpStdOnly
         val params = intArrayOf(storageId.toInt(), format.toInt(), parent.toInt())
         val result = executeWithBusyRetry(
             PtpOpcode.GET_OBJECT_HANDLES,
@@ -254,19 +260,23 @@ class PtpFileOperations(
         filter: PtpMediaFilter = PtpMediaFilter.ALL,
         batchSize: Int = 500,
     ): List<PtpObject> {
-        if (profile.objectHandlesOpcode == PtpOpcode.Sony.CONTENT_LIST) {
+        if (!ptpStdOnly && profile.objectHandlesOpcode == PtpOpcode.Sony.CONTENT_LIST) {
             val listed = listedObjects(storageId, filter)
             if (listed != null) return listed
         }
         var handles = objectHandles(storageId, parent = parent)
-        if (handles.isEmpty() && parent != PTP_PARENT_ALL) {
+        // Only a store-root request (0xFFFFFFFF) may fall back to the whole-device
+        // aggregate (0x00000000). PIMA 15740 §10.4.7 defines parameter 3 as:
+        //   0xFFFFFFFF → objects in the store root of this storageId (one level)
+        //   0x00000000 → parameter unused; aggregate across the entire device
+        //   valid association handle → direct children of that association
+        // If the caller asked for a specific folder (an association handle), an
+        // empty result means that folder genuinely has no direct children — do
+        // not silently widen the scope and dump every object on the device.
+        // NikonCameraControl uses the same root-only fallback in api.js:346-357.
+        if (handles.isEmpty() && parent == PTP_PARENT_ROOT) {
             handles = objectHandles(storageId, parent = PTP_PARENT_ALL)
         }
-        // Empty stays empty — do not fall back to the aggregate storage
-        // sentinel (0xFFFFFFFF). PIMA 15740 section 10.4.7 defines it as
-        // addressing every storage at once, so a device that returns handles
-        // for it would mix cards and yield false-positives. NikonCameraControl
-        // walks one real storageId per call for the same reason.
         val result = ArrayList<PtpObject>(handles.size)
         handles.chunked(batchSize).forEach { batch ->
             batch.forEach { handle ->
@@ -365,10 +375,10 @@ class PtpFileOperations(
     }
 
     suspend fun objectInfo(handle: Long): PtpObjectInfo {
-        if (profile.objectHandlesOpcode == PtpOpcode.Sony.CONTENT_LIST) {
+        if (!ptpStdOnly && profile.objectHandlesOpcode == PtpOpcode.Sony.CONTENT_LIST) {
             listedInfo[handle]?.let { return it }
         }
-        val skipSony = profile.objectHandlesOpcode == PtpOpcode.Sony.CONTENT_LIST
+        val skipSony = profile.objectHandlesOpcode == PtpOpcode.Sony.CONTENT_LIST && !ptpStdOnly
         val result = executeWithStandardFallback(
             PtpOpcode.GET_OBJECT_INFO,
             profile.objectInfoOpcode,
@@ -396,7 +406,7 @@ class PtpFileOperations(
     }
 
     suspend fun thumbnail(handle: Long): ByteArray {
-        val skipSony = profile.objectHandlesOpcode == PtpOpcode.Sony.CONTENT_LIST
+        val skipSony = profile.objectHandlesOpcode == PtpOpcode.Sony.CONTENT_LIST && !ptpStdOnly
         val result = executeWithStandardFallback(
             PtpOpcode.GET_THUMB,
             profile.thumbOpcode,
@@ -422,11 +432,12 @@ class PtpFileOperations(
         }
         val packedFormat = listedPackedFormats[handle] ?: STILL_IMAGE_PACKED_FORMAT
         val chunk = profile.chunkSize(chunkHint)
-        val isSony = profile.partialObjectOpcode == PtpOpcode.Sony.PARTIAL_OBJECT
+        val isSony = profile.partialObjectOpcode == PtpOpcode.Sony.PARTIAL_OBJECT && !ptpStdOnly
         // Standard GetPartialObject (0x101B) takes three params:
         // [handle, offset, size]. Canon 0x9174 and Nikon 0x9431 accept the same
         // three; only Sony's 0x923D needs the packed-format + 64-bit offset
-        // layout and has no standard counterpart.
+        // layout and has no standard counterpart — so when ptpStdOnly is on we
+        // force the standard shape even on Sony-family cameras.
         val makeParams = { h: Long, o: Long, s: Int ->
             if (isSony) partialParams(h, o, s, packedFormat)
             else intArrayOf(h.toInt(), o.toInt(), s)
