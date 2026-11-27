@@ -68,38 +68,55 @@ class CameraFileRepository(
         withContext(Dispatchers.IO) {
             val written = ArrayList<Uri>(objects.size)
         objects.forEachIndexed { index, item ->
-            val info = operations.objectInfo(item.handle)
-            val name = uniqueName(item.name, info.format)
-            val mime = PtpFormats.mimeType(info.format)
+            // CameraCore.download() already fetched objectInfo and built PtpObject, so the
+            // handle → name/format/size mapping is authoritative here — do NOT re-query
+            // objectInfo a second time. The extra round-trip is both wasteful and racy: a
+            // device that is slow or flaky on metadata can return a mismatched size (or
+            // even refuse the handle between the two reads), and we'd then download the
+            // wrong number of bytes into a sink sized by stale info.
+            val name = uniqueName(item.name, item.format)
+            val mime = PtpFormats.mimeType(item.format)
             val sink = createSink(name, mime, target)
             _progress.value = TransferProgress(
                 kind = TransferKind.DOWNLOAD,
                 objectName = name,
                 objectIndex = index + 1,
                 objectCount = objects.size,
-                totalBytes = info.sizeBytes,
+                totalBytes = item.sizeBytes,
             )
             try {
-                operations.download(item.handle, info.sizeBytes, sink.output) { completed ->
+                operations.download(item.handle, item.sizeBytes, sink.output) { completed ->
                     _progress.value = TransferProgress(
                         kind = TransferKind.DOWNLOAD,
                         objectName = name,
                         objectIndex = index + 1,
                         objectCount = objects.size,
                         completedBytes = completed,
-                        totalBytes = info.sizeBytes,
+                        totalBytes = item.sizeBytes,
                     )
                 }
+                sink.output.flush()
                 sink.output.close()
                 sink.finish()
+                // Verify the bytes actually landed on the phone. SAF docs and MediaStore
+                // items can both be inspected through the content resolver: the column
+                // gives us the post-write size without reopening the stream.
+                val actualSize = resolveWrittenSize(sink.uri)
+                if (actualSize != item.sizeBytes) {
+                    sink.discard()
+                    throw IOException(
+                        "Downloaded $name but size mismatch: expected ${item.sizeBytes}B, " +
+                            "wrote ${actualSize}B",
+                    )
+                }
                 written += sink.uri
                 _progress.value = TransferProgress(
                     kind = TransferKind.DOWNLOAD,
                     objectName = name,
                     objectIndex = index + 1,
                     objectCount = objects.size,
-                    completedBytes = info.sizeBytes,
-                    totalBytes = info.sizeBytes,
+                    completedBytes = item.sizeBytes,
+                    totalBytes = item.sizeBytes,
                     state = TransferState.COMPLETED,
                 )
             } catch (error: Throwable) {
@@ -110,7 +127,7 @@ class CameraFileRepository(
                     objectName = name,
                     objectIndex = index + 1,
                     objectCount = objects.size,
-                    totalBytes = info.sizeBytes,
+                    totalBytes = item.sizeBytes,
                     state = TransferState.FAILED,
                     failure = error,
                 )
@@ -118,6 +135,23 @@ class CameraFileRepository(
             }
         }
         written
+    }
+
+    /**
+     * The byte count the system reports for a URI we just wrote to.
+     *
+     * SAF documents expose their size through `OpenableColumns.SIZE`; a MediaStore item is
+     * also queryable the same way. Returns `-1` when the resolver cannot answer — that is
+     * not an error by itself, just an opaque provider.
+     */
+    private fun resolveWrittenSize(uri: Uri): Long {
+        resolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val index = cursor.getColumnIndex(OpenableColumns.SIZE)
+                if (index >= 0) return cursor.getLong(index)
+            }
+        }
+        return -1
     }
 
     /**
