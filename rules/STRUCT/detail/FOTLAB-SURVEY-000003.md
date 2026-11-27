@@ -452,7 +452,7 @@ These are not resolved by silently preferring one source; they are recorded so i
 
 | Topic | Sources | Conflict / ambiguity | Consequence |
 | --- | --- | --- | --- |
-| `GetObjectHandles` parameter 3 | PIMA §10.4.7 vs earlier internal notes | PIMA says `0x00000000` = unused/aggregate and `0xFFFFFFFF` = store root. Earlier notes label `{-1,0,0}` as “root”. | Treat `0xFFFFFFFF` parent semantics as device/transport-dependent; verify on real hardware before changing parent-selection logic. |
+| `GetObjectHandles` parameter 3 | PIMA §10.4.7 vs earlier internal notes | PIMA says `0x00000000` = unused/aggregate and `0xFFFFFFFF` = store root. Earlier notes label `{-1,0,0}` as “root”. | The clause text is explicit, and libgphoto2 (`PTP_GOH_ROOT_PARENT 0xffffffff`, `PTP_GOH_ALL_ASSOCS 0x00000000`) and the Android MTP API (“-1 for the storage root, or zero for all objects”) agree, so `0xFFFFFFFF` = root is the settled direction; the mislabelled side is the earlier `{-1,0,0}` = “root” note. Only the aggregate behaviour still needs real-hardware confirmation. |
 | `GetObjectHandles` parameter 2 | PIMA §10.4.7 vs earlier default | PIMA says `0x00000000` = unused, `0xFFFFFFFF` = images only, not “all formats”. | A non-zero filter can legitimately return `Specification_By_Format_Unsupported`; zero is the safest “no filter”. |
 | TransactionID ranges | PIMA §9.3.1 vs Chinese article §§1.6.5, 2.3.6–2.3.7 | PIMA is explicit: `OpenSession = 0`, normal IDs `1..0xFFFFFFFE`, `0xFFFFFFFF` invalid. The article also mentions `0` for GetDeviceInfo and `0xFFFFFFFF` as “not applicable”. | Follow PIMA for core semantics; GetDeviceInfo outside a session uses zeroes as an operation dataset special case. |
 | SessionID on the wire | PIMA §9.3.2 vs PTP/IP connection model | PIMA operation/response/event datasets include SessionID; PTP/IP packets omit it. | The two TCP connections plus `Connection Number` identify the session; do not add SessionID to PTP/IP packets. |
@@ -500,7 +500,7 @@ These are not resolved by silently preferring one source; they are recorded so i
 
 ## Open Questions
 
-- Should `PTP_PARENT_ROOT` / `PTP_PARENT_ALL` be renamed to match PIMA §10.4.7 (`0x00000000` unused/aggregate, `0xFFFFFFFF` root), or kept as device-specific aliases pending real-camera verification?
+- Should `PTP_PARENT_ROOT` / `PTP_PARENT_ALL` keep their current names now that the PIMA §10.4.7 clause text and two independent implementations confirm the direction (`0xFFFFFFFF` = store root, `0x00000000` = device-wide aggregate)? The constant values are already correct; only the naming is open.
 - Should the project advertise protocol version `0x00010000` strictly and reject unknown responder versions, or continue to ignore that field for compatibility?
 - Do target cameras ever use DataPhaseInfo “unknown”, and if so what fallback behaviour is required?
 - Are any target cameras relying on the device-specific 55742 channel for browsing operations, or only for object bytes?
@@ -509,3 +509,4 @@ These are not resolved by silently preferring one source; they are recorded so i
 ## Change History
 
 - 2026-11-27 — Created from the SegmentFault PTP/IP Chinese article and PIMA 15740:2000. Consolidates core PTP and PTP/IP transport details, records source conflicts and stated limits, and maps the details to `feature/camera`. Documentation only; no requirement changed.
+- 2026-11-27 — Clarified the `GetObjectHandles` parameter 3 row and the matching open question after the PIMA 15740:2000 §10.4.7 clause text was re-read directly: `0xFFFFFFFF` = store root and `0x00000000` = device-wide aggregate, matching libgphoto2 constants and the Android MTP API contract. The earlier internal note that labelled `{-1,0,0}` as “root” is the mislabelled side. No protocol requirement changed.
