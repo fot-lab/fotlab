@@ -20,6 +20,7 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.delay
 
 /**
@@ -33,9 +34,28 @@ class PtpFileOperations(
     private val profile: CameraProfile,
 ) {
 
+    /**
+     * Object records carried by the family's paged content-list command.
+     *
+     * The listing dataset is the only reliable per-object information source on
+     * these devices, so the listing fills this cache and every later
+     * object-info lookup is served from it.
+     */
+    private val listedInfo = ConcurrentHashMap<Long, PtpObjectInfo>()
+
+    /** The packed (class byte + format) value the transfer commands take as a parameter. */
+    private val listedPackedFormats = ConcurrentHashMap<Long, Long>()
+
     /** GetStorageIDs followed by GetStorageInfo for each volume. */
     suspend fun storages(): List<PtpStorage> {
-        val result = session.execute(profile.storageIdsOpcode, expectDataIn = true)
+        val skipSony = profile.objectHandlesOpcode == PtpOpcode.Sony.CONTENT_LIST
+        val result = executeWithStandardFallback(
+            PtpOpcode.GET_STORAGE_IDS,
+            profile.storageIdsOpcode,
+            intArrayOf(),
+            expectDataIn = true,
+            skipStandard = skipSony,
+        )
         val ids = decodeHandles(result.data, limit = 256).ifEmpty { decodeSonyStorages(result.data) }
         val effective = ids.ifEmpty {
             profile.storageIdFallback?.let { listOf(it) } ?: emptyList()
@@ -82,7 +102,8 @@ class PtpFileOperations(
     }
 
     /**
-     * GetObjectHandles. Transient busy responses get bounded retries.
+     * GetObjectHandles. Standard-first with bounded busy retries on both the
+     * standard ISO/PIMA opcode and the profile's vendor extension.
      *
      * A format code of zero means "no format filter" to a responder; 0xFFFFFFFF is
      * the images-only filter, not a wildcard, and can hide non-image objects.
@@ -91,11 +112,16 @@ class PtpFileOperations(
         storageId: Long,
         format: Long = 0L,
         parent: Long = PTP_PARENT_ALL,
-        opcode: Int = profile.objectHandlesOpcode,
     ): List<Long> {
         delay(profile.preListDelayUsbMs)
+        val skipSony = profile.objectHandlesOpcode == PtpOpcode.Sony.CONTENT_LIST
         val params = intArrayOf(storageId.toInt(), format.toInt(), parent.toInt())
-        val result = executeWithBusyRetry(opcode, params)
+        val result = executeWithBusyRetry(
+            PtpOpcode.GET_OBJECT_HANDLES,
+            profile.objectHandlesOpcode,
+            params,
+            skipStandard = skipSony,
+        )
         return decodeHandles(result.data, limit = 200_000)
     }
 
@@ -105,18 +131,117 @@ class PtpFileOperations(
      * is retried the same way because a freshly inserted card is often busy on
      * the first list. Retries are bounded and back off, so a permanently busy
      * device fails with the last response instead of blocking forever.
+     *
+     * The retry loop also wraps a **standard-first, vendor-extension fallback**:
+     * every conforming PTP device answers the standard ISO/PIMA 15740 opcodes;
+     * vendor extensions are optional refinements. We try the standard opcode
+     * first, and if the responder explicitly says it does not support it
+     * (0x2005 OPERATION_NOT_SUPPORTED or 0x2006 PARAMETER_NOT_SUPPORTED) we
+     * retry with the vendor one instead. Other response codes propagate unchanged.
+     *
+     * [skipStandard] bypasses the standard attempt entirely. This is needed for
+     * Sony's 0x92xx family, where the standard GetObjectHandles returns empty or
+     * truncated data rather than a refusal.
      */
-    private suspend fun executeWithBusyRetry(code: Int, params: IntArray): PtpTransactionResult {
+    private suspend fun executeWithBusyRetry(
+        standardOpcode: Int,
+        vendorOpcode: Int,
+        params: IntArray,
+        skipStandard: Boolean = false,
+    ): PtpTransactionResult {
+        val candidates = when {
+            skipStandard -> listOf(vendorOpcode)
+            standardOpcode == vendorOpcode -> listOf(standardOpcode)
+            else -> listOf(standardOpcode, vendorOpcode)
+        }
+        var lastError: PtpResponseException? = null
+        for (code in candidates) {
+            val attempt = retryOnceOrError(code, params)
+            when (attempt) {
+                is RetryResult.Ok -> return attempt.result
+                is RetryResult.TransientBusy -> {
+                    // Standard opcode hit a busy — this device might still answer
+                    // the vendor variant, which is less commonly throttled.
+                    val notFirst = (code != candidates.first())
+                    if (notFirst) {
+                        // Already past the first candidate and still busy, give up.
+                        lastError = attempt.lastError
+                        break
+                    }
+                    lastError = attempt.lastError
+                }
+                is RetryResult.NotSupported -> {
+                    // Standard opcode not supported — fall through to vendor.
+                    if (code == candidates.last()) lastError = attempt.lastError
+                }
+            }
+        }
+        throw lastError ?: PtpResponseException(vendorOpcode, PtpOpcode.Response.GENERAL_ERROR)
+    }
+
+    /** Retry one opcode up to MAX_BUSY_RETRIES times. */
+    private suspend fun retryOnceOrError(code: Int, params: IntArray): RetryResult {
         var attempt = 0
+        var busyCount = 0
+        var lastError: PtpResponseException? = null
         while (true) {
             try {
-                return session.execute(code, params, expectDataIn = true)
+                return RetryResult.Ok(session.execute(code, params, expectDataIn = true))
             } catch (error: PtpResponseException) {
+                lastError = error
                 val transient = error.responseCode == PtpOpcode.Response.DEVICE_BUSY ||
                     error.responseCode == PtpOpcode.Response.STORE_NOT_AVAILABLE
-                if (!transient || attempt >= MAX_BUSY_RETRIES) throw error
-                delay(BUSY_RETRY_BASE_MS * (attempt + 1))
-                attempt++
+                val unsupported = error.responseCode == PtpOpcode.Response.OPERATION_NOT_SUPPORTED ||
+                    error.responseCode == PtpOpcode.Response.PARAMETER_NOT_SUPPORTED
+                when {
+                    unsupported -> return RetryResult.NotSupported(error)
+                    transient -> {
+                        busyCount++
+                        if (busyCount >= MAX_BUSY_RETRIES) {
+                            return RetryResult.TransientBusy(error)
+                        }
+                        delay(BUSY_RETRY_BASE_MS * (busyCount))
+                    }
+                    else -> throw error
+                }
+            }
+        }
+    }
+
+    private sealed class RetryResult {
+        data class Ok(val result: PtpTransactionResult) : RetryResult()
+        data class TransientBusy(val lastError: PtpResponseException) : RetryResult()
+        data class NotSupported(val lastError: PtpResponseException) : RetryResult()
+    }
+
+    /**
+     * Execute a single PTP operation with standard-first fallback, no busy retry.
+     *
+     * Used for per-object queries (ObjectInfo, Thumbnail) where the device
+     * should answer immediately and a busy response would indicate a deeper
+     * problem than a transient list refresh backpressure. Same fallback rule
+     * as [executeWithBusyRetry].
+     */
+    private suspend fun executeWithStandardFallback(
+        standardOpcode: Int,
+        vendorOpcode: Int,
+        params: IntArray,
+        expectDataIn: Boolean = true,
+        dataOut: ByteArray? = null,
+        skipStandard: Boolean = false,
+    ): PtpTransactionResult {
+        if (skipStandard || standardOpcode == vendorOpcode) {
+            return session.execute(vendorOpcode, params, dataOut, expectDataIn)
+        }
+        return try {
+            session.execute(standardOpcode, params, dataOut, expectDataIn)
+        } catch (error: PtpResponseException) {
+            val unsupported = error.responseCode == PtpOpcode.Response.OPERATION_NOT_SUPPORTED ||
+                error.responseCode == PtpOpcode.Response.PARAMETER_NOT_SUPPORTED
+            if (unsupported) {
+                session.execute(vendorOpcode, params, dataOut, expectDataIn)
+            } else {
+                throw error
             }
         }
     }
@@ -136,6 +261,10 @@ class PtpFileOperations(
         filter: PtpMediaFilter = PtpMediaFilter.ALL,
         batchSize: Int = 500,
     ): List<PtpObject> {
+        if (profile.objectHandlesOpcode == PtpOpcode.Sony.CONTENT_LIST) {
+            val listed = listedObjects(storageId, filter)
+            if (listed != null) return listed
+        }
         var handles = objectHandles(storageId, parent = parent)
         if (handles.isEmpty() && parent != PTP_PARENT_ALL) {
             handles = objectHandles(storageId, parent = PTP_PARENT_ALL)
@@ -146,16 +275,14 @@ class PtpFileOperations(
             handles = objectHandles(ALL_STORAGES_ID, parent = PTP_PARENT_ALL)
         }
         if (handles.isEmpty()) {
-            // A vendor-specific listing opcode may answer OK with no data even though
-            // the responder supports the standard GetObjectHandles. This is the same
-            // flat query every responder understands: all storages, no format filter,
-            // no parent filter. A refusal is an ordinary empty result here; a dead
-            // link still propagates through executeWithBusyRetry.
+            // Standard-first should already have covered the case where the
+            // vendor opcode returned empty data. A final retry with the
+            // aggregate sentinel still makes sense — it asks the entire device
+            // instead of a single store.
             handles = try {
                 objectHandles(
                     ALL_STORAGES_ID,
                     parent = PTP_PARENT_ALL,
-                    opcode = PtpOpcode.GET_OBJECT_HANDLES,
                 )
             } catch (_: PtpResponseException) {
                 emptyList()
@@ -190,16 +317,95 @@ class PtpFileOperations(
         return result
     }
 
+    /**
+     * Lists objects through the paged content-list command, which answers with
+     * full object records instead of bare handles.
+     *
+     * The command pages through the device's content by a record timestamp and
+     * is class-scoped, so the aggregate storage sentinel fans out to the known
+     * volumes. Returns `null` when the device refuses the command, letting the
+     * caller fall back to the generic handle-based path.
+     */
+    private suspend fun listedObjects(
+        storageId: Long,
+        filter: PtpMediaFilter,
+    ): List<PtpObject>? {
+        val targets = if (storageId == ALL_STORAGES_ID) {
+            // The aggregate sentinel carries no class byte; ask each known volume.
+            storages().map { it.id }.filter { it != ALL_STORAGES_ID }
+        } else {
+            listOf(storageId)
+        }
+        if (targets.isEmpty()) return null
+        listedInfo.clear()
+        listedPackedFormats.clear()
+        val result = ArrayList<PtpObject>(1024)
+        for (target in targets) {
+            val classByte = (target ushr 24).toInt()
+            var cursor = 0L
+            var pages = 0
+            while (pages < MAX_LIST_PAGES) {
+                pages++
+                val page = executeWithBusyRetry(
+                    profile.objectHandlesOpcode, // standard = Sony CONTENT_LIST (no standard counterpart)
+                    profile.objectHandlesOpcode,
+                    intArrayOf(
+                        cursor.toInt(),
+                        (cursor ushr 32).toInt(),
+                        SonyContentListDecoder.PAGE_SIZE,
+                        classByte,
+                        0,
+                    ),
+                    skipStandard = true,
+                )
+                val decoded = SonyContentListDecoder.decodePage(page.data)
+                if (decoded.recordCount <= 0 || decoded.entries.isEmpty()) break
+                for (entry in decoded.entries) {
+                    // A re-fetched page repeats its boundary record; keep one row per handle.
+                    if (listedInfo.putIfAbsent(entry.handle, entry.toInfo()) != null) continue
+                    listedPackedFormats[entry.handle] = entry.packedFormat
+                    val accepted = filter == PtpMediaFilter.ALL || filter.accepts(entry.format)
+                    if (accepted) {
+                        result += PtpObject(
+                            handle = entry.handle,
+                            name = entry.name.ifEmpty { entry.handle.toString() },
+                            format = entry.format,
+                            sizeBytes = entry.sizeBytes,
+                            storageId = target,
+                            parent = 0L,
+                            hasThumbnail = entry.hasImageBlock,
+                        )
+                    }
+                }
+                if (decoded.recordCount < SonyContentListDecoder.PAGE_SIZE) break
+                // The next page continues after the newest record this page carried.
+                cursor = if (decoded.maxCursor == cursor) cursor + 1 else decoded.maxCursor
+            }
+        }
+        return result
+    }
+
     suspend fun objectInfo(handle: Long): PtpObjectInfo {
-        val result = session.execute(
+        if (profile.objectHandlesOpcode == PtpOpcode.Sony.CONTENT_LIST) {
+            listedInfo[handle]?.let { return it }
+        }
+        val skipSony = profile.objectHandlesOpcode == PtpOpcode.Sony.CONTENT_LIST
+        val result = executeWithStandardFallback(
+            PtpOpcode.GET_OBJECT_INFO,
             profile.objectInfoOpcode,
             intArrayOf(handle.toInt()),
             expectDataIn = true,
+            skipStandard = skipSony,
         )
         var info = ObjectInfoDecoder.decode(result.data, handle)
         val repair = profile.largeLengthOpcode
         if (info.sizeBytes == PtpOpcode.SIZE_32_SENTINEL && repair != null) {
-            val extended = session.execute(repair, intArrayOf(handle.toInt()), expectDataIn = true)
+            val extended = executeWithStandardFallback(
+                repair,
+                repair,
+                intArrayOf(handle.toInt()),
+                expectDataIn = true,
+            )
             val raw = extended.data
             if (raw != null && raw.size >= 8) {
                 info = info.copy(
@@ -211,10 +417,13 @@ class PtpFileOperations(
     }
 
     suspend fun thumbnail(handle: Long): ByteArray {
-        val result = session.execute(
+        val skipSony = profile.objectHandlesOpcode == PtpOpcode.Sony.CONTENT_LIST
+        val result = executeWithStandardFallback(
+            PtpOpcode.GET_THUMB,
             profile.thumbOpcode,
             intArrayOf(handle.toInt()),
             expectDataIn = true,
+            skipStandard = skipSony,
         )
         return result.data ?: throw IOException("Device returned no thumbnail for $handle")
     }
@@ -232,11 +441,12 @@ class PtpFileOperations(
                 "Object $handle is larger than 4 GiB; this device needs a vendor range-read command",
             )
         }
+        val packedFormat = listedPackedFormats[handle] ?: STILL_IMAGE_PACKED_FORMAT
         val chunk = profile.chunkSize(chunkHint)
         var offset = 0L
         while (offset < totalBytes) {
             val size = minOf(chunk.toLong(), totalBytes - offset).toInt()
-            val params = partialParams(handle, offset, size)
+            val params = partialParams(handle, offset, size, packedFormat)
             val result = session.execute(profile.partialObjectOpcode, params, expectDataIn = true)
             val bytes = result.data ?: throw IOException("Missing data phase for object $handle")
             output.write(bytes)
@@ -250,7 +460,10 @@ class PtpFileOperations(
 
     suspend fun delete(handle: Long) {
         val params = if (profile.family == CameraFamily.SONY) {
-            intArrayOf((handle and 0x00FFFFFFL).toInt(), 0)
+            // The class byte of the object's packed format; the reference value
+            // when the listing has not seen the handle is the still-image class.
+            val classByte = listedPackedFormats[handle]?.let { (it ushr 24).toInt() } ?: 1
+            intArrayOf((handle and 0x00FFFFFFL).toInt(), classByte)
         } else {
             intArrayOf(handle.toInt())
         }
@@ -339,12 +552,13 @@ class PtpFileOperations(
         return handle
     }
 
-    /** Standard GetPartialObject uses a 32-bit byte offset. Vendor ranges may differ. */
-    private fun partialParams(handle: Long, offset: Long, size: Int): IntArray = when {
+    /** Standard range-read uses a 32-bit offset; the family variant is 64-bit and class-scoped. */
+    private fun partialParams(handle: Long, offset: Long, size: Int, packedFormat: Long): IntArray = when {
         profile.partialObjectOpcode == PtpOpcode.Sony.PARTIAL_OBJECT -> intArrayOf(
-            handle.toInt(),
+            (handle and 0x00FFFFFFL).toInt(),
+            packedFormat.toInt(),
+            offset.toInt(),
             (offset ushr 32).toInt(),
-            (offset and 0xFFFFFFFFL).toInt(),
             size,
         )
         else -> intArrayOf(handle.toInt(), offset.toInt(), size)
@@ -419,5 +633,11 @@ class PtpFileOperations(
 
         /** GetObjectHandles storage ID that aggregates every storage (PIMA 10.4.7). */
         const val ALL_STORAGES_ID: Long = 0xFFFFFFFFL
+
+        /** Upper bound for content-list pages, so a misbehaving responder cannot loop us. */
+        const val MAX_LIST_PAGES = 10_000
+
+        /** Packed (class byte + format) assumed for a handle the listing has not seen. */
+        const val STILL_IMAGE_PACKED_FORMAT: Long = 0x01000001L
     }
 }
