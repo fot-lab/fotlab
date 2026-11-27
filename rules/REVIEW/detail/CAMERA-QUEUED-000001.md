@@ -7,6 +7,12 @@
 - Owner: —
 - Related: `rules/DESIGN/detail/FOTLAB-DATABS-000004.md` (the queue schema and semantics this observation motivated)
 
+> **Terminology — "PTP" in this repository:** **PTP** always means **Picture Transfer Protocol
+> (ISO 15740)**, the camera file-transfer protocol implemented in
+> `app/src/main/kotlin/io/github/fotlab/fotlab/feature/camera/`. It does **not** mean
+> Precision Time Protocol (IEEE 1588), the network clock-synchronisation standard; the two share
+> only the acronym.
+
 ## Background & Goal
 
 The camera feature (`app/src/main/kotlin/io/github/fotlab/fotlab/feature/camera/`) lets the
@@ -217,6 +223,9 @@ to different degrees:
 
 ## Change History
 
+- 2026-11-27 — Added the top-of-document terminology note: PTP here means Picture Transfer
+  Protocol (ISO 15740), not Precision Time Protocol (IEEE 1588). Documentation only; no finding
+  changed.
 - 2026-11-26 — Follow-up updated. The queue now exists (`FOTLAB-DATABS-000004`): the table
   is its memory, the link's retry state decides its fate, and the user has the controls
   (pause, resume, retry, cancel, delete) over a multi-selection of rows and batches.

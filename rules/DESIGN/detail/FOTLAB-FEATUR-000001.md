@@ -7,6 +7,12 @@
 - Owner: —
 - Related: `FOTLAB-UIXDES-000001` (the destination set and the content-region contract), `FOTLAB-UIXDES-000002` (per-module fun bar and drawer), `FOTLAB-UIXDES-000003` (strings blocks and locale parity), `FOTLAB-STRUCT-000001` (one `feature/<name>/` package per destination), `FOTLAB-STRUCT-000002` (package dependency direction), `FOTLAB-STRUCT-000003` (role-based naming), `FOTLAB-PRIVCY-000001` (permissions and network use), `FOTLAB-COMPAT-000001` (per-device protocol compatibility)
 
+> **Terminology — "PTP" in this repository:** **PTP** always means **Picture Transfer Protocol
+> (ISO 15740)**, the camera file-transfer protocol implemented in
+> `app/src/main/kotlin/io/github/fotlab/fotlab/feature/camera/`. It does **not** mean
+> Precision Time Protocol (IEEE 1588), the network clock-synchronisation standard; the two share
+> only the acronym.
+
 ## Background & Goal
 
 The Camera destination is the third top-level destination of the app, alongside the Library and the
@@ -288,3 +294,6 @@ Goals:
   the drawer toggle, the list/grid layout switch and the refresh of the open folder, the trailing
   cluster carries the selection trio in the overflow and two slots whose glyph depends on the
   selection (upload / new folder with an empty selection, download / delete with a non-empty one).
+- 2026-11-27 — Added the top-of-document terminology note: PTP here means Picture Transfer
+  Protocol (ISO 15740), not Precision Time Protocol (IEEE 1588). Documentation only; no
+  requirement changed.

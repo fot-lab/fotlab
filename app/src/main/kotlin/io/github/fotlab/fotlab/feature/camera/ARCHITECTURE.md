@@ -1,5 +1,10 @@
 # Camera feature — architecture
 
+> **Terminology — "PTP" in this repository:** **PTP** always means **Picture Transfer Protocol
+> (ISO 15740)**, the camera file-transfer protocol implemented in this package. It does **not**
+> mean Precision Time Protocol (IEEE 1588), the network clock-synchronisation standard; the two
+> share only the acronym.
+
 Scope of this iteration: device discovery, link setup, PTP session establishment
 (USB bulk and PTP/IP), connection lifecycle (link-failure propagation, hot-plug
 handling, event-driven refresh), object browsing by folder, thumbnail/full-object

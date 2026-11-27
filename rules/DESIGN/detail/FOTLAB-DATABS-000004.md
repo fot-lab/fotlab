@@ -7,6 +7,12 @@
 - Owner: —
 - Related: `FOTLAB-DATABS-000001` (Room persistence discipline), `FOTLAB-FEATUR-000001` (camera feature boundary), `FOTLAB-UIXDES-000002` (module chrome: drawer, fun bar), `rules/REVIEW/detail/CAMERA-QUEUED-000001.md` (the audit that motivated this)
 
+> **Terminology — "PTP" in this repository:** **PTP** always means **Picture Transfer Protocol
+> (ISO 15740)**, the camera file-transfer protocol implemented in
+> `app/src/main/kotlin/io/github/fotlab/fotlab/feature/camera/`. It does **not** mean
+> Precision Time Protocol (IEEE 1588), the network clock-synchronisation standard; the two share
+> only the acronym.
+
 ## Background & Goal
 
 `CAMERA-QUEUED-000001` audited the camera feature's download path and found no queue at all: a
@@ -212,3 +218,6 @@ storage view only.
   batch to another camera), R9 (the user's controls: pause, resume, retry, cancel, delete),
   and the multi-selection in R10. Uploads are queued through the same table; the download URI
   now carries the storage and the folder so the file can be found again by name.
+- 2026-11-27 — Added the top-of-document terminology note: PTP here means Picture Transfer
+  Protocol (ISO 15740), not Precision Time Protocol (IEEE 1588). Documentation only; no
+  requirement changed.
