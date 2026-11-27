@@ -61,13 +61,6 @@ class PtpFileOperations(
             profile.storageIdFallback?.let { listOf(it) } ?: emptyList()
         }
         delay(profile.preListDelayUsbMs)
-        if (effective.isEmpty()) {
-            // PIMA 15740 section 10.4.7: 0xFFFFFFFF addresses every storage at
-            // once. A device that answers GetStorageIDs with an unsupported or
-            // non-standard dataset must still be browsable; use the aggregate
-            // sentinel rather than returning an empty library with no error.
-            return listOf(PtpStorage(id = ALL_STORAGES_ID))
-        }
         return effective.map { id ->
             // StorageInfo is descriptive only: a responder that refuses it still
             // has objects to enumerate under this storage ID.
@@ -269,25 +262,11 @@ class PtpFileOperations(
         if (handles.isEmpty() && parent != PTP_PARENT_ALL) {
             handles = objectHandles(storageId, parent = PTP_PARENT_ALL)
         }
-        if (handles.isEmpty() && storageId != ALL_STORAGES_ID) {
-            // A storage ID that decoded incorrectly returns OK with no handles.
-            // Query the aggregate sentinel so a wrong ID cannot show an empty folder.
-            handles = objectHandles(ALL_STORAGES_ID, parent = PTP_PARENT_ALL)
-        }
-        if (handles.isEmpty()) {
-            // Standard-first should already have covered the case where the
-            // vendor opcode returned empty data. A final retry with the
-            // aggregate sentinel still makes sense — it asks the entire device
-            // instead of a single store.
-            handles = try {
-                objectHandles(
-                    ALL_STORAGES_ID,
-                    parent = PTP_PARENT_ALL,
-                )
-            } catch (_: PtpResponseException) {
-                emptyList()
-            }
-        }
+        // Empty stays empty — do not fall back to the aggregate storage
+        // sentinel (0xFFFFFFFF). PIMA 15740 section 10.4.7 defines it as
+        // addressing every storage at once, so a device that returns handles
+        // for it would mix cards and yield false-positives. NikonCameraControl
+        // walks one real storageId per call for the same reason.
         val result = ArrayList<PtpObject>(handles.size)
         handles.chunked(batchSize).forEach { batch ->
             batch.forEach { handle ->
