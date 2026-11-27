@@ -123,7 +123,7 @@ object IpHandshake {
                     command.soTimeout = COMMAND_TIMEOUT_MS
                 }
                 if (ack.type == PtpIpType.INIT_FAIL) {
-                    val detail = runCatching { PtpContainer.parseInitFail(ack).toString() }
+                    val detail = runCatching { PtpContainer.InitFailInfo.parseInitFail(ack).toString() }
                         .getOrDefault("INIT_FAIL")
                     throw IOException("PTP/IP init refused: $detail")
                 }
