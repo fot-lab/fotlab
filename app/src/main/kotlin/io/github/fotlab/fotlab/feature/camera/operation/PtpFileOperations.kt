@@ -41,7 +41,22 @@ class PtpFileOperations(
             profile.storageIdFallback?.let { listOf(it) } ?: emptyList()
         }
         delay(profile.preListDelayUsbMs)
-        return effective.map { id -> storageInfo(id) }
+        if (effective.isEmpty()) {
+            // PIMA 15740 section 10.4.7: 0xFFFFFFFF addresses every storage at
+            // once. A device that answers GetStorageIDs with an unsupported or
+            // non-standard dataset must still be browsable; use the aggregate
+            // sentinel rather than returning an empty library with no error.
+            return listOf(PtpStorage(id = ALL_STORAGES_ID))
+        }
+        return effective.map { id ->
+            // StorageInfo is descriptive only: a responder that refuses it still
+            // has objects to enumerate under this storage ID.
+            try {
+                storageInfo(id)
+            } catch (_: PtpResponseException) {
+                PtpStorage(id = id)
+            }
+        }
     }
 
     suspend fun storageInfo(storageId: Long): PtpStorage {
@@ -76,10 +91,11 @@ class PtpFileOperations(
         storageId: Long,
         format: Long = 0L,
         parent: Long = PTP_PARENT_ALL,
+        opcode: Int = profile.objectHandlesOpcode,
     ): List<Long> {
         delay(profile.preListDelayUsbMs)
         val params = intArrayOf(storageId.toInt(), format.toInt(), parent.toInt())
-        val result = executeWithBusyRetry(profile.objectHandlesOpcode, params)
+        val result = executeWithBusyRetry(opcode, params)
         return decodeHandles(result.data, limit = 200_000)
     }
 
@@ -124,12 +140,41 @@ class PtpFileOperations(
         if (handles.isEmpty() && parent != PTP_PARENT_ALL) {
             handles = objectHandles(storageId, parent = PTP_PARENT_ALL)
         }
+        if (handles.isEmpty() && storageId != ALL_STORAGES_ID) {
+            // A storage ID that decoded incorrectly returns OK with no handles.
+            // Query the aggregate sentinel so a wrong ID cannot show an empty folder.
+            handles = objectHandles(ALL_STORAGES_ID, parent = PTP_PARENT_ALL)
+        }
+        if (handles.isEmpty()) {
+            // A vendor-specific listing opcode may answer OK with no data even though
+            // the responder supports the standard GetObjectHandles. This is the same
+            // flat query every responder understands: all storages, no format filter,
+            // no parent filter. A refusal is an ordinary empty result here; a dead
+            // link still propagates through executeWithBusyRetry.
+            handles = try {
+                objectHandles(
+                    ALL_STORAGES_ID,
+                    parent = PTP_PARENT_ALL,
+                    opcode = PtpOpcode.GET_OBJECT_HANDLES,
+                )
+            } catch (_: PtpResponseException) {
+                emptyList()
+            }
+        }
         val result = ArrayList<PtpObject>(handles.size)
         handles.chunked(batchSize).forEach { batch ->
             batch.forEach { handle ->
-                val info = objectInfo(handle)
+                // GetObjectHandles already returned this handle, so the object exists
+                // even when GetObjectInfo is refused or its dataset decodes to no
+                // format. Keep it visible instead of dropping it silently.
+                val info = try {
+                    objectInfo(handle)
+                } catch (_: PtpResponseException) {
+                    PtpObjectInfo(handle = handle)
+                }
                 val folder = info.format == PtpFormats.ASSOCIATION
-                if (folder || filter.accepts(info.format)) {
+                val accepted = folder || filter == PtpMediaFilter.ALL || filter.accepts(info.format)
+                if (accepted) {
                     result += PtpObject(
                         handle = handle,
                         name = info.name.ifEmpty { handle.toString() },
@@ -371,5 +416,8 @@ class PtpFileOperations(
         /** Bounded retries for Device_Busy / Store_Not_Available (PIMA 9.3.4). */
         const val MAX_BUSY_RETRIES = 2
         const val BUSY_RETRY_BASE_MS = 400L
+
+        /** GetObjectHandles storage ID that aggregates every storage (PIMA 10.4.7). */
+        const val ALL_STORAGES_ID: Long = 0xFFFFFFFFL
     }
 }

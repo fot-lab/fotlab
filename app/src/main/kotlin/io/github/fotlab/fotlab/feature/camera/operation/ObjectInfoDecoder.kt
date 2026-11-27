@@ -12,7 +12,10 @@ import java.util.Locale
 /** Decodes the standard PTP object-info dataset, including the 64-bit size suffix. */
 object ObjectInfoDecoder {
     fun decode(raw: ByteArray?, handle: Long): PtpObjectInfo {
-        if (raw == null || raw.size < 50) return PtpObjectInfo(handle = handle)
+        // The fixed part through ParentObject is 42 bytes. A responder that truncates
+        // the trailing association fields or strings must still yield its format,
+        // size and parent instead of losing the whole dataset.
+        if (raw == null || raw.size < 42) return PtpObjectInfo(handle = handle)
         return try {
             val buffer = ByteBuffer.wrap(raw).order(ByteOrder.LITTLE_ENDIAN)
             val storageId = buffer.u32()
@@ -27,9 +30,11 @@ object ObjectInfoDecoder {
             val pixelHeight = buffer.u32() // image pixel height
             buffer.u32() // image bit depth
             val parent = buffer.u32() // parent object: association handle, 0 at root
-            buffer.u16() // association type
-            buffer.u32() // association descriptor
-            buffer.u32() // sequence number
+            if (buffer.remaining() >= 10) {
+                buffer.u16() // association type
+                buffer.u32() // association descriptor
+                buffer.u32() // sequence number
+            }
             val name = readString(buffer)
             val captured = parseDate(readString(buffer))
             val modified = parseDate(readString(buffer))
@@ -92,6 +97,7 @@ object ObjectInfoDecoder {
     private fun ByteBuffer.u32(): Long = int.toLong() and 0xFFFFFFFFL
 
     private fun readString(buffer: ByteBuffer): String {
+        if (!buffer.hasRemaining()) return ""
         val units = buffer.get().toInt() and 0xFF
         if (units <= 1 || buffer.remaining() < (units - 1) * 2) return ""
         val bytes = ByteArray((units - 1) * 2)
