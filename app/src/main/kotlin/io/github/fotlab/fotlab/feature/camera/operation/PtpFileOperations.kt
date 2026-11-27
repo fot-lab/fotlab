@@ -422,11 +422,26 @@ class PtpFileOperations(
         }
         val packedFormat = listedPackedFormats[handle] ?: STILL_IMAGE_PACKED_FORMAT
         val chunk = profile.chunkSize(chunkHint)
+        val isSony = profile.partialObjectOpcode == PtpOpcode.Sony.PARTIAL_OBJECT
+        // Standard GetPartialObject (0x101B) takes three params:
+        // [handle, offset, size]. Canon 0x9174 and Nikon 0x9431 accept the same
+        // three; only Sony's 0x923D needs the packed-format + 64-bit offset
+        // layout and has no standard counterpart.
+        val makeParams = { h: Long, o: Long, s: Int ->
+            if (isSony) partialParams(h, o, s, packedFormat)
+            else intArrayOf(h.toInt(), o.toInt(), s)
+        }
         var offset = 0L
         while (offset < totalBytes) {
             val size = minOf(chunk.toLong(), totalBytes - offset).toInt()
-            val params = partialParams(handle, offset, size, packedFormat)
-            val result = session.execute(profile.partialObjectOpcode, params, expectDataIn = true)
+            val params = makeParams(handle, offset, size)
+            val result = executeWithStandardFallback(
+                PtpOpcode.GET_PARTIAL_OBJECT,
+                profile.partialObjectOpcode,
+                params,
+                expectDataIn = true,
+                skipStandard = isSony,
+            )
             val bytes = result.data ?: throw IOException("Missing data phase for object $handle")
             output.write(bytes)
             output.flush()
