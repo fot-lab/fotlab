@@ -13,6 +13,7 @@ import io.github.fotlab.fotlab.feature.camera.profile.CameraProfile
 import io.github.fotlab.fotlab.feature.camera.protocol.PtpContainer
 import io.github.fotlab.fotlab.feature.camera.protocol.PtpOpcode
 import io.github.fotlab.fotlab.feature.camera.protocol.PtpSession
+import io.github.fotlab.fotlab.feature.camera.protocol.PtpTransactionResult
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStream
@@ -66,10 +67,10 @@ class PtpFileOperations(
     }
 
     /**
-     * GetObjectHandles. A busy store gets one retry, matching observed camera timing.
+     * GetObjectHandles. Transient busy responses get bounded retries.
      *
-     * A format code of zero means "all formats" to a responder; 0xFFFFFFFF is not a
-     * wildcard and makes some cameras return an empty handle list.
+     * A format code of zero means "no format filter" to a responder; 0xFFFFFFFF is
+     * the images-only filter, not a wildcard, and can hide non-image objects.
      */
     suspend fun objectHandles(
         storageId: Long,
@@ -78,14 +79,30 @@ class PtpFileOperations(
     ): List<Long> {
         delay(profile.preListDelayUsbMs)
         val params = intArrayOf(storageId.toInt(), format.toInt(), parent.toInt())
-        val result = try {
-            session.execute(profile.objectHandlesOpcode, params, expectDataIn = true)
-        } catch (error: PtpResponseException) {
-            if (error.responseCode != PtpOpcode.Response.STORE_NOT_AVAILABLE) throw error
-            delay(750)
-            session.execute(profile.objectHandlesOpcode, params, expectDataIn = true)
-        }
+        val result = executeWithBusyRetry(profile.objectHandlesOpcode, params)
         return decodeHandles(result.data, limit = 200_000)
+    }
+
+    /**
+     * PIMA 15740 section 9.3.4: a responder performing an asynchronous operation
+     * answers Device_Busy and the initiator must retry later. Store_Not_Available
+     * is retried the same way because a freshly inserted card is often busy on
+     * the first list. Retries are bounded and back off, so a permanently busy
+     * device fails with the last response instead of blocking forever.
+     */
+    private suspend fun executeWithBusyRetry(code: Int, params: IntArray): PtpTransactionResult {
+        var attempt = 0
+        while (true) {
+            try {
+                return session.execute(code, params, expectDataIn = true)
+            } catch (error: PtpResponseException) {
+                val transient = error.responseCode == PtpOpcode.Response.DEVICE_BUSY ||
+                    error.responseCode == PtpOpcode.Response.STORE_NOT_AVAILABLE
+                if (!transient || attempt >= MAX_BUSY_RETRIES) throw error
+                delay(BUSY_RETRY_BASE_MS * (attempt + 1))
+                attempt++
+            }
+        }
     }
 
     /**
@@ -350,5 +367,9 @@ class PtpFileOperations(
     private companion object {
         /** The standard range-read command carries a 32-bit byte offset. */
         const val MAX_STANDARD_OFFSET: Long = 0xFFFFFFFFL
+
+        /** Bounded retries for Device_Busy / Store_Not_Available (PIMA 9.3.4). */
+        const val MAX_BUSY_RETRIES = 2
+        const val BUSY_RETRY_BASE_MS = 400L
     }
 }

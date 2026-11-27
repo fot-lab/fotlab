@@ -81,7 +81,7 @@ class PtpSession(
             closed = true
             if (sessionOpen) {
                 runCatching {
-                    val tid = ids.incrementAndGet() and 0x7FFFFFFF
+                    val tid = nextTransactionId()
                     val result = link { transport.transact(tid, PtpOpcode.CLOSE_SESSION) }
                     checkResponse(PtpOpcode.CLOSE_SESSION, result.responseCode)
                 }
@@ -104,7 +104,7 @@ class PtpSession(
             checkResponse(PtpOpcode.OPEN_SESSION, opened.responseCode)
             sessionOpen = true
         }
-        val tid = ids.incrementAndGet() and 0x7FFFFFFF
+        val tid = nextTransactionId()
         val result = link { transport.transact(tid, code, params, dataOut, expectDataIn) }
         checkResponse(code, result.responseCode)
         return result
@@ -113,6 +113,20 @@ class PtpSession(
     private fun checkResponse(code: Int, response: Int) {
         if (response != PtpOpcode.Response.OK) {
             throw PtpResponseException(code, response)
+        }
+    }
+
+    /**
+     * PIMA 15740 section 9.3.1: transaction IDs run continuously from 0x00000001;
+     * 0x00000000 and 0xFFFFFFFF are reserved and never issued. The counter holds
+     * the raw 32-bit pattern, so it advances through the whole unsigned range and
+     * skips the two reserved values before wrapping back to 1.
+     */
+    private fun nextTransactionId(): Int {
+        while (true) {
+            val id = ids.incrementAndGet()
+            if (id == 0 || id == -1) continue // 0x00000000 / 0xFFFFFFFF
+            return id
         }
     }
 
@@ -143,10 +157,9 @@ object DeviceInfoDecoder {
             buffer.short // vendor extension version
             readString(buffer)
             buffer.short // functional mode
-            skipCodeArray(buffer)
-            skipCodeArray(buffer)
-            skipCodeArray(buffer)
-            skipCodeArray(buffer)
+            // OperationsSupported, EventsSupported, DevicePropertiesSupported,
+            // CaptureFormats, ImageFormats precede Manufacturer/Model.
+            repeat(5) { skipCodeArray(buffer) }
             PtpDeviceIdentity(readString(buffer), readString(buffer))
         } catch (_: RuntimeException) {
             PtpDeviceIdentity()

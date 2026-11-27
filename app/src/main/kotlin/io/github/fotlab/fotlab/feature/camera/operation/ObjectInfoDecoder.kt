@@ -21,8 +21,12 @@ object ObjectInfoDecoder {
             var size = buffer.u32()
             val thumbFormat = buffer.u16().toLong()
             val thumbBytes = buffer.u32()
-            repeat(4) { buffer.u32() } // thumb width/height, image width/height
-            repeat(2) { buffer.u32() } // image bit depth, parent object
+            buffer.u32() // thumbnail pixel width
+            buffer.u32() // thumbnail pixel height
+            val pixelWidth = buffer.u32() // image pixel width
+            val pixelHeight = buffer.u32() // image pixel height
+            buffer.u32() // image bit depth
+            val parent = buffer.u32() // parent object: association handle, 0 at root
             buffer.u16() // association type
             buffer.u32() // association descriptor
             buffer.u32() // sequence number
@@ -41,6 +45,9 @@ object ObjectInfoDecoder {
                 sizeBytes = size,
                 thumbFormat = thumbFormat,
                 thumbBytes = thumbBytes,
+                pixelWidth = pixelWidth,
+                pixelHeight = pixelHeight,
+                parent = parent,
                 name = name,
                 capturedAt = captured,
                 modifiedAt = modified,

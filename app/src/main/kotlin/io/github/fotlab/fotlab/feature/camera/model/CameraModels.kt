@@ -93,8 +93,24 @@ object PtpFormats {
         0xB980L, 0xB981L, 0xB982L, 0xB902L, 0xB104L, 0xB105L, 0xB201L,
     ).toSet()
 
-    /** Folders are enumerated separately, so they are not media objects. */
-    fun isMedia(format: Long): Boolean = format in IMAGE_FORMATS || format in VIDEO_FORMATS
+    /** PIMA 15740 section 6: bit 11 marks image formats, bit 15 vendor-defined codes. */
+    private const val IMAGE_FORMAT_BIT: Long = 0x0800L
+    private const val VENDOR_FORMAT_BIT: Long = 0x8000L
+
+    /**
+     * Whether a format may hold user media. PIMA 15740 section 6 assigns bit 11
+     * (0x0800) to every image format and bit 15 (0x8000) to vendor-defined ones;
+     * accepting both bit fields covers RAW/DNG and other camera-specific formats
+     * that a fixed whitelist would drop. UNDEFINED (0x3000) is included because
+     * devices report unfamiliar object formats with it. Associations are folders,
+     * set neither bit, and stay excluded.
+     */
+    fun isMedia(format: Long): Boolean =
+        format == UNDEFINED ||
+            (format and IMAGE_FORMAT_BIT) != 0L ||
+            (format and VENDOR_FORMAT_BIT) != 0L ||
+            format in IMAGE_FORMATS ||
+            format in VIDEO_FORMATS
 
     fun isImage(format: Long): Boolean = format in IMAGE_FORMATS
 
@@ -186,8 +202,14 @@ class PtpResponseException(
  */
 class CameraLinkException(message: String, cause: Throwable? = null) : IOException(message, cause)
 
-/** Parent handle of the storage root in the object hierarchy. */
-const val PTP_PARENT_ROOT: Long = 0L
+/**
+ * GetObjectHandles (PIMA 15740 section 10.4.7) parent-object argument values.
+ * 0xFFFFFFFF requests the store root; 0x00000000 leaves the argument unused so
+ * handles are aggregated across the device. These are request sentinels and are
+ * distinct from the ParentObject field of an ObjectInfo dataset, whose root is
+ * 0x00000000.
+ */
+const val PTP_PARENT_ROOT: Long = 0xFFFFFFFFL
 
 /** Parent handle that asks for every object, whatever folder it sits in. */
-const val PTP_PARENT_ALL: Long = 0xFFFFFFFFL
+const val PTP_PARENT_ALL: Long = 0L
