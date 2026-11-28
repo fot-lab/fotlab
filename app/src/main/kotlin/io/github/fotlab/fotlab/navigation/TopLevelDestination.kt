@@ -37,15 +37,15 @@ enum class TopLevelDestination(
         label = R.string.app_nav_library_label,
         icon = Icons.Filled.PermMedia,
     ),
-    GALLERY(
-        route = GalleryDestination.ROUTE,
-        label = R.string.app_nav_gallery_label,
-        icon = Icons.Filled.PhotoLibrary,
-    ),
     STUDIO(
         route = StudioDestination.ROUTE,
         label = R.string.app_nav_studio_label,
         icon = Icons.Filled.CameraRoll,
+    ),
+    GALLERY(
+        route = GalleryDestination.ROUTE,
+        label = R.string.app_nav_gallery_label,
+        icon = Icons.Filled.PhotoLibrary,
     ),
     ;
 
