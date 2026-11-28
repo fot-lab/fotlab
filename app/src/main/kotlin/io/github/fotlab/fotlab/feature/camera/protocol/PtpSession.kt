@@ -7,7 +7,9 @@ import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -38,9 +40,30 @@ class PtpSession(
     private var closed = false
     private var identity = PtpDeviceIdentity()
 
+    /**
+     * Wall-clock time of the last proof that the peer is alive — the instant any
+     * command response (OK or error) or camera-sourced event arrived on the wire.
+     * Updated from [callLocked] and from the event flow exposed by [events].
+     *
+     * The keepalive probe in [CameraCore] consults this to decide whether to send
+     * another GetDeviceInfo. If a transfer, listing, or spontaneous event happened
+     * within the interval the peer is demonstrably alive and we can skip the probe
+     * entirely — this avoids starving the mutex with an extra command right after
+     * a long data phase.
+     */
+    private val lastActivityAt = AtomicLong(System.currentTimeMillis())
+
     val label: String get() = transport.label
 
-    fun events(): Flow<CameraEvent> = transport.events()
+    /** Called after every on-write response or camera event — the peer just talked. */
+    fun touch() {
+        lastActivityAt.set(System.currentTimeMillis())
+    }
+
+    /** Milliseconds since the peer last said anything; -1 if unknown. */
+    fun idleMs(): Long = System.currentTimeMillis() - lastActivityAt.get()
+
+    fun events(): Flow<CameraEvent> = transport.events().onEach { touch() }
 
     suspend fun open(): PtpDeviceIdentity = mutex.withLock {
         if (!closed && sessionOpen) return@withLock identity
@@ -106,6 +129,9 @@ class PtpSession(
         }
         val tid = nextTransactionId()
         val result = link { transport.transact(tid, code, params, dataOut, expectDataIn) }
+        // Any response — OK or PTP error code — proves the peer is alive; a broken
+        // link throws out of [link] before we reach this line.
+        touch()
         checkResponse(code, result.responseCode)
         return result
     }

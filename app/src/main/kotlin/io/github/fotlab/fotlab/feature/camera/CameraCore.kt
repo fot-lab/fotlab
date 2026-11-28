@@ -830,9 +830,19 @@ object CameraCore {
     }
 
     /**
-     * Probe the link periodically so an idle connection tears the socket down
-     * instead of being left half-open. Only runs on PTP links (USB or IP); HTTP
-     * has no session or socket to probe and is skipped.
+     * Idle-only keepalive — the probe is skipped whenever the camera has said
+     * anything recently (a transfer response, a listing, or a spontaneous event).
+     *
+     * Why decouple "probe" from "interval"? A 30 s RAW download and a 20 s interval
+     * collide badly when the probe blindly takes the mutex: the probe queues up
+     * behind the transfer, arrives late, and adds unnecessary contention for no
+     * signal value — the transfer's own response already proved the peer alive.
+     *
+     * So the rule is: wake every [CameraSettings.keepaliveIntervalSeconds] (still
+     * the default 20 s, not more frequent), consult [PtpSession.idleMs], and send
+     * a GetDeviceInfo **only if** the session has been truly quiet the whole time.
+     * If any transaction or camera event landed within the interval the link is
+     * demonstrably healthy and we sleep another interval.
      */
     private fun startKeepalive(device: CameraDevice) {
         keepaliveJob?.cancel()
@@ -842,10 +852,18 @@ object CameraCore {
         val session = connection.ptpSession ?: return
         keepaliveJob = scope.launch {
             while (this.isActive && active != null) {
-                delay(_settings.value.keepaliveIntervalSeconds * 1000L)
+                val intervalMs = _settings.value.keepaliveIntervalSeconds * 1000L
+                delay(intervalMs)
                 val current = active ?: return@launch
+                val ptp = current.ptpSession ?: return@launch
+                if (ptp.idleMs() < intervalMs) {
+                    // The peer already talked to us recently — a transfer response, a
+                    // list, a capture event — so no probe is needed. Keep the loop's
+                    // nominal cadence; next wake re-evaluates.
+                    continue
+                }
                 try {
-                    current.ptpSession?.deviceInfo()
+                    ptp.deviceInfo()
                 } catch (error: Throwable) {
                     runCatching { failLink(current, CameraLinkException("Keepalive probe failed: ${error.message}", error)) }
                     return@launch
