@@ -105,6 +105,7 @@ fun LibraryRecycleScreen(
     var candidateIds by remember { mutableStateOf<List<Long>>(emptyList()) }
 
     var deleteForeverConfirm by remember { mutableStateOf(false) }
+    var restoreConfirm by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     fun enterSelection(id: Long) {
@@ -152,14 +153,7 @@ fun LibraryRecycleScreen(
                 onCycleLayout = onCycleLayout,
                 onRefresh = onRefresh,
                 onExitSelection = { exitSelection() },
-                onRestore = {
-                    // Capture the selection up front: the restore runs in a coroutine and
-                    // `exitSelection()` below clears `selectedIds`, so reading it lazily inside
-                    // the launch would see an empty set and restore nothing.
-                    val ids = selectedIds.toList()
-                    scope.launch { LibraryCore.restoreFromBin(ids) }
-                    exitSelection()
-                },
+                onRestore = { restoreConfirm = true },
                 onDeleteForever = { deleteForeverConfirm = true },
                 onSelectAll = {
                     selectedIds = candidateIds.toSet()
@@ -229,6 +223,32 @@ fun LibraryRecycleScreen(
             },
             dismissButton = {
                 TextButton(onClick = { deleteForeverConfirm = false }) {
+                    Text(text = stringResource(id = R.string.common_action_cancel))
+                }
+            },
+        )
+    }
+
+    if (restoreConfirm) {
+        AlertDialog(
+            onDismissRequest = { restoreConfirm = false },
+            title = { Text(text = stringResource(id = R.string.library_restore_batch_title)) },
+            text = { Text(text = stringResource(id = R.string.library_restore_batch_message, selectedIds.size)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        restoreConfirm = false
+                        // Capture the selection up front: the restore runs in a coroutine and
+                        // `exitSelection()` below clears `selectedIds`, so reading it lazily
+                        // would hand `restoreFromBin` an empty list and restore nothing.
+                        val ids = selectedIds.toList()
+                        scope.launch { LibraryCore.restoreFromBin(ids) }
+                        exitSelection()
+                    },
+                ) { Text(text = stringResource(id = R.string.common_action_ok)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { restoreConfirm = false }) {
                     Text(text = stringResource(id = R.string.common_action_cancel))
                 }
             },

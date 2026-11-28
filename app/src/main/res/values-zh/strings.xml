@@ -53,6 +53,8 @@
     <string name="library_delete_forever">永久删除</string>
     <string name="library_cd_restore_from_bin">从回收站恢复所选项目</string>
     <string name="library_cd_delete_forever">永久删除所选项目</string>
+    <string name="library_restore_batch_title">从回收站恢复？</string>
+    <string name="library_restore_batch_message">恢复所选 %d 项时，同批次删除的所有其他项目也将一并恢复。</string>
     <string name="library_delete_forever_title">永久删除？</string>
     <string name="library_delete_forever_message">所选项将被永久删除，此操作无法撤销。</string>
 
