@@ -1,6 +1,10 @@
 package io.github.fotlab.fotlab.feature.camera.profile
 
-import io.github.fotlab.fotlab.feature.camera.protocol.PtpOpcode
+import io.github.fotlab.fotlab.feature.camera.protocol.opcode.PtpCanon
+import io.github.fotlab.fotlab.feature.camera.protocol.opcode.PtpFuji
+import io.github.fotlab.fotlab.feature.camera.protocol.opcode.PtpNikon
+import io.github.fotlab.fotlab.feature.camera.protocol.opcode.PtpSony
+import io.github.fotlab.fotlab.feature.camera.protocol.opcode.PtpStd
 
 enum class CameraFamily { CANON, NIKON, SONY, FUJIFILM, GENERIC }
 
@@ -11,17 +15,24 @@ enum class GuidVariant { PRIMARY, ALTERNATE, ZERO, SECONDARY }
  * All device-specific knobs used by the browsing/transfer path live here.
  * A model family is expressed as `copy(...)` of a base profile, so only fields
  * that really differ are restated.
+ *
+ * Opcode selection is duplicated here and in the action layer (see
+ * [io.github.fotlab.fotlab.feature.camera.action.CameraActionContext]):
+ * this profile carries the raw int values that the old PtpFileOperations
+ * still reads, while the new action layer picks opcodes directly from
+ * family+protocol. Once PtpFileOperations is fully removed these opcode
+ * fields can be dropped and only chunk/GUID tuning stays.
  */
 data class CameraProfile(
     val id: String,
     val family: CameraFamily,
     val sessionId: Int,
-    val storageIdsOpcode: Int = PtpOpcode.GET_STORAGE_IDS,
-    val objectHandlesOpcode: Int = PtpOpcode.GET_OBJECT_HANDLES,
-    val objectInfoOpcode: Int = PtpOpcode.GET_OBJECT_INFO,
-    val partialObjectOpcode: Int = PtpOpcode.GET_PARTIAL_OBJECT,
-    val thumbOpcode: Int = PtpOpcode.GET_THUMB,
-    val deleteOpcode: Int = PtpOpcode.DELETE_OBJECT,
+    val storageIdsOpcode: Int = PtpStd.GET_STORAGE_IDS,
+    val objectHandlesOpcode: Int = PtpStd.GET_OBJECT_HANDLES,
+    val objectInfoOpcode: Int = PtpStd.GET_OBJECT_INFO,
+    val partialObjectOpcode: Int = PtpStd.GET_PARTIAL_OBJECT,
+    val thumbOpcode: Int = PtpStd.GET_THUMB,
+    val deleteOpcode: Int = PtpStd.DELETE_OBJECT,
     val largeLengthOpcode: Int? = null,
     val storageIdFallback: Long? = null,
     val minChunkBytes: Int = DEFAULT_MIN_CHUNK,
@@ -53,11 +64,11 @@ data class CameraProfile(
                 id = "canon",
                 family = CameraFamily.CANON,
                 sessionId = sessionId,
-                storageIdsOpcode = PtpOpcode.Canon.STORAGE_IDS,
-                objectHandlesOpcode = PtpOpcode.Canon.OBJECT_HANDLES,
-                objectInfoOpcode = PtpOpcode.Canon.OBJECT_INFO_EX,
-                partialObjectOpcode = PtpOpcode.Canon.PARTIAL_OBJECT,
-                thumbOpcode = PtpOpcode.Canon.THUMB,
+                storageIdsOpcode = PtpCanon.STORAGE_IDS,
+                objectHandlesOpcode = PtpCanon.OBJECT_HANDLES,
+                objectInfoOpcode = PtpCanon.OBJECT_INFO_EX,
+                partialObjectOpcode = PtpCanon.PARTIAL_OBJECT,
+                thumbOpcode = PtpCanon.THUMB,
                 guidVariant = guid,
             )
 
@@ -66,11 +77,11 @@ data class CameraProfile(
                 id = "nikon-d",
                 family = CameraFamily.NIKON,
                 sessionId = sessionId,
-                objectHandlesOpcode = PtpOpcode.Nikon.OBJECT_HANDLES,
-                partialObjectOpcode = PtpOpcode.Nikon.PARTIAL_OBJECT,
-                thumbOpcode = PtpOpcode.Nikon.THUMB,
-                largeLengthOpcode = PtpOpcode.Nikon.LARGE_OBJECT_LENGTH,
-                maxChunkBytes = 5 * 1024 * 1024,
+                objectHandlesOpcode = PtpNikon.OBJECT_HANDLES,
+                partialObjectOpcode = PtpNikon.PARTIAL_OBJECT,
+                thumbOpcode = PtpNikon.THUMB,
+                largeLengthOpcode = PtpNikon.LARGE_OBJECT_LENGTH,
+                maxChunkBytes = PtpNikon.MAX_CHUNK_BYTES,
                 guidVariant = guid,
             )
 
@@ -79,11 +90,11 @@ data class CameraProfile(
                 id = "sony",
                 family = CameraFamily.SONY,
                 sessionId = sessionId,
-                storageIdsOpcode = PtpOpcode.Sony.STORAGE_IDS,
-                objectHandlesOpcode = PtpOpcode.Sony.CONTENT_LIST,
-                partialObjectOpcode = PtpOpcode.Sony.PARTIAL_OBJECT,
-                thumbOpcode = PtpOpcode.Sony.THUMB,
-                deleteOpcode = PtpOpcode.Sony.DELETE_OBJECT,
+                storageIdsOpcode = PtpSony.STORAGE_IDS,
+                objectHandlesOpcode = PtpSony.CONTENT_LIST,
+                partialObjectOpcode = PtpSony.PARTIAL_OBJECT,
+                thumbOpcode = PtpSony.THUMB,
+                deleteOpcode = PtpSony.DELETE_OBJECT,
                 guidVariant = guid,
             )
 
@@ -91,11 +102,11 @@ data class CameraProfile(
             id = "fuji-usb",
             family = CameraFamily.FUJIFILM,
             sessionId = 1,
-            objectHandlesOpcode = PtpOpcode.Fuji.OBJECT_HANDLES,
-            storageIdFallback = PtpOpcode.Fuji.STORAGE_ID,
-            minChunkBytes = 1024 * 1024,
-            maxChunkBytes = 3 * 1024 * 1024,
-            preferredChunkBytes = 1024 * 1024,
+            objectHandlesOpcode = PtpFuji.OBJECT_HANDLES,
+            storageIdFallback = PtpFuji.STORAGE_ID_FALLBACK,
+            minChunkBytes = PtpFuji.MIN_CHUNK_BYTES,
+            maxChunkBytes = PtpFuji.MAX_CHUNK_BYTES,
+            preferredChunkBytes = PtpFuji.PREFERRED_CHUNK_BYTES,
         )
     }
 }

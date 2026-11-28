@@ -16,7 +16,7 @@ import io.github.fotlab.fotlab.feature.camera.model.PtpStorage
 import io.github.fotlab.fotlab.feature.camera.model.TransferKind
 import io.github.fotlab.fotlab.feature.camera.model.TransferProgress
 import io.github.fotlab.fotlab.feature.camera.model.TransferState
-import io.github.fotlab.fotlab.feature.camera.operation.PtpFileOperations
+import io.github.fotlab.fotlab.feature.camera.action.CameraRoutine
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -35,14 +35,14 @@ import kotlinx.coroutines.withContext
  */
 class CameraFileRepository(
     private val context: Context,
-    private val operations: PtpFileOperations,
+    private val routine: CameraRoutine,
 ) {
     private val resolver = context.contentResolver
     private val _progress = MutableStateFlow<TransferProgress?>(null)
     val progress: StateFlow<TransferProgress?> = _progress.asStateFlow()
 
     suspend fun storages(): List<PtpStorage> = withContext(Dispatchers.IO) {
-        operations.storages()
+        routine.storages()
     }
 
     suspend fun objects(
@@ -50,11 +50,11 @@ class CameraFileRepository(
         parent: Long,
         filter: PtpMediaFilter = PtpMediaFilter.ALL,
     ): List<PtpObject> = withContext(Dispatchers.IO) {
-        operations.objects(storageId, parent, filter)
+        routine.objects(storageId, parent, filter)
     }
 
     suspend fun thumbnail(handle: Long): ByteArray? = withContext(Dispatchers.IO) {
-        runCatching { operations.thumbnail(handle) }.getOrNull()
+        runCatching { routine.thumbnail(handle) }.getOrNull()
     }
 
     /**
@@ -85,7 +85,7 @@ class CameraFileRepository(
                 totalBytes = item.sizeBytes,
             )
             try {
-                operations.download(item.handle, item.sizeBytes, sink.output) { completed ->
+                routine.download(item.handle, item.sizeBytes, sink.output) { completed ->
                     _progress.value = TransferProgress(
                         kind = TransferKind.DOWNLOAD,
                         objectName = name,
@@ -162,7 +162,7 @@ class CameraFileRepository(
      */
     suspend fun objectName(handle: Long): String? = withContext(Dispatchers.IO) {
         try {
-            operations.objectInfo(handle).name
+            routine.objectInfo(handle).name
         } catch (error: PtpResponseException) {
             null
         }
@@ -177,18 +177,18 @@ class CameraFileRepository(
      */
     suspend fun findObjectByName(storageId: Long, parent: Long, name: String): Long? =
         withContext(Dispatchers.IO) {
-            operations.objects(storageId, parent, PtpMediaFilter.ALL)
+            routine.objects(storageId, parent, PtpMediaFilter.ALL)
                 .firstOrNull { it.name == name }
                 ?.handle
         }
 
     suspend fun delete(handles: List<Long>) = withContext(Dispatchers.IO) {
-        handles.forEach { operations.delete(it) }
+        handles.forEach { routine.delete(it) }
     }
 
     /** Creates a folder (a PTP association) on the device. */
     suspend fun createFolder(storageId: Long, parent: Long, name: String): Long =
-        withContext(Dispatchers.IO) { operations.createFolder(storageId, parent, name) }
+        withContext(Dispatchers.IO) { routine.createFolder(storageId, parent, name) }
 
     /** Uploads a content URI to the selected storage and parent folder. */
     suspend fun upload(source: Uri, storageId: Long, parent: Long): Long = withContext(Dispatchers.IO) {
@@ -200,7 +200,7 @@ class CameraFileRepository(
                 objectName = name,
                 totalBytes = size,
             )
-            operations.upload(storageId, parent, name, size, input) { completed ->
+            routine.upload(storageId, parent, name, size, input) { completed ->
                 _progress.value = TransferProgress(
                     kind = TransferKind.UPLOAD,
                     objectName = name,

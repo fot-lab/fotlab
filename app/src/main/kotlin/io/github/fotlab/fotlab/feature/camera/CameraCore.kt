@@ -13,7 +13,7 @@ import io.github.fotlab.fotlab.feature.camera.model.CameraQueueItem
 import io.github.fotlab.fotlab.feature.camera.model.PTP_PARENT_ROOT
 import io.github.fotlab.fotlab.feature.camera.model.PtpMediaFilter
 import io.github.fotlab.fotlab.feature.camera.model.PtpObject
-import io.github.fotlab.fotlab.feature.camera.operation.PtpFileOperations
+import io.github.fotlab.fotlab.feature.camera.action.CameraRoutine
 import io.github.fotlab.fotlab.feature.camera.profile.CameraProfile
 import io.github.fotlab.fotlab.feature.camera.profile.CameraProfileResolver
 import io.github.fotlab.fotlab.feature.camera.protocol.PtpDeviceIdentity
@@ -51,7 +51,8 @@ sealed class CameraConnectionState {
     data class Connected(
         val device: CameraDevice,
         val profile: CameraProfile,
-        val identity: PtpDeviceIdentity,
+        /** PTP device identity when known; null for HTTP links that have no PtpSession. */
+        val identity: PtpDeviceIdentity? = null,
     ) : CameraConnectionState()
     data class Failed(val device: CameraDevice, val message: String) : CameraConnectionState()
 }
@@ -76,11 +77,20 @@ sealed class CameraRetryState {
 
 private class ActiveConnection(
     val device: CameraDevice,
-    val session: PtpSession,
-    val operations: PtpFileOperations,
+    val routine: CameraRoutine,
     val repository: CameraFileRepository,
     val eventJob: Job,
-)
+    /** PTP session when [routine.protocol] is PTP, null for HTTP. */
+    val ptpSession: PtpSession? = null,
+    /** HTTP transport when [routine.protocol] is HTTP_SONY, null for PTP. */
+    val httpTransport: io.github.fotlab.fotlab.feature.camera.transport.SonyHttpTransport? = null,
+) {
+    /** Close whatever transport is alive — PTP or HTTP, both branches are no-op-safe. */
+    suspend fun closeAll() {
+        ptpSession?.close()
+        httpTransport?.close()
+    }
+}
 
 /**
  * Process-wide facade for the camera feature.
@@ -349,37 +359,17 @@ object CameraCore {
                 link = device.link,
                 preferAlternateGuid = preferAlternateGuid,
             )
-            val transport = transportFor(engine, device, profile)
-            val session = PtpSession(transport, profile.sessionId)
-            transport.onLinkBroken = { handleLinkBroken(transport.label) }
-            val identity = session.open()
-            val operations = PtpFileOperations(session, profile, ptpStdOnly = _settings.value.ptpStdOnly)
-            val eventJob = scope.launch {
-                session.events().collect { event ->
-                    _lastEvent.value = event
-                    _events.emit(event)
-                }
+            when (device) {
+                is CameraDevice.Ip when device.transportKind == TransportKind.HTTP_SONY ->
+                    connectHttpSony(device, profile, context)
+                else ->
+                    connectPtp(device, engine, profile, context)
             }
-            active = ActiveConnection(
-                device = device,
-                session = session,
-                operations = operations,
-                repository = CameraFileRepository(context, operations),
-                eventJob = eventJob,
-            )
             reconnectJob?.cancel()
             reconnectJob = null
             startKeepalive(device)
-            // Pin the process at IMPORTANCE_SERVICE so the keepalive coroutine and
-            // the event reader keep running while the user is away from the screen
-            // (system folder picker, another app, launcher). Without this the link
-            // dies silently before CameraTransferService even starts.
             appContext?.let { ctx -> CameraConnectionDaemon.start(ctx, device.displayName) }
-            _state.value = CameraConnectionState.Connected(device, profile, identity)
-            // The link is up: whatever recovery was running is over.
             _retryState.value = CameraRetryState.Idle
-            // A camera came up: the queue picks up where it stopped, so a transfer the
-            // previous link interrupted runs again without the user asking twice.
             scope.launch {
                 val manager = queue ?: return@launch
                 val serviceContext = appContext ?: return@launch
@@ -390,6 +380,99 @@ object CameraCore {
         } catch (error: Throwable) {
             _state.value = CameraConnectionState.Failed(device, error.message ?: error.toString())
             throw error
+        }
+    }
+
+    // ── Transport-specific connect paths ─────────────────────────────────
+
+    private suspend fun connectPtp(
+        device: CameraDevice,
+        engine: CameraDiscovery,
+        profile: CameraProfile,
+        context: Context,
+    ) {
+        val transport = transportForPtp(engine, device, profile)
+        val session = PtpSession(transport, profile.sessionId)
+        transport.onLinkBroken = { handleLinkBroken(transport.label) }
+        val identity = session.open()
+        val path = resolvePtpPath(device, profile)
+        val routine = CameraRoutine.forPtp(
+            session = session,
+            path = path,
+            profile = profile,
+            ptpStdOnly = _settings.value.ptpStdOnly,
+        )
+        val eventJob = scope.launch {
+            session.events().collect { event ->
+                _lastEvent.value = event
+                _events.emit(event)
+            }
+        }
+        active = ActiveConnection(
+            device = device,
+            routine = routine,
+            repository = CameraFileRepository(context, routine),
+            eventJob = eventJob,
+            ptpSession = session,
+        )
+        _state.value = CameraConnectionState.Connected(device, profile, identity)
+    }
+
+    private suspend fun connectHttpSony(
+        device: CameraDevice.Ip,
+        profile: CameraProfile,
+        context: Context,
+    ) {
+        val baseUrl = device.actionListUrl
+            ?: throw CameraLinkException("Sony HTTP device has no ActionList URL advertised")
+        val transport = io.github.fotlab.fotlab.feature.camera.transport.SonyHttpTransport(baseUrl)
+        transport.onLinkBroken = { handleLinkBroken(transport.label) }
+        val path = TransportPath.HTTP_IP_SONY_NEX
+        val routine = CameraRoutine.forHttp(
+            transport = transport,
+            path = path,
+            profile = profile,
+        )
+        val eventJob = scope.launch { /* no-op: HTTP has no PTP event stream */ }
+        active = ActiveConnection(
+            device = device,
+            routine = routine,
+            repository = CameraFileRepository(context, routine),
+            eventJob = eventJob,
+            httpTransport = transport,
+        )
+        _state.value = CameraConnectionState.Connected(device, profile, identity = null)
+    }
+
+    /**
+     * Pick the exact [TransportPath] for a PTP session from device info
+     * and the resolved profile. This is the single place that decides
+     * whether a connection gets the generic ISO path or a vendor block.
+     *
+     * The ptpStdOnly flag is *not* applied here — it is evaluated at
+     * operation time inside [PtpExecutor] so the routine still tries the
+     * vendor opcode first, then falls back to standard when the device
+     * refuses (which is how we discover the real capability).
+     */
+    private fun resolvePtpPath(device: CameraDevice, profile: CameraProfile): TransportPath {
+        val isUsb = device is CameraDevice.Usb
+        val family = profile.family
+        return when {
+            family == io.github.fotlab.fotlab.feature.camera.profile.CameraFamily.SONY && isUsb ->
+                TransportPath.PTP_USB_SONY_0X92XX
+            family == io.github.fotlab.fotlab.feature.camera.profile.CameraFamily.SONY && !isUsb ->
+                TransportPath.PTP_IP_STD_ISO
+            family == io.github.fotlab.fotlab.feature.camera.profile.CameraFamily.CANON && isUsb ->
+                TransportPath.PTP_USB_CANON_0X91XX
+            family == io.github.fotlab.fotlab.feature.camera.profile.CameraFamily.CANON && !isUsb ->
+                TransportPath.PTP_IP_CANON_0X91XX
+            family == io.github.fotlab.fotlab.feature.camera.profile.CameraFamily.NIKON && isUsb ->
+                TransportPath.PTP_USB_NIKON_0X90XX
+            family == io.github.fotlab.fotlab.feature.camera.profile.CameraFamily.NIKON && !isUsb ->
+                TransportPath.PTP_IP_NIKON_0X90XX
+            family == io.github.fotlab.fotlab.feature.camera.profile.CameraFamily.FUJIFILM && isUsb ->
+                TransportPath.PTP_USB_FUJI_0XD2XX
+            else -> if (isUsb) TransportPath.PTP_USB_STD_ISO else TransportPath.PTP_IP_STD_ISO
         }
     }
 
@@ -411,8 +494,7 @@ object CameraCore {
         }
         active = null
         current.eventJob.cancel()
-        withContext(Dispatchers.IO) { runCatching { current.session.close() } }
-        // Drop the foreground-service pin on an explicit disconnect too.
+        withContext(Dispatchers.IO) { runCatching { current.closeAll() } }
         appContext?.let { ctx -> CameraConnectionDaemon.stop(ctx) }
         _state.value = CameraConnectionState.Idle
         if (userInitiated) {
@@ -458,7 +540,7 @@ object CameraCore {
         val connection = active ?: throw IllegalStateException("No camera session is connected")
         val objects = withContext(Dispatchers.IO) {
             handles.map { handle ->
-                val info = connection.operations.objectInfo(handle)
+                val info = connection.routine.objectInfo(handle)
                 PtpObject(
                     handle = handle,
                     name = info.name.ifEmpty { handle.toString() },
@@ -615,10 +697,7 @@ object CameraCore {
         connection.eventJob.cancel()
         keepaliveJob?.cancel()
         keepaliveJob = null
-        withContext(Dispatchers.IO) { runCatching { connection.session.close() } }
-        // The daemon stays alive across the subsequent reconnect/backoff cycle so the
-        // retry delays are not throttled; it is dropped only when the recovery exhausts
-        // (see [startReconnect]) or the user disconnects explicitly (see [disconnect]).
+        withContext(Dispatchers.IO) { runCatching { connection.closeAll() } }
         _state.value = CameraConnectionState.Failed(
             connection.device,
             error.message ?: error.toString(),
@@ -662,26 +741,15 @@ object CameraCore {
         }
     }
 
-    private fun transportFor(
+    private fun transportForPtp(
         engine: CameraDiscovery,
         device: CameraDevice,
         profile: CameraProfile,
     ): PtpTransport = when (device) {
         is CameraDevice.Usb -> UsbPtpTransport(device.device, engine.usbDiscovery)
-        is CameraDevice.Ip -> when (device.transportKind) {
-            io.github.fotlab.fotlab.feature.camera.discovery.TransportKind.HTTP_SONY ->
-                // The Sony JSON-RPC transport, its session and the content API exist, but
-                // they are not wired into the browse/download pipeline, which runs on PTP
-                // handles and storages. An HTTP-only camera therefore cannot be opened
-                // yet; one that also speaks PTP/IP is discovered as PTP and works.
-                throw UnsupportedOperationException(
-                    "Sony's HTTP API is not wired into the transfer pipeline yet; " +
-                        "${device.displayName} (${device.host}) has to be reachable over PTP/IP",
-                )
-            io.github.fotlab.fotlab.feature.camera.discovery.TransportKind.PTP -> {
-                val port = if (device.port == 15740) profile.initPort else device.port
-                IpPtpTransport(device.host, port, profile)
-            }
+        is CameraDevice.Ip -> {
+            val port = if (device.port == 15740) profile.initPort else device.port
+            IpPtpTransport(device.host, port, profile)
         }
     }
 
@@ -758,27 +826,23 @@ object CameraCore {
 
     /**
      * Probe the link periodically so an idle connection tears the socket down
-     * instead of being left half-open. We send [PtpSession.deviceInfo] every
-     * keepalive interval — it is a cheap read that the PTP spec allows after
-     * OpenSession, and the session guards against OpenSession racing.
-     *
-     * The interval is the user's setting ([CameraSettings]); it is read before every
-     * probe, so a change takes effect on the next cycle even if the job was not
-     * restarted.
-     *
-     * This only runs on IP links; USB is physical and does not need it.
+     * instead of being left half-open. Only runs on PTP links (USB or IP); HTTP
+     * has no session or socket to probe and is skipped.
      */
     private fun startKeepalive(device: CameraDevice) {
         keepaliveJob?.cancel()
+        val connection = active ?: return
+        if (!connection.routine.path.isPtp) return
         if (device.link != io.github.fotlab.fotlab.feature.camera.model.CameraLink.IP) return
+        val session = connection.ptpSession ?: return
         keepaliveJob = scope.launch {
             while (this.isActive && active != null) {
                 delay(_settings.value.keepaliveIntervalSeconds * 1000L)
-                val connection = active ?: return@launch
+                val current = active ?: return@launch
                 try {
-                    connection.session.deviceInfo()
+                    current.ptpSession?.deviceInfo()
                 } catch (error: Throwable) {
-                    runCatching { failLink(connection, CameraLinkException("Keepalive probe failed: ${error.message}", error)) }
+                    runCatching { failLink(current, CameraLinkException("Keepalive probe failed: ${error.message}", error)) }
                     return@launch
                 }
             }
