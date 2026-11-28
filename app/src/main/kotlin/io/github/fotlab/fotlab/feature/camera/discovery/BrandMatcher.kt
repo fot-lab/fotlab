@@ -51,9 +51,9 @@ object BrandMatcher {
         "OLYMPUS" to setOf("OLYMPUS", "OM-D", "OMSYS"),
         "PENTAX" to setOf("PENTAX"),
         "Ricoh" to setOf("RICOH"),
-        "Samsung" to setOf("SAMSUNG", "NX-"),
+        "SAMSUNG" to setOf("SAMSUNG", "NX-"),
         "Kodak" to setOf("KODAK"),
-        "Casio" to setOf("CASIO"),
+        "CASIO" to setOf("CASIO"),
         "HP" to setOf("HP"),
     )
 }
