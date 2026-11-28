@@ -57,6 +57,10 @@ class LibraryRepository(private val database: LibraryDatabase) {
     fun deletedNodesAt(time: Long): Flow<List<FsNodeObject>> =
         database.nodeObjectDao().deletedNodesAt(time)
 
+    /** Just the ids of every node in the soft-delete batch stamped at [time]. */
+    suspend fun deletedNodeIdsAt(time: Long): List<Long> =
+        database.nodeObjectDao().deletedNodeIdsAt(time)
+
     /** Edges soft-deleted in the batch stamped at [time]; rebuilds the batch's directory tree. */
     fun deletedRelationsAt(time: Long): Flow<List<FsNodeRelation>> =
         database.nodeRelationDao().deletedRelationsAt(time)

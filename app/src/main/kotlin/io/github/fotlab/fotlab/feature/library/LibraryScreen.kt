@@ -860,6 +860,13 @@ internal fun NodeList(
     onToggleSelect: (FsNodeObject) -> Unit,
     onLongPress: (FsNodeObject) -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * Keys for "virtual" nodes that carry no real [FsNodeObject.fsNodeId] — e.g. the per-batch
+     * placeholder folders shown at the recycle-bin root. Such a node is treated as selected
+     * when its [FsNodeObject.timeCreated] (which stores the virtual key) appears in this set.
+     * Defaults to empty so callers that never create virtual folders are unaffected.
+     */
+    virtualSelectedKeys: Set<Long> = emptySet(),
 ) {
     // [selectionActive] is the selection action mode flag (owned by the core), not the bare
     // selection count: a plain tap toggles while the mode is on, opens while it is off
@@ -867,7 +874,11 @@ internal fun NodeList(
     val cell: @Composable (FsNodeObject) -> Unit = { node ->
         NodeCell(
             node = node,
-            selected = node.fsNodeId != null && node.fsNodeId in selectedIds,
+            selected = when {
+                node.fsNodeId != null -> node.fsNodeId in selectedIds
+                node.typeMime == MimeFolderDeleted -> node.timeCreated in virtualSelectedKeys
+                else -> false
+            },
             isGrid = layoutMode.isGrid,
             selectionActive = selectionActive,
             onNodeClick = onNodeClick,

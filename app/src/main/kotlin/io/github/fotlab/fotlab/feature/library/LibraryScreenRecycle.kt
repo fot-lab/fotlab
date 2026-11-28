@@ -177,8 +177,21 @@ fun LibraryRecycleScreen(
                 RecycleLocation.Root -> RecycleRoot(
                     selectedIds = selectedIds,
                     selectionActive = selectionActive,
-                    onToggleSelect = { node -> node.fsNodeId?.let { toggleSelect(it) } },
-                    onLongPress = { node -> node.fsNodeId?.let { enterSelection(it) } },
+                    onToggleSelectBatch = { _, batchIds ->
+                        // If every node of this batch is already selected → deselect the whole
+                        // batch; otherwise → select every one of its nodes. The batch folder
+                        // behaves as a single atomic pick even though the underlying selectedIds
+                        // set carries real fs node ids.
+                        val isAllSelected = batchIds.all { it in selectedIds }
+                        selectedIds = if (isAllSelected) selectedIds - batchIds else selectedIds + batchIds
+                        selectionActive = true
+                    },
+                    onLongPressBatch = { _, batchIds ->
+                        // Long-press on a batch folder enters selection mode and marks every
+                        // node of that batch as picked — the whole batch becomes one pick.
+                        selectedIds = selectedIds + batchIds
+                        selectionActive = true
+                    },
                     onOpenBatch = { time -> location = RecycleLocation.Inside(time) },
                     onVisibleIds = { candidateIds = it },
                 )
@@ -409,16 +422,31 @@ private fun RecycleScreenFunBar(
 private fun RecycleRoot(
     selectedIds: Set<Long>,
     selectionActive: Boolean,
-    onToggleSelect: (FsNodeObject) -> Unit,
-    onLongPress: (FsNodeObject) -> Unit,
+    /** Called when the user toggles a virtual batch folder in selection mode. [batchIds] are
+     *  every fs_node id belonging to that batch; the handler decides whether to add or remove
+     *  them from the overall selection (the batch-folder "selects all its contents" behaviour). */
+    onToggleSelectBatch: (batchTime: Long, batchIds: List<Long>) -> Unit,
+    /** Long-press on a virtual batch folder: handler typically enters selection mode and
+     *  marks every [batchIds] as picked. */
+    onLongPressBatch: (batchTime: Long, batchIds: List<Long>) -> Unit,
     onOpenBatch: (Long) -> Unit,
     onVisibleIds: (List<Long>) -> Unit,
 ) {
     val batches by LibraryCore.deletedBatchTimes().collectAsState(initial = emptyList())
     val layoutMode by LibraryCore.layoutMode.collectAsState()
 
-    // Virtual folders are not real nodes (no fs_node_id), so nothing is selectable at the root.
-    LaunchedEffect(Unit) { onVisibleIds(emptyList()) }
+    // Cache of batch timestamp → every fs_node id in that batch. Filled in a coroutine whenever
+    // the batch listing changes, so toggleBatch / longPressBatch can hand concrete ids back to
+    // the handler without the handler needing its own database access.
+    var batchNodeIdsCache by remember { mutableStateOf<Map<Long, List<Long>>>(emptyMap()) }
+
+    LaunchedEffect(batches) {
+        val cache = mutableMapOf<Long, List<Long>>()
+        for (time in batches) {
+            cache[time] = LibraryCore.recycleBatchNodeIds(time)
+        }
+        batchNodeIdsCache = cache
+    }
 
     if (batches.isEmpty()) {
         Text(
@@ -426,6 +454,19 @@ private fun RecycleRoot(
             modifier = Modifier.padding(16.dp),
         )
         return
+    }
+
+    // Root-level select-all / invert should operate over every real node across every batch,
+    // since selecting a batch = selecting all its nodes.
+    val allNodeIds = batchNodeIdsCache.values.flatten()
+    LaunchedEffect(allNodeIds) { onVisibleIds(allNodeIds) }
+
+    // A batch folder is shown as "selected" when every one of its node ids is already in the
+    // flat [selectedIds] set.
+    val virtualSelectedKeys = remember(selectedIds, batchNodeIdsCache) {
+        batchNodeIdsCache.mapNotNull { (time, ids) ->
+            if (ids.isNotEmpty() && ids.all { it in selectedIds }) time else null
+        }.toSet()
     }
 
     // Virtual folders: not fs nodes. The timestamp lives in `timeCreated` so the batch can be
@@ -446,11 +487,26 @@ private fun RecycleRoot(
         selectedIds = selectedIds,
         layoutMode = layoutMode,
         selectionActive = selectionActive,
+        virtualSelectedKeys = virtualSelectedKeys,
         onNodeClick = { node ->
-            if (selectionActive) onToggleSelect(node) else onOpenBatch(node.timeCreated)
+            if (selectionActive) {
+                val time = node.timeCreated
+                val ids = batchNodeIdsCache[time].orEmpty()
+                if (ids.isNotEmpty()) onToggleSelectBatch(time, ids)
+            } else {
+                onOpenBatch(node.timeCreated)
+            }
         },
-        onToggleSelect = onToggleSelect,
-        onLongPress = onLongPress,
+        onToggleSelect = { node ->
+            val time = node.timeCreated
+            val ids = batchNodeIdsCache[time].orEmpty()
+            if (ids.isNotEmpty()) onToggleSelectBatch(time, ids)
+        },
+        onLongPress = { node ->
+            val time = node.timeCreated
+            val ids = batchNodeIdsCache[time].orEmpty()
+            if (ids.isNotEmpty()) onLongPressBatch(time, ids)
+        },
         modifier = Modifier.fillMaxSize(),
     )
 }

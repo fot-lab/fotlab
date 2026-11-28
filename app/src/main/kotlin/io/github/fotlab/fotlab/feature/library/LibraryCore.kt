@@ -164,6 +164,9 @@ object LibraryCore {
     /** Nodes soft-deleted in the batch stamped at [time]. */
     fun recycleBatchNodes(time: Long): Flow<List<FsNodeObject>> = repo().deletedNodesAt(time)
 
+    /** Just the ids of every node in the soft-delete batch stamped at [time]. */
+    suspend fun recycleBatchNodeIds(time: Long): List<Long> = repo().deletedNodeIdsAt(time)
+
     /** Edges soft-deleted in the batch stamped at [time]; rebuilds the batch's directory tree. */
     fun recycleBatchRelations(time: Long): Flow<List<FsNodeRelation>> = repo().deletedRelationsAt(time)
 

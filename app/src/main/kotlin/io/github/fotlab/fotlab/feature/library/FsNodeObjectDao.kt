@@ -101,6 +101,10 @@ interface FsNodeObjectDao {
     )
     fun deletedNodesAt(time: Long): Flow<List<FsNodeObject>>
 
+    /** Just the ids of every node in the soft-delete batch stamped at [time]. */
+    @Query("SELECT fs_node_id FROM fs_node_object WHERE time_deleted = :time AND fs_node_id IS NOT NULL")
+    suspend fun deletedNodeIdsAt(time: Long): List<Long>
+
     /**
      * Soft-delete: stamp `time_deleted` instead of dropping the row (`FOTLAB-DATABS-000002`
      * R10, revised). The id keeps its slot in the live id space; nothing is archived into a
