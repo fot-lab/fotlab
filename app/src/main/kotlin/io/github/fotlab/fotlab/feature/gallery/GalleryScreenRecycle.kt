@@ -374,7 +374,7 @@ private fun GalleryRecycleRoot(
 
     if (batches.isEmpty()) {
         Text(
-            text = stringResource(id = R.string.library_recycle_bin_empty),
+            text = stringResource(id = R.string.gallery_recycle_bin_empty),
             modifier = Modifier.padding(16.dp),
         )
         return
@@ -468,7 +468,7 @@ private fun GalleryRecycleBatch(
 
     if (currentChildren.isEmpty()) {
         Text(
-            text = stringResource(id = R.string.library_empty_directory),
+            text = stringResource(id = R.string.gallery_empty_directory),
             modifier = Modifier.padding(16.dp),
         )
         return

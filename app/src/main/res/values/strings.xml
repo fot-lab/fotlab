@@ -45,12 +45,12 @@
     <string name="library_delete_invalid_message">Every selected node must belong directly to the
         directory currently shown to be deletable</string>
 
-    <string name="library_empty_directory">This folder is empty</string>
+    <string name="library_empty_directory">Library folder is empty</string>
 
     <!-- Drawer navigation: the two top-level views the drawer switches between. -->
     <string name="library_library">Library</string>
     <string name="library_recycle_bin">Recycle Bin</string>
-    <string name="library_recycle_bin_empty">The recycle bin is empty</string>
+    <string name="library_recycle_bin_empty">Library recycle bin is empty</string>
     <string name="library_cd_library">Open Library</string>
     <string name="library_cd_recycle_bin">Open Recycle Bin</string>
     <string name="library_restore_from_bin">Restore from bin</string>
@@ -74,6 +74,8 @@
 
     <!-- ===== feature: gallery ===== -->
     <string name="gallery_name">Gallery</string>
+    <string name="gallery_empty_directory">Gallery folder is empty</string>
+    <string name="gallery_recycle_bin_empty">Gallery recycle bin is empty</string>
 
     <!-- ===== feature: studio ===== -->
     <string name="studio_cd_drawer_open">Open navigation drawer</string>

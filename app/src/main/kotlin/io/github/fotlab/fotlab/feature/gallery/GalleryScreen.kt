@@ -205,7 +205,7 @@ fun GalleryScreen(
 
                         if (children.isEmpty()) {
                             Text(
-                                text = stringResource(id = R.string.library_empty_directory),
+                                text = stringResource(id = R.string.gallery_empty_directory),
                                 modifier = Modifier.padding(16.dp),
                             )
                         }

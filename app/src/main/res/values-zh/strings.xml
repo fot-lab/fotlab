@@ -42,12 +42,12 @@
     <string name="library_delete_invalid_title">无法删除</string>
     <string name="library_delete_invalid_message">所有选中节点必须直接属于当前界面展示的目录才可删除</string>
 
-    <string name="library_empty_directory">此文件夹为空</string>
+    <string name="library_empty_directory">图库文件夹为空</string>
 
     <!-- Drawer navigation: the two top-level views the drawer switches between. -->
     <string name="library_library">图库</string>
     <string name="library_recycle_bin">回收站</string>
-    <string name="library_recycle_bin_empty">回收站为空</string>
+    <string name="library_recycle_bin_empty">图库回收站为空</string>
     <string name="library_cd_library">打开图库</string>
     <string name="library_cd_recycle_bin">打开回收站</string>
     <string name="library_restore_from_bin">从回收站恢复</string>
@@ -71,6 +71,8 @@
 
     <!-- ===== feature: gallery ===== -->
     <string name="gallery_name">画廊</string>
+    <string name="gallery_empty_directory">画廊文件夹为空</string>
+    <string name="gallery_recycle_bin_empty">画廊回收站为空</string>
 
     <!-- ===== feature: studio ===== -->
     <string name="studio_cd_drawer_open">打开导航抽屉</string>
