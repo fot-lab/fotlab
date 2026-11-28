@@ -200,15 +200,7 @@ class CameraFileRepository(
                 objectName = name,
                 totalBytes = size,
             )
-            routine.upload(storageId, parent, name, size, input) { completed ->
-                _progress.value = TransferProgress(
-                    kind = TransferKind.UPLOAD,
-                    objectName = name,
-                    completedBytes = completed,
-                    totalBytes = size,
-                )
-            }
-        }.also { handle ->
+            val handle = routine.upload(storageId, parent, name, size, input)
             _progress.value = TransferProgress(
                 kind = TransferKind.UPLOAD,
                 objectName = name,
@@ -216,6 +208,7 @@ class CameraFileRepository(
                 totalBytes = size,
                 state = TransferState.COMPLETED,
             ).copy(objectName = "$name (handle $handle)")
+            handle
         }
     }
 

@@ -56,6 +56,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.exifinterface.media.ExifInterface
 import coil3.request.ImageRequest
 import io.github.fotlab.fotlab.R
+import io.github.fotlab.fotlab.data.common.FsNodeObject
 import io.github.fotlab.fotlab.ui.ZoomableAsyncImage
 import io.github.fotlab.fotlab.ui.rememberZoomState
 import kotlinx.coroutines.Dispatchers

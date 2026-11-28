@@ -46,6 +46,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.unit.dp
 import io.github.fotlab.fotlab.R
+import io.github.fotlab.fotlab.data.common.FsNodeObject
+import io.github.fotlab.fotlab.data.common.MimeFolderDeleted
+import io.github.fotlab.fotlab.data.common.isCollection
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date

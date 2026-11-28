@@ -3,6 +3,7 @@ package io.github.fotlab.fotlab.navigation.library
 import androidx.navigation.NavGraphBuilder
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.composable
+import io.github.fotlab.fotlab.data.common.FsNodeObject
 import io.github.fotlab.fotlab.feature.library.LibraryScreen
 import io.github.fotlab.fotlab.feature.library.LibraryViewerScreen
 import io.github.fotlab.fotlab.feature.studio.StudioEngine

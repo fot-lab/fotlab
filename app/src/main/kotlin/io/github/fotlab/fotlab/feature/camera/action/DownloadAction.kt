@@ -28,7 +28,14 @@ object DownloadAction {
         progress: (Long) -> Unit = {},
     ): Long = when (ctx.path) {
         TransportPath.HTTP_IP_SONY_NEX -> executeHttp(ctx, handle, output, progress)
-        in TransportPath.values().filter { it.isPtp } -> executePtp(ctx, handle, totalBytes, output, progress)
+        TransportPath.PTP_USB_STD_ISO,
+        TransportPath.PTP_IP_STD_ISO,
+        TransportPath.PTP_USB_SONY_0X92XX,
+        TransportPath.PTP_USB_CANON_0X91XX,
+        TransportPath.PTP_IP_CANON_0X91XX,
+        TransportPath.PTP_USB_NIKON_0X90XX,
+        TransportPath.PTP_IP_NIKON_0X90XX,
+        TransportPath.PTP_USB_FUJI_0XD2XX -> executePtp(ctx, handle, totalBytes, output, progress)
     }
 
     private suspend fun executePtp(

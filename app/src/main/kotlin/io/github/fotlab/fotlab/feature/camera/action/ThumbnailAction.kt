@@ -13,7 +13,14 @@ object ThumbnailAction {
 
     suspend fun execute(ctx: CameraActionContext, handle: Long): ByteArray = when (ctx.path) {
         TransportPath.HTTP_IP_SONY_NEX -> executeHttp(ctx, handle)
-        in TransportPath.values().filter { it.isPtp } -> executePtp(ctx, handle)
+        TransportPath.PTP_USB_STD_ISO,
+        TransportPath.PTP_IP_STD_ISO,
+        TransportPath.PTP_USB_SONY_0X92XX,
+        TransportPath.PTP_USB_CANON_0X91XX,
+        TransportPath.PTP_IP_CANON_0X91XX,
+        TransportPath.PTP_USB_NIKON_0X90XX,
+        TransportPath.PTP_IP_NIKON_0X90XX,
+        TransportPath.PTP_USB_FUJI_0XD2XX -> executePtp(ctx, handle)
     }
 
     private suspend fun executePtp(ctx: CameraActionContext, handle: Long): ByteArray {

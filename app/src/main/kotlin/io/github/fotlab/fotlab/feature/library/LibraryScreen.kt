@@ -96,6 +96,9 @@ import android.app.Activity
 import android.content.Intent
 import android.provider.DocumentsContract
 import androidx.compose.ui.platform.LocalContext
+import io.github.fotlab.fotlab.data.common.FsNodeObject
+import io.github.fotlab.fotlab.data.common.MimeFolderDeleted
+import io.github.fotlab.fotlab.data.common.isCollection
 import io.github.fotlab.fotlab.media.MediaPreference
 import java.text.SimpleDateFormat
 import java.util.Date

@@ -22,7 +22,13 @@ object CreateFolderAction {
         TransportPath.PTP_USB_SONY_0X92XX -> throw UnsupportedOperationException(
             "Sony 0x92xx has no folder creation API",
         )
-        in TransportPath.values().filter { it.isPtp } -> {
+        TransportPath.PTP_USB_STD_ISO,
+        TransportPath.PTP_IP_STD_ISO,
+        TransportPath.PTP_USB_CANON_0X91XX,
+        TransportPath.PTP_IP_CANON_0X91XX,
+        TransportPath.PTP_USB_NIKON_0X90XX,
+        TransportPath.PTP_IP_NIKON_0X90XX,
+        TransportPath.PTP_USB_FUJI_0XD2XX -> {
             val session = ctx.ptpSession ?: throw java.io.IOException("No PTP session")
             val result = session.execute(
                 code = io.github.fotlab.fotlab.feature.camera.protocol.opcode.PtpStd.SEND_OBJECT,

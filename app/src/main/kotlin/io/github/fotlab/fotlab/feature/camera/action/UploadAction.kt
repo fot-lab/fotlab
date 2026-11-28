@@ -1,10 +1,6 @@
 package io.github.fotlab.fotlab.feature.camera.action
 
-import io.github.fotlab.fotlab.feature.camera.protocol.opcode.PtpCanon
-import io.github.fotlab.fotlab.feature.camera.protocol.opcode.PtpNikon
-import io.github.fotlab.fotlab.feature.camera.protocol.opcode.PtpSony
 import io.github.fotlab.fotlab.feature.camera.protocol.opcode.PtpStd
-import io.github.fotlab.fotlab.feature.camera.model.PtpResponseException
 import java.io.IOException
 import java.io.InputStream
 
@@ -32,26 +28,17 @@ object UploadAction {
         source: InputStream,
         progress: (Long) -> Unit = {},
     ): Long = when (ctx.path) {
-        TransportPath.HTTP_IP_SONY_NEX -> throw UnsupportedOperationException(
-            "Sony HTTP API does not support upload",
+        TransportPath.HTTP_IP_SONY_NEX,
+        TransportPath.PTP_USB_SONY_0X92XX -> throw UnsupportedOperationException(
+            "Sony paths do not support upload",
         )
-        TransportPath.PTP_USB_SONY_0X92XX,
         TransportPath.PTP_IP_STD_ISO,
         TransportPath.PTP_USB_STD_ISO,
         TransportPath.PTP_USB_FUJI_0XD2XX,
         TransportPath.PTP_USB_CANON_0X91XX,
         TransportPath.PTP_IP_CANON_0X91XX,
         TransportPath.PTP_USB_NIKON_0X90XX,
-        TransportPath.PTP_IP_NIKON_0X90XX -> {
-            // Canon's CREATE_OBJECT_EX / SEND_OBJECT_DATA shape is only valid when
-            // the vendor segment is actually active (ptpStdOnly=false). When the
-            // effectiveSegment drops back to ISO we route through executeStandard.
-            if (ctx.segment == Segment.CANON_0X91XX) {
-                executeCanon(ctx, storageId, parent, name, sizeBytes, source, progress)
-            } else {
-                executeStandard(ctx, storageId, parent, name, sizeBytes, source, progress)
-            }
-        }
+        TransportPath.PTP_IP_NIKON_0X90XX -> executeStandard(ctx, storageId, parent, name, sizeBytes, source, progress)
     }
 
     private suspend fun executeStandard(
@@ -77,38 +64,5 @@ object UploadAction {
         )
         progress(bytes.size.toLong())
         return result.phase2ObjectHandle ?: -1L
-    }
-
-    private suspend fun executeCanon(
-        ctx: CameraActionContext,
-        storageId: Long,
-        parent: Long,
-        name: String,
-        sizeBytes: Long,
-        source: InputStream,
-        progress: (Long) -> Unit,
-    ): Long {
-        val session = ctx.ptpSession ?: throw IOException("No PTP session")
-        val bytes = source.readBytes()
-        val nameBytes = (name + '\u0000').toByteArray(java.nio.charset.StandardCharsets.UTF_16LE)
-        val params = intArrayOf(
-            0, // handle unknown
-            storageId.toInt(), parent.toInt(),
-            nameBytes.size, sizeBytes.toInt(),
-        )
-        try {
-            session.execute(
-                code = PtpCanon.CREATE_OBJECT_EX,
-                params = params + nameBytes.toIntArray(),
-                dataOut = null, expectDataIn = true,
-            )
-        } catch (_: PtpResponseException) { /* no-op — CreateObjectEx may not exist */ }
-        val handle = session.execute(
-            code = PtpStd.SEND_OBJECT,
-            params = intArrayOf(storageId.toInt(), parent.toInt(), io.github.fotlab.fotlab.feature.camera.model.PtpFormats.JPEG.toInt()),
-            dataOut = bytes, expectDataIn = false,
-        ).phase2ObjectHandle ?: -1L
-        progress(bytes.size.toLong())
-        return handle
     }
 }

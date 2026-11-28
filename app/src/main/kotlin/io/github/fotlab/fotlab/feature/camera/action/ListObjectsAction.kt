@@ -44,7 +44,13 @@ object ListObjectsAction {
     ): List<PtpObject> = when (ctx.path) {
         TransportPath.HTTP_IP_SONY_NEX -> executeHttp(ctx, storageId, filter)
         TransportPath.PTP_USB_SONY_0X92XX -> listObjectsSonyContentList(ctx, storageId, filter)
-        in TransportPath.values().filter { it.isPtp } -> executePtpStandard(ctx, storageId, parent, filter, batchSize)
+        TransportPath.PTP_USB_STD_ISO,
+        TransportPath.PTP_IP_STD_ISO,
+        TransportPath.PTP_USB_CANON_0X91XX,
+        TransportPath.PTP_IP_CANON_0X91XX,
+        TransportPath.PTP_USB_NIKON_0X90XX,
+        TransportPath.PTP_IP_NIKON_0X90XX,
+        TransportPath.PTP_USB_FUJI_0XD2XX -> executePtpStandard(ctx, storageId, parent, filter, batchSize)
     }
 
     // ── Standard PTP path (with vendor fallback from Opcodes table) ─────

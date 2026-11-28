@@ -9,7 +9,14 @@ data class PtpTransactionResult(
     val responseCode: Int,
     val params: List<Long> = emptyList(),
     val data: ByteArray? = null,
-)
+) {
+    /**
+     * Handle returned by phase-2 operations (SendObject, SendObjectData, CreateObject).
+     * PTP puts the new object handle in params[0] of the response phase; derived here
+     * so callers don't have to remember the index.
+     */
+    val phase2ObjectHandle: Long? get() = params.firstOrNull()?.takeIf { it != 0L }
+}
 
 /**
  * Common bearer contract. Implementations own framing and link lifetime; they

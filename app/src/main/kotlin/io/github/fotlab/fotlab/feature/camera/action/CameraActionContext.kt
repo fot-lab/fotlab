@@ -135,19 +135,19 @@ object PtpExecutor {
             val notLast = index < candidates.size - 1
             val result = withBusyRetryCancellable(session, code, params, dataOut, expectDataIn)
             when (result) {
-                is RetryOk -> return result.result
-                is RetryTransientBusy -> {
+                is RetryResult.Ok -> return result.result
+                is RetryResult.TransientBusy -> {
                     if (index > 0) break
                     lastError = result.lastError
                 }
-                is RetryNotSupported -> {
+                is RetryResult.NotSupported -> {
                     if (notLast) { /* fall through */ }
                     else lastError = result.lastError
                 }
             }
         }
         throw lastError ?: PtpResponseException(
-            op = vendor ?: standard ?: -1,
+            operation = vendor ?: standard ?: -1,
             responseCode = PtpStd.Response.GENERAL_ERROR,
         )
     }
@@ -235,7 +235,7 @@ object PtpExecutor {
         var lastError: PtpResponseException? = null
         while (true) {
             try {
-                return RetryOk(session.execute(code, params, dataOut, expectDataIn))
+                return RetryResult.Ok(session.execute(code, params, dataOut, expectDataIn))
             } catch (error: PtpResponseException) {
                 lastError = error
                 val transient = error.responseCode == PtpStd.Response.DEVICE_BUSY ||
@@ -243,10 +243,10 @@ object PtpExecutor {
                 val unsupported = error.responseCode == PtpStd.Response.OPERATION_NOT_SUPPORTED ||
                     error.responseCode == PtpStd.Response.PARAMETER_NOT_SUPPORTED
                 when {
-                    unsupported -> return RetryNotSupported(error)
+                    unsupported -> return RetryResult.NotSupported(error)
                     transient -> {
                         busyCount++
-                        if (busyCount >= MAX_BUSY_RETRIES) return RetryTransientBusy(error)
+                        if (busyCount >= MAX_BUSY_RETRIES) return RetryResult.TransientBusy(error)
                         delay(BUSY_RETRY_BASE_MS * busyCount)
                     }
                     else -> throw error
