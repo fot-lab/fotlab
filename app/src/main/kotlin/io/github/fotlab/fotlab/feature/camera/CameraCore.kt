@@ -14,6 +14,8 @@ import io.github.fotlab.fotlab.feature.camera.model.PTP_PARENT_ROOT
 import io.github.fotlab.fotlab.feature.camera.model.PtpMediaFilter
 import io.github.fotlab.fotlab.feature.camera.model.PtpObject
 import io.github.fotlab.fotlab.feature.camera.action.CameraRoutine
+import io.github.fotlab.fotlab.feature.camera.action.TransportPath
+import io.github.fotlab.fotlab.feature.camera.discovery.TransportKind
 import io.github.fotlab.fotlab.feature.camera.profile.CameraProfile
 import io.github.fotlab.fotlab.feature.camera.profile.CameraProfileResolver
 import io.github.fotlab.fotlab.feature.camera.protocol.PtpDeviceIdentity
@@ -360,8 +362,11 @@ object CameraCore {
                 preferAlternateGuid = preferAlternateGuid,
             )
             when (device) {
-                is CameraDevice.Ip if device.transportKind == TransportKind.HTTP_SONY ->
-                    connectHttpSony(device, profile, context)
+                is CameraDevice.Ip ->
+                    if (device.transportKind == TransportKind.HTTP_SONY)
+                        connectHttpSony(device, profile, context)
+                    else
+                        connectPtp(device, engine, profile, context)
                 else ->
                     connectPtp(device, engine, profile, context)
             }
