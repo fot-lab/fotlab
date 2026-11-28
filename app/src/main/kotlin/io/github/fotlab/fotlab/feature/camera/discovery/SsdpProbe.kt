@@ -63,22 +63,31 @@ object SsdpProbe {
                 val actionListUrl = extractActionListUrl(headers)
                 val friendlyName = description["friendlyName"] ?: ""
                 val modelName = description["modelName"]
-                // Prefer the authoritative manufacturer from the UPnP description XML.
-                // When it is missing (rare), fall back to keyword matching over the
-                // name fields — a probe may have announced the brand in its hostname
-                // or friendlyName even when it did not fill the manufacturer element.
                 val manufacturer = description["manufacturer"]?.trim()?.ifBlank { null }
                     ?: BrandMatcher.matchFromNames(friendlyName, modelName, host)
-                val device = DiscoveredIpDevice(
+
+                // HTTP_SONY is an authoritative claim: the camera published its
+                // ScalarWebAPI base URL in the SSDP response headers. Every host
+                // that answered with DigitalImaging earlier already lives in `found`;
+                // we merge the two claims — HTTP wins because the camera explicitly
+                // told us how to reach its HTTP API, whereas DigitalImaging was just
+                // a UPnP service announcement that may or may not actually speak PTP.
+                val existing = found[host]
+                val transportKind = if (actionListUrl != null) {
+                    TransportKind.HTTP_SONY
+                } else {
+                    existing?.transportKind ?: TransportKind.PTP
+                }
+                val merged = DiscoveredIpDevice(
                     host = host,
-                    name = friendlyName,
-                    manufacturer = manufacturer,
-                    model = modelName,
+                    name = friendlyName.ifBlank { existing?.name.orEmpty() },
+                    manufacturer = manufacturer ?: existing?.manufacturer,
+                    model = modelName ?: existing?.model,
                     source = "ssdp",
-                    actionListUrl = actionListUrl,
-                    transportKind = if (actionListUrl != null) TransportKind.HTTP_SONY else TransportKind.PTP,
+                    actionListUrl = actionListUrl ?: existing?.actionListUrl,
+                    transportKind = transportKind,
                 )
-                found.putIfAbsent(host, device)
+                found[host] = merged
             }
         } finally {
             socket.close()

@@ -45,19 +45,22 @@ class IpCameraDiscovery(private val context: Context) {
             if (existing == null) {
                 byHost[device.host] = device
             } else {
-                // A host that answers PTP/IP keeps the PTP transport, even when the
-                // SSDP answer also carries Sony's `ActionList_URL`. The HTTP API is
-                // not wired into the session yet (`CameraCore.transportFor`), so
-                // preferring it would make a camera that works over PTP unconnectable.
-                // The HTTP endpoint is still recorded, for the day it is wired up.
-                val speaksPtp =
-                    device.transportKind == TransportKind.PTP ||
-                        existing.transportKind == TransportKind.PTP
+                // TransportKind resolution:
+                // - HTTP_SONY wins unconditionally when any source published a
+                //   ScalarWebAPI ActionList_URL — that is the camera telling us
+                //   its HTTP API endpoint, which is an authoritative claim.
+                // - PTP is the fallback when no HTTP endpoint is known.
+                //
+                // We deliberately do NOT prefer PTP over HTTP: a host may answer
+                // DigitalImaging in SSDP (an UPnP service type) without actually
+                // speaking PTP/IP over TCP; the ActionList_URL, by contrast,
+                // names a concrete HTTP endpoint that exists.
+                val mergedActionListUrl = existing.actionListUrl ?: device.actionListUrl
                 val transportKind = when {
-                    speaksPtp -> TransportKind.PTP
+                    mergedActionListUrl != null -> TransportKind.HTTP_SONY
                     device.transportKind == TransportKind.HTTP_SONY ||
                         existing.transportKind == TransportKind.HTTP_SONY -> TransportKind.HTTP_SONY
-                    else -> existing.transportKind
+                    else -> TransportKind.PTP
                 }
                 byHost[device.host] = existing.copy(
                     name = existing.name.ifBlank { device.name },
@@ -65,7 +68,7 @@ class IpCameraDiscovery(private val context: Context) {
                     model = existing.model ?: device.model,
                     port = if (existing.port != 15740) existing.port else device.port,
                     source = "${existing.source}+${device.source}",
-                    actionListUrl = if (existing.actionListUrl != null) existing.actionListUrl else device.actionListUrl,
+                    actionListUrl = mergedActionListUrl,
                     transportKind = transportKind,
                 )
             }
