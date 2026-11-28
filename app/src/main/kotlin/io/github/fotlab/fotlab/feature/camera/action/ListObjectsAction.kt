@@ -196,7 +196,7 @@ object ListObjectsAction {
                     val item = items.getJSONObject(i)
                     val handle = SonyHttpContentAdapter.makeSyntheticHandle(storageId, start + i)
                     ctx.objectUrlCache[handle] = SonyHttpContentAdapter.extractUrls(item)
-                    val obj = SonyHttpContentAdapter.toPtpObject(item, storageId, handle)
+                    val obj = SonyHttpContentAdapter.toPtpObject(item, storageId, handle.toInt())
                     val accepted = filter == PtpMediaFilter.ALL || filter.accepts(obj.format)
                     if (accepted) result += obj
                 } catch (_: Exception) { /* skip malformed */ }
