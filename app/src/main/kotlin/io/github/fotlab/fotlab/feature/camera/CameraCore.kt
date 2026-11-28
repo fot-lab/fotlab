@@ -370,6 +370,11 @@ object CameraCore {
             reconnectJob?.cancel()
             reconnectJob = null
             startKeepalive(device)
+            // Pin the process at IMPORTANCE_SERVICE so the keepalive coroutine and
+            // the event reader keep running while the user is away from the screen
+            // (system folder picker, another app, launcher). Without this the link
+            // dies silently before CameraTransferService even starts.
+            appContext?.let { ctx -> CameraConnectionDaemon.start(ctx, device.displayName) }
             _state.value = CameraConnectionState.Connected(device, profile, identity)
             // The link is up: whatever recovery was running is over.
             _retryState.value = CameraRetryState.Idle
@@ -407,6 +412,8 @@ object CameraCore {
         active = null
         current.eventJob.cancel()
         withContext(Dispatchers.IO) { runCatching { current.session.close() } }
+        // Drop the foreground-service pin on an explicit disconnect too.
+        appContext?.let { ctx -> CameraConnectionDaemon.stop(ctx) }
         _state.value = CameraConnectionState.Idle
         if (userInitiated) {
             _retryState.value = CameraRetryState.Idle
@@ -609,6 +616,9 @@ object CameraCore {
         keepaliveJob?.cancel()
         keepaliveJob = null
         withContext(Dispatchers.IO) { runCatching { connection.session.close() } }
+        // The daemon stays alive across the subsequent reconnect/backoff cycle so the
+        // retry delays are not throttled; it is dropped only when the recovery exhausts
+        // (see [startReconnect]) or the user disconnects explicitly (see [disconnect]).
         _state.value = CameraConnectionState.Failed(
             connection.device,
             error.message ?: error.toString(),
@@ -641,6 +651,7 @@ object CameraCore {
                 } else {
                     // Nothing can recover a detached camera, so the queue's wait ends now.
                     _retryState.value = CameraRetryState.Exhausted(device)
+                    appContext?.let { ctx -> CameraConnectionDaemon.stop(ctx) }
                 }
             }
         } else if (_state.value is CameraConnectionState.Connecting) {
@@ -740,6 +751,8 @@ object CameraCore {
             // The recovery is over: the rows that never ran are stamped `failed`, and the
             // user decides whether to put them back.
             _retryState.value = CameraRetryState.Exhausted(device)
+            // Nothing left to protect — drop the foreground-service pin.
+            appContext?.let { ctx -> CameraConnectionDaemon.stop(ctx) }
         }
     }
 

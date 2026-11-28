@@ -254,6 +254,11 @@
     <string name="library_viewer_label_duration">Duration</string>
 
     <!-- ===== feature: camera ===== -->
+    <!-- connection-daemon foreground-service channel -->
+    <string name="camera_connection_channel_name">Camera connection</string>
+    <string name="camera_connection_title">Camera connected</string>
+    <string name="camera_connection_text">Keeping connection to %1$s alive</string>
+    <string name="camera_connection_default">camera</string>
     <!-- transfer: labels and states -->
     <string name="camera_transfer_channel_name">Camera transfer</string>
     <string name="camera_transfer_preparing">Preparing transfer</string>

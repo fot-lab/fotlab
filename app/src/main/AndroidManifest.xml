@@ -27,6 +27,7 @@
     <!-- Background transfers. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
@@ -50,6 +51,14 @@
             </intent-filter>
         </activity>
 
+        <service
+            android:name=".feature.camera.CameraConnectionDaemon"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Guard the full PTP/IP connection lifecycle (keepalive, reconnect, backoff) while the app is backgrounded" />
+        </service>
         <service
             android:name=".feature.camera.CameraTransferService"
             android:exported="false"

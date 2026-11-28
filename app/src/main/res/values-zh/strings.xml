@@ -224,6 +224,11 @@
     <string name="library_viewer_label_duration">时长</string>
 
     <!-- ===== feature: camera ===== -->
+    <!-- connection-daemon foreground-service channel -->
+    <string name="camera_connection_channel_name">相机连接</string>
+    <string name="camera_connection_title">相机已连接</string>
+    <string name="camera_connection_text">正在保持与 %1$s 的连接</string>
+    <string name="camera_connection_default">相机</string>
     <!-- transfer: labels and states -->
     <string name="camera_transfer_channel_name">相机传输</string>
     <string name="camera_transfer_preparing">正在准备传输</string>
