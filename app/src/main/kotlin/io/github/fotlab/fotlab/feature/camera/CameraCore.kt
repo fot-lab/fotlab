@@ -360,7 +360,7 @@ object CameraCore {
                 preferAlternateGuid = preferAlternateGuid,
             )
             when (device) {
-                is CameraDevice.Ip when device.transportKind == TransportKind.HTTP_SONY ->
+                is CameraDevice.Ip if device.transportKind == TransportKind.HTTP_SONY ->
                     connectHttpSony(device, profile, context)
                 else ->
                     connectPtp(device, engine, profile, context)
