@@ -1,4 +1,4 @@
-package io.github.fotlab.fotlab.feature.library
+package io.github.fotlab.fotlab.data.common
 
 import androidx.room.Dao
 import androidx.room.Insert
@@ -13,8 +13,8 @@ interface FsNodeRelationDao {
     /**
      * IGNORE keeps the "same edge cannot be inserted twice" guarantee of the unique
      * `(child, parent)` index usable from code: re-linking an existing child/parent pair
-     * is a no-op instead of an abort (`FOTLAB-DATABS-000002` R3). Every stored edge names
-     * a real parent node — the root is the node row `LibraryRoot.ID`, not a `NULL`.
+     * is a no-op instead of an abort. Every stored edge names a real parent node — the root
+     * is the node row with the `FsNodeRepository`'s root id, not a `NULL`.
      */
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(relation: FsNodeRelation)
@@ -37,7 +37,7 @@ interface FsNodeRelationDao {
 
     /**
      * Children of a parent — the top level is the root node, queried by its own id
-     * ([LibraryRoot.ID]) like any other directory, so there is no separate root listing.
+     * like any other directory, so there is no separate root listing.
      */
     @Query(
         "SELECT child.* FROM fs_node_object AS child " +
@@ -60,8 +60,6 @@ interface FsNodeRelationDao {
 
     /**
      * The live edge between [childId] and its parent [parentId], or null when there is none.
-     * The parent is always a real node id ([LibraryRoot.ID] at the top level), so the
-     * predicate is a plain equality.
      */
     @Query(
         "SELECT * FROM fs_node_relation " +
@@ -71,9 +69,7 @@ interface FsNodeRelationDao {
     suspend fun getRelation(childId: Long, parentId: Long): FsNodeRelation?
 
     /**
-     * Unlink a child from a parent by soft-deleting the edge (`FOTLAB-DATABS-000002` R10,
-     * revised): the row stays but its `time_deleted` is stamped, so the node id space is
-     * never touched.
+     * Unlink a child from a parent by soft-deleting the edge.
      */
     @Query(
         "UPDATE fs_node_relation SET time_deleted = :timeDeleted " +
@@ -101,7 +97,7 @@ interface FsNodeRelationDao {
     @Query("SELECT * FROM fs_node_relation WHERE fs_node_id_parent = :parentId AND time_deleted IS NULL")
     suspend fun relationsWithParent(parentId: Long): List<FsNodeRelation>
 
-    /** How many live parents a node still has; 0 means it became an orphan (R12). */
+    /** How many live parents a node still has; 0 means it became an orphan. */
     @Query("SELECT COUNT(*) FROM fs_node_relation WHERE fs_node_id_child = :childId AND time_deleted IS NULL")
     suspend fun activeParentCount(childId: Long): Int
 
@@ -112,14 +108,12 @@ interface FsNodeRelationDao {
      * orphans:
      *
      *  - the node has no parent edge at all;
-     *  - its only parent edge is a `NULL`-parent edge (the shape the old implicit-root scheme
-     *    wrote, kept sweepable rather than trusted);
-     *  - its parent edge is live but the parent node is soft-deleted (a dead parent leaves a
-     *    dead relationship).
+     *  - its only parent edge is a `NULL`-parent edge;
+     *  - its parent edge is live but the parent node is soft-deleted.
      *
-     * The root kind is excluded by its MIME (`LibraryRoot.MIME`): the root is the one node that
-     * legitimately has no parent, so it is protected by what it *is*, never by being swept for
-     * what it lacks. A node is only ever reaped for having lost every effective parent link.
+     * The root kind is excluded by its MIME (`rootMime` parameter): the root is the one node
+     * that legitimately has no parent, so it is protected by what it *is*, never by being
+     * swept for what it lacks.
      */
     @Query(
         "SELECT fs_node_id FROM fs_node_object " +
@@ -139,10 +133,9 @@ interface FsNodeRelationDao {
      *
      * The relation table is many-to-many, so this is deliberately **per relation, never per
      * child**: a child that also sits under a live parent keeps that edge, and only the dead
-     * one is stamped. The child's own verdict is a separate question, answered by
-     * [orphanNodeIds] — a child is only an orphan once *every* parent link is gone.
+     * one is stamped.
      *
-     * Swept like any other removal: a `time_deleted` stamp, never a physical drop (R10).
+     * Swept like any other removal: a `time_deleted` stamp, never a physical drop.
      */
     @Query(
         "UPDATE fs_node_relation SET time_deleted = :timeDeleted " +
@@ -158,8 +151,7 @@ interface FsNodeRelationDao {
 
     /**
      * Restore a whole delete batch's parent/child links: clear the soft-delete stamp on every edge
-     * stamped with [time] so the batch's tree is reconnected (`FOTLAB-DATABS-000002` R12, recycle
-     * restore — batch-level).
+     * stamped with [time] so the batch's tree is reconnected (batch-level restore).
      */
     @Query("UPDATE fs_node_relation SET time_deleted = NULL WHERE time_deleted = :time")
     suspend fun restoreRelationsByBatch(time: Long)

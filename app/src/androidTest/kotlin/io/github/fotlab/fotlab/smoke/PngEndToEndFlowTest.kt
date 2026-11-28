@@ -12,7 +12,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import coil3.imageLoader
 import coil3.request.ImageRequest
 import coil3.request.SuccessResult
-import io.github.fotlab.fotlab.feature.library.FsNodeObject
+import io.github.fotlab.fotlab.data.common.FsNodeObject
 import io.github.fotlab.fotlab.feature.library.LibraryCore
 import io.github.fotlab.fotlab.feature.library.LibraryRoot
 import io.github.fotlab.fotlab.feature.studio.StudioEngine

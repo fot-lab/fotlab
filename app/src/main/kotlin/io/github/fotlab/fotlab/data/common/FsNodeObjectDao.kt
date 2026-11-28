@@ -1,4 +1,4 @@
-package io.github.fotlab.fotlab.feature.library
+package io.github.fotlab.fotlab.data.common
 
 import androidx.room.Dao
 import androidx.room.Insert
@@ -47,14 +47,12 @@ interface FsNodeObjectDao {
     @Query("UPDATE fs_node_object SET time_deleted = NULL, name_display = :nameDisplay, type_mime = :typeMime WHERE fs_node_id = :id")
     suspend fun revive(id: Long, nameDisplay: String, typeMime: String)
 
-    /** Rename a node in place (R-name only); selection rename path (`FOTLAB-UIXDES-000004`). */
+    /** Rename a node in place (R-name only); selection rename path. */
     @Query("UPDATE fs_node_object SET name_display = :name WHERE fs_node_id = :id")
     suspend fun rename(id: Long, name: String)
 
     /**
-     * Every live user collection, ordered by name. The root is excluded by its own MIME kind
-     * (`LibraryRoot.MIME`): it is the tree's top level, not a folder sitting inside it, and it
-     * is not something the user created or can delete.
+     * Every live user collection, ordered by name. The root is excluded by its own MIME kind.
      */
     @Query(
         "SELECT * FROM fs_node_object WHERE type_mime = 'application/folder' " +
@@ -63,9 +61,7 @@ interface FsNodeObjectDao {
     fun observeCollections(): Flow<List<FsNodeObject>>
 
     /**
-     * All live file-entry nodes — what the refresh reconcile treats as a real file. Both
-     * non-file kinds are excluded by their MIME: a user collection and the root, which carries
-     * its own kind (`LibraryRoot.MIME`) precisely so it is never mistaken for a file.
+     * All live file-entry nodes — what the refresh reconcile treats as a real file.
      */
     @Query(
         "SELECT * FROM fs_node_object WHERE time_deleted IS NULL " +
@@ -75,11 +71,6 @@ interface FsNodeObjectDao {
 
     /**
      * The ids of [ids] that are **not** the root node kind.
-     *
-     * The delete gates ask this instead of comparing against the root's id: the root is
-     * whatever carries [LibraryRoot.MIME], so the protection follows the node's kind rather
-     * than a hard-coded primary key, and a second node of that kind would be covered too.
-     * Ids that do not exist are simply absent from the result.
      */
     @Query(
         "SELECT fs_node_id FROM fs_node_object " +
@@ -106,17 +97,14 @@ interface FsNodeObjectDao {
     suspend fun deletedNodeIdsAt(time: Long): List<Long>
 
     /**
-     * Soft-delete: stamp `time_deleted` instead of dropping the row (`FOTLAB-DATABS-000002`
-     * R10, revised). The id keeps its slot in the live id space; nothing is archived into a
-     * separate table, so live and removed ids never collide.
+     * Soft-delete: stamp `time_deleted` instead of dropping the row.
      */
     @Query("UPDATE fs_node_object SET time_deleted = :timeDeleted WHERE fs_node_id = :id")
     suspend fun markDeleted(id: Long, timeDeleted: Long)
 
     /**
      * Restore a whole delete batch from the recycle bin: clear the soft-delete stamp on every node
-     * stamped with [time] so the entire batch becomes live again (`FOTLAB-DATABS-000002` R12, recycle
-     * restore — batch-level). The ids keep their slots in the id space.
+     * stamped with [time] so the entire batch becomes live again (batch-level restore).
      */
     @Query("UPDATE fs_node_object SET time_deleted = NULL WHERE time_deleted = :time")
     suspend fun restoreNodesByBatch(time: Long)

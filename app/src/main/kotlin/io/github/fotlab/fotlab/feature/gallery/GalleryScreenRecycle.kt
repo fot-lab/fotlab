@@ -46,9 +46,10 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.unit.dp
 import io.github.fotlab.fotlab.R
-import io.github.fotlab.fotlab.feature.library.FsNodeObject
+import io.github.fotlab.fotlab.data.common.FsNodeObject
+import io.github.fotlab.fotlab.data.common.MimeFolderDeleted
+import io.github.fotlab.fotlab.data.common.isCollection
 import io.github.fotlab.fotlab.feature.library.LibraryScreenFunBarHeight
-import io.github.fotlab.fotlab.feature.library.MimeFolderDeleted
 import io.github.fotlab.fotlab.feature.library.NodeList
 import io.github.fotlab.fotlab.feature.library.SweepSyncIcon
 import io.github.fotlab.fotlab.feature.library.isMedia
@@ -483,7 +484,7 @@ private fun GalleryRecycleBatch(
                 onToggleSelect(node)
             } else {
                 when {
-                    node.isGalleryCollection() -> onOpenNode(node)
+                    node.isCollection() -> onOpenNode(node)
                     isMedia(node.typeMime) -> {
                         val media = currentChildren.filter { isMedia(it.typeMime) }
                         val start = media.indexOfFirst { it.fsNodeId == node.fsNodeId }.coerceAtLeast(0)

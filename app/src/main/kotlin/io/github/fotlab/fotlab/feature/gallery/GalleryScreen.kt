@@ -50,11 +50,12 @@ import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.fotlab.fotlab.R
-import io.github.fotlab.fotlab.feature.library.FsNodeObject
+import io.github.fotlab.fotlab.data.common.FsNodeObject
+import io.github.fotlab.fotlab.data.common.MimeFolderDeleted
+import io.github.fotlab.fotlab.data.common.isCollection
 import io.github.fotlab.fotlab.feature.library.LibraryRenameDialog
 import io.github.fotlab.fotlab.feature.library.LibraryScreenFunBarHeight
 import io.github.fotlab.fotlab.feature.library.LibraryThumbnail
-import io.github.fotlab.fotlab.feature.library.MimeFolderDeleted
 import io.github.fotlab.fotlab.feature.library.NodeCell
 import io.github.fotlab.fotlab.feature.library.NodeList
 import io.github.fotlab.fotlab.feature.library.SweepSyncIcon
@@ -169,7 +170,7 @@ fun GalleryScreen(
                             onNodeClick = { node ->
                                 node.fsNodeId?.let { id ->
                                     when {
-                                        node.isGalleryCollection() -> node.fsNodeId?.let { currentDirectoryId = it }
+                                        node.isCollection() -> node.fsNodeId?.let { currentDirectoryId = it }
                                         isMedia(node.typeMime) -> {
                                             val media = children.filter { isMedia(it.typeMime) }
                                             val start = media.indexOfFirst { it.fsNodeId == id }.coerceAtLeast(0)

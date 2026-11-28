@@ -1,15 +1,20 @@
 package io.github.fotlab.fotlab.feature.library
 
 import androidx.room.Database
-import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import io.github.fotlab.fotlab.data.common.FsNodeDatabase
+import io.github.fotlab.fotlab.data.common.FsNodeObject
+import io.github.fotlab.fotlab.data.common.FsNodeRelation
 
 /**
  * The library feature's own Room database (`FOTLAB-DATABS-000001` R3), realising the
- * `fs_node` schema of `FOTLAB-DATABS-000002` — the two live tables, now carrying a
+ * shared `fs_node` schema of `FOTLAB-DATABS-000002`. The two tables now carry a
  * `time_deleted` column so deletion is a soft stamp instead of an archive into separate
  * recycle tables (R10, revised).
+ *
+ * Inherits [FsNodeDatabase] so the shared [io.github.fotlab.fotlab.data.common.FsNodeRepository]
+ * can reach the DAOs without knowing which feature owns the database file.
  *
  * `exportSchema = false`: the schema JSON is a build artifact and is not committed
  * (`FOTLAB-DATABS-000001` R5). Migration safety comes from Room's runtime validation
@@ -23,9 +28,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
     version = 3,
     exportSchema = false,
 )
-abstract class LibraryDatabase : RoomDatabase() {
-    abstract fun nodeObjectDao(): FsNodeObjectDao
-    abstract fun nodeRelationDao(): FsNodeRelationDao
+abstract class LibraryDatabase : FsNodeDatabase() {
 
     companion object {
 

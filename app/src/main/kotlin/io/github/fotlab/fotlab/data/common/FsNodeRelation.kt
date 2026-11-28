@@ -1,4 +1,4 @@
-package io.github.fotlab.fotlab.feature.library
+package io.github.fotlab.fotlab.data.common
 
 import androidx.room.ColumnInfo
 import androidx.room.Entity
@@ -12,7 +12,7 @@ import androidx.room.PrimaryKey
  * that references it (R3/R8).
  *
  * The parent is always a real node id: the top level of the tree is the root node
- * [LibraryRoot.ID], a normal row like any other, so a stored edge never needs a
+ * [FsNodeRepository]'s root, a normal row like any other, so a stored edge never needs a
  * "no parent" marker. The root is the single node that has no parent edge at all.
  *
  * Room forbids a nullable column in a `@PrimaryKey`, so instead of a composite

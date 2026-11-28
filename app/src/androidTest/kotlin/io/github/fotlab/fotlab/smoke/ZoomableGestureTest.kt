@@ -28,7 +28,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.fotlab.fotlab.MainActivity
 import io.github.fotlab.fotlab.R
-import io.github.fotlab.fotlab.feature.library.FsNodeObject
+import io.github.fotlab.fotlab.data.common.FsNodeObject
 import io.github.fotlab.fotlab.feature.library.LibraryCore
 import io.github.fotlab.fotlab.feature.library.LibraryRoot
 import io.github.fotlab.fotlab.feature.library.LibraryScreen

@@ -5,6 +5,12 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.room.Room
+import io.github.fotlab.fotlab.data.common.FsNodeObject
+import io.github.fotlab.fotlab.data.common.FsNodeRelation
+import io.github.fotlab.fotlab.data.common.FsNodeRepository
+import io.github.fotlab.fotlab.data.common.MimeCollection
+import io.github.fotlab.fotlab.data.common.MimeFolderDeleted
+import io.github.fotlab.fotlab.data.common.RootConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -16,17 +22,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 
-/** MIME value that marks a collection (`FOTLAB-DATABS-000002` R4). */
-const val MimeCollection = "application/folder"
-
-/** MIME for the virtual per-batch folder shown at the recycle root; presentation only, not an fs node. */
-const val MimeFolderDeleted = "application/folder_deleted"
-
 /** Fallback MIME when the platform cannot tell us the type of a picked file. */
 private const val MimeUnknown = "application/octet-stream"
-
-/** A collection is a node with the folder MIME; anything else is a file entry. */
-fun FsNodeObject.isCollection(): Boolean = typeMime == MimeCollection
 
 /**
  * The library's root node (`FOTLAB-DATABS-000002` R5, revised).
@@ -34,11 +31,15 @@ fun FsNodeObject.isCollection(): Boolean = typeMime == MimeCollection
  * The root is an ordinary row in `fs_node_object`, created when the database is first
  * initialised, with the fixed id [ID] — not a derived "top level" and not a `NULL` parent.
  * Every other node reaches it through a normal relation edge whose parent is this id, so the
- * whole tree is one uniform structure: the top level is simply [childrenOf] of this node, and
+ * whole tree is one uniform structure: the top level is simply `childrenOf` of this node, and
  * the root can be a parent like any other collection.
  *
  * The root is the one node with **no** parent edge at all — nothing sits above it. That is
  * the only meaning a null parent ever carries; it is never a marker for "top level".
+ *
+ * [config] is passed into the shared [FsNodeRepository] so it can bootstrap the root row,
+ * exclude root-kind nodes from deletes, and otherwise behave as if written specifically for
+ * this feature.
  */
 object LibraryRoot {
     /** The root's fixed primary key. */
@@ -48,22 +49,26 @@ object LibraryRoot {
     const val NAME: String = "Library"
 
     /**
-     * The root's own node kind. Distinct from [MimeCollection] on purpose: a user folder is
+     * The root's own node kind. Distinct from `MIME_COLLECTION` on purpose: a user folder is
      * something the user created and can delete, while the root is the anchor of the tree —
      * it is what every other node hangs from, and it is never an item in any listing.
      */
     const val MIME: String = "application/folder-root"
+
+    /** Package the three constants the shared repository needs to operate on this tree. */
+    val config: RootConfig = RootConfig(ID, NAME, MIME)
 }
 
 /**
  * Lower layer of the library feature (`FOTLAB-STRUCT-000001`).
  *
  * Builds and owns the library's Room database (the two-table `fs_node` schema of
- * `FOTLAB-DATABS-000002`) and exposes it through [LibraryRepository]. This object also
- * owns the single [ListSelectionOfLibrary] instance, which is therefore process-scoped
- * (`FOTLAB-UIXDES-000004` R3), and the current [LibraryLayoutMode], a process-scoped observable
- * that is persisted to a `DataStore` preference (`FOTLAB-UIXDES-000004` R9). The UI
- * (`LibraryScreen`) depends on this class; this class never depends on `ui` or `navigation` (R3).
+ * `FOTLAB-DATABS-000002`) and exposes it through the shared [FsNodeRepository] with
+ * [LibraryRoot.config]. This object also owns the single [ListSelectionOfLibrary] instance,
+ * which is therefore process-scoped (`FOTLAB-UIXDES-000004` R3), and the current
+ * [LibraryLayoutMode], a process-scoped observable that is persisted to a `DataStore`
+ * preference (`FOTLAB-UIXDES-000004` R9). The UI (`LibraryScreen`) depends on this class;
+ * this class never depends on `ui` or `navigation` (R3).
  */
 object LibraryCore {
 
@@ -118,7 +123,7 @@ object LibraryCore {
     private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private lateinit var layoutPreference: LibraryLayoutPreference
 
-    private var repository: LibraryRepository? = null
+    private var repository: FsNodeRepository? = null
     private lateinit var applicationContext: Context
 
     /** Build the library database and the layout preference. Call once from the application context. */
@@ -132,7 +137,7 @@ object LibraryCore {
         )
             .addMigrations(LibraryDatabase.MIGRATION_1_2, LibraryDatabase.MIGRATION_2_3)
             .build()
-        repository = LibraryRepository(database)
+        repository = FsNodeRepository(database, LibraryRoot.config)
         layoutPreference = LibraryLayoutPreference(applicationContext)
         // The root node must exist before anything links under it. Idempotent, so a library
         // that already has one (every start after the first) pays a single ignored insert.
@@ -141,7 +146,7 @@ object LibraryCore {
         layoutModeState.value = runBlocking(Dispatchers.IO) { layoutPreference.mode.first() }
     }
 
-    private fun repo(): LibraryRepository =
+    private fun repo(): FsNodeRepository =
         repository ?: error("LibraryCore.prepare(context) must be called before use")
 
     // --- Tree queries, delegated to the repository ---
@@ -246,15 +251,16 @@ object LibraryCore {
      * under its own batch timestamp, since it belongs to no deleted node's subtree walk.
      */
     suspend fun refresh() {
-        val missing = repo().fileEntryNodes().filter { node ->
+        val repo = repo()
+        val missing = repo.fileEntryNodes().filter { node ->
             node.uriStorage != null && !uriExists(node.uriStorage)
         }.mapNotNull { it.fsNodeId }
-        val orphans = repo().orphanNodeIds().mapNotNull { it }
+        val orphans = repo.orphanNodeIds().mapNotNull { it }
         val toDelete = (missing + orphans).toSet()
         if (toDelete.isNotEmpty()) {
-            repo().deleteNodes(toDelete)
+            repo.deleteNodes(toDelete)
         }
-        repo().sweepOrphanRelations(System.currentTimeMillis())
+        repo.sweepOrphanRelations(System.currentTimeMillis())
     }
 
     /**
@@ -281,13 +287,14 @@ object LibraryCore {
      * One node row plus one relation row; no physical folder is created.
      */
     suspend fun createCollection(parentId: Long, name: String): Long {
-        val id = repo().addNode(
+        val repo = repo()
+        val id = repo.addNode(
             nameDisplay = name,
             typeMime = MimeCollection,
             uriStorage = null,
             timeCreated = System.currentTimeMillis(),
         )
-        repo().link(id, parentId)
+        repo.link(id, parentId)
         return id
     }
 
@@ -298,21 +305,22 @@ object LibraryCore {
      * recorded once thanks to the UNIQUE index (`FOTLAB-DATABS-000002` R7).
      */
     suspend fun importUris(parentId: Long, uris: List<Uri>) {
+        val repo = repo()
         for (uri in uris) {
             takeReadPermission(uri)
             val text = uri.toString()
             val name = displayNameOf(uri) ?: uri.lastPathSegment ?: text
             val mime = applicationContext.contentResolver.getType(uri) ?: MimeUnknown
-            val existing = repo().getByUriAnyStatus(text)
+            val existing = repo.getByUriAnyStatus(text)
             val childId = if (existing != null) {
                 // Revive a soft-deleted node instead of INSERTing a duplicate that would
                 // violate the UNIQUE index on `uri_storage`.
                 if (existing.timeDeleted != null) {
-                    repo().revive(existing.fsNodeId!!, name, mime)
+                    repo.revive(existing.fsNodeId!!, name, mime)
                 }
                 existing.fsNodeId!!
             } else {
-                repo().addNode(
+                repo.addNode(
                     nameDisplay = name,
                     typeMime = mime,
                     uriStorage = text,
@@ -320,7 +328,7 @@ object LibraryCore {
                 )
             }
             // Re-linking an existing edge is ignored by the DAO rather than aborting.
-            repo().link(childId, parentId)
+            repo.link(childId, parentId)
         }
     }
 

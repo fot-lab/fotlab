@@ -5,12 +5,14 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.room.Room
-import io.github.fotlab.fotlab.feature.library.FsNodeObject
-import io.github.fotlab.fotlab.feature.library.FsNodeRelation
+import io.github.fotlab.fotlab.data.common.FsNodeObject
+import io.github.fotlab.fotlab.data.common.FsNodeRelation
+import io.github.fotlab.fotlab.data.common.FsNodeRepository
+import io.github.fotlab.fotlab.data.common.MimeCollection
+import io.github.fotlab.fotlab.data.common.MimeFolderDeleted
+import io.github.fotlab.fotlab.data.common.RootConfig
 import io.github.fotlab.fotlab.feature.library.LibraryLayoutMode
 import io.github.fotlab.fotlab.feature.library.ListSelectionOfLibrary
-import io.github.fotlab.fotlab.feature.library.MimeCollection
-import io.github.fotlab.fotlab.feature.library.MimeFolderDeleted
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -25,22 +27,27 @@ import kotlinx.coroutines.runBlocking
 /** Fallback MIME when the platform cannot tell us the type of a picked file. */
 private const val MimeUnknown = "application/octet-stream"
 
-/** A collection is a node with the folder MIME; anything else is a file entry. */
-fun FsNodeObject.isGalleryCollection(): Boolean = typeMime == MimeCollection
-
 /**
  * The gallery's root node — same design as the library root.
  * Fixed id [ID], own MIME kind, ordinary row in `fs_node_object`.
+ *
+ * [config] is passed into the shared [FsNodeRepository] so it can bootstrap the root row,
+ * exclude root-kind nodes from deletes, and otherwise behave as if written specifically for
+ * this feature.
  */
 object GalleryRoot {
     const val ID: Long = 0L
     const val NAME: String = "Gallery"
     const val MIME: String = "application/gallery-root"
+
+    /** Package the three constants the shared repository needs to operate on this tree. */
+    val config: RootConfig = RootConfig(ID, NAME, MIME)
 }
 
 /**
  * Lower layer of the gallery feature. Builds and owns the gallery's Room database
- * (schema identical to library, separate file so data is isolated).
+ * (schema identical to library, separate file so data is isolated) and exposes it through
+ * the shared [FsNodeRepository] with [GalleryRoot.config].
  */
 object GalleryCore {
 
@@ -69,7 +76,7 @@ object GalleryCore {
     private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private lateinit var layoutPreference: GalleryLayoutPreference
 
-    private var repository: GalleryRepository? = null
+    private var repository: FsNodeRepository? = null
     private lateinit var applicationContext: Context
 
     fun prepare(context: Context) {
@@ -80,13 +87,13 @@ object GalleryCore {
             GalleryDatabase::class.java,
             "gallery",
         ).build()
-        repository = GalleryRepository(database)
+        repository = FsNodeRepository(database, GalleryRoot.config)
         layoutPreference = GalleryLayoutPreference(applicationContext)
         runBlocking(Dispatchers.IO) { repository?.ensureRoot() }
         layoutModeState.value = runBlocking(Dispatchers.IO) { layoutPreference.mode.first() }
     }
 
-    private fun repo(): GalleryRepository =
+    private fun repo(): FsNodeRepository =
         repository ?: error("GalleryCore.prepare(context) must be called before use")
 
     // --- Tree queries ---
@@ -152,15 +159,16 @@ object GalleryCore {
     fun setViewerSession(items: List<FsNodeObject>, startIndex: Int) { viewerSessionState.value = ViewerSession(items, startIndex) }
 
     suspend fun refresh() {
-        val missing = repo().fileEntryNodes().filter { node ->
+        val repo = repo()
+        val missing = repo.fileEntryNodes().filter { node ->
             node.uriStorage != null && !uriExists(node.uriStorage)
         }.mapNotNull { it.fsNodeId }
-        val orphans = repo().orphanNodeIds().mapNotNull { it }
+        val orphans = repo.orphanNodeIds().mapNotNull { it }
         val toDelete = (missing + orphans).toSet()
         if (toDelete.isNotEmpty()) {
-            repo().deleteNodes(toDelete)
+            repo.deleteNodes(toDelete)
         }
-        repo().sweepOrphanRelations(System.currentTimeMillis())
+        repo.sweepOrphanRelations(System.currentTimeMillis())
     }
 
     private fun uriExists(uriString: String): Boolean {
@@ -175,13 +183,14 @@ object GalleryCore {
     // --- Top bar actions ---
 
     suspend fun createCollection(parentId: Long, name: String): Long {
-        val id = repo().addNode(
+        val repo = repo()
+        val id = repo.addNode(
             nameDisplay = name,
             typeMime = MimeCollection,
             uriStorage = null,
             timeCreated = System.currentTimeMillis(),
         )
-        repo().link(id, parentId)
+        repo.link(id, parentId)
         return id
     }
 
@@ -190,24 +199,25 @@ object GalleryCore {
      */
     suspend fun importUri(parentId: Long, uri: Uri) {
         takeReadPermission(uri)
+        val repo = repo()
         val text = uri.toString()
         val name = displayNameOf(uri) ?: uri.lastPathSegment ?: text
         val mime = applicationContext.contentResolver.getType(uri) ?: MimeUnknown
-        val existing = repo().getByUriAnyStatus(text)
+        val existing = repo.getByUriAnyStatus(text)
         val childId = if (existing != null) {
             if (existing.timeDeleted != null) {
-                repo().revive(existing.fsNodeId!!, name, mime)
+                repo.revive(existing.fsNodeId!!, name, mime)
             }
             existing.fsNodeId!!
         } else {
-            repo().addNode(
+            repo.addNode(
                 nameDisplay = name,
                 typeMime = mime,
                 uriStorage = text,
                 timeCreated = System.currentTimeMillis(),
             )
         }
-        repo().link(childId, parentId)
+        repo.link(childId, parentId)
     }
 
     /** Reference multiple picked files under [parentId]. */

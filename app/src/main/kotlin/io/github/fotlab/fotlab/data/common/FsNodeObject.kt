@@ -1,4 +1,4 @@
-package io.github.fotlab.fotlab.feature.library
+package io.github.fotlab.fotlab.data.common
 
 import androidx.room.ColumnInfo
 import androidx.room.Entity
