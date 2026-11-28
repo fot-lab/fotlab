@@ -213,3 +213,19 @@ const val PTP_PARENT_ROOT: Long = 0xFFFFFFFFL
 
 /** Parent handle that asks for every object, whatever folder it sits in. */
 const val PTP_PARENT_ALL: Long = 0L
+
+/**
+ * Truncate a Long to its low 32 bits — matches the PTP wire format where every
+ * handle, storage ID, format code and parent reference is a UINT32.
+ *
+ * PIMA 15740 §5.1 declares ObjectHandle, StorageID and parentObject as UINT32.
+ * Kotlin has no unsigned Int on JVM, so the camera module carries these values
+ * as Long on the inside and masks them down when writing to the wire. Calling
+ * this instead of a bare [Long.toInt] makes the boundary explicit and guards
+ * against accidental sign-extension or high-bit contamination.
+ *
+ * The return type is [Int] because PtpSession.execute takes [IntArray] params;
+ * the caller should treat the result as an opaque 32-bit pattern, not as a
+ * signed number.
+ */
+fun Long.toPtpInt(): Int = (this and 0xFFFFFFFFL).toInt()

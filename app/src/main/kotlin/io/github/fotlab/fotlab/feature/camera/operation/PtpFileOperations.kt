@@ -8,6 +8,7 @@ import io.github.fotlab.fotlab.feature.camera.model.PtpObject
 import io.github.fotlab.fotlab.feature.camera.model.PtpObjectInfo
 import io.github.fotlab.fotlab.feature.camera.model.PtpResponseException
 import io.github.fotlab.fotlab.feature.camera.model.PtpStorage
+import io.github.fotlab.fotlab.feature.camera.model.toPtpInt
 import io.github.fotlab.fotlab.feature.camera.profile.CameraFamily
 import io.github.fotlab.fotlab.feature.camera.profile.CameraProfile
 import io.github.fotlab.fotlab.feature.camera.protocol.PtpContainer
@@ -81,7 +82,7 @@ class PtpFileOperations(
     suspend fun storageInfo(storageId: Long): PtpStorage {
         val result = session.execute(
             PtpOpcode.GET_STORAGE_INFO,
-            intArrayOf(storageId.toInt()),
+            intArrayOf(storageId.toPtpInt()),
             expectDataIn = true,
         )
         val raw = result.data ?: return PtpStorage(id = storageId)
@@ -114,7 +115,7 @@ class PtpFileOperations(
     ): List<Long> {
         delay(profile.preListDelayUsbMs)
         val skipSony = profile.objectHandlesOpcode == PtpOpcode.Sony.CONTENT_LIST && !ptpStdOnly
-        val params = intArrayOf(storageId.toInt(), format.toInt(), parent.toInt())
+        val params = intArrayOf(storageId.toPtpInt(), format.toPtpInt(), parent.toPtpInt())
         val result = executeWithBusyRetry(
             PtpOpcode.GET_OBJECT_HANDLES,
             profile.objectHandlesOpcode,
@@ -339,8 +340,8 @@ class PtpFileOperations(
                     profile.objectHandlesOpcode, // standard = Sony CONTENT_LIST (no standard counterpart)
                     profile.objectHandlesOpcode,
                     intArrayOf(
-                        cursor.toInt(),
-                        (cursor ushr 32).toInt(),
+                        cursor.toPtpInt(),
+                        (cursor ushr 32).toPtpInt(),
                         SonyContentListDecoder.PAGE_SIZE,
                         classByte,
                         0,
@@ -382,7 +383,7 @@ class PtpFileOperations(
         val result = executeWithStandardFallback(
             PtpOpcode.GET_OBJECT_INFO,
             profile.objectInfoOpcode,
-            intArrayOf(handle.toInt()),
+            intArrayOf(handle.toPtpInt()),
             expectDataIn = true,
             skipStandard = skipSony,
         )
@@ -392,7 +393,7 @@ class PtpFileOperations(
             val extended = executeWithStandardFallback(
                 repair,
                 repair,
-                intArrayOf(handle.toInt()),
+                intArrayOf(handle.toPtpInt()),
                 expectDataIn = true,
             )
             val raw = extended.data
@@ -410,7 +411,7 @@ class PtpFileOperations(
         val result = executeWithStandardFallback(
             PtpOpcode.GET_THUMB,
             profile.thumbOpcode,
-            intArrayOf(handle.toInt()),
+            intArrayOf(handle.toPtpInt()),
             expectDataIn = true,
             skipStandard = skipSony,
         )
@@ -440,7 +441,7 @@ class PtpFileOperations(
         // force the standard shape even on Sony-family cameras.
         val makeParams = { h: Long, o: Long, s: Int ->
             if (isSony) partialParams(h, o, s, packedFormat)
-            else intArrayOf(h.toInt(), o.toInt(), s)
+            else intArrayOf(h.toPtpInt(), o.toPtpInt(), s)
         }
         var offset = 0L
         while (offset < totalBytes) {
@@ -468,9 +469,9 @@ class PtpFileOperations(
             // The class byte of the object's packed format; the reference value
             // when the listing has not seen the handle is the still-image class.
             val classByte = listedPackedFormats[handle]?.let { (it ushr 24).toInt() } ?: 1
-            intArrayOf((handle and 0x00FFFFFFL).toInt(), classByte)
+            intArrayOf((handle and 0x00FFFFFFL).toPtpInt(), classByte)
         } else {
-            intArrayOf(handle.toInt())
+            intArrayOf(handle.toPtpInt())
         }
         session.execute(profile.deleteOpcode, params)
     }
@@ -497,7 +498,7 @@ class PtpFileOperations(
         )
         val info = session.execute(
             PtpOpcode.SEND_OBJECT_INFO,
-            intArrayOf(storageId.toInt(), parent.toInt(), 0),
+            intArrayOf(storageId.toPtpInt(), parent.toPtpInt(), 0),
             dataOut = dataset,
         )
         if (info.params.size < 3) throw IOException("SendObjectInfo did not return a handle")
@@ -541,7 +542,7 @@ class PtpFileOperations(
         )
         val info = session.execute(
             PtpOpcode.SEND_OBJECT_INFO,
-            intArrayOf(storageId.toInt(), parent.toInt(), 0),
+            intArrayOf(storageId.toPtpInt(), parent.toPtpInt(), 0),
             dataOut = dataset,
         )
         if (info.params.size < 3) throw IOException("SendObjectInfo did not return a handle")
@@ -560,13 +561,13 @@ class PtpFileOperations(
     /** Standard range-read uses a 32-bit offset; the family variant is 64-bit and class-scoped. */
     private fun partialParams(handle: Long, offset: Long, size: Int, packedFormat: Long): IntArray = when {
         profile.partialObjectOpcode == PtpOpcode.Sony.PARTIAL_OBJECT -> intArrayOf(
-            (handle and 0x00FFFFFFL).toInt(),
-            packedFormat.toInt(),
-            offset.toInt(),
-            (offset ushr 32).toInt(),
+            (handle and 0x00FFFFFFL).toPtpInt(),
+            packedFormat.toPtpInt(),
+            offset.toPtpInt(),
+            (offset ushr 32).toPtpInt(),
             size,
         )
-        else -> intArrayOf(handle.toInt(), offset.toInt(), size)
+        else -> intArrayOf(handle.toPtpInt(), offset.toPtpInt(), size)
     }
 
     private fun formatForName(name: String): Long = when (name.substringAfterLast('.').lowercase()) {

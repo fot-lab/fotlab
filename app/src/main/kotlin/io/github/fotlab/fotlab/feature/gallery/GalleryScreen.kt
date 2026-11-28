@@ -59,6 +59,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.navigationBars
 import io.github.fotlab.fotlab.R
@@ -67,8 +68,6 @@ import io.github.fotlab.fotlab.data.common.MimeFolderDeleted
 import io.github.fotlab.fotlab.data.common.isCollection
 import io.github.fotlab.fotlab.feature.library.LibraryRenameDialog
 import io.github.fotlab.fotlab.feature.library.LibraryScreenFunBarHeight
-import io.github.fotlab.fotlab.feature.library.LibraryThumbnail
-import io.github.fotlab.fotlab.feature.library.NodeCell
 import io.github.fotlab.fotlab.feature.library.NodeList
 import io.github.fotlab.fotlab.feature.library.SweepSyncIcon
 import io.github.fotlab.fotlab.feature.library.isMedia
