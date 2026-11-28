@@ -168,11 +168,14 @@ object MdnsProbe {
         if (ports.isEmpty() && instances.isEmpty()) return emptyList()
         return instances.keys.map { instance ->
             val target = instances[instance].orEmpty()
+            val host = addresses[target] ?: addresses[instance] ?: observedHost
+            val displayName = instance.substringBefore('.')
             DiscoveredIpDevice(
-                host = addresses[target] ?: addresses[instance] ?: observedHost,
-                name = instance.substringBefore('.'),
+                host = host,
+                name = displayName,
                 port = ports[instance] ?: PORT,
                 source = "mdns",
+                manufacturer = BrandMatcher.matchFromNames(displayName, host),
             )
         }
     }

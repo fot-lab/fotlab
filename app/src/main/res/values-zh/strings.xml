@@ -248,8 +248,9 @@
     <string name="camera_status_connected">已连接 %1$s</string>
     <string name="camera_status_failed">连接 %1$s 失败</string>
     <string name="camera_section_devices">相机设备</string>
-    <string name="camera_label_usb">USB</string>
-    <string name="camera_label_network">网络</string>
+    <string name="camera_label_ptp_usb">PTP/USB</string>
+    <string name="camera_label_ptp_ip">PTP/IP</string>
+    <string name="camera_label_http_ip">HTTP/IP</string>
     <string name="camera_label_storage">存储 %1$d</string>
     <string name="camera_label_size">%1$d B</string>
     <string name="camera_filter_all">全部</string>

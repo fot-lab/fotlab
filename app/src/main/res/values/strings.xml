@@ -278,8 +278,9 @@
     <string name="camera_status_connected">Connected to %1$s</string>
     <string name="camera_status_failed">Connection to %1$s failed</string>
     <string name="camera_section_devices">Cameras</string>
-    <string name="camera_label_usb">USB</string>
-    <string name="camera_label_network">Network</string>
+    <string name="camera_label_ptp_usb">PTP/USB</string>
+    <string name="camera_label_ptp_ip">PTP/IP</string>
+    <string name="camera_label_http_ip">HTTP/IP</string>
     <string name="camera_label_storage">Storage %1$d</string>
     <string name="camera_label_size">%1$d B</string>
     <string name="camera_filter_all">All</string>

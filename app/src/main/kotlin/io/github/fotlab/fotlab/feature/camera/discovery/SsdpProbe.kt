@@ -61,11 +61,19 @@ object SsdpProbe {
                     ?: continue
                 val description = fetchDescription(location)
                 val actionListUrl = extractActionListUrl(headers)
+                val friendlyName = description["friendlyName"] ?: ""
+                val modelName = description["modelName"]
+                // Prefer the authoritative manufacturer from the UPnP description XML.
+                // When it is missing (rare), fall back to keyword matching over the
+                // name fields — a probe may have announced the brand in its hostname
+                // or friendlyName even when it did not fill the manufacturer element.
+                val manufacturer = description["manufacturer"]?.trim()?.ifBlank { null }
+                    ?: BrandMatcher.matchFromNames(friendlyName, modelName, host)
                 val device = DiscoveredIpDevice(
                     host = host,
-                    name = description["friendlyName"] ?: "",
-                    manufacturer = description["manufacturer"],
-                    model = description["modelName"],
+                    name = friendlyName,
+                    manufacturer = manufacturer,
+                    model = modelName,
                     source = "ssdp",
                     actionListUrl = actionListUrl,
                     transportKind = if (actionListUrl != null) TransportKind.HTTP_SONY else TransportKind.PTP,

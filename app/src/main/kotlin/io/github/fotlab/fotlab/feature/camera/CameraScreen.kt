@@ -68,6 +68,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.fotlab.fotlab.R
 import io.github.fotlab.fotlab.feature.camera.discovery.CameraDevice
+import io.github.fotlab.fotlab.feature.camera.discovery.TransportKind
 import io.github.fotlab.fotlab.feature.camera.model.CameraEventCode
 import io.github.fotlab.fotlab.feature.camera.model.CameraLink
 import io.github.fotlab.fotlab.feature.camera.model.CameraQueueStates
@@ -766,16 +767,31 @@ fun CameraScreen() {
                                                         text = device.displayName,
                                                         style = MaterialTheme.typography.bodyLarge,
                                                     )
-                                                    Text(
-                                                        text = stringResource(
-                                                            id = if (device.link == CameraLink.USB) {
-                                                                R.string.camera_label_usb
-                                                            } else {
-                                                                R.string.camera_label_network
-                                                            },
-                                                        ),
-                                                        style = MaterialTheme.typography.bodySmall,
-                                                    )
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                    ) {
+                                                        val transportLabelId = when (device) {
+                                                            is CameraDevice.Usb -> R.string.camera_label_ptp_usb
+                                                            is CameraDevice.Ip ->
+                                                                if (device.transportKind == TransportKind.HTTP_SONY) {
+                                                                    R.string.camera_label_http_ip
+                                                                } else {
+                                                                    R.string.camera_label_ptp_ip
+                                                                }
+                                                        }
+                                                        Text(
+                                                            text = stringResource(id = transportLabelId),
+                                                            style = MaterialTheme.typography.bodySmall,
+                                                        )
+                                                        device.manufacturer?.let { brand ->
+                                                            Text(
+                                                                text = brand,
+                                                                style = MaterialTheme.typography.bodySmall,
+                                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                            )
+                                                        }
+                                                    }
                                                 }
                                                 Button(onClick = {
                                                     scope.launch {
