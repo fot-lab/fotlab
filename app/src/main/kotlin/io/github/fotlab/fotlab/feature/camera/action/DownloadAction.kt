@@ -1,5 +1,6 @@
 package io.github.fotlab.fotlab.feature.camera.action
 
+import io.github.fotlab.fotlab.feature.camera.model.toPtpInt
 import io.github.fotlab.fotlab.feature.camera.protocol.opcode.PtpSony
 import io.github.fotlab.fotlab.feature.camera.protocol.opcode.PtpStd
 import java.io.IOException
@@ -61,7 +62,7 @@ object DownloadAction {
             val params = if (useSonyShape) {
                 sonyPartialParams(handle, offset, size, packedFormat)
             } else {
-                intArrayOf(handle.toInt(), offset.toInt(), size)
+                intArrayOf(handle.toPtpInt(), offset.toPtpInt(), size)
             }
             val result = PtpExecutor.execute(
                 ctx = ctx, standard = pair.standard, vendor = pair.vendor,
@@ -94,7 +95,7 @@ object DownloadAction {
     }
 
     private fun sonyPartialParams(handle: Long, offset: Long, size: Int, packedFormat: Long): IntArray = intArrayOf(
-        (handle and 0x00FFFFFFL).toInt(), packedFormat.toInt(),
-        offset.toInt(), (offset ushr 32).toInt(), size,
+        (handle and 0x00FFFFFFL).toPtpInt(), packedFormat.toPtpInt(),
+        offset.toPtpInt(), (offset ushr 32).toPtpInt(), size,
     )
 }

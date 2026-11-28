@@ -1,6 +1,7 @@
 package io.github.fotlab.fotlab.feature.camera.action
 
 import io.github.fotlab.fotlab.feature.camera.model.PtpObjectInfo
+import io.github.fotlab.fotlab.feature.camera.model.toPtpInt
 import io.github.fotlab.fotlab.feature.camera.protocol.opcode.PtpNikon
 import io.github.fotlab.fotlab.feature.camera.protocol.opcode.PtpStd
 import java.nio.ByteBuffer
@@ -35,7 +36,7 @@ object ObjectInfoAction {
 
         val result = PtpExecutor.executeNoRetry(
             ctx = ctx, standard = pair.standard, vendor = pair.vendor,
-            params = intArrayOf(handle.toInt()), expectDataIn = true, skipStandard = skipStandard,
+            params = intArrayOf(handle.toPtpInt()), expectDataIn = true, skipStandard = skipStandard,
         )
 
         var info = decodeObjectInfo(result.data, handle)
@@ -44,7 +45,7 @@ object ObjectInfoAction {
         if (info.sizeBytes == PtpStd.SIZE_32_SENTINEL && ctx.path == TransportPath.PTP_USB_NIKON_0X90XX) {
             val extended = PtpExecutor.executeNoRetry(
                 ctx = ctx, standard = null, vendor = PtpNikon.LARGE_OBJECT_LENGTH,
-                params = intArrayOf(handle.toInt()), expectDataIn = true,
+                params = intArrayOf(handle.toPtpInt()), expectDataIn = true,
             )
             val raw = extended.data
             if (raw != null && raw.size >= 8) {
@@ -55,23 +56,40 @@ object ObjectInfoAction {
     }
 
     private fun decodeObjectInfo(raw: ByteArray?, handle: Long): PtpObjectInfo {
-        if (raw == null) return PtpObjectInfo(handle = handle)
+        // PIMA 15740 §5.1.3 ObjectInfo dataset — fixed part is 42 bytes through ParentObject,
+        // then optionally 10 bytes for association fields (type + descriptor + sequence),
+        // then four PTP-counted UTF-16LE strings (name, captured, modified, keywords),
+        // optionally followed by an 8-byte ExtendedObjectSize (UINT64) suffix (v1.11).
+        if (raw == null || raw.size < 42) return PtpObjectInfo(handle = handle)
         return try {
             val buffer = ByteBuffer.wrap(raw).order(ByteOrder.LITTLE_ENDIAN)
-            val format = buffer.u16().toLong()
-            val protection = buffer.u16()
-            val size = buffer.u32()
-            val thumbFormat = buffer.u16().toLong()
-            val thumbBytes = buffer.u32()
-            val pixelWidth = buffer.u32()
-            val pixelHeight = buffer.u32()
-            val parent = buffer.u32()
-            val attributes = buffer.u16()
-            val name = readPtpString(buffer)
-            val captured = readPtpString(buffer)
-            val modified = readPtpString(buffer)
+            val storageId = buffer.u32()                  // 0: StorageID
+            val format = buffer.u16().toLong()             // 4: ObjectFormatCode
+            val protection = buffer.u16()                  // 6: ProtectionStatus
+            var size = buffer.u32()                        // 8: ObjectSize
+            val thumbFormat = buffer.u16().toLong()        // 12: ThumbFormat
+            val thumbBytes = buffer.u32()                  // 14: ThumbSize
+            buffer.u32()                                   // 18: ThumbPixelWidth
+            buffer.u32()                                   // 22: ThumbPixelHeight
+            val pixelWidth = buffer.u32()                  // 26: ImagePixelWidth
+            val pixelHeight = buffer.u32()                 // 30: ImagePixelHeight
+            buffer.u32()                                   // 34: ImageBitDepth
+            val parent = buffer.u32()                      // 38: ParentObject
+            if (buffer.remaining() >= 10) {
+                buffer.u16()                               // 42: AssociationType
+                buffer.u32()                               // 44: AssociationDescriptor
+                buffer.u32()                               // 48: SequenceNumber
+            }
+            val name = readPtpString(buffer)               // 52+: ObjectFileName
+            val captured = readPtpString(buffer)           // CaptureDate
+            val modified = readPtpString(buffer)            // ModificationDate
+            readPtpString(buffer)                           // Keywords
+            if (size == PtpStd.SIZE_32_SENTINEL && buffer.remaining() >= 8) {
+                size = buffer.long
+            }
             PtpObjectInfo(
-                handle = handle, format = format, protectionStatus = protection,
+                handle = handle, storageId = storageId,
+                format = format, protectionStatus = protection,
                 sizeBytes = size, thumbFormat = thumbFormat, thumbBytes = thumbBytes,
                 pixelWidth = pixelWidth, pixelHeight = pixelHeight, parent = parent,
                 name = name, capturedAt = parsePtpDate(captured), modifiedAt = parsePtpDate(modified),

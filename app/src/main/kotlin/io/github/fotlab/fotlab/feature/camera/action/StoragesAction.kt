@@ -2,6 +2,7 @@ package io.github.fotlab.fotlab.feature.camera.action
 
 import io.github.fotlab.fotlab.feature.camera.model.PtpResponseException
 import io.github.fotlab.fotlab.feature.camera.model.PtpStorage
+import io.github.fotlab.fotlab.feature.camera.model.toPtpInt
 import io.github.fotlab.fotlab.feature.camera.protocol.opcode.PtpFuji
 import io.github.fotlab.fotlab.feature.camera.protocol.opcode.SonyHttp
 import java.nio.ByteBuffer
@@ -64,7 +65,7 @@ object StoragesAction {
         val standard = pair.standard ?: io.github.fotlab.fotlab.feature.camera.protocol.opcode.PtpStd.GET_STORAGE_INFO
         val result = PtpExecutor.executeNoRetry(
             ctx = ctx, standard = standard, vendor = null,
-            params = intArrayOf(id.toInt()), expectDataIn = true,
+            params = intArrayOf(id.toPtpInt()), expectDataIn = true,
         )
         decodeStorageInfo(result.data, id)
     } catch (_: PtpResponseException) {

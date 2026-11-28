@@ -6,6 +6,7 @@ import io.github.fotlab.fotlab.feature.camera.model.PtpFormats
 import io.github.fotlab.fotlab.feature.camera.model.PtpMediaFilter
 import io.github.fotlab.fotlab.feature.camera.model.PtpObject
 import io.github.fotlab.fotlab.feature.camera.model.PtpObjectInfo
+import io.github.fotlab.fotlab.feature.camera.model.toPtpInt
 import io.github.fotlab.fotlab.feature.camera.protocol.opcode.PtpSony
 import io.github.fotlab.fotlab.feature.camera.protocol.opcode.SonyHttp
 import kotlinx.coroutines.delay
@@ -94,7 +95,7 @@ object ListObjectsAction {
     ): List<Long> {
         val pair = Opcodes.objectHandles(ctx)
         val skipStandard = ctx.path.isVendorSegment && pair.standard == null
-        val params = intArrayOf(storageId.toInt(), 0, parent.toInt())
+        val params = intArrayOf(storageId.toPtpInt(), 0, parent.toPtpInt())
         val result = PtpExecutor.execute(
             ctx = ctx, standard = pair.standard, vendor = pair.vendor,
             params = params, expectDataIn = true, skipStandard = skipStandard,
@@ -103,7 +104,7 @@ object ListObjectsAction {
         if (handles.isEmpty() && parent == PTP_PARENT_ROOT) {
             val fallback = PtpExecutor.execute(
                 ctx = ctx, standard = pair.standard, vendor = pair.vendor,
-                params = intArrayOf(ALL_STORAGES_SENTINEL.toInt(), 0, PTP_PARENT_ALL.toInt()),
+                params = intArrayOf(ALL_STORAGES_SENTINEL.toPtpInt(), 0, PTP_PARENT_ALL.toPtpInt()),
                 expectDataIn = true, skipStandard = skipStandard,
             )
             handles = decodeHandles(fallback.data)
@@ -146,7 +147,7 @@ object ListObjectsAction {
                 pages++
                 val page = PtpExecutor.execute(
                     ctx = ctx, standard = null, vendor = PtpSony.CONTENT_LIST,
-                    params = intArrayOf(cursor.toInt(), (cursor ushr 32).toInt(), PtpSony.CONTENT_LIST_PAGE_SIZE, classByte, 0),
+                    params = intArrayOf(cursor.toPtpInt(), (cursor ushr 32).toPtpInt(), PtpSony.CONTENT_LIST_PAGE_SIZE, classByte, 0),
                     expectDataIn = true, skipStandard = true,
                 )
                 val decoded = SonyContentListDecoderBridge.decodePage(page.data)

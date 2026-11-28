@@ -1,5 +1,6 @@
 package io.github.fotlab.fotlab.feature.camera.action
 
+import io.github.fotlab.fotlab.feature.camera.model.toPtpInt
 import java.io.IOException
 
 /**
@@ -28,7 +29,7 @@ object ThumbnailAction {
         val skipStandard = ctx.path.isVendorSegment && pair.standard == null
         val result = PtpExecutor.executeNoRetry(
             ctx = ctx, standard = pair.standard, vendor = pair.vendor,
-            params = intArrayOf(handle.toInt()), expectDataIn = true, skipStandard = skipStandard,
+            params = intArrayOf(handle.toPtpInt()), expectDataIn = true, skipStandard = skipStandard,
         )
         return result.data ?: throw IOException("Device returned no thumbnail for $handle")
     }

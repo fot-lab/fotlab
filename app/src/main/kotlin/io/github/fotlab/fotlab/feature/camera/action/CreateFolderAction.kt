@@ -1,5 +1,7 @@
 package io.github.fotlab.fotlab.feature.camera.action
 
+import io.github.fotlab.fotlab.feature.camera.model.toPtpInt
+
 /**
  * Create a subfolder on the device (send-object with format=ASSOCIATION).
  *
@@ -32,7 +34,7 @@ object CreateFolderAction {
             val session = ctx.ptpSession ?: throw java.io.IOException("No PTP session")
             val result = session.execute(
                 code = io.github.fotlab.fotlab.feature.camera.protocol.opcode.PtpStd.SEND_OBJECT,
-                params = intArrayOf(storageId.toInt(), parent.toInt(), PTP_FORM_ASSOCIATION.toInt()),
+                params = intArrayOf(storageId.toPtpInt(), parent.toPtpInt(), PTP_FORM_ASSOCIATION.toPtpInt()),
                 dataOut = null, expectDataIn = false,
             )
             result.phase2ObjectHandle ?: -1L

@@ -1,5 +1,7 @@
 package io.github.fotlab.fotlab.feature.camera.action
 
+import io.github.fotlab.fotlab.feature.camera.model.toPtpInt
+
 /**
  * Delete one object from the device.
  *
@@ -33,10 +35,10 @@ object DeleteAction {
         // Sony 0x9250 needs a class byte after the handle — standard shape is (handle) only.
         val params = when (ctx.path) {
             TransportPath.PTP_USB_SONY_0X92XX -> intArrayOf(
-                (handle and 0x00FFFFFFL).toInt(),
+                (handle and 0x00FFFFFFL).toPtpInt(),
                 1, // still-image class
             )
-            else -> intArrayOf(handle.toInt())
+            else -> intArrayOf(handle.toPtpInt())
         }
 
         PtpExecutor.executeNoRetry(
