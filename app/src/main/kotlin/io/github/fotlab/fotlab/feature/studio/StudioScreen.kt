@@ -6,6 +6,8 @@ import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import io.github.fotlab.fotlab.feature.gallery.GalleryCore
+import io.github.fotlab.fotlab.feature.gallery.GalleryRoot
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -342,6 +344,8 @@ fun StudioScreen() {
                     val bytes = encodeExport(context, current, format, crParams)
                     if (bytes != null) {
                         context.contentResolver.openOutputStream(target)?.use { it.write(bytes) }
+                        // Export succeeded — add the URI to the Gallery so the work is collected.
+                        GalleryCore.importUri(GalleryRoot.ID, target)
                     }
                 }
             }

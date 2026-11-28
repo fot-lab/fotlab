@@ -2,6 +2,7 @@ package io.github.fotlab.fotlab
 
 import android.app.Application
 import io.github.fotlab.fotlab.feature.camera.CameraCore
+import io.github.fotlab.fotlab.feature.gallery.GalleryCore
 import io.github.fotlab.fotlab.feature.library.LibraryCore
 import io.github.fotlab.fotlab.feature.studio.StudioEngine
 
@@ -17,6 +18,7 @@ class MainApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         LibraryCore.prepare(this)
+        GalleryCore.prepare(this)
         StudioEngine.prepare(this)
         CameraCore.prepare(this)
     }

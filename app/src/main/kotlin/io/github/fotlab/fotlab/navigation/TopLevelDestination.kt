@@ -5,9 +5,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CameraRoll
 import androidx.compose.material.icons.filled.PermMedia
 import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.ui.graphics.vector.ImageVector
 import io.github.fotlab.fotlab.R
 import io.github.fotlab.fotlab.navigation.camera.CameraDestination
+import io.github.fotlab.fotlab.navigation.gallery.GalleryDestination
 import io.github.fotlab.fotlab.navigation.library.LibraryDestination
 import io.github.fotlab.fotlab.navigation.studio.StudioDestination
 
@@ -34,6 +36,11 @@ enum class TopLevelDestination(
         route = LibraryDestination.ROUTE,
         label = R.string.app_nav_library_label,
         icon = Icons.Filled.PermMedia,
+    ),
+    GALLERY(
+        route = GalleryDestination.ROUTE,
+        label = R.string.app_nav_gallery_label,
+        icon = Icons.Filled.PhotoLibrary,
     ),
     STUDIO(
         route = StudioDestination.ROUTE,
